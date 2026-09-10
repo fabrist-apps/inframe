@@ -1,0 +1,5 @@
+import 'package:context/context.dart';
+
+void main() {
+  ContextBinding<int>(ContextKey<int>('count'), 42);
+}

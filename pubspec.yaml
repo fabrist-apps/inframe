@@ -5,6 +5,7 @@ environment:
   sdk: ^3.13.0
 
 workspace:
+  - packages/context
   - packages/database/clickhouse
 
 dev_dependencies:

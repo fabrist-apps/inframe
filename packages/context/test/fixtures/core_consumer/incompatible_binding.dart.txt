@@ -1,0 +1,5 @@
+import 'package:context/context.dart';
+
+void main() {
+  ContextKey<int>('count').bind('wrong type');
+}
