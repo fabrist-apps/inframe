@@ -8,6 +8,7 @@ workspace:
   - packages/context
   - packages/database/clickhouse
   - packages/json_patch
+  - packages/chrono_id
 
 dev_dependencies:
   very_good_analysis: ^10.0.0
