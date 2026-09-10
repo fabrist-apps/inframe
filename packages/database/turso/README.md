@@ -42,6 +42,26 @@ such as `{':id': 42}`. Supported values are `null`, `String`, finite numbers, si
 values, and `Uint8List`. SQL integers always return as `BigInt`; `getInt` accepts only values in the
 portable safe-integer range.
 
+Use `transaction` for an isolated callback transaction:
+
+```dart
+final note = await database.transaction((tx) async {
+  await tx.execute(
+    'INSERT INTO notes (id, title) VALUES (?, ?)',
+    parameters: [42, 'Hello'],
+  );
+  return (await tx.query('SELECT id, title FROM notes WHERE id = ?', parameters: [42]))
+      .rows
+      .single;
+});
+```
+
+Await every transaction operation. The transaction drains work submitted before the callback
+finishes, but an operation failure rolls back the transaction even if its returned future is not
+awaited. Use only the callback's `TursoTransaction` handle while the callback is active; calls on the
+parent database fail immediately and the handle expires when the callback returns. Raw `BEGIN`,
+`COMMIT`, `ROLLBACK`, and savepoint statements bypass this managed boundary and are unsupported.
+
 ## Browser setup
 
 Install the pinned browser bridge beside the application's other hosted files:
@@ -74,7 +94,8 @@ dart run tool/serve_web_example.dart
 ```
 
 The OPFS persistence, reload, lock-release, memory, and shared SQL contract checks were run against
-desktop Chrome `152.0.7977.65` on macOS. Web FTS and vector capabilities remain unadvertised until a
+desktop Chrome `152.0.7977.65` on macOS. The same browser check covers callback transaction commit,
+rollback, isolation, and handle expiry. Web FTS and vector capabilities remain unadvertised until a
 later slice verifies them.
 
 ## Upstream

@@ -6,6 +6,7 @@ import 'package:turso/src/internal/backend_native.dart'
     if (dart.library.js_interop) 'package:turso/src/internal/backend_web.dart'
     as platform;
 import 'package:turso/src/internal/parameters.dart';
+import 'package:turso/src/turso_exception.dart';
 import 'package:turso/src/turso_location.dart';
 import 'package:turso/src/turso_options.dart';
 import 'package:turso/src/turso_result.dart';
@@ -15,6 +16,7 @@ final class TursoDatabase {
   TursoDatabase._(this._backend);
 
   final TursoBackend _backend;
+  final Object _transactionZoneKey = Object();
   Future<void> _tail = Future<void>.value();
   Future<void>? _closeFuture;
 
@@ -37,6 +39,7 @@ final class TursoDatabase {
     List<Object?> parameters = const [],
     Map<String, Object?> namedParameters = const {},
   }) => Future<TursoQueryResult>.sync(() {
+    _ensureOutsideTransactionCallback();
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
       final wireResult = await _backend.query(sql, snapshot);
@@ -50,6 +53,7 @@ final class TursoDatabase {
     List<Object?> parameters = const [],
     Map<String, Object?> namedParameters = const {},
   }) => Future<TursoExecuteResult>.sync(() {
+    _ensureOutsideTransactionCallback();
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
       final rowsAffected = await _backend.execute(sql, snapshot);
@@ -58,12 +62,18 @@ final class TursoDatabase {
   });
 
   /// Runs [action] inside one deferred transaction.
-  Future<T> transaction<T>(Future<T> Function(TursoTransaction tx) action) async {
-    throw UnimplementedError();
-  }
+  Future<T> transaction<T>(Future<T> Function(TursoTransaction tx) action) => Future<T>.sync(() {
+    _ensureOutsideTransactionCallback();
+    return _enqueue(() => _runTransaction(action));
+  });
 
   /// Drains accepted work and releases the database.
   Future<void> close() {
+    if (_insideTransactionCallback) {
+      return Future<void>.error(
+        StateError('The parent database cannot close inside its transaction callback.'),
+      );
+    }
     final existing = _closeFuture;
     if (existing != null) return existing;
 
@@ -94,6 +104,70 @@ final class TursoDatabase {
     });
     return completer.future;
   }
+
+  bool get _insideTransactionCallback => Zone.current[_transactionZoneKey] == true;
+
+  void _ensureOutsideTransactionCallback() {
+    if (_insideTransactionCallback) {
+      throw StateError(
+        'Use the transaction handle inside its callback instead of the parent database.',
+      );
+    }
+  }
+
+  Future<T> _runTransaction<T>(Future<T> Function(TursoTransaction tx) action) async {
+    await _backend.execute('BEGIN DEFERRED', const []);
+    final transaction = _ManagedTransaction(_backend);
+    late T result;
+    Object? primaryError;
+    StackTrace? primaryStackTrace;
+
+    try {
+      result = await runZoned(
+        () => action(transaction),
+        zoneValues: {_transactionZoneKey: true},
+      );
+    } on Object catch (error, stackTrace) {
+      primaryError = error;
+      primaryStackTrace = stackTrace;
+    }
+
+    transaction.finishCallback(abortQueued: primaryError != null);
+    await transaction.drain();
+    final operationFailure = transaction.firstFailure;
+    if (primaryError == null && operationFailure != null) {
+      primaryError = operationFailure.error;
+      primaryStackTrace = operationFailure.stackTrace;
+    }
+
+    if (primaryError != null) {
+      await _rollbackAndThrow(primaryError, primaryStackTrace!);
+    }
+
+    try {
+      await _backend.execute('COMMIT', const []);
+    } on Object catch (error, stackTrace) {
+      await _rollbackAndThrow(error, stackTrace);
+    }
+    return result;
+  }
+
+  Future<Never> _rollbackAndThrow(Object primaryError, StackTrace primaryStackTrace) async {
+    try {
+      await _backend.execute('ROLLBACK', const []);
+    } on Object catch (rollbackError, rollbackStackTrace) {
+      Error.throwWithStackTrace(
+        TursoTransactionException(
+          primaryError: primaryError,
+          primaryStackTrace: primaryStackTrace,
+          rollbackError: rollbackError,
+          rollbackStackTrace: rollbackStackTrace,
+        ),
+        primaryStackTrace,
+      );
+    }
+    Error.throwWithStackTrace(primaryError, primaryStackTrace);
+  }
 }
 
 TursoQueryResult _decodeQueryResult(List<Object?> wireResult) {
@@ -119,6 +193,84 @@ Object? _decodeValue(Object? wireValue) {
     'blob' => Uint8List.fromList((wireValue[1]! as List<Object?>).cast<int>()),
     _ => throw StateError('Unknown native value encoding: ${wireValue[0]}.'),
   };
+}
+
+final class _ManagedTransaction implements TursoTransaction {
+  _ManagedTransaction(this._backend);
+
+  final TursoBackend _backend;
+  Future<void> _tail = Future<void>.value();
+  _OperationFailure? _firstFailure;
+  var _accepting = true;
+  var _abortQueued = false;
+
+  _OperationFailure? get firstFailure => _firstFailure;
+
+  @override
+  Future<TursoQueryResult> query(
+    String sql, {
+    List<Object?> parameters = const [],
+    Map<String, Object?> namedParameters = const {},
+  }) => Future<TursoQueryResult>.sync(() {
+    _ensureAccepting();
+    final snapshot = snapshotParameters(parameters, namedParameters);
+    return _enqueue(() async {
+      final wireResult = await _backend.query(sql, snapshot);
+      return _decodeQueryResult(wireResult);
+    });
+  });
+
+  @override
+  Future<TursoExecuteResult> execute(
+    String sql, {
+    List<Object?> parameters = const [],
+    Map<String, Object?> namedParameters = const {},
+  }) => Future<TursoExecuteResult>.sync(() {
+    _ensureAccepting();
+    final snapshot = snapshotParameters(parameters, namedParameters);
+    return _enqueue(() async {
+      final rowsAffected = await _backend.execute(sql, snapshot);
+      return TursoExecuteResult(rowsAffected: rowsAffected);
+    });
+  });
+
+  Future<T> _enqueue<T>(Future<T> Function() operation) {
+    final completer = Completer<T>();
+    _tail = _tail.then((_) async {
+      if (_abortQueued) {
+        completer.completeError(
+          StateError('The transaction callback failed before this operation started.'),
+        );
+        return;
+      }
+      try {
+        completer.complete(await operation());
+      } on Object catch (error, stackTrace) {
+        _firstFailure ??= _OperationFailure(error, stackTrace);
+        completer.completeError(error, stackTrace);
+      }
+    });
+    unawaited(completer.future.then<void>((_) {}, onError: (_, _) {}));
+    return completer.future;
+  }
+
+  void _ensureAccepting() {
+    if (!_accepting) throw StateError('The transaction handle has expired.');
+  }
+
+  void finishCallback({required bool abortQueued}) {
+    _accepting = false;
+    _abortQueued = abortQueued;
+  }
+
+  Future<void> drain() => _tail;
+}
+
+final class _OperationFailure {
+  const _OperationFailure(this.error, this.stackTrace);
+
+  final Object error;
+  final StackTrace stackTrace;
 }
 
 /// Operations reserved by an active transaction.

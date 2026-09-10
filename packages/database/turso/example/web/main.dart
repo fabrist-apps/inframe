@@ -17,6 +17,7 @@ Future<void> main() async {
     }
 
     await _verifyReloadedData();
+    await _verifyTransactions();
     await _verifyLockRelease();
     await _verifyMemoryDatabase();
     await _verifyPlatformFailures();
@@ -24,6 +25,33 @@ Future<void> main() async {
     web.document.body!.textContent = 'PASS\n${web.window.navigator.userAgent}';
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
+  }
+}
+
+Future<void> _verifyTransactions() async {
+  final database = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
+  try {
+    await database.execute('CREATE TABLE transactions (value TEXT)');
+    late TursoTransaction expired;
+    final result = await database.transaction((tx) async {
+      expired = tx;
+      await tx.execute('INSERT INTO transactions VALUES (?)', parameters: const ['committed']);
+      await _expectFailure<StateError>(() => database.query('SELECT 1'));
+      return (await tx.query('SELECT value FROM transactions')).rows.single.getString('value');
+    });
+    _expect(result == 'committed', 'Transaction did not read its write.');
+    await _expectFailure<StateError>(() => expired.query('SELECT 1'));
+
+    await _expectFailure<_BrowserTransactionFailure>(
+      () => database.transaction((tx) async {
+        await tx.execute('INSERT INTO transactions VALUES (?)', parameters: const ['rolled back']);
+        throw const _BrowserTransactionFailure();
+      }),
+    );
+    final rows = await database.query('SELECT value FROM transactions');
+    _expect(rows.rows.length == 1, 'Failed transaction escaped its rollback.');
+  } finally {
+    await database.close();
   }
 }
 
@@ -170,4 +198,8 @@ bool _listEquals(List<int> left, List<int> right) {
     if (left[index] != right[index]) return false;
   }
   return true;
+}
+
+final class _BrowserTransactionFailure implements Exception {
+  const _BrowserTransactionFailure();
 }
