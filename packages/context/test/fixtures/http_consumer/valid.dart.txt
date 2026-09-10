@@ -1,0 +1,15 @@
+import 'package:context/context.dart';
+import 'package:web_server/web_server.dart';
+
+void main() {
+  final exchange = HttpExchange();
+  final context = Context().withHttp(exchange);
+  context.http.respond('Hello');
+  if (!identical(context.http, exchange) ||
+      exchange.responses.single != 'Hello') {
+    throw StateError('HTTP exchange was not supplied to the context');
+  }
+  if (!identical(HttpContext(context).http, exchange)) {
+    throw StateError('Named extension invocation failed');
+  }
+}
