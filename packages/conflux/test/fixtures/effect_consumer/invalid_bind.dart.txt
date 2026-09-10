@@ -1,0 +1,5 @@
+import 'package:conflux/conflux.dart';
+
+final program = Effect.build<int, String>(($) async {
+  return $(Effect.succeed<int, int>(42));
+});

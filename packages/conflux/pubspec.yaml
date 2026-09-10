@@ -7,5 +7,9 @@ resolution: workspace
 environment:
   sdk: ^3.13.0
 
+dependencies:
+  context:
+    path: ../context
+
 dev_dependencies:
   test: ^1.26.3
