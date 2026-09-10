@@ -1,31 +1,64 @@
 import 'package:conflux/conflux.dart';
+import 'package:context/context.dart';
 
-void main() {
-  const Option<String?> field = Some(null);
+Future<void> main() async {
+  final users = _Users();
+  final runtime = Runtime(context: Context().withUsers(users));
+  final program = Effect.build<String, String>(($) async {
+    final userId = $.sync(_parseUserId('42'));
+    final connection = await $.acquireRelease(
+      $.context.users.connect(),
+      release: (connection) => connection.closeEffect(),
+    );
+    $.addFinalizer(Effect.sync(() => users.events.add('finished')));
+    return $(connection.loadUser(userId));
+  });
 
-  final description = field.match(
-    onSome: (value) => 'The field was supplied as $value.',
-    onNone: () => 'The field was not supplied.',
-  );
-
-  if (description != 'The field was supplied as null.') {
-    throw StateError('Unexpected description: $description');
+  try {
+    final exit = await runtime.run(program);
+    if (exit case Succeeded<String, String>(:final value)) {
+      if (value != 'User 42') throw StateError('Unexpected user: $value');
+    } else {
+      throw StateError('Unexpected exit: $exit');
+    }
+  } finally {
+    await runtime.close();
   }
 
-  const Result<int, String> count = Success(42);
-  final label = count.map((value) => 'Count: $value').getOrElse((error) => 'Error: $error');
-  if (label != 'Count: 42') throw StateError('Unexpected result: $label');
-
-  final collected = Option.all<int>(const [Some(1), Some(2), Some(3)]).getOrNull();
-  if (collected?.join(',') != '1,2,3') {
-    throw StateError('Unexpected collection: $collected');
+  if (users.events.join(',') != 'connected,finished,closed') {
+    throw StateError('Unexpected lifecycle: ${users.events}');
   }
+}
 
-  final validation = Result.validate<int, int, String>(
-    const [1, 2, 3],
-    (value) => value.isOdd ? Success(value) : Failure('$value is even'),
-  );
-  if (validation.getFailure().getOrNull()?.first != '2 is even') {
-    throw StateError('Unexpected validation: $validation');
+Result<String, String> _parseUserId(String raw) {
+  return int.tryParse(raw) == null ? const Failure('Invalid ID') : Success(raw);
+}
+
+final _usersKey = ContextKey<_Users>('users');
+
+extension _UsersContext on Context {
+  _Users get users => require(_usersKey);
+
+  Context withUsers(_Users users) => withBinding(_usersKey.bind(users));
+}
+
+final class _Users {
+  final events = <String>[];
+
+  Effect<_Connection, String> connect() {
+    return Effect.sync(() {
+      events.add('connected');
+      return _Connection(events);
+    }).mapError((error) => '$error');
   }
+}
+
+final class _Connection {
+  const _Connection(this.events);
+
+  final List<String> events;
+
+  Effect<String, String> loadUser(String id) => Effect.succeed('User $id');
+
+  Effect<void, Never> closeEffect() => Effect.sync(() => events.add('closed'));
 }

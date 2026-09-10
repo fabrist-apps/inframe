@@ -1,0 +1,40 @@
+import 'package:conflux/conflux.dart';
+
+Future<void> main() async {
+  final program = Effect.build<String, String>(($) async {
+    final value = await $(Effect.succeed<int, String>(42));
+    final nullable = $.sync<String?>(const Success(null));
+    return '$value:$nullable';
+  });
+
+  final exit = await Runtime().run(program);
+  if (exit case Succeeded<String, String>(value: final value)) {
+    if (value != '42:null') throw StateError('Unexpected value: $value');
+  } else {
+    throw StateError('Unexpected exit: $exit');
+  }
+
+  final Effect<int, _BaseError> widened = Effect.fail<int, _SpecificError>(
+    const _SpecificError(),
+  );
+  final Effect<Result<int, _BaseError>, _BaseError> captured = widened.result();
+  final recovered = widened.catchError(
+    (_) => Effect.succeed<int, _BaseError>(1),
+  );
+  final capturedExit = await Runtime().run(captured);
+  final widenedExit = await Runtime().run(recovered);
+  if (capturedExit is! Succeeded<Result<int, _BaseError>, _BaseError>) {
+    throw StateError('Expected a captured result.');
+  }
+  if (widenedExit is! Succeeded<int, _BaseError>) {
+    throw StateError('Expected widened recovery to succeed.');
+  }
+}
+
+sealed class _BaseError {
+  const _BaseError();
+}
+
+final class _SpecificError extends _BaseError {
+  const _SpecificError();
+}

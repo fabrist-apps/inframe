@@ -38,6 +38,20 @@ final class ConsumerFixtures {
   Future<void> analyze(String package, String file) =>
       _dart(package, ['analyze', '--format=machine', file]);
 
+  Future<void> analyzeFails(
+    String package,
+    String file, {
+    required String containing,
+  }) async {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      ['analyze', '--format=machine', file],
+      workingDirectory: '${_directory.path}/$package',
+    );
+    expect(result.exitCode, isNonZero, reason: '${result.stdout}\n${result.stderr}');
+    expect('${result.stdout}\n${result.stderr}', contains(containing));
+  }
+
   Future<void> run(String package, String file) => _dart(package, ['run', file]);
 
   Future<void> _dart(String package, List<String> arguments) async {
