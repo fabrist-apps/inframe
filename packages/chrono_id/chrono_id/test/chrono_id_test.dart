@@ -92,6 +92,16 @@ void main() {
       expect(random.nextIntCalls, 16);
     });
 
+    test('should map every random index to the declared alphabet', () {
+      const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+      final generator = ChronoIdGenerator(
+        clock: () => 0,
+        randomFactory: () => _SequenceRandom(List.generate(62, (index) => index)),
+      );
+
+      expect(generator.generate(size: 70), '00000000$alphabet');
+    });
+
     test('should initialize one random source lazily and reuse it', () {
       var factoryCalls = 0;
       final random = _SequenceRandom(List.filled(32, 0));

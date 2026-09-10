@@ -71,17 +71,19 @@ void main() {
     });
 
     test('should preserve existing constraints without changing the original schema', () {
-      final original = Ack.string().minLength(20);
-      final chronoId = original.chronoId(size: 16);
-      const structurallyValid = '0000000000000000';
+      final original = Ack.string()
+          .minLength(20)
+          .refine((value) => !value.endsWith('0'), message: 'Must not end in zero.');
+      final chronoId = original.chronoId(size: 20);
+      const rejectedByExistingRefinement = '00000000000000000000';
       const nonChronoLength20 = '____________________';
 
-      expect(original.refinements, isEmpty);
+      expect(original.refinements, hasLength(1));
       expect(original.safeParse(nonChronoLength20).isOk, isTrue);
-      expect(original.safeParse(structurallyValid).isFail, isTrue);
-      expect(chronoId.refinements, hasLength(1));
+      expect(original.safeParse(rejectedByExistingRefinement).isFail, isTrue);
+      expect(chronoId.refinements, hasLength(2));
       expect(chronoId.safeParse(nonChronoLength20).isFail, isTrue);
-      expect(chronoId.safeParse(structurallyValid).isFail, isTrue);
+      expect(chronoId.safeParse(rejectedByExistingRefinement).isFail, isTrue);
     });
 
     test('should retain validation after subsequent fluent constraints', () {
