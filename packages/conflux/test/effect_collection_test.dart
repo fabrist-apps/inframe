@@ -26,15 +26,14 @@ void main() {
       var active = 0;
       var maximumActive = 0;
       final gates = List.generate(4, (_) => Completer<void>());
-      final started = StreamController<int>.broadcast();
-      addTearDown(started.close);
+      final started = List.generate(4, (_) => Completer<void>());
       final effect = Effect.forEach<int, int, String>(
         [0, 1, 2, 3],
         (index) => Effect.tryFuture<int, String>(
           () async {
             active += 1;
             maximumActive = active > maximumActive ? active : maximumActive;
-            started.add(index);
+            started[index].complete();
             await gates[index].future;
             active -= 1;
             return index;
@@ -45,12 +44,12 @@ void main() {
       );
       final fiber = Runtime().fork(effect);
 
-      await started.stream.firstWhere((index) => index == 1);
+      await Future.wait([started[0].future, started[1].future]);
       expect(active, 2);
       gates[1].complete();
-      await started.stream.firstWhere((index) => index == 2);
+      await started[2].future;
       gates[0].complete();
-      await started.stream.firstWhere((index) => index == 3);
+      await started[3].future;
       gates[2].complete();
       gates[3].complete();
 
