@@ -123,6 +123,143 @@ void main() {
       expect(service.closed, isFalse);
       expect(service.connection.closed, isTrue);
     });
+
+    test('should register release before cancellation can abandon the resource', () async {
+      final acquireStarted = Completer<void>();
+      final acquired = Completer<_Connection>();
+      final registered = Completer<void>();
+      final pending = Completer<void>();
+      final connection = _Connection();
+      final runtime = Runtime();
+      final fiber = runtime.fork(
+        Effect.build<void, String>(($) async {
+          await $.acquireRelease(
+            Effect.tryFuture<_Connection, String>(
+              () {
+                acquireStarted.complete();
+                return acquired.future;
+              },
+              onError: (error, _) => '$error',
+            ),
+            release: (resource) => Effect.sync(resource.close),
+          );
+          registered.complete();
+          await $(
+            Effect.tryFuture<void, String>(
+              () => pending.future,
+              onError: (error, _) => '$error',
+            ),
+          );
+        }),
+      );
+      await acquireStarted.future;
+
+      acquired.complete(connection);
+      await registered.future;
+      await fiber.interrupt('test');
+
+      expect(connection.closed, isTrue);
+    });
+
+    test('should protect finalization from repeated cancellation', () async {
+      final bodyStarted = Completer<void>();
+      final bodyPending = Completer<void>();
+      final releaseStarted = Completer<void>();
+      final releaseGate = Completer<void>();
+      final runtime = Runtime();
+      final fiber = runtime.fork(
+        Effect.build<void, String>(($) async {
+          await $.acquireRelease(
+            Effect.succeed<void, String>(null),
+            release: (_) => Effect.tryFuture<void, Never>(
+              () {
+                releaseStarted.complete();
+                return releaseGate.future;
+              },
+              onError: (error, _) => throw StateError('$error'),
+            ),
+          );
+          bodyStarted.complete();
+          await $(
+            Effect.tryFuture<void, String>(
+              () => bodyPending.future,
+              onError: (error, _) => '$error',
+            ),
+          );
+        }),
+      );
+      await bodyStarted.future;
+
+      final interrupted = fiber.interrupt('first');
+      await releaseStarted.future;
+      var finished = false;
+      unawaited(interrupted.whenComplete(() => finished = true));
+      await fiber
+          .interrupt('second')
+          .timeout(
+            const Duration(milliseconds: 10),
+            onTimeout: () => const Failed<void, String>(Interrupted('timeout')),
+          );
+      expect(finished, isFalse);
+      releaseGate.complete();
+
+      await interrupted;
+      expect(finished, isTrue);
+    });
+
+    test('should keep multiple cleanup failures in reverse order', () async {
+      final program = Effect.build<void, String>(($) {
+        $
+          ..addFinalizer(Effect.sync(() => throw StateError('first')))
+          ..addFinalizer(Effect.sync(() => throw StateError('second')))
+          ..sync<void>(const Failure('operation'));
+      });
+
+      final cause = (await Runtime().run(program) as Failed<void, String>).cause;
+      final outer = (cause as Sequential<String>).causes;
+      final cleanup = (outer[1] as Sequential<String>).causes;
+
+      expect((cleanup[0] as Defect<String>).error.toString(), contains('second'));
+      expect((cleanup[1] as Defect<String>).error.toString(), contains('first'));
+    });
+
+    test('should finish child cleanup before releasing parent resources', () async {
+      final events = <String>[];
+      final childStarted = Completer<void>();
+      final childPending = Completer<int>();
+      final program = Effect.build<void, String>(($) async {
+        await $.acquireRelease(
+          Effect.succeed<void, String>(null),
+          release: (_) => Effect.sync(() => events.add('release')),
+        );
+        await $(
+          Effect.all<int, String>([
+            Effect.tryFuture<int, String>(
+              () async {
+                await childStarted.future;
+                throw StateError('failed');
+              },
+              onError: (_, _) => 'failed',
+            ),
+            Effect.tryFuture<int, String>(
+              () {
+                childStarted.complete();
+                return childPending.future;
+              },
+              onError: (error, _) => '$error',
+              onCancel: () async {
+                await Future<void>.delayed(Duration.zero);
+                events.add('child');
+              },
+            ),
+          ], concurrency: 2),
+        );
+      });
+
+      await Runtime().run(program);
+
+      expect(events, ['child', 'release']);
+    });
   });
 }
 

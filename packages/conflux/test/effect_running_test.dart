@@ -57,6 +57,30 @@ void main() {
       expect((exit as Succeeded<String, String>).value, 'value:4');
     });
 
+    test('should evaluate Option failure factories only for None', () async {
+      var calls = 0;
+      final present = Effect.fromOption<int, String>(
+        const Some(1),
+        () {
+          calls += 1;
+          return 'missing';
+        },
+      );
+      final absent = Effect.fromOption<int, String>(
+        const None(),
+        () {
+          calls += 1;
+          return 'missing';
+        },
+      );
+
+      expect(calls, 0);
+      await present.runFutureExit();
+      expect(calls, 0);
+      await absent.runFutureExit();
+      expect(calls, 1);
+    });
+
     test('should invoke success and expected-error observers on their branch', () async {
       final events = <String>[];
       await Effect.succeed<int, String>(1)

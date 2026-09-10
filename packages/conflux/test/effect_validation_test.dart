@@ -59,6 +59,25 @@ void main() {
       expect(leaves[1], isA<Defect<NonEmptyList<String>>>());
     });
 
+    test('should abort without visiting later inputs after interruption', () async {
+      var visitedSecond = false;
+      final effect = Effect.validate<int, int, String>([1, 2], (value) {
+        if (value == 1) {
+          return Effect.failCause(const Interrupted<String>('stopped'));
+        }
+        visitedSecond = true;
+        return Effect.succeed(value);
+      });
+
+      final exit = await Runtime().run(effect);
+
+      expect(visitedSecond, isFalse);
+      expect(
+        (exit as Failed<List<int>, NonEmptyList<String>>).cause,
+        isA<Interrupted<NonEmptyList<String>>>(),
+      );
+    });
+
     test('should support empty input', () async {
       final exit = await Runtime().run(
         Effect.validate<int, int, String>(const [], Effect.succeed),
