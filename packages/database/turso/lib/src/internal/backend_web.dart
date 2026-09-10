@@ -137,12 +137,10 @@ final class _WebBackend implements TursoBackend {
 
   void _handleWorkerFailure(web.Event _) {
     if (_workerFailure != null) return;
-    _workerFailure = const TursoPlatformException('The Turso browser worker stopped unexpectedly.');
-    for (final pending in _pending.values) {
-      pending.completeError(_workerFailure!);
-    }
-    _pending.clear();
-    _worker.terminate();
+    _workerFailure = const TursoPlatformException(
+      'The Turso browser worker stopped unexpectedly; an interrupted write may have committed.',
+    );
+    unawaited(retire());
   }
 
   @override
@@ -160,6 +158,19 @@ final class _WebBackend implements TursoBackend {
     } finally {
       _worker.terminate();
     }
+  }
+
+  @override
+  Future<void> retire() async {
+    _closed = true;
+    final failure = _workerFailure ??= const TursoPlatformException(
+      'The Turso browser worker was retired.',
+    );
+    for (final pending in _pending.values) {
+      pending.completeError(failure);
+    }
+    _pending.clear();
+    _worker.terminate();
   }
 }
 

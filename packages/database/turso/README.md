@@ -62,6 +62,11 @@ awaited. Use only the callback's `TursoTransaction` handle while the callback is
 parent database fail immediately and the handle expires when the callback returns. Raw `BEGIN`,
 `COMMIT`, `ROLLBACK`, and savepoint statements bypass this managed boundary and are unsupported.
 
+`close` rejects new root operations immediately, waits for accepted operations and transactions,
+then releases the connection and worker. Repeated calls share the same shutdown future. A worker
+failure or failed rollback retires the connection; later operations fail and diagnostics treat an
+interrupted write as having an uncertain outcome.
+
 ## Browser setup
 
 Install the pinned browser bridge beside the application's other hosted files:

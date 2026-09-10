@@ -18,6 +18,8 @@ final class NativeBackend implements TursoBackend {
     this._isolate,
     this._receivePort,
     this._subscription,
+    this._statusPort,
+    this._statusSubscription,
     this._workerPort,
     this.capabilities,
   );
@@ -25,10 +27,13 @@ final class NativeBackend implements TursoBackend {
   final Isolate _isolate;
   final ReceivePort _receivePort;
   final StreamSubscription<Object?> _subscription;
+  final ReceivePort _statusPort;
+  final StreamSubscription<Object?> _statusSubscription;
   final SendPort _workerPort;
   final Map<int, Completer<Object?>> _pending = {};
   var _nextRequestId = 0;
   var _closed = false;
+  TursoPlatformException? _workerFailure;
 
   @override
   final TursoCapabilities capabilities;
@@ -47,9 +52,12 @@ final class NativeBackend implements TursoBackend {
     };
 
     final receivePort = ReceivePort('Turso native replies');
+    final statusPort = ReceivePort('Turso native status');
     final ready = Completer<List<Object?>>();
     late final StreamSubscription<Object?> subscription;
+    late final StreamSubscription<Object?> statusSubscription;
     NativeBackend? backend;
+    var failedBeforeBackend = false;
     subscription = receivePort.listen((message) {
       final reply = message! as List<Object?>;
       if (!ready.isCompleted) {
@@ -59,33 +67,68 @@ final class NativeBackend implements TursoBackend {
       backend?._handleReply(reply);
     });
 
+    statusSubscription = statusPort.listen((_) {
+      if (!ready.isCompleted) {
+        ready.complete([
+          false,
+          'platform',
+          'The Turso native worker stopped during initialization.',
+          null,
+        ]);
+        return;
+      }
+      final owner = backend;
+      if (owner == null) {
+        failedBeforeBackend = true;
+      } else {
+        owner._handleWorkerFailure();
+      }
+    });
+
     final encodedKey = encryption == null ? null : base64Encode(encryption.key);
-    final isolate = await Isolate.spawn(
-      _runNativeWorker,
-      <Object?>[
-        receivePort.sendPort,
-        path,
-        encryption?.cipher.name,
-        encodedKey,
-      ],
-      debugName: 'Turso native database',
-    );
+    late final Isolate isolate;
+    try {
+      isolate = await Isolate.spawn(
+        _runNativeWorker,
+        <Object?>[
+          receivePort.sendPort,
+          path,
+          encryption?.cipher.name,
+          encodedKey,
+        ],
+        debugName: 'Turso native database',
+        onError: statusPort.sendPort,
+        onExit: statusPort.sendPort,
+      );
+    } on Object {
+      await subscription.cancel();
+      await statusSubscription.cancel();
+      receivePort.close();
+      statusPort.close();
+      rethrow;
+    }
 
     final handshake = await ready.future;
     if (handshake[0] != true) {
       await subscription.cancel();
+      await statusSubscription.cancel();
       receivePort.close();
+      statusPort.close();
       isolate.kill();
       Error.throwWithStackTrace(_decodeWorkerError(handshake), StackTrace.current);
     }
 
-    return backend = NativeBackend._(
+    backend = NativeBackend._(
       isolate,
       receivePort,
       subscription,
+      statusPort,
+      statusSubscription,
       handshake[1]! as SendPort,
       const TursoCapabilities(fts: false, vectorFunctions: false, vectorIndexes: false),
     );
+    if (failedBeforeBackend) backend._handleWorkerFailure();
+    return backend;
   }
 
   @override
@@ -101,6 +144,8 @@ final class NativeBackend implements TursoBackend {
   }
 
   Future<Object?> _request(String operation, Object? payload) {
+    final failure = _workerFailure;
+    if (failure != null) return Future<Object?>.error(failure);
     if (_closed) return Future<Object?>.error(StateError('The native worker is closed.'));
     final requestId = _nextRequestId++;
     final completer = Completer<Object?>();
@@ -120,6 +165,14 @@ final class NativeBackend implements TursoBackend {
     }
   }
 
+  void _handleWorkerFailure() {
+    if (_closed || _workerFailure != null) return;
+    _workerFailure = const TursoPlatformException(
+      'The Turso native worker stopped unexpectedly; an interrupted write may have committed.',
+    );
+    unawaited(retire());
+  }
+
   @override
   Future<void> close() async {
     if (_closed) return;
@@ -132,13 +185,32 @@ final class NativeBackend implements TursoBackend {
       await completer.future;
     } finally {
       await _subscription.cancel();
+      await _statusSubscription.cancel();
       _receivePort.close();
+      _statusPort.close();
       _isolate.kill();
       for (final pending in _pending.values) {
         pending.completeError(const TursoPlatformException('The native worker stopped.'));
       }
       _pending.clear();
     }
+  }
+
+  @override
+  Future<void> retire() async {
+    _closed = true;
+    final failure = _workerFailure ??= const TursoPlatformException(
+      'The Turso native worker was retired; an interrupted write may have committed.',
+    );
+    await _subscription.cancel();
+    await _statusSubscription.cancel();
+    _receivePort.close();
+    _statusPort.close();
+    _isolate.kill();
+    for (final pending in _pending.values) {
+      pending.completeError(failure);
+    }
+    _pending.clear();
   }
 }
 

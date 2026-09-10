@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:turso/turso.dart';
@@ -18,6 +19,8 @@ Future<void> main() async {
 
     await _verifyReloadedData();
     await _verifyTransactions();
+    await _verifyWorkerDeath();
+    await _verifyCloseFailure();
     await _verifyLockRelease();
     await _verifyMemoryDatabase();
     await _verifyPlatformFailures();
@@ -28,17 +31,66 @@ Future<void> main() async {
   }
 }
 
+Future<void> _verifyCloseFailure() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.memory(),
+    web: TursoWebOptions(moduleUri: Uri.parse('failing_close_bridge.js')),
+  );
+  final firstClose = database.close();
+  final secondClose = database.close();
+  _expect(identical(firstClose, secondClose), 'Failed closes did not share their shutdown.');
+  await _expectFailure<TursoPlatformException>(() => firstClose);
+  await _expectFailure<StateError>(() => database.query('SELECT 1'));
+}
+
+Future<void> _verifyWorkerDeath() async {
+  var stage = 'open';
+  try {
+    final database = await TursoDatabase.open(
+      TursoLocation.memory(),
+      web: TursoWebOptions(moduleUri: Uri.parse('crashing_bridge.js')),
+    );
+    stage = 'pending requests';
+    final interrupted = _expectFailure<TursoPlatformException>(() => database.query('SELECT 1'));
+    final queued = _expectFailure<TursoPlatformException>(() => database.query('SELECT 2'));
+    await Future.wait([interrupted, queued]);
+    stage = 'future request';
+    await _expectFailure<TursoPlatformException>(() => database.query('SELECT 3'));
+    stage = 'close';
+    await database.close();
+  } on Object catch (error, stackTrace) {
+    Error.throwWithStackTrace(
+      StateError('Worker death verification failed at $stage: $error'),
+      stackTrace,
+    );
+  }
+}
+
 Future<void> _verifyTransactions() async {
   final database = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
   try {
     await database.execute('CREATE TABLE transactions (value TEXT)');
+    final entered = Completer<void>();
+    final continueTransaction = Completer<void>();
     late TursoTransaction expired;
-    final result = await database.transaction((tx) async {
+    final transaction = database.transaction((tx) async {
       expired = tx;
       await tx.execute('INSERT INTO transactions VALUES (?)', parameters: const ['committed']);
       await _expectFailure<StateError>(() => database.query('SELECT 1'));
+      entered.complete();
+      await continueTransaction.future;
       return (await tx.query('SELECT value FROM transactions')).rows.single.getString('value');
     });
+    await entered.future;
+    var rootCompleted = false;
+    final root = database.query('SELECT count(*) AS count FROM transactions').whenComplete(() {
+      rootCompleted = true;
+    });
+    await Future<void>.delayed(Duration.zero);
+    _expect(!rootCompleted, 'Root work entered an active transaction.');
+    continueTransaction.complete();
+    final result = await transaction;
+    await root;
     _expect(result == 'committed', 'Transaction did not read its write.');
     await _expectFailure<StateError>(() => expired.query('SELECT 1'));
 
@@ -50,6 +102,22 @@ Future<void> _verifyTransactions() async {
     );
     final rows = await database.query('SELECT value FROM transactions');
     _expect(rows.rows.length == 1, 'Failed transaction escaped its rollback.');
+
+    final closeEntered = Completer<void>();
+    final finishClosingTransaction = Completer<void>();
+    final accepted = database.transaction((tx) async {
+      closeEntered.complete();
+      await finishClosingTransaction.future;
+      await tx.query('SELECT 1');
+    });
+    await closeEntered.future;
+    final firstClose = database.close();
+    final secondClose = database.close();
+    _expect(identical(firstClose, secondClose), 'Repeated close did not share its shutdown.');
+    await _expectFailure<StateError>(() => database.query('SELECT 1'));
+    finishClosingTransaction.complete();
+    await accepted;
+    await firstClose;
   } finally {
     await database.close();
   }

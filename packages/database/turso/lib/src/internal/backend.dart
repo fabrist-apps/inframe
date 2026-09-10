@@ -13,4 +13,7 @@ abstract interface class TursoBackend {
 
   /// Releases all resources owned by this backend.
   Future<void> close();
+
+  /// Stops the backend after an unrecoverable connection failure.
+  Future<void> retire();
 }

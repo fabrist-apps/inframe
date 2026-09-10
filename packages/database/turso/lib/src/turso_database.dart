@@ -19,6 +19,7 @@ final class TursoDatabase {
   final Object _transactionZoneKey = Object();
   Future<void> _tail = Future<void>.value();
   Future<void>? _closeFuture;
+  TursoPlatformException? _retirementFailure;
 
   /// Opens a database at [location].
   static Future<TursoDatabase> open(
@@ -42,7 +43,7 @@ final class TursoDatabase {
     _ensureOutsideTransactionCallback();
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
-      final wireResult = await _backend.query(sql, snapshot);
+      final wireResult = await _runBackendOperation(() => _backend.query(sql, snapshot));
       return _decodeQueryResult(wireResult);
     });
   });
@@ -56,7 +57,7 @@ final class TursoDatabase {
     _ensureOutsideTransactionCallback();
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
-      final rowsAffected = await _backend.execute(sql, snapshot);
+      final rowsAffected = await _runBackendOperation(() => _backend.execute(sql, snapshot));
       return TursoExecuteResult(rowsAffected: rowsAffected);
     });
   });
@@ -94,9 +95,13 @@ final class TursoDatabase {
     if (_closeFuture != null) {
       return Future<T>.error(StateError('The database is closing or closed.'));
     }
+    final retirementFailure = _retirementFailure;
+    if (retirementFailure != null) return Future<T>.error(retirementFailure);
     final completer = Completer<T>();
     _tail = _tail.then((_) async {
       try {
+        final retirementFailure = _retirementFailure;
+        if (retirementFailure != null) throw retirementFailure;
         completer.complete(await operation());
       } on Object catch (error, stackTrace) {
         completer.completeError(error, stackTrace);
@@ -116,8 +121,8 @@ final class TursoDatabase {
   }
 
   Future<T> _runTransaction<T>(Future<T> Function(TursoTransaction tx) action) async {
-    await _backend.execute('BEGIN DEFERRED', const []);
-    final transaction = _ManagedTransaction(_backend);
+    await _runBackendOperation(() => _backend.execute('BEGIN DEFERRED', const []));
+    final transaction = _ManagedTransaction(_backend, _runBackendOperation);
     late T result;
     Object? primaryError;
     StackTrace? primaryStackTrace;
@@ -145,7 +150,7 @@ final class TursoDatabase {
     }
 
     try {
-      await _backend.execute('COMMIT', const []);
+      await _runBackendOperation(() => _backend.execute('COMMIT', const []));
     } on Object catch (error, stackTrace) {
       await _rollbackAndThrow(error, stackTrace);
     }
@@ -154,8 +159,13 @@ final class TursoDatabase {
 
   Future<Never> _rollbackAndThrow(Object primaryError, StackTrace primaryStackTrace) async {
     try {
-      await _backend.execute('ROLLBACK', const []);
+      await _runBackendOperation(() => _backend.execute('ROLLBACK', const []));
     } on Object catch (rollbackError, rollbackStackTrace) {
+      await _retire(
+        const TursoPlatformException(
+          'The Turso connection was retired after a failed rollback; an interrupted write may have committed.',
+        ),
+      );
       Error.throwWithStackTrace(
         TursoTransactionException(
           primaryError: primaryError,
@@ -167,6 +177,26 @@ final class TursoDatabase {
       );
     }
     Error.throwWithStackTrace(primaryError, primaryStackTrace);
+  }
+
+  Future<T> _runBackendOperation<T>(Future<T> Function() operation) async {
+    final retirementFailure = _retirementFailure;
+    if (retirementFailure != null) throw retirementFailure;
+    try {
+      return await operation();
+    } on TursoPlatformException catch (error, stackTrace) {
+      await _retire(error);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  Future<void> _retire(TursoPlatformException failure) async {
+    _retirementFailure ??= failure;
+    try {
+      await _backend.retire();
+    } on Object {
+      // Preserve the failure that made the connection unusable.
+    }
   }
 }
 
@@ -196,9 +226,10 @@ Object? _decodeValue(Object? wireValue) {
 }
 
 final class _ManagedTransaction implements TursoTransaction {
-  _ManagedTransaction(this._backend);
+  _ManagedTransaction(this._backend, this._runBackendOperation);
 
   final TursoBackend _backend;
+  final Future<T> Function<T>(Future<T> Function() operation) _runBackendOperation;
   Future<void> _tail = Future<void>.value();
   _OperationFailure? _firstFailure;
   var _accepting = true;
@@ -215,7 +246,7 @@ final class _ManagedTransaction implements TursoTransaction {
     _ensureAccepting();
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
-      final wireResult = await _backend.query(sql, snapshot);
+      final wireResult = await _runBackendOperation(() => _backend.query(sql, snapshot));
       return _decodeQueryResult(wireResult);
     });
   });
@@ -229,7 +260,7 @@ final class _ManagedTransaction implements TursoTransaction {
     _ensureAccepting();
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
-      final rowsAffected = await _backend.execute(sql, snapshot);
+      final rowsAffected = await _runBackendOperation(() => _backend.execute(sql, snapshot));
       return TursoExecuteResult(rowsAffected: rowsAffected);
     });
   });
