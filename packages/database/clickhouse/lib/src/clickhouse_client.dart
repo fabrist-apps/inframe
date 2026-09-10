@@ -53,50 +53,40 @@ final class ClickHouseClient {
   final int _maxRequestBytes;
   final int _maxResponseBytes;
   final HttpClient _httpClient;
-  var _closed = false;
+  var _closing = false;
+  var _activeOperations = 0;
+  Completer<void>? _becameIdle;
+  Future<void>? _closeFuture;
 
   /// Runs [sql] and returns the complete validated result.
   Future<ClickHouseQueryResult> query(
     String sql, {
     Map<String, String> parameters = const {},
     Duration? timeout,
-  }) async {
-    _ensureOpen();
-    final operationTimeout = _operationTimeout(timeout);
+  }) => _runOperation(timeout, 'query', (deadline) async {
     final requestUri = _requestUri(parameters);
     final body = utf8.encode(sql);
+    deadline.check(ClickHouseRequestState.notSent);
     _ensureRequestWithinLimit(body);
-
-    try {
-      return await _query(requestUri, body).timeout(operationTimeout);
-    } on ClickHouseException {
-      rethrow;
-    } on TimeoutException {
-      throw ClickHouseTimeoutException(
-        message:
-            'ClickHouse query exceeded its ${operationTimeout.inMicroseconds} microsecond deadline.',
-        requestState: ClickHouseRequestState.mayHaveReachedServer,
-      );
-    }
-  }
+    return _query(requestUri, body, deadline);
+  });
 
   /// Executes [sql] that does not return rows.
   Future<void> command(
     String sql, {
     Map<String, String> parameters = const {},
     Duration? timeout,
-  }) async {
-    _ensureOpen();
-    final operationTimeout = _operationTimeout(timeout);
+  }) => _runOperation(timeout, 'command', (deadline) async {
     final body = utf8.encode(sql);
+    deadline.check(ClickHouseRequestState.notSent);
     _ensureRequestWithinLimit(body);
     await _runVoidOperation(
       uri: _requestUri(parameters),
       body: body,
-      timeout: operationTimeout,
       operation: 'command',
+      deadline: deadline,
     );
-  }
+  });
 
   /// Inserts a completely validated [rows] batch into [table].
   Future<void> insert({
@@ -104,11 +94,10 @@ final class ClickHouseClient {
     required List<Map<String, Object?>> rows,
     String? deduplicationToken,
     Duration? timeout,
-  }) async {
-    _ensureOpen();
-    final operationTimeout = _operationTimeout(timeout);
+  }) => _runOperation(timeout, 'insert', (deadline) async {
     final quotedTable = _quoteIdentifier(table);
     final encodedRows = _encodeRows(rows);
+    deadline.check(ClickHouseRequestState.notSent);
     if (rows.isEmpty) {
       return;
     }
@@ -124,22 +113,33 @@ final class ClickHouseClient {
         },
       ),
       body: body,
-      timeout: operationTimeout,
       operation: 'insert',
+      deadline: deadline,
     );
-  }
+  });
 
   /// Stops accepting operations, waits for active work, and closes connections.
   Future<void> close() {
-    if (!_closed) {
-      _closed = true;
-      _httpClient.close();
+    final existing = _closeFuture;
+    if (existing != null) {
+      return existing;
     }
-    return Future<void>.value();
+    _closing = true;
+    final shutdown = _closeWhenIdle();
+    _closeFuture = shutdown;
+    return shutdown;
   }
 
-  Future<ClickHouseQueryResult> _query(Uri uri, List<int> body) async {
-    final response = await _send(uri, body);
+  Future<void> _closeWhenIdle() async {
+    if (_activeOperations > 0) {
+      _becameIdle = Completer<void>();
+      await _becameIdle!.future;
+    }
+    _httpClient.close();
+  }
+
+  Future<ClickHouseQueryResult> _query(Uri uri, List<int> body, _Deadline deadline) async {
+    final response = await _send(uri, body, deadline);
     if (response.statusCode != HttpStatus.ok) {
       throw _serverException(response.statusCode, response.body, response.queryId);
     }
@@ -147,7 +147,12 @@ final class ClickHouseClient {
     late final String responseText;
     try {
       responseText = utf8.decode(response.body);
-      return _decodeQueryResult(responseText);
+      final result = _decodeQueryResult(responseText);
+      deadline.check(
+        ClickHouseRequestState.mayHaveReachedServer,
+        queryId: response.queryId,
+      );
+      return result;
     } on FormatException catch (error) {
       final responseTextForError = utf8.decode(response.body, allowMalformed: true);
       final errorCode = _clickHouseErrorCode(responseTextForError);
@@ -171,74 +176,72 @@ final class ClickHouseClient {
   Future<void> _runVoidOperation({
     required Uri uri,
     required List<int> body,
-    required Duration timeout,
     required String operation,
+    required _Deadline deadline,
   }) async {
-    try {
-      final response = await _send(uri, body).timeout(timeout);
-      if (response.statusCode != HttpStatus.ok) {
-        throw _serverException(response.statusCode, response.body, response.queryId);
-      }
-      final responseText = utf8.decode(response.body, allowMalformed: true).trim();
-      final errorCode = _clickHouseErrorCode(responseText);
-      if (errorCode != null) {
-        throw ClickHouseServerException(
-          message: responseText,
-          requestState: ClickHouseRequestState.mayHaveReachedServer,
-          queryId: response.queryId,
-          statusCode: response.statusCode,
-          clickHouseCode: errorCode,
-        );
-      }
-      if (responseText.isNotEmpty) {
-        throw ClickHouseProtocolException(
-          message: 'ClickHouse returned unexpected output for a $operation.',
-          requestState: ClickHouseRequestState.mayHaveReachedServer,
-          queryId: response.queryId,
-        );
-      }
-    } on ClickHouseException {
-      rethrow;
-    } on TimeoutException {
-      throw ClickHouseTimeoutException(
-        message:
-            'ClickHouse $operation exceeded its ${timeout.inMicroseconds} microsecond deadline.',
+    final response = await _send(uri, body, deadline);
+    if (response.statusCode != HttpStatus.ok) {
+      throw _serverException(response.statusCode, response.body, response.queryId);
+    }
+    final responseText = utf8.decode(response.body, allowMalformed: true).trim();
+    final errorCode = _clickHouseErrorCode(responseText);
+    if (errorCode != null) {
+      throw ClickHouseServerException(
+        message: responseText,
         requestState: ClickHouseRequestState.mayHaveReachedServer,
+        queryId: response.queryId,
+        statusCode: response.statusCode,
+        clickHouseCode: errorCode,
       );
     }
+    if (responseText.isNotEmpty) {
+      throw ClickHouseProtocolException(
+        message: 'ClickHouse returned unexpected output for a $operation.',
+        requestState: ClickHouseRequestState.mayHaveReachedServer,
+        queryId: response.queryId,
+      );
+    }
+    deadline.check(
+      ClickHouseRequestState.mayHaveReachedServer,
+      queryId: response.queryId,
+    );
   }
 
-  Future<_HttpResponse> _send(Uri uri, List<int> body) async {
+  Future<_HttpResponse> _send(Uri uri, List<int> body, _Deadline deadline) async {
     HttpClientRequest? request;
     var requestState = ClickHouseRequestState.notSent;
     String? queryId;
     try {
-      request = await _httpClient.postUrl(uri);
-      request.headers
+      final openRequest = _httpClient.postUrl(uri);
+      final openedRequest = await deadline.wait(
+        openRequest,
+        requestState,
+        onLateValue: (lateRequest) => lateRequest.abort(),
+      );
+      request = openedRequest;
+      openedRequest.headers
         ..set('x-clickhouse-user', _username)
         ..set('x-clickhouse-key', _password)
         ..set('x-clickhouse-format', 'JSON')
         ..contentType = ContentType.text;
-      request
+      deadline.check(requestState);
+      requestState = ClickHouseRequestState.mayHaveReachedServer;
+      openedRequest
         ..contentLength = body.length
         ..add(body);
 
-      requestState = ClickHouseRequestState.mayHaveReachedServer;
-      final response = await request.close();
+      final response = await deadline.wait(
+        openedRequest.close(),
+        requestState,
+        onTimeout: openedRequest.abort,
+      );
       queryId = response.headers.value('x-clickhouse-query-id');
-      final responseBody = <int>[];
-      await for (final chunk in response) {
-        responseBody.addAll(chunk);
-        if (responseBody.length > _maxResponseBytes) {
-          throw ClickHouseSizeLimitException(
-            message: 'ClickHouse response exceeded the $_maxResponseBytes byte limit.',
-            requestState: requestState,
-            queryId: queryId,
-            direction: ClickHouseSizeLimitDirection.response,
-            limit: _maxResponseBytes,
-          );
-        }
-      }
+      final responseBody = await _consumeResponse(
+        response,
+        openedRequest,
+        deadline,
+        queryId,
+      );
       return _HttpResponse(
         statusCode: response.statusCode,
         body: responseBody,
@@ -258,6 +261,75 @@ final class ClickHouseClient {
     }
   }
 
+  Future<List<int>> _consumeResponse(
+    HttpClientResponse response,
+    HttpClientRequest request,
+    _Deadline deadline,
+    String? queryId,
+  ) {
+    final completer = Completer<List<int>>();
+    final responseBody = <int>[];
+    late final StreamSubscription<List<int>> subscription;
+    late final Timer timer;
+
+    void fail(Object error, [StackTrace? stackTrace]) {
+      if (completer.isCompleted) {
+        return;
+      }
+      timer.cancel();
+      unawaited(subscription.cancel());
+      request.abort(error);
+      completer.completeError(error, stackTrace);
+    }
+
+    subscription = response.listen(
+      (chunk) {
+        responseBody.addAll(chunk);
+        if (responseBody.length > _maxResponseBytes) {
+          fail(
+            ClickHouseSizeLimitException(
+              message: 'ClickHouse response exceeded the $_maxResponseBytes byte limit.',
+              requestState: ClickHouseRequestState.mayHaveReachedServer,
+              queryId: queryId,
+              direction: ClickHouseSizeLimitDirection.response,
+              limit: _maxResponseBytes,
+            ),
+          );
+        }
+      },
+      onError: fail,
+      onDone: () {
+        if (completer.isCompleted) {
+          return;
+        }
+        timer.cancel();
+        try {
+          deadline.check(
+            ClickHouseRequestState.mayHaveReachedServer,
+            queryId: queryId,
+          );
+          completer.complete(responseBody);
+        } on Object catch (error, stackTrace) {
+          fail(error, stackTrace);
+        }
+      },
+      cancelOnError: true,
+    );
+    timer = Timer(
+      deadline.remaining(
+        ClickHouseRequestState.mayHaveReachedServer,
+        queryId: queryId,
+      ),
+      () => fail(
+        deadline.exception(
+          ClickHouseRequestState.mayHaveReachedServer,
+          queryId: queryId,
+        ),
+      ),
+    );
+    return completer.future;
+  }
+
   Uri _requestUri(
     Map<String, String> parameters, {
     Map<String, String> settings = const {},
@@ -273,6 +345,31 @@ final class ClickHouseClient {
   Duration _operationTimeout(Duration? timeout) =>
       timeout == null ? _timeout : _requirePositiveDuration(timeout, 'timeout');
 
+  Future<T> _runOperation<T>(
+    Duration? timeout,
+    String operation,
+    Future<T> Function(_Deadline deadline) run,
+  ) {
+    late final _Deadline deadline;
+    try {
+      _ensureOpen();
+      deadline = _Deadline(operation, _operationTimeout(timeout));
+    } on Object catch (error, stackTrace) {
+      return Future<T>.error(error, stackTrace);
+    }
+    _activeOperations += 1;
+    final result = Future<T>.sync(() => run(deadline));
+    return result.whenComplete(_finishOperation);
+  }
+
+  void _finishOperation() {
+    _activeOperations -= 1;
+    if (_activeOperations == 0) {
+      _becameIdle?.complete();
+      _becameIdle = null;
+    }
+  }
+
   void _ensureRequestWithinLimit(List<int> body) {
     if (body.length > _maxRequestBytes) {
       throw ClickHouseSizeLimitException(
@@ -285,8 +382,8 @@ final class ClickHouseClient {
   }
 
   void _ensureOpen() {
-    if (_closed) {
-      throw StateError('The ClickHouse client is closed.');
+    if (_closing) {
+      throw StateError('The ClickHouse client is closing or closed.');
     }
   }
 }
@@ -425,4 +522,69 @@ final class _HttpResponse {
   final int statusCode;
   final List<int> body;
   final String? queryId;
+}
+
+final class _Deadline {
+  _Deadline(this.operation, this.timeout) : _stopwatch = (Stopwatch()..start());
+
+  final String operation;
+  final Duration timeout;
+  final Stopwatch _stopwatch;
+
+  void check(ClickHouseRequestState requestState, {String? queryId}) {
+    if (_stopwatch.elapsed >= timeout) {
+      throw exception(requestState, queryId: queryId);
+    }
+  }
+
+  Duration remaining(ClickHouseRequestState requestState, {String? queryId}) {
+    final value = timeout - _stopwatch.elapsed;
+    if (value <= Duration.zero) {
+      throw exception(requestState, queryId: queryId);
+    }
+    return value;
+  }
+
+  ClickHouseTimeoutException exception(
+    ClickHouseRequestState requestState, {
+    String? queryId,
+  }) => ClickHouseTimeoutException(
+    message: 'ClickHouse $operation exceeded its ${timeout.inMicroseconds} microsecond deadline.',
+    requestState: requestState,
+    queryId: queryId,
+  );
+
+  Future<T> wait<T>(
+    Future<T> future,
+    ClickHouseRequestState requestState, {
+    void Function()? onTimeout,
+    void Function(T value)? onLateValue,
+    String? queryId,
+  }) {
+    final completer = Completer<T>();
+    final timer = Timer(remaining(requestState, queryId: queryId), () {
+      onTimeout?.call();
+      completer.completeError(exception(requestState, queryId: queryId));
+    });
+    unawaited(
+      future.then(
+        (value) {
+          if (completer.isCompleted) {
+            onLateValue?.call(value);
+            return;
+          }
+          timer.cancel();
+          completer.complete(value);
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (completer.isCompleted) {
+            return;
+          }
+          timer.cancel();
+          completer.completeError(error, stackTrace);
+        },
+      ),
+    );
+    return completer.future;
+  }
 }

@@ -61,6 +61,20 @@ remain distinct. A failed command or insert marked `mayHaveReachedServer` has an
 may have had partial effects. Failure releases local request resources but does not prove that the
 server cancelled work or rolled it back.
 
+## Deadlines and shutdown
+
+The default operation deadline is 30 seconds. A positive `timeout` on `query`, `command`, or
+`insert` overrides it for that operation. The deadline covers validation, encoding, request work,
+response consumption, and decoding. Synchronous JSON work cannot be interrupted by a timer, so the
+client checks elapsed time after encoding and decoding before it sends a request or publishes a
+result. This detects overruns but cannot provide a strict wall-clock bound while the isolate is
+blocked.
+
+Create one client when a service starts and close it during shutdown. `close` immediately rejects new
+operations, lets accepted operations finish under their existing deadlines, then releases the owned
+connection pool. Repeated calls await the same shutdown. A local timeout releases that operation's
+HTTP resources without claiming server-side cancellation or rollback.
+
 ## Tested server
 
 Integration tests target the official `clickhouse:26.8.2.7` image, pinned to the multi-platform
