@@ -83,6 +83,51 @@ final class ClickHouseClient {
     }
   }
 
+  /// Executes [sql] that does not return rows.
+  Future<void> command(
+    String sql, {
+    Map<String, String> parameters = const {},
+    Duration? timeout,
+  }) async {
+    _ensureOpen();
+    final operationTimeout = _operationTimeout(timeout);
+    await _runVoidOperation(
+      uri: _requestUri(parameters),
+      body: utf8.encode(sql),
+      timeout: operationTimeout,
+      operation: 'command',
+    );
+  }
+
+  /// Inserts a completely validated [rows] batch into [table].
+  Future<void> insert({
+    required String table,
+    required List<Map<String, Object?>> rows,
+    String? deduplicationToken,
+    Duration? timeout,
+  }) async {
+    _ensureOpen();
+    final operationTimeout = _operationTimeout(timeout);
+    final quotedTable = _quoteIdentifier(table);
+    final encodedRows = _encodeRows(rows);
+    if (rows.isEmpty) {
+      return;
+    }
+
+    await _runVoidOperation(
+      uri: _requestUri(
+        const {},
+        settings: {
+          'async_insert': '0',
+          'insert_deduplication_token': ?deduplicationToken,
+        },
+      ),
+      body: utf8.encode('INSERT INTO $quotedTable FORMAT JSONEachRow\n$encodedRows'),
+      timeout: operationTimeout,
+      operation: 'insert',
+    );
+  }
+
   /// Stops accepting operations, waits for active work, and closes connections.
   Future<void> close() {
     if (!_closed) {
@@ -93,6 +138,69 @@ final class ClickHouseClient {
   }
 
   Future<ClickHouseQueryResult> _query(Uri uri, List<int> body) async {
+    final response = await _send(uri, body);
+    if (response.statusCode != HttpStatus.ok) {
+      throw _serverException(response.statusCode, response.body, response.queryId);
+    }
+
+    final responseText = utf8.decode(response.body);
+    try {
+      return _decodeQueryResult(responseText);
+    } on FormatException {
+      final errorCode = _clickHouseErrorCode(responseText);
+      if (errorCode != null) {
+        throw ClickHouseServerException(
+          message: responseText.trim(),
+          requestState: ClickHouseRequestState.mayHaveReachedServer,
+          queryId: response.queryId,
+          statusCode: response.statusCode,
+          clickHouseCode: errorCode,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _runVoidOperation({
+    required Uri uri,
+    required List<int> body,
+    required Duration timeout,
+    required String operation,
+  }) async {
+    try {
+      final response = await _send(uri, body).timeout(timeout);
+      if (response.statusCode != HttpStatus.ok) {
+        throw _serverException(response.statusCode, response.body, response.queryId);
+      }
+      final responseText = utf8.decode(response.body, allowMalformed: true).trim();
+      final errorCode = _clickHouseErrorCode(responseText);
+      if (errorCode != null) {
+        throw ClickHouseServerException(
+          message: responseText,
+          requestState: ClickHouseRequestState.mayHaveReachedServer,
+          queryId: response.queryId,
+          statusCode: response.statusCode,
+          clickHouseCode: errorCode,
+        );
+      }
+    } on ClickHouseException {
+      rethrow;
+    } on TimeoutException {
+      throw ClickHouseTimeoutException(
+        message:
+            'ClickHouse $operation exceeded its ${timeout.inMicroseconds} microsecond deadline.',
+        requestState: ClickHouseRequestState.mayHaveReachedServer,
+      );
+    } on IOException catch (error) {
+      throw ClickHouseTransportException(
+        message: 'ClickHouse $operation transport failed: $error',
+        requestState: ClickHouseRequestState.mayHaveReachedServer,
+        cause: error,
+      );
+    }
+  }
+
+  Future<_HttpResponse> _send(Uri uri, List<int> body) async {
     final request = await _httpClient.postUrl(uri);
     request.headers
       ..set('x-clickhouse-user', _username)
@@ -106,32 +214,20 @@ final class ClickHouseClient {
       <int>[],
       (bytes, chunk) => bytes..addAll(chunk),
     );
-    final queryId = response.headers.value('x-clickhouse-query-id');
-    if (response.statusCode != HttpStatus.ok) {
-      throw _serverException(response.statusCode, responseBody, queryId);
-    }
-
-    final responseText = utf8.decode(responseBody);
-    try {
-      return _decodeQueryResult(responseText, queryId);
-    } on FormatException {
-      final errorCode = _clickHouseErrorCode(responseText);
-      if (errorCode != null) {
-        throw ClickHouseServerException(
-          message: responseText.trim(),
-          requestState: ClickHouseRequestState.mayHaveReachedServer,
-          queryId: queryId,
-          statusCode: response.statusCode,
-          clickHouseCode: errorCode,
-        );
-      }
-      rethrow;
-    }
+    return _HttpResponse(
+      statusCode: response.statusCode,
+      body: responseBody,
+      queryId: response.headers.value('x-clickhouse-query-id'),
+    );
   }
 
-  Uri _requestUri(Map<String, String> parameters) => _endpoint.replace(
+  Uri _requestUri(
+    Map<String, String> parameters, {
+    Map<String, String> settings = const {},
+  }) => _endpoint.replace(
     queryParameters: <String, String>{
       'database': _database,
+      ...settings,
       for (final entry in parameters.entries)
         'param_${entry.key}': _escapeParameterValue(entry.value),
     },
@@ -179,7 +275,7 @@ int _requirePositiveInt(int value, String name) {
   return value;
 }
 
-ClickHouseQueryResult _decodeQueryResult(String responseBody, String? queryId) {
+ClickHouseQueryResult _decodeQueryResult(String responseBody) {
   final decoded = jsonDecode(responseBody);
   if (decoded is! Map<String, Object?>) {
     throw const FormatException('The response root must be a JSON object.');
@@ -219,6 +315,43 @@ ClickHouseQueryResult _decodeQueryResult(String responseBody, String? queryId) {
   return ClickHouseQueryResult(columns: columns, rows: rows);
 }
 
+String _quoteIdentifier(String identifier) {
+  if (identifier.isEmpty || identifier.contains('\u0000')) {
+    throw ArgumentError.value(identifier, 'table', 'Must be a non-empty identifier without NUL.');
+  }
+  final escaped = identifier.replaceAll(r'\', r'\\').replaceAll('`', r'\`');
+  return '`$escaped`';
+}
+
+String _encodeRows(List<Map<String, Object?>> rows) {
+  for (final row in rows) {
+    _validateJsonValue(row, 'rows');
+  }
+  return rows.map(jsonEncode).map((row) => '$row\n').join();
+}
+
+void _validateJsonValue(Object? value, String path) {
+  switch (value) {
+    case null || bool() || String():
+      return;
+    case final num number when number.isFinite:
+      return;
+    case final List<Object?> values:
+      for (var index = 0; index < values.length; index += 1) {
+        _validateJsonValue(values[index], '$path[$index]');
+      }
+    case final Map<Object?, Object?> map:
+      for (final entry in map.entries) {
+        if (entry.key is! String) {
+          throw ArgumentError.value(value, path, 'JSON object keys must be strings.');
+        }
+        _validateJsonValue(entry.value, '$path.${entry.key}');
+      }
+    default:
+      throw ArgumentError.value(value, path, 'Must contain only JSON-compatible values.');
+  }
+}
+
 ClickHouseServerException _serverException(int statusCode, List<int> body, String? queryId) {
   final message = utf8.decode(body, allowMalformed: true).trim();
   return ClickHouseServerException(
@@ -237,3 +370,11 @@ int? _clickHouseErrorCode(String message) {
 
 String _escapeParameterValue(String value) =>
     value.replaceAll(r'\', r'\\').replaceAll('\t', r'\t').replaceAll('\n', r'\n');
+
+final class _HttpResponse {
+  const _HttpResponse({required this.statusCode, required this.body, required this.queryId});
+
+  final int statusCode;
+  final List<int> body;
+  final String? queryId;
+}

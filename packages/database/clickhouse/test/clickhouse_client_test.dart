@@ -156,6 +156,89 @@ void main() {
 
       await expectLater(client.query('SELECT 1', timeout: Duration.zero), throwsArgumentError);
     });
+
+    test('should execute commands with separately bound parameters', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requestFuture = server.first;
+      final client = createClient(serverUrl(server));
+      addTearDown(client.close);
+
+      final commandFuture = client.command(
+        'CREATE TABLE {table:String}',
+        parameters: {'table': 'events\narchive'},
+      );
+      final request = await requestFuture;
+
+      expect(await utf8.decoder.bind(request).join(), 'CREATE TABLE {table:String}');
+      expect(request.uri.queryParameters['param_table'], r'events\narchive');
+      await request.response.close();
+      await commandFuture;
+    });
+
+    test('should quote one table identifier and encode a validated JSONEachRow batch', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requestFuture = server.first;
+      final client = createClient(serverUrl(server));
+      addTearDown(client.close);
+
+      final insertFuture = client.insert(
+        table: r'events.raw`archive\name',
+        rows: [
+          {
+            'id': 1,
+            'data': {
+              'active': true,
+              'labels': ['one', null],
+            },
+          },
+        ],
+        deduplicationToken: r'batch\token',
+      );
+      final request = await requestFuture;
+      final body = await utf8.decoder.bind(request).join();
+
+      expect(
+        body,
+        '${r'INSERT INTO `events.raw\`archive\\name` FORMAT JSONEachRow'}\n'
+        '{"id":1,"data":{"active":true,"labels":["one",null]}}\n',
+      );
+      expect(request.uri.queryParameters['async_insert'], '0');
+      expect(request.uri.queryParameters['insert_deduplication_token'], r'batch\token');
+      await request.response.close();
+      await insertFuture;
+    });
+
+    test('should validate empty and invalid batches before network activity', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      var requests = 0;
+      server.listen((request) async {
+        requests += 1;
+        await request.response.close();
+      });
+      final client = createClient(serverUrl(server));
+      addTearDown(client.close);
+
+      await client.insert(table: 'events', rows: []);
+      await expectLater(
+        client.insert(
+          table: 'events',
+          rows: [
+            <String, Object?>{'valid': true},
+            <String, Object?>{
+              'invalid': <Object?, Object?>{1: 'not a JSON object'},
+            },
+          ],
+        ),
+        throwsArgumentError,
+      );
+      await expectLater(client.insert(table: '', rows: []), throwsArgumentError);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(requests, 0);
+    });
   });
 }
 

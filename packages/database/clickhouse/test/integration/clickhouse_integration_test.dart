@@ -64,6 +64,45 @@ void main() {
           'decimal': '1.230000000000000000',
         });
       });
+
+      test('should create, insert, query, and deduplicate a batch', () async {
+        final table = 'fbr1_events.${DateTime.now().microsecondsSinceEpoch}';
+        final quotedTable = '`${table.replaceAll('`', r'\`')}`';
+        await client.command('''
+          CREATE TABLE $quotedTable (
+            id UInt64,
+            name String
+          )
+          ENGINE = MergeTree
+          ORDER BY id
+          SETTINGS non_replicated_deduplication_window = 100
+        ''');
+
+        try {
+          final rows = [
+            <String, Object?>{'id': 1, 'name': 'first'},
+            <String, Object?>{'id': 2, 'name': 'second'},
+          ];
+          await client.insert(table: table, rows: rows, deduplicationToken: 'stable-batch');
+          await client.insert(table: table, rows: rows, deduplicationToken: 'stable-batch');
+
+          final result = await client.query('SELECT id, name FROM $quotedTable ORDER BY id');
+          expect(result.rows, rows);
+        } finally {
+          await client.command('DROP TABLE $quotedTable');
+        }
+      });
+
+      test('should expose command rejection from ClickHouse', () async {
+        await expectLater(
+          client.command('THIS IS NOT SQL'),
+          throwsA(
+            isA<ClickHouseServerException>()
+                .having((error) => error.statusCode, 'statusCode', HttpStatus.badRequest)
+                .having((error) => error.clickHouseCode, 'clickHouseCode', isNotNull),
+          ),
+        );
+      });
     },
     skip: endpoint == null || password == null
         ? 'Set CLICKHOUSE_URL and CLICKHOUSE_PASSWORD.'

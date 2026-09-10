@@ -14,6 +14,12 @@ final client = ClickHouseClient(
 );
 
 try {
+  await client.insert(
+    table: 'events',
+    rows: encodedEvents,
+    deduplicationToken: batchId,
+  );
+
   final result = await client.query(
     'SELECT event_name FROM events WHERE app_id = {appId:String}',
     parameters: {'appId': appId},
@@ -29,6 +35,18 @@ separately: strings are the actual unquoted values, numbers use their textual re
 composites use ClickHouse textual syntax. The server validates declared types. Repositories remain
 responsible for App authorization and schema-specific date, time, decimal, and domain conversion.
 Quoted large integers and explicitly string-selected decimals remain strings.
+
+`insert` validates and encodes the complete batch as JSONEachRow before it sends a request. The table
+argument names one identifier in the configured database, so a dot remains part of the table name.
+Successful completion means ClickHouse acknowledged the synchronous insert. It does not establish
+that rows were new or replicated everywhere. The optional deduplication token is useful only with a
+supporting table engine and settings, inside the configured finite deduplication window. A retry must
+preserve both its token and batch contents. The caller owns retries, Kafka offsets, and event-level
+deduplication; the client never retries automatically.
+
+Use `command` for SQL without row results, such as migrations scheduled by the consuming service.
+Commands also use separate parameter binding and complete after server acknowledgement. A failed
+write can have an unknown outcome and does not imply rollback.
 
 ## Tested server
 
