@@ -1,14 +1,12 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clickhouse/src/clickhouse_deadline.dart';
 import 'package:clickhouse/src/clickhouse_exception.dart';
+import 'package:clickhouse/src/clickhouse_http_transport.dart';
+import 'package:clickhouse/src/clickhouse_protocol.dart' as protocol;
 import 'package:clickhouse/src/clickhouse_query_result.dart';
-
-part 'clickhouse_deadline.dart';
-part 'clickhouse_http_transport.dart';
-part 'clickhouse_protocol.dart';
 
 /// A reusable HTTP client for bounded ClickHouse operations.
 final class ClickHouseClient {
@@ -27,42 +25,42 @@ final class ClickHouseClient {
     int maxRequestBytes = 16 * 1024 * 1024,
     int maxResponseBytes = 16 * 1024 * 1024,
   }) {
-    final parsedEndpoint = _parseEndpoint(endpoint);
-    final validatedTimeout = _requirePositiveDuration(timeout, 'timeout');
-    final validatedMaxRequestBytes = _requirePositiveInt(maxRequestBytes, 'maxRequestBytes');
-    final validatedMaxResponseBytes = _requirePositiveInt(maxResponseBytes, 'maxResponseBytes');
-    final httpClient = HttpClient()..autoUncompress = true;
+    final parsedEndpoint = protocol.parseEndpoint(endpoint);
+    final validatedTimeout = protocol.requirePositiveDuration(timeout, 'timeout');
+    final validatedMaxRequestBytes = protocol.requirePositiveInt(
+      maxRequestBytes,
+      'maxRequestBytes',
+    );
+    final validatedMaxResponseBytes = protocol.requirePositiveInt(
+      maxResponseBytes,
+      'maxResponseBytes',
+    );
     return ClickHouseClient._(
       endpoint: parsedEndpoint,
       database: database,
-      username: username,
-      password: password,
       timeout: validatedTimeout,
       maxRequestBytes: validatedMaxRequestBytes,
-      maxResponseBytes: validatedMaxResponseBytes,
-      httpClient: httpClient,
+      transport: ClickHouseHttpTransport(
+        username: username,
+        password: password,
+        maxResponseBytes: validatedMaxResponseBytes,
+      ),
     );
   }
 
   ClickHouseClient._({
     required this._endpoint,
     required this._database,
-    required this._username,
-    required this._password,
     required this._timeout,
     required this._maxRequestBytes,
-    required this._maxResponseBytes,
-    required this._httpClient,
+    required this._transport,
   });
 
   final Uri _endpoint;
   final String _database;
-  final String _username;
-  final String _password;
   final Duration _timeout;
   final int _maxRequestBytes;
-  final int _maxResponseBytes;
-  final HttpClient _httpClient;
+  final ClickHouseHttpTransport _transport;
   var _closing = false;
   var _activeOperations = 0;
   Completer<void>? _becameIdle;
@@ -118,8 +116,8 @@ final class ClickHouseClient {
     String? deduplicationToken,
     Duration? timeout,
   }) => _runOperation(timeout, 'insert', (deadline) async {
-    final quotedTable = _quoteIdentifier(table);
-    final encodedRows = _encodeRows(rows);
+    final quotedTable = protocol.quoteIdentifier(table);
+    final encodedRows = protocol.encodeRows(rows);
     deadline.check(ClickHouseRequestState.notSent);
     if (rows.isEmpty) {
       return;
@@ -162,13 +160,17 @@ final class ClickHouseClient {
       _becameIdle = Completer<void>();
       await _becameIdle!.future;
     }
-    _httpClient.close();
+    _transport.close();
   }
 
-  Future<ClickHouseQueryResult> _query(Uri uri, List<int> body, _Deadline deadline) async {
-    final response = await _send(uri, body, deadline);
+  Future<ClickHouseQueryResult> _query(
+    Uri uri,
+    List<int> body,
+    ClickHouseDeadline deadline,
+  ) async {
+    final response = await _transport.send(uri, body, deadline);
     if (response.statusCode != HttpStatus.ok) {
-      throw _serverException(
+      throw protocol.serverException(
         response.statusCode,
         response.body,
         response.queryId,
@@ -179,7 +181,7 @@ final class ClickHouseClient {
     late final String responseText;
     try {
       responseText = utf8.decode(response.body);
-      final result = _decodeQueryResult(responseText);
+      final result = protocol.decodeQueryResult(responseText);
       deadline.check(
         ClickHouseRequestState.mayHaveReachedServer,
         queryId: response.queryId,
@@ -187,7 +189,7 @@ final class ClickHouseClient {
       return result;
     } on FormatException catch (error) {
       final responseTextForError = utf8.decode(response.body, allowMalformed: true);
-      final errorCode = _clickHouseErrorCode(responseTextForError);
+      final errorCode = protocol.errorCode(responseTextForError);
       if (errorCode != null) {
         throw ClickHouseServerException(
           message: responseTextForError.trim(),
@@ -209,11 +211,11 @@ final class ClickHouseClient {
     required Uri uri,
     required List<int> body,
     required String operation,
-    required _Deadline deadline,
+    required ClickHouseDeadline deadline,
   }) async {
-    final response = await _send(uri, body, deadline);
+    final response = await _transport.send(uri, body, deadline);
     if (response.statusCode != HttpStatus.ok) {
-      throw _serverException(
+      throw protocol.serverException(
         response.statusCode,
         response.body,
         response.queryId,
@@ -221,7 +223,7 @@ final class ClickHouseClient {
       );
     }
     final responseText = utf8.decode(response.body, allowMalformed: true).trim();
-    final errorCode = _clickHouseErrorCode(responseText);
+    final errorCode = protocol.errorCode(responseText);
     if (errorCode != null) {
       throw ClickHouseServerException(
         message: responseText,
@@ -252,22 +254,22 @@ final class ClickHouseClient {
       'database': _database,
       ...settings,
       for (final entry in parameters.entries)
-        'param_${entry.key}': _escapeParameterValue(entry.value),
+        'param_${entry.key}': protocol.escapeParameterValue(entry.value),
     },
   );
 
   Duration _operationTimeout(Duration? timeout) =>
-      timeout == null ? _timeout : _requirePositiveDuration(timeout, 'timeout');
+      timeout == null ? _timeout : protocol.requirePositiveDuration(timeout, 'timeout');
 
   Future<T> _runOperation<T>(
     Duration? timeout,
     String operation,
-    Future<T> Function(_Deadline deadline) run,
+    Future<T> Function(ClickHouseDeadline deadline) run,
   ) {
-    late final _Deadline deadline;
+    late final ClickHouseDeadline deadline;
     try {
       _ensureOpen();
-      deadline = _Deadline(operation, _operationTimeout(timeout));
+      deadline = ClickHouseDeadline(operation, _operationTimeout(timeout));
     } on Object catch (error, stackTrace) {
       return Future<T>.error(error, stackTrace);
     }

@@ -1,7 +1,41 @@
-part of 'clickhouse_client.dart';
+import 'dart:async';
+import 'dart:io';
 
-extension on ClickHouseClient {
-  Future<_HttpResponse> _send(Uri uri, List<int> body, _Deadline deadline) async {
+import 'package:clickhouse/src/clickhouse_deadline.dart';
+import 'package:clickhouse/src/clickhouse_exception.dart';
+
+/// Owns the HTTP connection pool and transport details for a ClickHouse client.
+final class ClickHouseHttpTransport {
+  /// Creates a transport with fixed credentials and a response limit.
+  factory ClickHouseHttpTransport({
+    required String username,
+    required String password,
+    required int maxResponseBytes,
+  }) => ClickHouseHttpTransport._(
+    username,
+    password,
+    maxResponseBytes,
+    HttpClient()..autoUncompress = true,
+  );
+
+  ClickHouseHttpTransport._(
+    this._username,
+    this._password,
+    this._maxResponseBytes,
+    this._httpClient,
+  );
+
+  final String _username;
+  final String _password;
+  final int _maxResponseBytes;
+  final HttpClient _httpClient;
+
+  /// Sends one request and returns its completely buffered response.
+  Future<({int statusCode, List<int> body, String? queryId, int? clickHouseCode})> send(
+    Uri uri,
+    List<int> body,
+    ClickHouseDeadline deadline,
+  ) async {
     HttpClientRequest? request;
     var requestState = ClickHouseRequestState.notSent;
     String? queryId;
@@ -36,11 +70,13 @@ extension on ClickHouseClient {
         deadline,
         queryId,
       );
-      return _HttpResponse(
+      return (
         statusCode: response.statusCode,
         body: responseBody,
         queryId: queryId,
-        clickHouseCode: int.tryParse(response.headers.value('x-clickhouse-exception-code') ?? ''),
+        clickHouseCode: int.tryParse(
+          response.headers.value('x-clickhouse-exception-code') ?? '',
+        ),
       );
     } on ClickHouseException catch (error) {
       request?.abort(error);
@@ -56,10 +92,13 @@ extension on ClickHouseClient {
     }
   }
 
+  /// Releases every connection owned by this transport.
+  void close() => _httpClient.close();
+
   Future<List<int>> _consumeResponse(
     HttpClientResponse response,
     HttpClientRequest request,
-    _Deadline deadline,
+    ClickHouseDeadline deadline,
     String? queryId,
   ) {
     final remaining = deadline.remaining(
@@ -117,7 +156,7 @@ extension on ClickHouseClient {
     timer = Timer(
       remaining,
       () => fail(
-        deadline.exception(
+        deadline.timeoutException(
           ClickHouseRequestState.mayHaveReachedServer,
           queryId: queryId,
         ),

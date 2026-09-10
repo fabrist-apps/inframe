@@ -1,35 +1,46 @@
-part of 'clickhouse_client.dart';
+import 'dart:async';
 
-final class _Deadline {
-  _Deadline(this.operation, this.timeout) : _stopwatch = (Stopwatch()..start());
+import 'package:clickhouse/src/clickhouse_exception.dart';
 
-  final String operation;
-  final Duration timeout;
+/// Tracks the remaining time for one internal ClickHouse operation.
+final class ClickHouseDeadline {
+  /// Starts a deadline for [operation].
+  ClickHouseDeadline(String operation, Duration timeout)
+    : _operation = operation,
+      _timeout = timeout,
+      _stopwatch = (Stopwatch()..start());
+
+  final String _operation;
+  final Duration _timeout;
   final Stopwatch _stopwatch;
 
+  /// Throws when no time remains for the operation.
   void check(ClickHouseRequestState requestState, {String? queryId}) {
-    if (_stopwatch.elapsed >= timeout) {
-      throw exception(requestState, queryId: queryId);
+    if (_stopwatch.elapsed >= _timeout) {
+      throw timeoutException(requestState, queryId: queryId);
     }
   }
 
+  /// Returns the remaining time or throws when the deadline has expired.
   Duration remaining(ClickHouseRequestState requestState, {String? queryId}) {
-    final value = timeout - _stopwatch.elapsed;
+    final value = _timeout - _stopwatch.elapsed;
     if (value <= Duration.zero) {
-      throw exception(requestState, queryId: queryId);
+      throw timeoutException(requestState, queryId: queryId);
     }
     return value;
   }
 
-  ClickHouseTimeoutException exception(
+  /// Creates the timeout exception for the operation's current phase.
+  ClickHouseTimeoutException timeoutException(
     ClickHouseRequestState requestState, {
     String? queryId,
   }) => ClickHouseTimeoutException(
-    message: 'ClickHouse $operation exceeded its ${timeout.inMicroseconds} microsecond deadline.',
+    message: 'ClickHouse $_operation exceeded its ${_timeout.inMicroseconds} microsecond deadline.',
     requestState: requestState,
     queryId: queryId,
   );
 
+  /// Waits for [future] within the operation's remaining time.
   Future<T> wait<T>(
     Future<T> future,
     ClickHouseRequestState requestState, {
@@ -65,7 +76,7 @@ final class _Deadline {
       } on Object {
         // Preserve the timeout when local cleanup also fails.
       } finally {
-        completer.completeError(exception(requestState, queryId: queryId));
+        completer.completeError(timeoutException(requestState, queryId: queryId));
       }
     });
     unawaited(

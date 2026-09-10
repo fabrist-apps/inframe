@@ -1,6 +1,11 @@
-part of 'clickhouse_client.dart';
+import 'dart:collection';
+import 'dart:convert';
 
-Uri _parseEndpoint(String endpoint) {
+import 'package:clickhouse/src/clickhouse_exception.dart';
+import 'package:clickhouse/src/clickhouse_query_result.dart';
+
+/// Parses and validates a ClickHouse HTTP endpoint.
+Uri parseEndpoint(String endpoint) {
   final uri = Uri.tryParse(endpoint);
   if (uri == null ||
       (uri.scheme != 'http' && uri.scheme != 'https') ||
@@ -21,21 +26,24 @@ Uri _parseEndpoint(String endpoint) {
 bool _hasCredentialDelimiter(String endpoint) =>
     RegExp('^https?://[^/?#]*@', caseSensitive: false).hasMatch(endpoint);
 
-Duration _requirePositiveDuration(Duration value, String name) {
+/// Validates a positive duration and returns it unchanged.
+Duration requirePositiveDuration(Duration value, String name) {
   if (value <= Duration.zero) {
     throw ArgumentError.value(value, name, 'Must be positive.');
   }
   return value;
 }
 
-int _requirePositiveInt(int value, String name) {
+/// Validates a positive integer and returns it unchanged.
+int requirePositiveInt(int value, String name) {
   if (value <= 0) {
     throw ArgumentError.value(value, name, 'Must be positive.');
   }
   return value;
 }
 
-ClickHouseQueryResult _decodeQueryResult(String responseBody) {
+/// Decodes and validates one buffered ClickHouse JSON query response.
+ClickHouseQueryResult decodeQueryResult(String responseBody) {
   final decoded = jsonDecode(responseBody);
   if (decoded is! Map<String, Object?>) {
     throw const FormatException('The response root must be a JSON object.');
@@ -75,7 +83,8 @@ ClickHouseQueryResult _decodeQueryResult(String responseBody) {
   return ClickHouseQueryResult(columns: columns, rows: rows);
 }
 
-String _quoteIdentifier(String identifier) {
+/// Quotes [identifier] as one ClickHouse identifier.
+String quoteIdentifier(String identifier) {
   if (identifier.isEmpty || identifier.contains('\u0000')) {
     throw ArgumentError.value(identifier, 'table', 'Must be a non-empty identifier without NUL.');
   }
@@ -83,7 +92,8 @@ String _quoteIdentifier(String identifier) {
   return '`$escaped`';
 }
 
-String _encodeRows(List<Map<String, Object?>> rows) {
+/// Validates and encodes a complete JSONEachRow batch.
+String encodeRows(List<Map<String, Object?>> rows) {
   final activeContainers = HashSet<Object>.identity();
   for (final row in rows) {
     _validateJsonValue(row, 'rows', activeContainers);
@@ -133,7 +143,8 @@ void _validateContainer(
   }
 }
 
-ClickHouseServerException _serverException(
+/// Creates a structured exception from a ClickHouse error response.
+ClickHouseServerException serverException(
   int statusCode,
   List<int> body,
   String? queryId,
@@ -145,28 +156,16 @@ ClickHouseServerException _serverException(
     requestState: ClickHouseRequestState.mayHaveReachedServer,
     queryId: queryId,
     statusCode: statusCode,
-    clickHouseCode: headerCode ?? _clickHouseErrorCode(message),
+    clickHouseCode: headerCode ?? errorCode(message),
   );
 }
 
-int? _clickHouseErrorCode(String message) {
+/// Extracts a ClickHouse error code from its textual error representation.
+int? errorCode(String message) {
   final match = RegExp(r'Code: (\d+)').firstMatch(message);
   return match == null ? null : int.tryParse(match.group(1)!);
 }
 
-String _escapeParameterValue(String value) =>
+/// Applies ClickHouse's HTTP query-parameter escaping to one textual value.
+String escapeParameterValue(String value) =>
     value.replaceAll(r'\', r'\\').replaceAll('\t', r'\t').replaceAll('\n', r'\n');
-
-final class _HttpResponse {
-  const _HttpResponse({
-    required this.statusCode,
-    required this.body,
-    required this.queryId,
-    required this.clickHouseCode,
-  });
-
-  final int statusCode;
-  final List<int> body;
-  final String? queryId;
-  final int? clickHouseCode;
-}
