@@ -4,11 +4,11 @@ import 'dart:convert';
 import 'package:clickhouse/src/clickhouse_exception.dart';
 import 'package:clickhouse/src/clickhouse_query_result.dart';
 
-/// Parses and validates a ClickHouse HTTP endpoint.
-Uri parseEndpoint(String endpoint) {
+/// Parses and validates a ClickHouse HTTPS endpoint.
+Uri parseEndpoint(String endpoint, {required bool allowInsecureHttp}) {
   final uri = Uri.tryParse(endpoint);
   if (uri == null ||
-      (uri.scheme != 'http' && uri.scheme != 'https') ||
+      (uri.scheme != 'https' && !(allowInsecureHttp && uri.scheme == 'http')) ||
       !uri.hasAuthority ||
       uri.host.isEmpty ||
       _hasCredentialDelimiter(endpoint) ||
@@ -17,7 +17,8 @@ Uri parseEndpoint(String endpoint) {
     throw ArgumentError.value(
       endpoint,
       'endpoint',
-      'Must be an HTTP(S) URL with a host and no credentials, query, or fragment.',
+      'Must be an HTTPS URL with a host and no credentials, query, or fragment. '
+          'Plaintext HTTP requires allowInsecureHttp.',
     );
   }
   return uri.path.isEmpty ? uri.replace(path: '/') : uri;

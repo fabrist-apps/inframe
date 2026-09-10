@@ -6,6 +6,29 @@ import 'package:test/test.dart';
 
 void main() {
   group('ClickHouseClient', () {
+    test('should require HTTPS unless plaintext HTTP is explicitly allowed', () async {
+      expect(
+        () => ClickHouseClient(
+          endpoint: 'http://clickhouse.example',
+          database: 'analytics',
+          username: 'tester',
+          password: 'secret',
+        ),
+        throwsArgumentError,
+      );
+
+      final secureClient = ClickHouseClient(
+        endpoint: 'https://clickhouse.example',
+        database: 'analytics',
+        username: 'tester',
+        password: 'secret',
+      );
+      final explicitlyInsecureClient = createClient('http://clickhouse.example');
+
+      await secureClient.close();
+      await explicitlyInsecureClient.close();
+    });
+
     test('should reject invalid endpoints and limits before network activity', () {
       for (final endpoint in [
         'ftp://clickhouse.example',
@@ -286,6 +309,7 @@ ClickHouseClient createClient(
   timeout: timeout,
   maxRequestBytes: maxRequestBytes,
   maxResponseBytes: maxResponseBytes,
+  allowInsecureHttp: true,
 );
 
 String serverUrl(HttpServer server) => 'http://${server.address.host}:${server.port}';

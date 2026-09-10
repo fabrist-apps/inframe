@@ -7,7 +7,7 @@ servers and is not published.
 import 'package:clickhouse/clickhouse.dart';
 
 final client = ClickHouseClient(
-  endpoint: 'http://localhost:8123',
+  endpoint: 'https://clickhouse.internal.example',
   database: 'analytics',
   username: 'default',
   password: password,
@@ -30,6 +30,10 @@ try {
   await client.close();
 }
 ```
+
+Endpoints require HTTPS by default because credentials are sent in ClickHouse headers. Set
+`allowInsecureHttp: true` only for an isolated local server or a trusted network where plaintext
+transport is intentional.
 
 SQL declares each parameter type with ClickHouse `{name:Type}` syntax. Parameter values are sent
 separately: strings are the actual unquoted values, numbers use their textual representation, and
@@ -92,5 +96,6 @@ docker run --rm --name inframe-clickhouse-test \
 
 CLICKHOUSE_URL=http://127.0.0.1:18123 \
 CLICKHOUSE_PASSWORD=test-password \
+CLICKHOUSE_ALLOW_INSECURE_HTTP=true \
 dart test packages/database/clickhouse/test/integration
 ```

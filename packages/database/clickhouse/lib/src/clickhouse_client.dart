@@ -12,9 +12,10 @@ import 'package:clickhouse/src/clickhouse_query_result.dart';
 final class ClickHouseClient {
   /// Creates a client that owns one HTTP connection pool.
   ///
-  /// [endpoint] must use HTTP or HTTPS, include a host, and contain no
-  /// credentials, query, or fragment. Its path is preserved for reverse
-  /// proxies. [timeout], [maxRequestBytes], and [maxResponseBytes] must be
+  /// [endpoint] must use HTTPS, include a host, and contain no credentials,
+  /// query, or fragment. Its path is preserved for reverse proxies. Set
+  /// [allowInsecureHttp] only for isolated environments that require plaintext
+  /// HTTP. [timeout], [maxRequestBytes], and [maxResponseBytes] must be
   /// positive. An empty [password] is allowed.
   factory ClickHouseClient({
     required String endpoint,
@@ -24,8 +25,12 @@ final class ClickHouseClient {
     Duration timeout = const Duration(seconds: 30),
     int maxRequestBytes = 16 * 1024 * 1024,
     int maxResponseBytes = 16 * 1024 * 1024,
+    bool allowInsecureHttp = false,
   }) {
-    final parsedEndpoint = protocol.parseEndpoint(endpoint);
+    final parsedEndpoint = protocol.parseEndpoint(
+      endpoint,
+      allowInsecureHttp: allowInsecureHttp,
+    );
     final validatedTimeout = protocol.requirePositiveDuration(timeout, 'timeout');
     final validatedMaxRequestBytes = protocol.requirePositiveInt(
       maxRequestBytes,

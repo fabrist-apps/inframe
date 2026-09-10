@@ -6,6 +6,7 @@ import 'package:test/test.dart';
 void main() {
   final endpoint = Platform.environment['CLICKHOUSE_URL'];
   final password = Platform.environment['CLICKHOUSE_PASSWORD'];
+  final allowInsecureHttp = Platform.environment['CLICKHOUSE_ALLOW_INSECURE_HTTP'] == 'true';
 
   group(
     'ClickHouseClient integration',
@@ -18,6 +19,7 @@ void main() {
           database: 'default',
           username: 'default',
           password: password!,
+          allowInsecureHttp: allowInsecureHttp,
         );
       });
 

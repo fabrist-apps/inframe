@@ -37,6 +37,7 @@ jobs:
         env:
           CLICKHOUSE_URL: http://127.0.0.1:18123
           CLICKHOUSE_PASSWORD: test-password
+          CLICKHOUSE_ALLOW_INSECURE_HTTP: 'true'
         run: |
           docker run --detach --rm --name inframe-clickhouse-test \
             --publish 127.0.0.1:18123:8123 \

@@ -194,6 +194,7 @@ void main() {
         database: 'analytics',
         username: 'tester',
         password: 'secret',
+        allowInsecureHttp: true,
       );
       addTearDown(client.close);
 
@@ -214,4 +215,5 @@ ClickHouseClient createClient(HttpServer server) => ClickHouseClient(
   database: 'analytics',
   username: 'tester',
   password: 'secret',
+  allowInsecureHttp: true,
 );

@@ -226,6 +226,7 @@ void main() {
         database: 'analytics',
         username: 'tester',
         password: 'secret',
+        allowInsecureHttp: true,
       );
       addTearDown(client.close);
 
@@ -265,6 +266,7 @@ void main() {
           database: 'analytics',
           username: 'tester',
           password: 'secret',
+          allowInsecureHttp: true,
         );
         addTearDown(client.close);
 
@@ -298,6 +300,7 @@ ClickHouseClient createClient(
   password: 'secret',
   maxRequestBytes: maxRequestBytes,
   maxResponseBytes: maxResponseBytes,
+  allowInsecureHttp: true,
 );
 
 Future<HttpServer> responseServer(
