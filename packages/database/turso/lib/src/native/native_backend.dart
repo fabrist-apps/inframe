@@ -214,7 +214,7 @@ final class _NativeDatabase {
   }) {
     if (cipher != null || key != null) {
       throw const TursoUnsupportedException(
-        'Native encryption is implemented by FBR-30.',
+        'Encryption is unavailable in this native build.',
       );
     }
 
