@@ -236,9 +236,38 @@ void main() {
         throwsArgumentError,
       );
       await expectLater(client.insert(table: '', rows: []), throwsArgumentError);
+
+      final cyclicValues = <Object?>[];
+      cyclicValues.add(cyclicValues);
+      await expectLater(
+        client.insert(
+          table: 'events',
+          rows: [
+            <String, Object?>{'cyclic': cyclicValues},
+          ],
+        ),
+        throwsArgumentError,
+      );
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
       expect(requests, 0);
+    });
+
+    test('should reject query-result values that cannot form an immutable JSON snapshot', () {
+      final cyclicValues = <Object?>[];
+      cyclicValues.add(cyclicValues);
+
+      for (final value in <Object?>[StringBuffer('mutable'), double.nan, cyclicValues]) {
+        expect(
+          () => ClickHouseQueryResult(
+            columns: const [ClickHouseColumn(name: 'value', type: 'String')],
+            rows: [
+              <String, Object?>{'value': value},
+            ],
+          ),
+          throwsArgumentError,
+        );
+      }
     });
   });
 }

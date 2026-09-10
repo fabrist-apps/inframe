@@ -37,10 +37,33 @@ final class _Deadline {
     void Function(T value)? onLateValue,
     String? queryId,
   }) {
+    void handleLateValue(T value) {
+      try {
+        onLateValue?.call(value);
+      } on Object {
+        // Cleanup must not create an unhandled asynchronous error.
+      }
+    }
+
+    late final Duration timeLeft;
+    try {
+      timeLeft = remaining(requestState, queryId: queryId);
+    } on ClickHouseTimeoutException {
+      unawaited(
+        future.then<void>(
+          handleLateValue,
+          onError: (Object _, StackTrace _) {},
+        ),
+      );
+      rethrow;
+    }
+
     final completer = Completer<T>();
-    final timer = Timer(remaining(requestState, queryId: queryId), () {
+    final timer = Timer(timeLeft, () {
       try {
         onTimeout?.call();
+      } on Object {
+        // Preserve the timeout when local cleanup also fails.
       } finally {
         completer.completeError(exception(requestState, queryId: queryId));
       }
@@ -49,7 +72,7 @@ final class _Deadline {
       future.then(
         (value) {
           if (completer.isCompleted) {
-            onLateValue?.call(value);
+            handleLateValue(value);
             return;
           }
           timer.cancel();

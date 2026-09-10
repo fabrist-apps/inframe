@@ -29,7 +29,11 @@ void main() {
       final request = await requestReceived.future;
 
       await expectation;
-      await request.response.close();
+      try {
+        await request.response.close();
+      } on IOException {
+        // The client intentionally aborted this connection at its deadline.
+      }
     });
 
     test('should detect a deadline exhausted by encoding before transmission', () async {

@@ -84,31 +84,52 @@ String _quoteIdentifier(String identifier) {
 }
 
 String _encodeRows(List<Map<String, Object?>> rows) {
+  final activeContainers = HashSet<Object>.identity();
   for (final row in rows) {
-    _validateJsonValue(row, 'rows');
+    _validateJsonValue(row, 'rows', activeContainers);
   }
   return rows.map(jsonEncode).map((row) => '$row\n').join();
 }
 
-void _validateJsonValue(Object? value, String path) {
+void _validateJsonValue(Object? value, String path, Set<Object> activeContainers) {
   switch (value) {
     case null || bool() || String():
       return;
     case final num number when number.isFinite:
       return;
     case final List<Object?> values:
-      for (var index = 0; index < values.length; index += 1) {
-        _validateJsonValue(values[index], '$path[$index]');
-      }
-    case final Map<Object?, Object?> map:
-      for (final entry in map.entries) {
-        if (entry.key is! String) {
-          throw ArgumentError.value(value, path, 'JSON object keys must be strings.');
+      _validateContainer(values, path, activeContainers, () {
+        for (var index = 0; index < values.length; index += 1) {
+          _validateJsonValue(values[index], '$path[$index]', activeContainers);
         }
-        _validateJsonValue(entry.value, '$path.${entry.key}');
-      }
+      });
+    case final Map<Object?, Object?> map:
+      _validateContainer(map, path, activeContainers, () {
+        for (final entry in map.entries) {
+          if (entry.key is! String) {
+            throw ArgumentError.value(value, path, 'JSON object keys must be strings.');
+          }
+          _validateJsonValue(entry.value, '$path.${entry.key}', activeContainers);
+        }
+      });
     default:
       throw ArgumentError.value(value, path, 'Must contain only JSON-compatible values.');
+  }
+}
+
+void _validateContainer(
+  Object container,
+  String path,
+  Set<Object> activeContainers,
+  void Function() validateChildren,
+) {
+  if (!activeContainers.add(container)) {
+    throw ArgumentError.value(container, path, 'JSON containers must not contain cycles.');
+  }
+  try {
+    validateChildren();
+  } finally {
+    activeContainers.remove(container);
   }
 }
 

@@ -209,7 +209,12 @@ void main() {
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(server.close);
       server.listen((socket) {
+        var responded = false;
         socket.listen((_) {
+          if (responded) {
+            return;
+          }
+          responded = true;
           unawaited(
             (socket..add(utf8.encode('HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort')))
                 .close(),
