@@ -15,4 +15,9 @@ void main() {
   const Result<int, String> count = Success(42);
   final label = count.map((value) => 'Count: $value').getOrElse((error) => 'Error: $error');
   if (label != 'Count: 42') throw StateError('Unexpected result: $label');
+
+  final collected = Option.all<int>(const [Some(1), Some(2), Some(3)]).getOrNull();
+  if (collected?.join(',') != '1,2,3') {
+    throw StateError('Unexpected collection: $collected');
+  }
 }

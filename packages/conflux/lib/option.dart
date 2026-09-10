@@ -1,6 +1,34 @@
 /// An optional value that distinguishes absence from a present nullable value.
 sealed class Option<T> {
   const Option();
+
+  /// Collects every present option or returns [None] at the first absence.
+  static Option<List<T>> all<T>(Iterable<Option<T>> options) {
+    final values = <T>[];
+    for (final option in options) {
+      switch (option) {
+        case Some<T>(:final value):
+          values.add(value);
+        case None():
+          return const None();
+      }
+    }
+    return Some(List<T>.unmodifiable(values));
+  }
+
+  /// Returns the first present option, without inspecting later values.
+  static Option<T> firstSome<T>(Iterable<Option<T>> options) {
+    for (final option in options) {
+      if (option case Some<T>()) return option;
+    }
+    return const None();
+  }
+
+  /// Returns the first iterable element or [None] when it is empty.
+  static Option<T> fromIterable<T>(Iterable<T> values) {
+    final iterator = values.iterator;
+    return iterator.moveNext() ? Some(iterator.current) : const None();
+  }
 }
 
 /// A present [value], including `null` when [T] is nullable.

@@ -36,6 +36,10 @@ thrown by callbacks remain ordinary Dart exceptions.
 success or failure remains present. `getOrNull()` intentionally collapses a
 failure and a successful `null`. Use `match` when that distinction matters.
 
+`Option.all` collects present values in order and stops at the first `None`.
+`Option.firstSome` stops at the first present value, including `Some(null)`,
+while `Option.fromIterable` requests only the first item from its input.
+
 Run the package tests from the repository root:
 
 ```sh
