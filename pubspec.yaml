@@ -6,6 +6,7 @@ environment:
 
 workspace:
   - packages/context
+  - packages/inlet
   - packages/database/clickhouse
   - packages/json_patch
   - packages/chrono_id
