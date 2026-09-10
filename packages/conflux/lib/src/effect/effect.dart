@@ -220,6 +220,35 @@ final class Effect<A, E> {
     }
     return _raceEffects(branches, execution);
   });
+
+  /// Evaluates every input and accumulates all expected errors in input order.
+  static Effect<List<A>, NonEmptyList<E>> validate<I, A, E>(
+    Iterable<I> inputs,
+    Effect<A, E> Function(I input) validate,
+  ) => Effect._((execution) async {
+    final values = <A>[];
+    final errors = <E>[];
+    for (final input in inputs) {
+      final exit = await Effect.defer(() => validate(input))._evaluate(execution);
+      switch (exit) {
+        case Succeeded<A, E>(:final value):
+          values.add(value);
+        case Failed<A, E>(:final cause) when _containsFatal(cause):
+          return Failed(
+            _mapCause<E, NonEmptyList<E>>(
+              cause,
+              NonEmptyList.new,
+            ),
+          );
+        case Failed<A, E>(:final cause):
+          errors.addAll(_expectedErrors(cause));
+      }
+    }
+    if (errors.isNotEmpty) {
+      return Failed(Expected(NonEmptyList(errors.first, errors.skip(1))));
+    }
+    return Succeeded(List.unmodifiable(values));
+  });
 }
 
 sealed class _ValueSlot<A> {

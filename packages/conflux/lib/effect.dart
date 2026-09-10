@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 
+import 'package:conflux/non_empty_list.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:context/context.dart';
