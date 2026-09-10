@@ -11,10 +11,20 @@ final class CoordinationWaiter<A> {
   final Completer<Effect<A, Never>> _completion = Completer();
   var _settled = false;
 
-  /// Waits for the owner's result and removes this registration on cancellation.
-  Effect<A, Never> awaitValue({required void Function() onCancel}) {
+  /// Starts the owner's registration, then waits for its result cancellably.
+  ///
+  /// [onStart] runs inside the foreign-Future adapter, before its cancellation
+  /// check. This ensures cancellation either prevents registration or invokes
+  /// [onCancel] to remove it.
+  Effect<A, Never> awaitValue({
+    required void Function() onStart,
+    required void Function() onCancel,
+  }) {
     return Effect.tryFuture<Effect<A, Never>, Never>(
-      () => _completion.future,
+      () {
+        onStart();
+        return _completion.future;
+      },
       onError: Error.throwWithStackTrace,
       onCancel: () {
         if (_settled) return;

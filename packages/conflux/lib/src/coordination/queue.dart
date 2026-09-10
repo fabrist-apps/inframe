@@ -67,12 +67,16 @@ final class Queue<A> {
   /// Cancellation before the offer commits removes it. Cancellation after the
   /// item is accepted cannot retract its delivery.
   Effect<void, Never> offer(A item) => Effect.defer(() {
-    if (_isShutdown) return _shutdownEffect();
-
     final offer = _PendingOffer(item);
-    _offers.addLast(offer);
-    _drain();
     return offer.waiter.awaitValue(
+      onStart: () {
+        if (_isShutdown) {
+          offer.waiter.interrupt(const QueueShutdown());
+          return;
+        }
+        _offers.addLast(offer);
+        _drain();
+      },
       onCancel: () {
         _offers.remove(offer);
         _drain();
@@ -84,18 +88,21 @@ final class Queue<A> {
   ///
   /// Cancellation removes a pending take without consuming a later item.
   Effect<A, Never> take() => Effect.defer(() {
-    if (_isShutdown) return _shutdownEffect();
-
-    if (_items.isNotEmpty) {
-      final item = _items.removeFirst();
-      _drain();
-      return Effect.succeed(item);
-    }
-
     final taker = CoordinationWaiter<A>();
-    _takers.addLast(taker);
-    _drain();
     return taker.awaitValue(
+      onStart: () {
+        if (_isShutdown) {
+          taker.interrupt(const QueueShutdown());
+          return;
+        }
+        if (_items.isNotEmpty) {
+          taker.succeed(_items.removeFirst());
+          _drain();
+          return;
+        }
+        _takers.addLast(taker);
+        _drain();
+      },
       onCancel: () {
         _takers.remove(taker);
         _drain();
@@ -160,11 +167,15 @@ final class Queue<A> {
   ///
   /// This does not wait for previously accepted items to be processed.
   Effect<void, Never> awaitShutdown() => Effect.defer(() {
-    if (_isShutdown) return Effect.succeed(null);
-
     final waiter = CoordinationWaiter<void>();
-    _shutdownWaiters.addLast(waiter);
     return waiter.awaitValue(
+      onStart: () {
+        if (_isShutdown) {
+          waiter.succeed(null);
+          return;
+        }
+        _shutdownWaiters.addLast(waiter);
+      },
       onCancel: () => _shutdownWaiters.remove(waiter),
     );
   });

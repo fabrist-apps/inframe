@@ -142,6 +142,48 @@ void main() {
       expect(await fixture.run(subscription.take()), 1);
     });
 
+    test('should not retain cancelled work at a scheduling boundary', () async {
+      final fixture = await _PubSubFixture.acquire<int>(1);
+      addTearDown(fixture.close);
+      final subscription = await fixture.subscribe();
+      await fixture.run(fixture.pubsub.publish(0));
+
+      final publication = fixture.runtime.fork(
+        _atWaiterRegistrationBoundary(fixture.pubsub.publish(1)),
+      );
+      expect(await _interruptNextEventTurn(publication), isA<Failed<void, Never>>());
+      expect(await fixture.run(subscription.take()), 0);
+      expect(await fixture.run(subscription.takeUpTo(1)), isEmpty);
+
+      final take = fixture.runtime.fork(
+        _atWaiterRegistrationBoundary(subscription.take()),
+      );
+      expect(await _interruptNextEventTurn(take), isA<Failed<int, Never>>());
+      await fixture.run(fixture.pubsub.publish(2));
+      expect(await fixture.run(subscription.takeUpTo(1)), [2]);
+
+      await fixture.cancelSubscription(subscription);
+      final acquisition = fixture.runtime.fork(
+        _atSubscriptionRegistrationBoundary(fixture.pubsub.subscribe()),
+      );
+      expect(
+        await _interruptNextEventTurn(acquisition),
+        isA<Failed<PubSubSubscription<int>, Never>>(),
+      );
+
+      final active = await fixture.subscribe();
+      await fixture.run(fixture.pubsub.publish(3));
+      expect(await fixture.run(active.take()), 3);
+      var completed = false;
+      final next = fixture.runtime.fork(fixture.pubsub.publish(4));
+      unawaited(next.exit.then((_) => completed = true));
+      await _flushMicrotasks();
+
+      expect(completed, isTrue);
+      expect(await next.join(), isA<Succeeded<void, Never>>());
+      expect(await fixture.run(active.take()), 4);
+    });
+
     test('should take immutable available batches without waiting', () async {
       final fixture = await _PubSubFixture.acquire<int>(3);
       addTearDown(fixture.close);
@@ -413,4 +455,31 @@ void _expectPubSubShutdown(Exit<Object?, Never> exit) {
 Future<void> _flushMicrotasks() async {
   await Future<void>.delayed(Duration.zero);
   await Future<void>.delayed(Duration.zero);
+}
+
+Effect<A, E> _atWaiterRegistrationBoundary<A, E>(Effect<A, E> effect) {
+  // The operation's defer is step 255; its waiter adapter reaches the runtime's
+  // cooperative boundary at step 256.
+  return _afterEvaluationSteps(effect, 254);
+}
+
+Effect<A, E> _atSubscriptionRegistrationBoundary<A, E>(Effect<A, E> effect) {
+  // The former subscription acquisition created state at step 255, immediately
+  // before finalizer registration crossed the step-256 boundary.
+  return _afterEvaluationSteps(effect, 252);
+}
+
+Effect<A, E> _afterEvaluationSteps<A, E>(Effect<A, E> effect, int count) {
+  var wrapped = effect;
+  for (var index = 0; index < count; index += 1) {
+    final inner = wrapped;
+    wrapped = Effect.defer(() => inner);
+  }
+  return wrapped;
+}
+
+Future<Exit<A, E>> _interruptNextEventTurn<A, E>(Fiber<A, E> fiber) {
+  return Future<void>.delayed(Duration.zero).then(
+    (_) => fiber.interrupt('cancel at scheduling boundary'),
+  );
 }

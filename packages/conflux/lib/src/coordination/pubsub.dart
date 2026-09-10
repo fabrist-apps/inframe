@@ -71,17 +71,26 @@ final class PubSub<A> {
   /// With no subscribers, the item is discarded. Otherwise publication waits
   /// until every still-active target has capacity, then commits atomically.
   Effect<void, Never> publish(A item) => Effect.defer(() {
-    if (_isShutdown) return _shutdownEffect();
+    final waiter = CoordinationWaiter<void>();
+    late final _PendingPublication<A> publication;
+    return waiter.awaitValue(
+      onStart: () {
+        if (_isShutdown) {
+          waiter.interrupt(const PubSubShutdown());
+          return;
+        }
+        final targets = List<_PubSubSubscriptionState<A>>.unmodifiable(
+          _subscriptions,
+        );
+        if (targets.isEmpty) {
+          waiter.succeed(null);
+          return;
+        }
 
-    final targets = List<_PubSubSubscriptionState<A>>.unmodifiable(
-      _subscriptions,
-    );
-    if (targets.isEmpty) return Effect.succeed(null);
-
-    final publication = _PendingPublication(item, targets);
-    _publications.addLast(publication);
-    _drainPublications();
-    return publication.waiter.awaitValue(
+        publication = _PendingPublication(item, targets, waiter);
+        _publications.addLast(publication);
+        _drainPublications();
+      },
       onCancel: () {
         _publications.remove(publication);
         _drainPublications();
@@ -97,13 +106,13 @@ final class PubSub<A> {
     if (_isShutdown) return _shutdownEffect();
 
     return Effect.build<PubSubSubscription<A>, Never>(($) async {
-      return $.acquireRelease(
-        Effect.defer(() {
-          if (_isShutdown) return _shutdownEffect();
-          return Effect.succeed(_createSubscription());
-        }),
-        release: (subscription) => subscription.unsubscribe(),
+      final acquired = await $.acquireRelease(
+        Effect.sync<PubSubSubscription<A>?>(
+          () => _isShutdown ? null : _createSubscription(),
+        ),
+        release: (subscription) => subscription?.unsubscribe() ?? Effect.succeed(null),
       );
+      return $(acquired == null ? _shutdownEffect() : Effect.succeed(acquired));
     });
   });
 
@@ -115,11 +124,15 @@ final class PubSub<A> {
 
   /// Lazily waits until shutdown bookkeeping and waiter notification finish.
   Effect<void, Never> awaitShutdown() => Effect.defer(() {
-    if (_isShutdown) return Effect.succeed(null);
-
     final waiter = CoordinationWaiter<void>();
-    _shutdownWaiters.addLast(waiter);
     return waiter.awaitValue(
+      onStart: () {
+        if (_isShutdown) {
+          waiter.succeed(null);
+          return;
+        }
+        _shutdownWaiters.addLast(waiter);
+      },
       onCancel: () => _shutdownWaiters.remove(waiter),
     );
   });
@@ -161,9 +174,7 @@ final class PubSub<A> {
     while (_publications.isNotEmpty) {
       _publications.removeFirst().waiter.interrupt(const PubSubShutdown());
     }
-    final subscriptions = List<_PubSubSubscriptionState<A>>.of(
-      _subscriptions,
-    );
+    final subscriptions = List<_PubSubSubscriptionState<A>>.of(_subscriptions);
     _subscriptions.clear();
     for (final subscription in subscriptions) {
       subscription.close(const PubSubShutdown());
@@ -199,9 +210,7 @@ final class PubSubSubscription<A> {
   /// Lazily ends this subscription and releases its retained capacity.
   ///
   /// Repeated unsubscription is harmless and does not affect other subscribers.
-  Effect<void, Never> unsubscribe() => Effect.sync(
-    () => _state.owner._unsubscribe(_state),
-  );
+  Effect<void, Never> unsubscribe() => Effect.sync(() => _state.owner._unsubscribe(_state));
 }
 
 final class _PubSubSubscriptionState<A> {
@@ -217,18 +226,21 @@ final class _PubSubSubscriptionState<A> {
   bool get hasCapacity => _items.length < owner._capacity;
 
   Effect<A, Never> take() => Effect.defer(() {
-    final closedReason = _closedReason;
-    if (closedReason != null) return _interrupted(closedReason);
-
-    if (_items.isNotEmpty) {
-      final item = _items.removeFirst();
-      owner._onCapacityAvailable();
-      return Effect.succeed(item);
-    }
-
     final taker = CoordinationWaiter<A>();
-    _takers.addLast(taker);
     return taker.awaitValue(
+      onStart: () {
+        final closedReason = _closedReason;
+        if (closedReason != null) {
+          taker.interrupt(closedReason);
+          return;
+        }
+        if (_items.isNotEmpty) {
+          taker.succeed(_items.removeFirst());
+          owner._onCapacityAvailable();
+          return;
+        }
+        _takers.addLast(taker);
+      },
       onCancel: () => _takers.remove(taker),
     );
   });
@@ -238,11 +250,7 @@ final class _PubSubSubscriptionState<A> {
     if (closedReason != null) return _interrupted(closedReason);
     if (limit < 0) {
       return Effect.sync(
-        () => throw ArgumentError.value(
-          limit,
-          'limit',
-          'Must not be negative.',
-        ),
+        () => throw ArgumentError.value(limit, 'limit', 'Must not be negative.'),
       );
     }
 
@@ -278,9 +286,9 @@ final class _PubSubSubscriptionState<A> {
 }
 
 final class _PendingPublication<A> {
-  _PendingPublication(this.item, this.targets);
+  _PendingPublication(this.item, this.targets, this.waiter);
 
   final A item;
   final List<_PubSubSubscriptionState<A>> targets;
-  final CoordinationWaiter<void> waiter = CoordinationWaiter();
+  final CoordinationWaiter<void> waiter;
 }

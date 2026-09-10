@@ -119,6 +119,27 @@ void main() {
       expect(await fixture.run(fixture.queue.take()), 1);
     });
 
+    test('should not retain cancelled work at a scheduling boundary', () async {
+      final fixture = await _QueueFixture.acquire<int>(1);
+      addTearDown(fixture.close);
+      await fixture.run(fixture.queue.offer(0));
+
+      final offer = fixture.runtime.fork(
+        _atWaiterRegistrationBoundary(fixture.queue.offer(1)),
+      );
+      expect(await _interruptNextEventTurn(offer), isA<Failed<void, Never>>());
+      expect(await fixture.run(fixture.queue.take()), 0);
+      expect(fixture.queue.size, 0);
+
+      final take = fixture.runtime.fork(
+        _atWaiterRegistrationBoundary(fixture.queue.take()),
+      );
+      expect(await _interruptNextEventTurn(take), isA<Failed<int, Never>>());
+      await fixture.run(fixture.queue.offer(2));
+      expect(fixture.queue.size, 1);
+      expect(await fixture.run(fixture.queue.take()), 2);
+    });
+
     test('should poll an available item without waiting', () async {
       final fixture = await _QueueFixture.acquire<int>(1);
       addTearDown(fixture.close);
@@ -333,4 +354,25 @@ void _expectQueueShutdown(Exit<Object?, Never> exit) {
 Future<void> _flushMicrotasks() async {
   await Future<void>.delayed(Duration.zero);
   await Future<void>.delayed(Duration.zero);
+}
+
+Effect<A, E> _atWaiterRegistrationBoundary<A, E>(Effect<A, E> effect) {
+  // The operation's defer is step 255; its waiter adapter reaches the runtime's
+  // cooperative boundary at step 256.
+  return _afterEvaluationSteps(effect, 254);
+}
+
+Effect<A, E> _afterEvaluationSteps<A, E>(Effect<A, E> effect, int count) {
+  var wrapped = effect;
+  for (var index = 0; index < count; index += 1) {
+    final inner = wrapped;
+    wrapped = Effect.defer(() => inner);
+  }
+  return wrapped;
+}
+
+Future<Exit<A, E>> _interruptNextEventTurn<A, E>(Fiber<A, E> fiber) {
+  return Future<void>.delayed(Duration.zero).then(
+    (_) => fiber.interrupt('cancel at scheduling boundary'),
+  );
 }
