@@ -26,22 +26,51 @@ final class InletServer {
     _adapter.beginClosing();
     if (force && !_forced) {
       _forced = true;
-      final forceClose = _server.close(force: true);
+      final forceClose = _closeTransport(force: true);
       final existing = _closeFuture;
       if (existing != null) {
-        unawaited(
-          forceClose.then<void>(
-            (_) {},
-            onError: (Object error, StackTrace stackTrace) {
-              _adapter.report(error, stackTrace);
-            },
-          ),
-        );
+        _observeAdditionalClose(forceClose);
         return existing;
       }
+      _observeAdditionalClose(forceClose);
       return _closeFuture = forceClose;
     }
-    return _closeFuture ??= _server.close();
+    final existing = _closeFuture;
+    if (existing != null) {
+      return existing;
+    }
+
+    final closing = Completer<void>();
+    _closeFuture = closing.future;
+    Timer.run(() async {
+      try {
+        await _closeTransport(force: false);
+        closing.complete();
+      } on Object catch (error, stackTrace) {
+        _adapter.report(error, stackTrace);
+        if (!closing.isCompleted) {
+          closing.completeError(error, stackTrace);
+        }
+      }
+    });
+    return closing.future;
+  }
+
+  Future<void> _closeTransport({required bool force}) {
+    try {
+      return _server.close(force: force);
+    } on Object catch (error, stackTrace) {
+      return Future<void>.error(error, stackTrace);
+    }
+  }
+
+  void _observeAdditionalClose(Future<void> close) {
+    unawaited(
+      close.then<void>(
+        (_) {},
+        onError: _adapter.report,
+      ),
+    );
   }
 }
 
@@ -116,12 +145,19 @@ final class _ServerAdapter {
   void _accept(HttpRequest request) => unawaited(_handle(request));
 
   Future<void> _handle(HttpRequest incoming) async {
+    final input = _HttpRequestBody(incoming);
     if (_closing) {
-      await _sendEmpty(incoming.response, HttpStatus.serviceUnavailable);
+      incoming.response.persistentConnection = false;
+      try {
+        await _sendEmpty(incoming.response, HttpStatus.serviceUnavailable);
+      } on Object catch (error, stackTrace) {
+        _report(error, stackTrace);
+      } finally {
+        await _finishInput(input);
+      }
       return;
     }
 
-    final input = _HttpRequestBody(incoming);
     late final Request request;
     try {
       request = _adapt(incoming, input);
@@ -141,7 +177,12 @@ final class _ServerAdapter {
     try {
       dispatch = await _dispatch(request);
       response = dispatch.response;
-      await _deliver(incoming.response, response, input);
+      await _deliver(
+        incoming.response,
+        response,
+        input,
+        isHead: dispatch.request.method == 'HEAD',
+      );
     } on _DeliveryFailure catch (failure) {
       if (failure.committed || dispatch == null) {
         _report(failure.error, failure.stackTrace);
@@ -154,7 +195,12 @@ final class _ServerAdapter {
           failure.stackTrace,
         );
         try {
-          await _deliver(incoming.response, response, input);
+          await _deliver(
+            incoming.response,
+            response,
+            input,
+            isHead: dispatch.request.method == 'HEAD',
+          );
         } on _DeliveryFailure catch (replacementFailure) {
           _report(replacementFailure.error, replacementFailure.stackTrace);
         }
@@ -201,8 +247,9 @@ final class _ServerAdapter {
   Future<void> _deliver(
     HttpResponse target,
     Response response,
-    _HttpRequestBody input,
-  ) async {
+    _HttpRequestBody input, {
+    required bool isHead,
+  }) async {
     var committed = false;
     try {
       if (!input.isComplete) {
@@ -218,8 +265,35 @@ final class _ServerAdapter {
         }
       }
       final knownLength = response._body.knownLength;
+      if (response.statusCode == HttpStatus.noContent ||
+          response.statusCode == HttpStatus.notModified) {
+        target.persistentConnection = false;
+        target.headers.chunkedTransferEncoding = false;
+        final detached = target.detachSocket();
+        committed = true;
+        final socket = await detached;
+        await socket.close();
+        return;
+      }
+      if (response.statusCode == HttpStatus.resetContent) {
+        target.contentLength = 0;
+        final close = target.close();
+        committed = true;
+        await close;
+        return;
+      }
+      if (isHead) {
+        target.headers.chunkedTransferEncoding = false;
+        if (knownLength != null) {
+          target.contentLength = knownLength;
+        }
+        final close = target.close();
+        committed = true;
+        await close;
+        return;
+      }
       if (knownLength != null) {
-        target.contentLength = response._suppressBody ? 0 : knownLength;
+        target.contentLength = knownLength;
       }
       final delivery = target.addStream(response.body);
       committed = true;
