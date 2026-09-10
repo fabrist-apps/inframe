@@ -14,7 +14,12 @@ final class ResponseBodyLimitExceededException implements Exception {
 
 /// An ordinary buffered or streamed response.
 final class Response {
-  Response._({required this.statusCode, required this.headers, required this._body});
+  Response._({
+    required this.statusCode,
+    required this.headers,
+    required this._body,
+    this._suppressBody = false,
+  });
 
   /// Creates an empty response.
   factory Response.empty({
@@ -81,15 +86,32 @@ final class Response {
   final Headers headers;
 
   final _Body _body;
+  final bool _suppressBody;
 
   /// Creates a metadata view sharing this response's body owner.
   Response withHeaders(Headers headers) {
     _validateResponseHeaders(headers);
-    return Response._(statusCode: statusCode, headers: headers, body: _body);
+    return Response._(
+      statusCode: statusCode,
+      headers: headers,
+      body: _body,
+      suppressBody: _suppressBody,
+    );
   }
+
+  Response _withoutBody() => Response._(
+    statusCode: statusCode,
+    headers: headers,
+    body: _body,
+    suppressBody: true,
+  );
 
   /// Buffers the body once and returns a private byte copy.
   Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
+    _validateMaxBytes(maxBytes);
+    if (_suppressBody) {
+      return const [];
+    }
     try {
       return await _body.bytes(maxBytes: maxBytes);
     } on _BodyLimitFailure {

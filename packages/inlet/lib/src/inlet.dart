@@ -35,14 +35,14 @@ typedef ErrorReporter = void Function(Object error, StackTrace stackTrace);
 /// An application that dispatches registered routes in process or over HTTP.
 final class Inlet extends Router {
   /// Creates an editable application.
-  Inlet({Context? context, this.strict = true, this.onError, this.onReportError})
-    : context = context ?? Context();
+  // `Router` keeps its strictness private, so a super parameter would expose `_strict`.
+  // ignore: use_super_parameters
+  Inlet({Context? context, bool strict = true, this.onError, this.onReportError})
+    : context = context ?? Context(),
+      super._(strict: strict);
 
   /// The context used when a dispatch does not provide its own context.
   final Context context;
-
-  /// Whether one trailing slash remains significant while matching.
-  final bool strict;
 
   /// The optional application error hook.
   final ErrorHandler? onError;
@@ -52,18 +52,26 @@ final class Inlet extends Router {
 
   /// Dispatches [request] without a network listener.
   Future<Response> handle(Request request, {Context? context}) async {
-    request._admit();
-    _freeze();
+    final router = _admit(request);
     final dispatchContext = context ?? this.context;
-    final route = _routes.cast<_Route?>().firstWhere(
-      (candidate) => candidate!.method == request.method && candidate.path == request.uri.path,
-      orElse: () => null,
-    );
-    if (route == null) {
+    final resolution = router.resolve(request);
+    if (resolution case _BadRoutePath()) {
+      return Response.empty(status: HttpStatus.badRequest);
+    }
+    if (resolution case _RouteNotFound()) {
       return Response.empty(status: HttpStatus.notFound);
     }
+    if (resolution case _MethodNotAllowed(:final allowedMethods)) {
+      return Response.empty(
+        status: HttpStatus.methodNotAllowed,
+        headers: const Headers.empty().set(HttpHeaders.allowHeader, allowedMethods.join(', ')),
+      );
+    }
+    final matched = resolution as _MatchedRoute;
+    final matchedRequest = request._withPathParameters(matched.pathParameters);
     try {
-      return await route.handler(dispatchContext, request);
+      final response = await matched.registration.handler(dispatchContext, matchedRequest);
+      return matched.suppressBody ? response._withoutBody() : response;
     } on MalformedBodyException {
       return Response.empty(status: HttpStatus.badRequest);
     } on BodyLimitExceededException {
@@ -73,7 +81,8 @@ final class Inlet extends Router {
       final errorHandler = onError;
       if (errorHandler != null) {
         try {
-          return await errorHandler(dispatchContext, request, error, stackTrace);
+          final response = await errorHandler(dispatchContext, matchedRequest, error, stackTrace);
+          return matched.suppressBody ? response._withoutBody() : response;
         } on Object catch (hookError, hookStackTrace) {
           _report(hookError, hookStackTrace);
         }

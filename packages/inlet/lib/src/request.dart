@@ -101,6 +101,15 @@ final class Request {
     exchange: _exchange,
   );
 
+  Request _withPathParameters(Map<String, String> pathParameters) => Request._(
+    method: method,
+    uri: uri,
+    headers: headers,
+    connection: connection,
+    pathParameters: pathParameters,
+    exchange: _exchange,
+  );
+
   /// Buffers the body once and returns a private byte copy.
   Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
     try {
