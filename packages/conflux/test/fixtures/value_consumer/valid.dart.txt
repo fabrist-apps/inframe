@@ -36,6 +36,15 @@ void main() {
   if (describeResult(composed) != 'success:42') {
     throw StateError('Generic Result pattern did not match');
   }
+
+  final Result<List<int>, NonEmptyList<String>> validation = Result.validate(
+    const [1, 2, 3],
+    (value) => value.isOdd ? Success(value) : const Failure('even'),
+  );
+  final errors = validation.getFailure().getOrNull();
+  if (errors?.first != 'even' || errors?.length != 1) {
+    throw StateError('Incorrect validation result: $errors');
+  }
 }
 
 String describeResult<A, E>(Result<A, E> result) => switch (result) {

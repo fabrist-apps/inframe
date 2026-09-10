@@ -20,4 +20,12 @@ void main() {
   if (collected?.join(',') != '1,2,3') {
     throw StateError('Unexpected collection: $collected');
   }
+
+  final validation = Result.validate<int, int, String>(
+    const [1, 2, 3],
+    (value) => value.isOdd ? Success(value) : Failure('$value is even'),
+  );
+  if (validation.getFailure().getOrNull()?.first != '2 is even') {
+    throw StateError('Unexpected validation: $validation');
+  }
 }

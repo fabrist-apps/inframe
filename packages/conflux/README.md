@@ -40,6 +40,11 @@ failure and a successful `null`. Use `match` when that distinction matters.
 `Option.firstSome` stops at the first present value, including `Some(null)`,
 while `Option.fromIterable` requests only the first item from its input.
 
+`Result.all` inspects already-created results until the first failure.
+`Result.validate` invokes a validator for every input and accumulates expected
+failures in an immutable `NonEmptyList`. Unexpected callback exceptions remain
+ordinary Dart exceptions rather than validation failures.
+
 Run the package tests from the repository root:
 
 ```sh

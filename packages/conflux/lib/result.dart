@@ -1,8 +1,44 @@
+import 'package:conflux/non_empty_list.dart';
 import 'package:conflux/option.dart';
 
 /// The outcome of a synchronous operation with an expected error type.
 sealed class Result<A, E> {
   const Result();
+
+  /// Collects every success or returns the first failure.
+  static Result<List<A>, E> all<A, E>(Iterable<Result<A, E>> results) {
+    final values = <A>[];
+    for (final result in results) {
+      switch (result) {
+        case Success<A, E>(:final value):
+          values.add(value);
+        case Failure<A, E>(:final error):
+          return Failure(error);
+      }
+    }
+    return Success(List<A>.unmodifiable(values));
+  }
+
+  /// Validates every input and accumulates expected failures in input order.
+  static Result<List<A>, NonEmptyList<E>> validate<I, A, E>(
+    Iterable<I> inputs,
+    Result<A, E> Function(I input) validator,
+  ) {
+    final values = <A>[];
+    final errors = <E>[];
+    for (final input in inputs) {
+      switch (validator(input)) {
+        case Success<A, E>(:final value):
+          values.add(value);
+        case Failure<A, E>(:final error):
+          errors.add(error);
+      }
+    }
+    if (errors.isNotEmpty) {
+      return Failure(NonEmptyList(errors.first, errors.skip(1)));
+    }
+    return Success(List<A>.unmodifiable(values));
+  }
 
   /// Converts an [Option] to a result, computing an error only for [None].
   static Result<A, E> fromOption<A, E>(Option<A> option, E Function() onNone) => switch (option) {
