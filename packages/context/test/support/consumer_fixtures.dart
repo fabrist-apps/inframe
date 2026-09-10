@@ -22,9 +22,7 @@ final class ConsumerFixtures {
 
     await for (final entity in source.list(recursive: true)) {
       if (entity is! File) continue;
-      final relativePath = entity.path
-          .substring(source.path.length)
-          .replaceFirst(RegExp('^/'), '');
+      final relativePath = entity.path.substring(source.path.length).replaceFirst(RegExp('^/'), '');
       final destination = File(
         '${directory.path}/${relativePath.replaceAll('.dart.txt', '.dart')}',
       );
