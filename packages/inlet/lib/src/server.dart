@@ -399,8 +399,8 @@ final class _HttpRequestBody extends Stream<List<int>> {
         _resumePhysical();
         _completeCleanly = true;
       }
-    } on Object catch (_, stackTrace) {
-      _terminalError = const MalformedBodyException();
+    } on Object catch (error, stackTrace) {
+      _terminalError = error;
       _terminalStackTrace = stackTrace;
     }
   }
@@ -463,11 +463,11 @@ final class _HttpRequestBody extends Stream<List<int>> {
     _controller?.add(chunk);
   }
 
-  void _addError(Object _, StackTrace stackTrace) {
+  void _addError(Object error, StackTrace stackTrace) {
     if (_terminalError != null || _completeCleanly) {
       return;
     }
-    _terminalError = const MalformedBodyException();
+    _terminalError = error;
     _terminalStackTrace = stackTrace;
     final controller = _controller;
     if (controller != null) {

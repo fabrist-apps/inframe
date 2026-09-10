@@ -61,18 +61,20 @@ void main() {
 
     test('should use documented HTTP and TLS defaults', () async {
       final httpApplication = Inlet();
-      final http = await httpApplication.serve();
+      final http = await httpApplication.serve(port: 0);
       addTearDown(() => http.close(force: true));
 
       final tlsApplication = Inlet();
-      final tls = await tlsApplication.serveSecure(_securityContext());
+      final tls = await tlsApplication.serveSecure(_securityContext(), port: 0);
       addTearDown(() => tls.close(force: true));
 
+      expect(Inlet.defaultHttpPort, 8080);
+      expect(Inlet.defaultHttpsPort, 8443);
       expect(http.address, InternetAddress.loopbackIPv4);
-      expect(http.port, 8080);
+      expect(http.port, greaterThan(0));
       expect(http.isSecure, isFalse);
       expect(tls.address, InternetAddress.loopbackIPv4);
-      expect(tls.port, 8443);
+      expect(tls.port, greaterThan(0));
       expect(tls.isSecure, isTrue);
     });
 
@@ -173,6 +175,39 @@ void main() {
       expect(wireResponse.toLowerCase(), contains('connection: close'));
       expect(handlerCalls, 0);
       await socket.close();
+    });
+
+    test('should preserve and report an interrupted upload error', () async {
+      final recovered = Completer<Object>();
+      final reports = <Object>[];
+      final application =
+          Inlet(
+            onError: (_, _, error, _) {
+              recovered.complete(error);
+              return Response.empty();
+            },
+            onReportError: (error, _) => reports.add(error),
+          )..post('/', (_, request) async {
+            await request.bytes();
+            return Response.empty();
+          });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+      final socket = await Socket.connect(server.address, server.port);
+
+      socket.write(
+        'POST / HTTP/1.1\r\n'
+        'Host: ${server.address.address}:${server.port}\r\n'
+        'Content-Length: 5\r\n'
+        '\r\n'
+        'a',
+      );
+      await socket.flush();
+      socket.destroy();
+
+      final error = await recovered.future.timeout(const Duration(seconds: 2));
+      expect(error, isNot(isA<MalformedBodyException>()));
+      expect(reports, [same(error)]);
     });
 
     test('should replace a pre-commit delivery failure without leaking headers', () async {

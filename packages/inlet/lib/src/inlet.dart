@@ -43,6 +43,12 @@ final class Inlet extends Router {
     : context = context ?? Context(),
       super._(strict: strict);
 
+  /// The port used by [serve] when no port is supplied.
+  static const int defaultHttpPort = 8080;
+
+  /// The port used by [serveSecure] when no port is supplied.
+  static const int defaultHttpsPort = 8443;
+
   /// The context used when a dispatch does not provide its own context.
   final Context context;
 
@@ -59,7 +65,7 @@ final class Inlet extends Router {
   /// Starts an HTTP listener.
   Future<InletServer> serve({
     InternetAddress? address,
-    int port = 8080,
+    int port = defaultHttpPort,
     int backlog = 0,
     bool shared = false,
     Duration? idleTimeout = const Duration(seconds: 120),
@@ -82,7 +88,7 @@ final class Inlet extends Router {
   Future<InletServer> serveSecure(
     SecurityContext securityContext, {
     InternetAddress? address,
-    int port = 8443,
+    int port = defaultHttpsPort,
     int backlog = 0,
     bool shared = false,
     Duration? idleTimeout = const Duration(seconds: 120),
