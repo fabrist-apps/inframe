@@ -159,10 +159,10 @@ void main() {
 
       socket.add(
         latin1.encode(
-          'GET / HTTP/1.1\r\n'
+          'POST / HTTP/1.1\r\n'
           'Host: ${server.address.address}:${server.port}\r\n'
+          'Content-Length: 1000000\r\n'
           'X-Invalid: \x7f\r\n'
-          'Connection: close\r\n'
           '\r\n',
         ),
       );
@@ -170,8 +170,84 @@ void main() {
       final wireResponse = await latin1.decodeStream(socket);
 
       expect(wireResponse, startsWith('HTTP/1.1 400'));
+      expect(wireResponse.toLowerCase(), contains('connection: close'));
       expect(handlerCalls, 0);
       await socket.close();
+    });
+
+    test('should replace a pre-commit delivery failure without leaking headers', () async {
+      final reports = <Object>[];
+      var hookCalls = 0;
+      final application =
+          Inlet(
+            onError: (_, _, _, _) {
+              hookCalls++;
+              return Response.text(
+                'replacement',
+                status: HttpStatus.badGateway,
+                headers: const Headers.empty().set('x-replacement', 'yes'),
+              );
+            },
+            onReportError: (error, _) => reports.add(error),
+          )..get('/', (_, _) async {
+            final response = Response.text(
+              'original',
+              headers: Headers.from({
+                'set-cookie': ['session=original'],
+                'x-original': ['yes'],
+              }),
+            );
+            await response.bytes();
+            return response;
+          });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+
+      final response = await _request(server);
+
+      expect(response.statusCode, HttpStatus.badGateway);
+      expect(utf8.decode(response.body), 'replacement');
+      expect(response.headers['x-replacement'], 'yes');
+      expect(response.headers['x-original'], isNull);
+      expect(response.headers['set-cookie'], isNull);
+      expect(hookCalls, 1);
+      expect(reports, hasLength(1));
+    });
+
+    test('should abort when a pre-commit replacement also cannot be delivered', () async {
+      final reports = <Object>[];
+      var hookCalls = 0;
+      Future<Response> consumed(String value) async {
+        final response = Response.text(value);
+        await response.bytes();
+        return response;
+      }
+
+      final application = Inlet(
+        onError: (_, _, _, _) async {
+          hookCalls++;
+          return consumed('replacement');
+        },
+        onReportError: (error, _) => reports.add(error),
+      )..get('/', (_, _) => consumed('original'));
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+      final socket = await Socket.connect(server.address, server.port);
+      addTearDown(socket.destroy);
+
+      socket.write(
+        'GET / HTTP/1.1\r\n'
+        'Host: ${server.address.address}:${server.port}\r\n'
+        '\r\n',
+      );
+      await socket.flush();
+      final bytes = await socket
+          .fold<List<int>>(<int>[], (received, chunk) => received..addAll(chunk))
+          .timeout(const Duration(seconds: 2));
+
+      expect(bytes, isEmpty);
+      expect(hookCalls, 1);
+      expect(reports, hasLength(2));
     });
 
     test('should clean up network request and response wrappers after delivery', () async {

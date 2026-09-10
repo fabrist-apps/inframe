@@ -128,6 +128,24 @@ void main() {
       await exchange.close();
     });
 
+    test('should reject an earlier request view after routing adds captures', () async {
+      final reports = <Object>[];
+      final original = Request(method: 'GET', uri: Uri.parse('/items/42'));
+      final application = Inlet(onReportError: (error, _) => reports.add(error))
+        ..use((context, request, next) {
+          expect(() => next(context, original), throwsStateError);
+          return next(context, request);
+        })
+        ..get('/items/:id', (_, request) => Response.text(request.pathParameters['id']!));
+
+      final response = await application.handle(original);
+
+      expect(await response.text(), '42');
+      expect(reports, hasLength(1));
+      await response.close();
+      await original.close();
+    });
+
     test('should fail and close responses when middleware abandons downstream work', () async {
       final release = Completer<void>();
       final reports = <Object>[];
@@ -152,6 +170,44 @@ void main() {
       await expectLater(orphan.bytes(), throwsStateError);
       expect(reports, hasLength(1));
       expect(reports.single, isA<StateError>());
+      await exchange.close();
+    });
+
+    test('should report abandoned downstream work even when outer middleware catches it', () async {
+      final release = Completer<void>();
+      final reports = <Object>[];
+      late Response premature;
+      late Response orphan;
+      final application = Inlet(onReportError: (error, _) => reports.add(error))
+        ..use((context, request, next) async {
+          try {
+            return await next(context, request);
+          } on Object catch (error) {
+            if (error is StateError) {
+              return Response.text('caught');
+            }
+            rethrow;
+          }
+        })
+        ..use((context, request, next) {
+          unawaited(next(context, request));
+          return premature = Response.text('premature');
+        })
+        ..get('/resource', (_, _) async {
+          await release.future;
+          return orphan = Response.text('orphan');
+        });
+
+      final exchange = await _dispatch(application, 'GET', '/resource');
+
+      expect(await exchange.response.text(), 'caught');
+      expect(reports, hasLength(1));
+      await expectLater(premature.bytes(), throwsStateError);
+      release.complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await expectLater(orphan.bytes(), throwsStateError);
+      expect(reports, hasLength(1));
       await exchange.close();
     });
 
@@ -419,10 +475,23 @@ void main() {
       );
       final fromError = await _dispatch(errorResponse, 'HEAD', '/resource');
 
+      final routingResponse = Inlet()
+        ..use((context, request, next) async {
+          final response = await next(context, request);
+          await response.close();
+          return streamed('routing');
+        });
+      final fromRouting = await _dispatch(routingResponse, 'HEAD', '/missing');
+
       expect(await fromMiddleware.response.bytes(), isEmpty);
       expect(await fromError.response.bytes(), isEmpty);
+      expect(await fromRouting.response.bytes(), isEmpty);
       expect(bodySubscriptions, 0);
-      await Future.wait([fromMiddleware.close(), fromError.close()]);
+      await Future.wait([
+        fromMiddleware.close(),
+        fromError.close(),
+        fromRouting.close(),
+      ]);
     });
   });
 }

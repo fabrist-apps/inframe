@@ -30,10 +30,16 @@ Future<void> main() async {
     await source.close();
     stdout.writeln(await transferred);
   } finally {
-    await response?.close();
-    await request.close();
-    if (!source.isClosed) {
-      await source.close();
+    try {
+      try {
+        await response?.close();
+      } finally {
+        await request.close();
+      }
+    } finally {
+      if (!source.isClosed) {
+        await source.close();
+      }
     }
   }
 }

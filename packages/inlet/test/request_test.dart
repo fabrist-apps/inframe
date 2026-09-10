@@ -15,6 +15,10 @@ void main() {
         throwsArgumentError,
       );
       expect(
+        () => Request(method: 'GET', uri: Uri.parse('//example.com/path')),
+        throwsArgumentError,
+      );
+      expect(
         () => Request(method: 'GET', uri: Uri.parse('http://user@example.com/path')),
         throwsArgumentError,
       );

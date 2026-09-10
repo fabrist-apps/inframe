@@ -25,8 +25,11 @@ Future<void> _runInProcess(Inlet application) async {
     response = await application.handle(request);
     stdout.writeln(jsonEncode(await response.json()));
   } finally {
-    await response?.close();
-    await request.close();
+    try {
+      await response?.close();
+    } finally {
+      await request.close();
+    }
   }
 }
 
@@ -43,7 +46,10 @@ Future<void> _runOverHttp(Inlet application) async {
     final response = await request.close();
     stdout.writeln(await utf8.decodeStream(response));
   } finally {
-    client.close(force: true);
-    await server.close();
+    try {
+      client.close(force: true);
+    } finally {
+      await server.close();
+    }
   }
 }

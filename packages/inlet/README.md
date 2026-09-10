@@ -30,8 +30,11 @@ try {
   response = await app.handle(request);
   print(await response.json());
 } finally {
-  await response?.close();
-  await request.close();
+  try {
+    await response?.close();
+  } finally {
+    await request.close();
+  }
 }
 ```
 
@@ -46,7 +49,7 @@ try {
 }
 ```
 
-`serve` defaults to `127.0.0.1:8080`. `serveSecure` accepts a `SecurityContext` and defaults to `127.0.0.1:8443`. Both accept an explicit address, port, backlog, shared binding, and nullable keep-alive idle timeout. A normal close stops admission and leaves active connections to finish. A later `close(force: true)` closes that listener's active connections. Repeated calls return the first close future.
+`serve` defaults to `127.0.0.1:8080`. `serveSecure` accepts a `SecurityContext` and defaults to `127.0.0.1:8443`. Both accept an explicit address, port, backlog, shared binding, and nullable keep-alive idle timeout. A normal close stops admission and leaves active connections to finish. Its future marks the listener admission boundary, not completion of application handlers. A later `close(force: true)` closes that listener's active connections. Repeated calls return the first close future.
 
 ## Routes and middleware
 

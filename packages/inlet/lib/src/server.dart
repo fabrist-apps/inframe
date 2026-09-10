@@ -78,26 +78,33 @@ extension on Inlet {
   }) async {
     _validateServerOptions(port, backlog, idleTimeout);
     final bindAddress = address ?? InternetAddress.loopbackIPv4;
-    final server = await _freezeAfter(() => bind(bindAddress));
-    server
-      ..autoCompress = false
-      ..idleTimeout = idleTimeout;
-    server.defaultResponseHeaders.clear();
+    return _freezeAfter(() async {
+      HttpServer? server;
+      try {
+        server = (await bind(bindAddress))
+          ..autoCompress = false
+          ..idleTimeout = idleTimeout
+          ..defaultResponseHeaders.clear();
 
-    final adapter = _ServerAdapter(
-      server,
-      _dispatch,
-      _recover,
-      _report,
-      isSecure: isSecure,
-    );
-    try {
-      adapter.start();
-    } on Object {
-      await server.close(force: true);
-      rethrow;
-    }
-    return InletServer._(server, adapter, isSecure: isSecure);
+        final adapter = _ServerAdapter(
+          server,
+          _dispatch,
+          _recover,
+          _report,
+          isSecure: isSecure,
+        )..start();
+        return InletServer._(server, adapter, isSecure: isSecure);
+      } on Object catch (error, stackTrace) {
+        if (server != null) {
+          try {
+            await server.close(force: true);
+          } on Object catch (cleanupError, cleanupStackTrace) {
+            _report(cleanupError, cleanupStackTrace);
+          }
+        }
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+    });
   }
 }
 
@@ -139,9 +146,13 @@ final class _ServerAdapter {
   Future<void> _handle(HttpRequest incoming) async {
     final input = _HttpRequestBody(incoming);
     if (_closing) {
-      incoming.response.persistentConnection = false;
       try {
-        await _sendEmpty(incoming.response, HttpStatus.serviceUnavailable);
+        await _sendEmpty(
+          incoming.response,
+          HttpStatus.serviceUnavailable,
+          input,
+          closeConnection: true,
+        );
       } on Object catch (error, stackTrace) {
         _report(error, stackTrace);
       } finally {
@@ -155,7 +166,7 @@ final class _ServerAdapter {
       request = _adapt(incoming, input);
     } on Object {
       try {
-        await _sendEmpty(incoming.response, HttpStatus.badRequest);
+        await _sendEmpty(incoming.response, HttpStatus.badRequest, input);
       } on Object catch (deliveryError, deliveryStackTrace) {
         _report(deliveryError, deliveryStackTrace);
       } finally {
@@ -192,15 +203,23 @@ final class _ServerAdapter {
             response,
             input,
             isHead: dispatch.request.method == 'HEAD',
+            resetTarget: true,
           );
         } on _DeliveryFailure catch (replacementFailure) {
           _report(replacementFailure.error, replacementFailure.stackTrace);
+          if (!replacementFailure.committed) {
+            await _cleanUp(() => _abortUncommitted(incoming.response));
+          }
         }
       }
     } on Object catch (error, stackTrace) {
       _report(error, stackTrace);
       try {
-        await _sendEmpty(incoming.response, HttpStatus.internalServerError);
+        await _sendEmpty(
+          incoming.response,
+          HttpStatus.internalServerError,
+          input,
+        );
       } on Object catch (deliveryError, deliveryStackTrace) {
         _report(deliveryError, deliveryStackTrace);
       }
@@ -241,13 +260,19 @@ final class _ServerAdapter {
     Response response,
     _HttpRequestBody input, {
     required bool isHead,
+    bool resetTarget = false,
   }) async {
     var committed = false;
     try {
-      if (!input.isComplete) {
-        input.pause();
-        target.persistentConnection = false;
+      final suppressBody =
+          response.statusCode == HttpStatus.noContent ||
+          response.statusCode == HttpStatus.resetContent ||
+          response.statusCode == HttpStatus.notModified ||
+          isHead;
+      if (!suppressBody && !response._body.isUntouched) {
+        throw StateError('The response body has already been consumed or closed.');
       }
+      _prepareTarget(target, input, reset: resetTarget);
       target
         ..statusCode = response.statusCode
         ..bufferOutput = false;
@@ -296,11 +321,44 @@ final class _ServerAdapter {
     }
   }
 
-  Future<void> _sendEmpty(HttpResponse response, int status) async {
+  Future<void> _sendEmpty(
+    HttpResponse response,
+    int status,
+    _HttpRequestBody input, {
+    bool closeConnection = false,
+  }) async {
+    _prepareTarget(response, input, closeConnection: closeConnection);
     response
       ..statusCode = status
       ..contentLength = 0;
     await response.close();
+  }
+
+  void _prepareTarget(
+    HttpResponse target,
+    _HttpRequestBody input, {
+    bool closeConnection = false,
+    bool reset = false,
+  }) {
+    if (reset) {
+      final wasPersistent = target.persistentConnection;
+      final wasChunked = target.headers.chunkedTransferEncoding;
+      target.headers.clear();
+      target
+        ..statusCode = HttpStatus.ok
+        ..persistentConnection = wasPersistent;
+      target.headers.chunkedTransferEncoding = wasChunked;
+    }
+    target.bufferOutput = false;
+    if (closeConnection || !input.isComplete) {
+      input.pause();
+      target.persistentConnection = false;
+    }
+  }
+
+  Future<void> _abortUncommitted(HttpResponse response) async {
+    final socket = await response.detachSocket(writeHeaders: false);
+    socket.destroy();
   }
 
   Future<void> _cleanUp(Future<void> Function() operation) async {

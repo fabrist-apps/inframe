@@ -81,7 +81,7 @@ Future<Response> _invokeMiddleware(
         'next cannot be called after its middleware invocation has finished.',
       );
     }
-    if (!forwardedRequest._sharesExchange(request)) {
+    if (!forwardedRequest._isViewOf(request)) {
       dispatch.rejectContinuation(
         'next accepts only views of the current request.',
       );
@@ -173,7 +173,7 @@ Future<Response> _finishMiddleware(
 
   await _closeAndReport(response, dispatch);
   _observeOrphan(downstream!, dispatch);
-  throw _ContinuationStateError(
+  dispatch.rejectContinuation(
     'Middleware finished before its downstream work completed.',
   );
 }

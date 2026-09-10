@@ -178,6 +178,10 @@ void main() {
         throwsArgumentError,
       );
       expect(
+        () => application.get('/bad/*rest/', (_, _) => Response.empty()),
+        throwsArgumentError,
+      );
+      expect(
         () => application.get('/bad/:id/:id', (_, _) => Response.empty()),
         throwsArgumentError,
       );

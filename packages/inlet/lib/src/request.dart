@@ -70,9 +70,9 @@ final class Request {
     required this.uri,
     required this.headers,
     required this.connection,
-    required Map<String, String> pathParameters,
+    required this.pathParameters,
     required this._exchange,
-  }) : pathParameters = Map.unmodifiable(pathParameters);
+  });
 
   /// The case-sensitive HTTP method.
   final String method;
@@ -110,7 +110,8 @@ final class Request {
     exchange: _exchange,
   );
 
-  bool _sharesExchange(Request other) => identical(_exchange, other._exchange);
+  bool _isViewOf(Request other) =>
+      identical(_exchange, other._exchange) && identical(pathParameters, other.pathParameters);
 
   /// The body stream, claimed when it is first listened to.
   Stream<List<int>> get body => _exchange.body.stream;
@@ -199,6 +200,13 @@ Uri _validateUri(Uri uri) {
   }
   if (uri.hasFragment || uri.userInfo.isNotEmpty) {
     throw ArgumentError.value(uri, 'uri', 'must not contain a fragment or user information');
+  }
+  if (uri.hasAuthority && !uri.hasScheme) {
+    throw ArgumentError.value(
+      uri,
+      'uri',
+      'an authority requires an absolute HTTP or HTTPS URI',
+    );
   }
   if (uri.hasScheme && uri.scheme != 'http' && uri.scheme != 'https') {
     throw ArgumentError.value(uri, 'uri', 'absolute URIs must use HTTP or HTTPS');

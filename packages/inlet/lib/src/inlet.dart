@@ -106,26 +106,23 @@ final class Inlet extends Router {
     final router = await _admit(request);
     final dispatchContext = context ?? this.context;
     final resolution = router.resolve(request);
-    final (:middleware, :terminal, :dispatchRequest, :suppressBody) = switch (resolution) {
+    final (:middleware, :terminal, :dispatchRequest) = switch (resolution) {
       _BadRoutePath() => (
         middleware: router.rootMiddleware,
         terminal: _badRequest,
         dispatchRequest: request,
-        suppressBody: false,
       ),
       _RouteNotFound() => (
         middleware: router.rootMiddleware,
         terminal: _notFound,
         dispatchRequest: request,
-        suppressBody: false,
       ),
       _MethodNotAllowed(:final allowedMethods) => (
         middleware: router.rootMiddleware,
         terminal: _methodNotAllowed(allowedMethods),
         dispatchRequest: request,
-        suppressBody: false,
       ),
-      _MatchedRoute(:final registration, :final pathParameters, :final suppressBody) => (
+      _MatchedRoute(:final registration, :final pathParameters) => (
         middleware: <Middleware>[
           ...router.rootMiddleware,
           for (final scope in registration.scopes) ...scope,
@@ -133,7 +130,6 @@ final class Inlet extends Router {
         ],
         terminal: registration.handler,
         dispatchRequest: request._withPathParameters(pathParameters),
-        suppressBody: suppressBody,
       ),
     };
     final dispatch = _DispatchState(dispatchContext, dispatchRequest, _report);
@@ -156,7 +152,7 @@ final class Inlet extends Router {
       );
     }
     return _DispatchResult(
-      suppressBody ? response._withoutBody() : response,
+      request.method == 'HEAD' ? response._withoutBody() : response,
       dispatch.context,
       dispatch.request,
     );

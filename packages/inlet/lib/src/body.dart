@@ -23,7 +23,7 @@ final class _Body {
     return _Body(Stream.value(copied)).._knownLength = copied.length;
   }
 
-  final Stream<List<int>> _source;
+  Stream<List<int>>? _source;
   late final Stream<List<int>> _stream = _BodyStream(this);
 
   _BodyState _state = const _UntouchedBody();
@@ -31,6 +31,8 @@ final class _Body {
   Future<void>? _closeFuture;
 
   int? get knownLength => _knownLength;
+
+  bool get isUntouched => _state is _UntouchedBody;
 
   Stream<List<int>> get stream => _stream;
 
@@ -71,8 +73,9 @@ final class _Body {
   }
 
   void _startBuffering(_BufferingBody buffering) {
+    final source = _takeSource();
     try {
-      final subscription = _source.listen(
+      final subscription = source.listen(
         (chunk) => _bufferChunk(buffering, chunk),
         onError: (Object error, StackTrace stackTrace) {
           _failBuffering(buffering, error, stackTrace);
@@ -155,6 +158,7 @@ final class _Body {
     final controller = StreamController<List<int>>(sync: true);
     final raw = _RawBody(controller);
     _state = raw;
+    final source = _takeSource();
 
     controller
       ..onPause = raw.source.pause
@@ -170,7 +174,7 @@ final class _Body {
     raw.downstream = downstream;
 
     try {
-      final upstream = _source.listen(
+      final upstream = source.listen(
         (chunk) => _forwardChunk(raw, chunk),
         onError: (Object error, StackTrace stackTrace) {
           _failRaw(raw, error, stackTrace);
@@ -228,6 +232,7 @@ final class _Body {
     _closeFuture = closed.future;
     final previous = _state;
     _state = const _ClosedBody();
+    _source = null;
 
     final Future<void> cleanup;
     switch (previous) {
@@ -254,6 +259,15 @@ final class _Body {
 
     unawaited(cleanup.then(closed.complete, onError: closed.completeError));
     return closed.future;
+  }
+
+  Stream<List<int>> _takeSource() {
+    final source = _source;
+    if (source == null) {
+      throw StateError('The body source has already been claimed.');
+    }
+    _source = null;
+    return source;
   }
 }
 

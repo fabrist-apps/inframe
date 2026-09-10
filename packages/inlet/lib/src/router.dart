@@ -180,9 +180,6 @@ final class _RoutePattern {
     }
 
     final rawSegments = path == '/' ? <String>[] : path.substring(1).split('/');
-    if (!strict && rawSegments.isNotEmpty && rawSegments.last.isEmpty) {
-      rawSegments.removeLast();
-    }
 
     final segments = <_PatternSegment>[];
     final captureNames = <String>[];
@@ -217,6 +214,12 @@ final class _RoutePattern {
         throw ArgumentError.value(path, 'path', 'captures must occupy a whole segment');
       }
       segments.add(_LiteralSegment(_decodePatternLiteral(rawSegment, path)));
+    }
+    if (!strict &&
+        segments.isNotEmpty &&
+        segments.last is _LiteralSegment &&
+        (segments.last as _LiteralSegment).value.isEmpty) {
+      segments.removeLast();
     }
     return _RoutePattern(List.unmodifiable(segments), List.unmodifiable(captureNames));
   }
@@ -315,16 +318,16 @@ final class _CompiledRouter {
     }
 
     if (request.method == 'HEAD') {
-      final explicit = _matchForMethod(candidates, 'HEAD', suppressBody: true);
+      final explicit = _matchForMethod(candidates, 'HEAD');
       if (explicit != null) {
         return explicit;
       }
-      final fallback = _matchForMethod(candidates, 'GET', suppressBody: true);
+      final fallback = _matchForMethod(candidates, 'GET');
       if (fallback != null) {
         return fallback;
       }
     } else {
-      final match = _matchForMethod(candidates, request.method, suppressBody: false);
+      final match = _matchForMethod(candidates, request.method);
       if (match != null) {
         return match;
       }
@@ -409,28 +412,23 @@ final class _PathCandidate {
   final _CompiledRouteNode node;
   final List<String> captures;
 
-  _MatchedRoute toMatch(String method, {required bool suppressBody}) {
+  _MatchedRoute toMatch(String method) {
     final registration = node.endpoints[method]!;
     final parameters = <String, String>{};
     for (var index = 0; index < captures.length; index++) {
       parameters[registration.pattern.captureNames[index]] = captures[index];
     }
-    return _MatchedRoute(
-      registration,
-      Map.unmodifiable(parameters),
-      suppressBody: suppressBody,
-    );
+    return _MatchedRoute(registration, Map.unmodifiable(parameters));
   }
 }
 
 _MatchedRoute? _matchForMethod(
   List<_PathCandidate> candidates,
-  String method, {
-  required bool suppressBody,
-}) {
+  String method,
+) {
   for (final candidate in candidates) {
     if (candidate.node.endpoints.containsKey(method)) {
-      return candidate.toMatch(method, suppressBody: suppressBody);
+      return candidate.toMatch(method);
     }
   }
   return null;
@@ -441,15 +439,10 @@ sealed class _RouteResolution {
 }
 
 final class _MatchedRoute extends _RouteResolution {
-  const _MatchedRoute(
-    this.registration,
-    this.pathParameters, {
-    required this.suppressBody,
-  });
+  const _MatchedRoute(this.registration, this.pathParameters);
 
   final _RouteRegistration registration;
   final Map<String, String> pathParameters;
-  final bool suppressBody;
 }
 
 final class _BadRoutePath extends _RouteResolution {
