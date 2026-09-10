@@ -84,10 +84,17 @@ jobs:
           dart run tool/serve_web_example.dart 8080 > "$RUNNER_TEMP/turso-web-server.log" 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          SERVER_READY=false
           for attempt in {1..30}; do
-            if curl --fail --silent http://localhost:8080 > /dev/null; then break; fi
+            if curl --fail --silent http://localhost:8080 > /dev/null; then
+              SERVER_READY=true
+              break
+            fi
             sleep 1
           done
+          if [[ "$SERVER_READY" != true ]]; then
+            cat "$RUNNER_TEMP/turso-web-server.log"
+          fi
           curl --fail --head http://localhost:8080
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py chrome
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py firefox
@@ -213,9 +220,18 @@ jobs:
         working-directory: packages/database/turso
         run: |
           dart run tool/serve_web_example.dart 8080 > "$RUNNER_TEMP/turso-web-server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          SERVER_READY=false
           for attempt in {1..30}; do
-            if curl --fail --silent http://localhost:8080 > /dev/null; then break; fi
+            if curl --fail --silent http://localhost:8080 > /dev/null; then
+              SERVER_READY=true
+              break
+            fi
             sleep 1
           done
+          if [[ "$SERVER_READY" != true ]]; then
+            cat "$RUNNER_TEMP/turso-web-server.log"
+          fi
           curl --fail --head http://localhost:8080
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py safari
