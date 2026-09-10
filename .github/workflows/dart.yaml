@@ -33,6 +33,9 @@ jobs:
       - name: Run context tests and consumer checks
         run: dart test packages/context/test --chain-stack-traces
 
+      - name: Run Chrono ID tests
+        run: dart test packages/chrono_id/chrono_id/test --chain-stack-traces
+
       - name: Run controlled HTTP tests
         run: dart test packages/database/clickhouse/test --exclude-tags integration --chain-stack-traces
 
