@@ -151,6 +151,18 @@ void main() {
       expect((result as Failure<int, String>).error, 'first');
     });
 
+    test('should retain a complete mixed cause in the Effect error channel', () async {
+      final cause = Sequential<String>([
+        const Expected('expected'),
+        Defect(StateError('bad'), StackTrace.current),
+      ]);
+      final captured = Effect.failCause<int, String>(cause).result();
+
+      final exit = await Runtime().run(captured);
+
+      expect((exit as Failed<Result<int, String>, String>).cause, same(cause));
+    });
+
     test('should be stack-safe and yield during deep composition', () async {
       var effect = Effect.succeed<int, Never>(0);
       for (var index = 0; index < 1000; index += 1) {

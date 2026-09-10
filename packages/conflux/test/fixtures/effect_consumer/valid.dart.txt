@@ -17,10 +17,15 @@ Future<void> main() async {
   final Effect<int, _BaseError> widened = Effect.fail<int, _SpecificError>(
     const _SpecificError(),
   );
+  final Effect<Result<int, _BaseError>, _BaseError> captured = widened.result();
   final recovered = widened.catchError(
     (_) => Effect.succeed<int, _BaseError>(1),
   );
+  final capturedExit = await Runtime().run(captured);
   final widenedExit = await Runtime().run(recovered);
+  if (capturedExit is! Succeeded<Result<int, _BaseError>, _BaseError>) {
+    throw StateError('Expected a captured result.');
+  }
   if (widenedExit is! Succeeded<int, _BaseError>) {
     throw StateError('Expected widened recovery to succeed.');
   }
