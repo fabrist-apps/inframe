@@ -2,6 +2,7 @@
 library;
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 import 'package:turso/turso.dart';
@@ -64,8 +65,44 @@ void main() {
       expect(matches.rows.map((row) => row.getInt('id')), [1, 3]);
       await reopened.close();
     });
+
+    for (final cipher in TursoCipher.values) {
+      test('composes ${cipher.name} encryption with FTS', () async {
+        final temporaryDirectory = await Directory.systemTemp.createTemp('turso-encrypted-fts-');
+        addTearDown(() => temporaryDirectory.delete(recursive: true));
+        final location = TursoLocation.file('${temporaryDirectory.path}/search.db');
+        final encryption = TursoEncryption(cipher: cipher, key: _encryptionKey());
+        final database = await TursoDatabase.open(location, encryption: encryption);
+        await database.execute('CREATE TABLE documents (id INTEGER PRIMARY KEY, body TEXT)');
+        await database.execute('CREATE INDEX documents_fts ON documents USING fts (body)');
+        await database.execute(
+          'INSERT INTO documents VALUES (?, ?)',
+          parameters: const [1, 'encrypted needle'],
+        );
+        await expectLater(
+          database.transaction((tx) async {
+            await tx.execute(
+              'INSERT INTO documents VALUES (?, ?)',
+              parameters: const [2, 'rolled back needle'],
+            );
+            throw const _ExpectedRollback();
+          }),
+          throwsA(isA<_ExpectedRollback>()),
+        );
+        await database.close();
+
+        final reopened = await TursoDatabase.open(location, encryption: encryption);
+        final matches = await reopened.query(
+          "SELECT id FROM documents WHERE fts_match(body, 'needle') ORDER BY id",
+        );
+        expect(matches.rows.map((row) => row.getInt('id')), [1]);
+        await reopened.close();
+      });
+    }
   });
 }
+
+Uint8List _encryptionKey() => Uint8List.fromList(List<int>.generate(32, (index) => index + 1));
 
 final class _ExpectedRollback implements Exception {
   const _ExpectedRollback();

@@ -2,40 +2,53 @@
 
 Internal Dart and Flutter bindings for an embedded Turso database.
 
-The package is under active implementation. SQL, transactions, persistent storage, and encryption
-run through packaged native libraries and the browser bridge. The complete cross-platform contract
-matrix is still being verified.
+SQL, transactions, persistent storage, and encryption run through packaged native libraries and the
+browser bridge. The supported runtime matrix is exercised in CI; see
+[VERIFICATION.md](VERIFICATION.md) for the recorded environments and contract trace.
 
 ## Native example
 
 ```dart
+import 'dart:typed_data';
+
 import 'package:turso/turso.dart';
 
-Future<void> main() async {
+Future<(int, String)> writeAndRead(
+  String databasePath,
+  Uint8List encryptionKey,
+) async {
   final database = await TursoDatabase.open(
-    TursoLocation.file('/absolute/path/to/notes.db'),
+    TursoLocation.file(databasePath),
+    encryption: TursoEncryption(
+      cipher: TursoCipher.aegis256,
+      key: encryptionKey,
+    ),
   );
   try {
     await database.execute(
       'CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, title TEXT)',
     );
-    await database.execute(
-      'INSERT INTO notes (id, title) VALUES (?, ?)',
-      parameters: [42, 'Hello'],
-    );
+    await database.transaction((tx) async {
+      await tx.execute(
+        'INSERT INTO notes (id, title) VALUES (?, ?)',
+        parameters: [42, 'Hello'],
+      );
+    });
     final result = await database.query(
       'SELECT id, title FROM notes WHERE id = ?',
       parameters: [42],
     );
-    print(result.rows.single.getString('title'));
+    final row = result.rows.single;
+    return (row.getInt('id'), row.getString('title'));
   } finally {
     await database.close();
   }
 }
 ```
 
-The caller owns the database path and creates its parent directory. Each database has one serialized
-connection, and native engine work runs in a dedicated isolate. Queries buffer their complete result.
+The caller owns the database path, parent directory, schema, key generation, and key storage. Each
+database has one serialized connection, and native engine work runs in a dedicated isolate. Queries
+buffer their complete result.
 
 Packaged native targets are:
 
@@ -52,9 +65,20 @@ artifacts through the Dart native-assets build hook and do not need Rust or an A
 provenance and integrity hashes are recorded in [native/README.md](native/README.md).
 
 SQL accepts either positional parameters or named parameters using their full placeholder spelling,
-such as `{':id': 42}`. Supported values are `null`, `String`, finite numbers, signed 64-bit `BigInt`
-values, and `Uint8List`. SQL integers always return as `BigInt`; `getInt` accepts only values in the
-portable safe-integer range.
+such as `{':id': 42}`. One call cannot use both. Supported values are `null`, `String`, finite
+numbers, signed 64-bit `BigInt` values, and `Uint8List`. The package copies mutable parameter lists,
+maps, and blobs when accepting an operation. Missing, extra, mixed, and unsupported bindings fail
+before execution, as do multiple SQL statements.
+
+Every SQL INTEGER returns as `BigInt`. Integral Dart numbers bind as integers only within
+±9,007,199,254,740,991; use `BigInt` outside that portable range. `getInt` enforces the same range.
+SQL REAL values return as `double`, without implicit integer conversion. Results preserve column and
+row order and are immutable. Duplicate column names remain available through `valueAt`; lookup by an
+ambiguous name fails. Blob getters return defensive copies.
+
+`query` buffers all rows, including `RETURNING` rows. `execute` consumes returned rows and reports a
+`BigInt rowsAffected`. V1 has no result-size limit or streaming API, so use bounded queries for data
+that can grow.
 
 Use `transaction` for an isolated callback transaction:
 
@@ -84,8 +108,9 @@ interrupted write as having an uncertain outcome.
 ## Encryption
 
 Pass `TursoEncryption` with either `TursoCipher.aegis256` or `TursoCipher.aes256gcm` and exactly 32
-key bytes. Both ciphers have been verified with persistent reopen on macOS ARM64 and desktop Chrome.
-Wrong keys and missing encryption settings fail open; the package never retries as plaintext.
+key bytes. Both ciphers have been verified with persistent reopen on every supported native runtime
+and desktop browser. Wrong keys and missing encryption settings fail open; the package never retries
+as plaintext.
 
 The application owns key generation and secure storage. The package copies key bytes at its public
 boundary and redacts them from its diagnostics, but it does not promise managed-runtime memory
@@ -128,18 +153,19 @@ dart compile js example/web/main.dart -O1 -o example/web/main.dart.js
 dart run tool/serve_web_example.dart
 ```
 
-The OPFS persistence, reload, lock-release, memory, and shared SQL contract checks were run against
-desktop Chrome `152.0.7977.65` on macOS. The same browser check covers callback transaction commit,
-rollback, isolation, and handle expiry.
+The OPFS persistence, reload, lock-release, memory, and shared SQL contract checks run in current
+stable desktop Chrome, Firefox, and actual macOS Safari. The same check covers callback transaction
+commit, rollback, isolation, and handle expiry. Mobile browsers are outside the v1 support matrix.
+Exact tested versions and runner images are recorded in [VERIFICATION.md](VERIFICATION.md).
 
 ## SQL features
 
 `capabilities` reports features verified for the selected packaged artifact:
 
-| Backend | FTS | Vector functions | Vector indexes |
-| --- | --- | --- | --- |
-| Native | Yes | Yes | No |
-| Web | No | Yes | No |
+| Runtime | AEGIS-256 | AES-256-GCM | FTS | Vector functions | Vector indexes |
+| --- | --- | --- | --- | --- | --- |
+| Android, iOS, macOS, Linux, Windows | Yes | Yes | Yes | Yes | No |
+| Desktop Chrome, Firefox, Safari | Yes | Yes | No | Yes | No |
 
 Native FTS uses upstream's raw SQL surface:
 

@@ -88,6 +88,24 @@ jobs:
             throw 'Turso Flutter smoke check failed.'
           }
 
+  turso-macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.3
+      - name: Resolve workspace dependencies
+        run: dart pub get
+      - name: Verify packaged macOS SDK artifact
+        run: echo '3fbb42e1e77acb7869615a5e5d5f18e5a13bbb167be22630f23d97b9e17a1c25  packages/database/turso/native/macos/arm64/libturso_sdk_kit.dylib' | shasum -a 256 --check
+      - name: Run the complete Turso native contract
+        working-directory: packages/database/turso
+        run: dart test test --chain-stack-traces
+
   turso-android:
     runs-on: ubuntu-latest
 
@@ -165,6 +183,80 @@ jobs:
         run: |
           find build/ios/iphoneos/Runner.app -path '*turso_sdk_kit.framework/turso_sdk_kit' \
             -exec file {} \; | grep 'arm64'
+
+  turso-web:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, firefox]
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.3
+      - name: Resolve workspace dependencies
+        run: dart pub get
+      - name: Build the browser verification application
+        working-directory: packages/database/turso
+        run: |
+          dart run tool/install_web.dart example/web/turso
+          dart compile js example/web/main.dart -O1 -o example/web/main.dart.js
+      - name: Install the browser driver
+        run: |
+          python3 -m venv "$RUNNER_TEMP/turso-selenium"
+          "$RUNNER_TEMP/turso-selenium/bin/pip" install selenium
+      - name: Run the complete web contract
+        working-directory: packages/database/turso
+        run: |
+          google-chrome --version || true
+          firefox --version || true
+          dart run tool/serve_web_example.dart 8080 > "$RUNNER_TEMP/turso-web-server.log" 2>&1 &
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:8080 > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --head http://localhost:8080
+          "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py "${{ matrix.browser }}"
+
+  turso-safari:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.3
+      - name: Resolve workspace dependencies
+        run: dart pub get
+      - name: Build the browser verification application
+        working-directory: packages/database/turso
+        run: |
+          dart run tool/install_web.dart example/web/turso
+          dart compile js example/web/main.dart -O1 -o example/web/main.dart.js
+      - name: Enable Safari automation
+        run: |
+          sudo safaridriver --enable
+          safaridriver --version
+      - name: Install the browser driver
+        run: |
+          python3 -m venv "$RUNNER_TEMP/turso-selenium"
+          "$RUNNER_TEMP/turso-selenium/bin/pip" install selenium
+      - name: Run the complete Safari contract
+        working-directory: packages/database/turso
+        run: |
+          dart run tool/serve_web_example.dart 8080 > "$RUNNER_TEMP/turso-web-server.log" 2>&1 &
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:8080 > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --head http://localhost:8080
+          "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py safari
 
   test:
     runs-on: ubuntu-latest

@@ -19,6 +19,9 @@ enum TursoCipher {
 }
 
 /// Application-supplied encryption configuration.
+///
+/// The application owns key generation and secure storage. The package copies
+/// key bytes at this boundary but does not promise managed-memory zeroization.
 final class TursoEncryption {
   /// Creates encryption configuration with a raw [key].
   TursoEncryption({required this.cipher, required Uint8List key}) : _key = Uint8List.fromList(key) {

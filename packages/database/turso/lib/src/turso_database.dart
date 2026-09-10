@@ -22,6 +22,12 @@ final class TursoDatabase {
   TursoPlatformException? _retirementFailure;
 
   /// Opens a database at [location].
+  ///
+  /// The caller owns native paths, their parent directories, browser asset
+  /// hosting, schema creation, and encryption-key storage. A requested
+  /// [encryption] configuration fails explicitly when the backend rejects it;
+  /// opening never retries as plaintext. Browser and memory locations on web
+  /// require version-matched [web] options.
   static Future<TursoDatabase> open(
     TursoLocation location, {
     TursoEncryption? encryption,
@@ -35,6 +41,10 @@ final class TursoDatabase {
   TursoCapabilities get capabilities => _backend.capabilities;
 
   /// Runs one SQL statement and buffers its complete result.
+  ///
+  /// Supply either positional [parameters] or [namedParameters] with full
+  /// placeholder spelling, such as `{':id': 42}`. Supported values are NULL,
+  /// text, finite numbers, signed 64-bit [BigInt] values, and [Uint8List].
   Future<TursoQueryResult> query(
     String sql, {
     List<Object?> parameters = const [],
@@ -49,6 +59,9 @@ final class TursoDatabase {
   });
 
   /// Runs one SQL statement and discards rows it returns.
+  ///
+  /// Use [query] when the statement has a `RETURNING` clause whose rows the
+  /// caller needs.
   Future<TursoExecuteResult> execute(
     String sql, {
     List<Object?> parameters = const [],
@@ -63,12 +76,19 @@ final class TursoDatabase {
   });
 
   /// Runs [action] inside one deferred transaction.
+  ///
+  /// The returned future completes with the callback result after commit.
+  /// Callback failures roll back when the connection remains usable. Use only
+  /// the supplied transaction handle inside [action].
   Future<T> transaction<T>(Future<T> Function(TursoTransaction tx) action) => Future<T>.sync(() {
     _ensureOutsideTransactionCallback();
     return _enqueue(() => _runTransaction(action));
   });
 
   /// Drains accepted work and releases the database.
+  ///
+  /// New root operations fail once shutdown starts. Repeated calls return the
+  /// same shutdown future.
   Future<void> close() {
     if (_insideTransactionCallback) {
       return Future<void>.error(

@@ -14,6 +14,10 @@ final class TursoColumn {
 }
 
 /// One immutable row from a buffered query result.
+///
+/// SQL values are represented as `null`, [BigInt], [double], [String], or
+/// owned [Uint8List] bytes. Duplicate column names remain accessible by index
+/// and make name lookup ambiguous.
 final class TursoRow {
   /// Creates a row from ordered [columns] and [values].
   TursoRow(List<TursoColumn> columns, List<Object?> values)
@@ -77,6 +81,9 @@ final class TursoRow {
 }
 
 /// A completely buffered SQL query result.
+///
+/// Results have no package-level size limit. Callers should bound queries when
+/// the complete result may be large.
 final class TursoQueryResult {
   /// Creates an immutable result.
   TursoQueryResult({

@@ -25,6 +25,7 @@ Future<void> main() async {
     await _verifyCloseFailure();
     await _verifyLockRelease();
     await _verifyMemoryDatabase();
+    await _verifyRepresentativeWorkload();
     await _verifyPlatformFailures();
     web.window.localStorage.removeItem(_phaseKey);
     web.document.body!.textContent = 'PASS\n${web.window.navigator.userAgent}';
@@ -238,6 +239,22 @@ Future<void> _writePersistentData() async {
     await _expectFailure<ArgumentError>(
       () => database.query('SELECT :id', namedParameters: const {':other': 1}),
     );
+    await _expectFailure<ArgumentError>(
+      () => database.query('SELECT ?', parameters: const [true]),
+    );
+    await _expectFailure<ArgumentError>(
+      () => database.query('SELECT ?', parameters: const [double.nan]),
+    );
+    await _expectFailure<ArgumentError>(
+      () => database.query('SELECT ?', parameters: [BigInt.parse('9223372036854775808')]),
+    );
+    await _expectFailure<ArgumentError>(
+      () => database.query(
+        'SELECT :value',
+        parameters: const [1],
+        namedParameters: const {':value': 1},
+      ),
+    );
     final repeated = await database.query(
       'SELECT :value + :value AS total',
       namedParameters: const {':value': 2},
@@ -269,6 +286,11 @@ Future<void> _verifyReloadedData() async {
     );
     _expect(row.getString('title') == 'persisted', 'Text did not persist.');
     _expect(_listEquals(row.getBlob('payload'), [1, 2, 3]), 'Blob snapshot did not persist.');
+    final copiedBlob = row.getBlob('payload')..[0] = 99;
+    _expect(copiedBlob[0] == 99, 'The returned blob was not mutable.');
+    _expect(row.getBlob('payload')[0] == 1, 'Blob access mutated the buffered row.');
+    await _expectFailure<RangeError>(() async => row.getInt('maximum'));
+    await _expectFailure<UnsupportedError>(() async => result.rows.clear());
     _expect(row.valueAt(4) == BigInt.parse('-9223372036854775808'), 'First duplicate changed.');
     _expect(row.valueAt(5) == BigInt.parse('9223372036854775807'), 'Second duplicate changed.');
     await _expectFailure<StateError>(() async => row.value('duplicate'));
@@ -298,6 +320,24 @@ Future<void> _verifyMemoryDatabase() async {
     await _expectFailure<TursoDatabaseException>(() => second.query('SELECT * FROM local_only'));
   } finally {
     await second.close();
+  }
+}
+
+Future<void> _verifyRepresentativeWorkload() async {
+  final database = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
+  try {
+    await database.execute('CREATE TABLE documents (id INTEGER PRIMARY KEY, body TEXT)');
+    await database.execute(
+      'WITH RECURSIVE sequence(value) AS ( '
+      'SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 2000) '
+      "INSERT INTO documents SELECT value, 'bounded browser row ' || value FROM sequence",
+    );
+    final rows = await database.query(
+      'SELECT id, body FROM documents ORDER BY id DESC LIMIT 25',
+    );
+    _expect(rows.rows.length == 25, 'The representative bounded query returned the wrong size.');
+  } finally {
+    await database.close();
   }
 }
 
