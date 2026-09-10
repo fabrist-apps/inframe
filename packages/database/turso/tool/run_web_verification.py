@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import time
 
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
@@ -44,7 +43,11 @@ def main():
         isolated = driver.execute_script('return window.crossOriginIsolated')
         if not isolated:
             raise RuntimeError('The verification page is not cross-origin isolated.')
-        print(f'TURSO_WEB_RUNTIME browser={arguments.browser} user_agent={user_agent}')
+        browser_version = driver.capabilities.get('browserVersion', 'unknown')
+        print(
+            f'TURSO_WEB_RUNTIME browser={arguments.browser} '
+            f'version={browser_version} user_agent={user_agent}'
+        )
         if arguments.browser == 'chrome':
             metrics = driver.execute_cdp_cmd('Performance.getMetrics', {})['metrics']
             values = {metric['name']: metric['value'] for metric in metrics}
@@ -53,7 +56,6 @@ def main():
                 f"js_heap_used={int(values.get('JSHeapUsedSize', 0))} "
                 f"js_heap_total={int(values.get('JSHeapTotalSize', 0))}"
             )
-        time.sleep(1)
     finally:
         driver.quit()
 

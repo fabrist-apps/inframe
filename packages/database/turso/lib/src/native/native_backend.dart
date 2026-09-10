@@ -166,7 +166,7 @@ final class NativeBackend implements TursoBackend {
   }
 
   void _handleWorkerFailure() {
-    if (_closed || _workerFailure != null) return;
+    if (_workerFailure != null || (_closed && _pending.isEmpty)) return;
     _workerFailure = const TursoPlatformException(
       'The Turso native worker stopped unexpectedly; an interrupted write may have committed.',
     );
@@ -216,13 +216,15 @@ final class NativeBackend implements TursoBackend {
 
 void _runNativeWorker(List<Object?> start) {
   final replyPort = start[0]! as SendPort;
+  final key = start[3] == null ? null : base64Decode(start[3]! as String);
+  final sensitiveValues = _sensitiveKeyRepresentations(key);
   ReceivePort? requests;
   _NativeDatabase? database;
   try {
     database = _NativeDatabase.open(
       path: start[1]! as String,
       cipher: start[2] as String?,
-      key: start[3] == null ? null : base64Decode(start[3]! as String),
+      key: key,
     );
     requests = ReceivePort('Turso native requests');
     replyPort.send([true, requests.sendPort]);
@@ -250,23 +252,44 @@ void _runNativeWorker(List<Object?> start) {
           replyPort.send([requestId, true, result]);
         }
       } on Object catch (error) {
-        replyPort.send([requestId, ..._encodeWorkerError(error)]);
+        replyPort.send([requestId, ..._encodeWorkerError(error, sensitiveValues)]);
       }
     });
   } on Object catch (error) {
-    database?.close();
+    try {
+      database?.close();
+    } on Object {
+      // Preserve and report the failure that interrupted initialization.
+    }
     requests?.close();
-    replyPort.send(_encodeWorkerError(error));
+    replyPort.send(_encodeWorkerError(error, sensitiveValues));
   }
 }
 
-List<Object?> _encodeWorkerError(Object error) => switch (error) {
-  TursoDatabaseException(:final message, :final code) => [false, 'database', message, code],
-  TursoUnsupportedException(:final message) => [false, 'unsupported', message, null],
-  ArgumentError() => [false, 'argument', error.toString(), null],
-  StateError() => [false, 'state', error.toString(), null],
-  _ => [false, 'platform', error.toString(), null],
-};
+Set<String> _sensitiveKeyRepresentations(Uint8List? key) {
+  if (key == null) return const {};
+  final hex = _encodeHex(key);
+  return {hex, hex.toUpperCase(), base64Encode(key), key.join(',')};
+}
+
+List<Object?> _encodeWorkerError(Object error, Set<String> sensitiveValues) {
+  final (kind, message, code) = switch (error) {
+    TursoDatabaseException(:final message, :final code) => ('database', message, code),
+    TursoUnsupportedException(:final message) => ('unsupported', message, null),
+    ArgumentError() => ('argument', error.toString(), null),
+    StateError() => ('state', error.toString(), null),
+    _ => ('platform', error.toString(), null),
+  };
+  return [false, kind, _redact(message, sensitiveValues), code];
+}
+
+String _redact(String message, Set<String> sensitiveValues) {
+  var redacted = message;
+  for (final sensitiveValue in sensitiveValues) {
+    redacted = redacted.replaceAll(sensitiveValue, '[REDACTED]');
+  }
+  return redacted;
+}
 
 Object _decodeWorkerError(List<Object?> reply) => switch (reply[1]) {
   'database' => TursoDatabaseException(reply[2]! as String, code: reply[3] as int?),

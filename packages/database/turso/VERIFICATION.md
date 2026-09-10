@@ -52,7 +52,8 @@ contract against a substitute backend.
 The browser workload inserts 2,000 rows and reads a bounded 25-row result. Chrome records its Dart
 page JavaScript heap after the workload. The upstream loader separately reserves 250 MiB of logical
 shared WASM memory; this reservation is not the same measurement as JavaScript heap or process
-resident memory.
+resident memory. A local Chrome 153.0.8010.36 run used 4,686,548 bytes of JavaScript heap out of a
+7,340,032-byte allocated JavaScript heap after the workload.
 
 The mobile workload builds an encrypted 2,000-document FTS index for each cipher, rolls back an
 additional document, closes and reopens the database, counts the 2,000 matches, and executes a vector
