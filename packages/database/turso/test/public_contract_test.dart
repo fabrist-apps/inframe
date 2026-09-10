@@ -8,6 +8,8 @@ void main() {
     test('should reject invalid caller-owned locations', () {
       expect(() => TursoLocation.file(''), throwsArgumentError);
       expect(() => TursoLocation.file('https://example.com/database'), throwsArgumentError);
+      expect(() => TursoLocation.file('libsql://example.com/database'), throwsArgumentError);
+      expect(TursoLocation.file(r'C:\data\app.db'), isA<TursoFileLocation>());
       expect(() => TursoLocation.browser('nested/database'), throwsArgumentError);
       expect(() => TursoLocation.browser(r'nested\database'), throwsArgumentError);
     });

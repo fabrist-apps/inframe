@@ -20,7 +20,7 @@ final class TursoFileLocation extends TursoLocation {
       throw ArgumentError.value(path, 'path', 'Must not be empty.');
     }
     final uri = Uri.tryParse(path);
-    if (uri != null && uri.hasScheme && uri.scheme != 'file') {
+    if (uri != null && _networkSchemes.contains(uri.scheme)) {
       throw ArgumentError.value(path, 'path', 'Network database URLs are not supported.');
     }
   }
@@ -28,6 +28,8 @@ final class TursoFileLocation extends TursoLocation {
   /// The caller-owned native filesystem path.
   final String path;
 }
+
+const _networkSchemes = {'http', 'https', 'libsql', 'ws', 'wss'};
 
 /// A browser origin-private filesystem database location.
 final class TursoBrowserLocation extends TursoLocation {

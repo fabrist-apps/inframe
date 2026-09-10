@@ -5,11 +5,89 @@ on:
   push:
     branches:
       - main
+      - bhaswanth-isani/fbr-25-turso-dart
 
 permissions:
   contents: read
 
 jobs:
+  turso-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.3
+      - name: Resolve workspace dependencies
+        run: dart pub get
+      - name: Verify packaged Linux SDK artifact
+        run: echo 'c61e84f96d41c2b58f7f016e3d5496b501581719092fcf0d942699e725736d47  packages/database/turso/native/linux/x64/libturso_sdk_kit.so' | sha256sum --check
+      - name: Run Turso engine tests
+        working-directory: packages/database/turso
+        run: dart test test --chain-stack-traces
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Build and run Linux Flutter application
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libgtk-3-dev ninja-build xvfb
+          flutter create --empty --platforms=linux "$RUNNER_TEMP/turso_smoke"
+          cd "$RUNNER_TEMP/turso_smoke"
+          flutter pub add turso --path "$GITHUB_WORKSPACE/packages/database/turso"
+          cp "$GITHUB_WORKSPACE/packages/database/turso/tool/flutter_smoke_main.dart.template" lib/main.dart
+          flutter build linux --release
+          xvfb-run --auto-servernum build/linux/x64/release/bundle/turso_smoke
+          test -f build/linux/x64/release/bundle/turso-flutter-smoke/PASS
+
+  turso-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.3
+      - name: Resolve workspace dependencies
+        run: dart pub get
+      - name: Verify packaged Windows SDK artifact
+        shell: pwsh
+        run: |
+          $actual = (Get-FileHash packages/database/turso/native/windows/x64/turso_sdk_kit.dll -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne 'd98951e2cc584ac98a2ada9f839a5901267c6fc0ee23eceed27b22393e51a60d') {
+            throw "Unexpected Turso SDK hash: $actual"
+          }
+      - name: Run Turso engine tests
+        working-directory: packages/database/turso
+        run: dart test test --chain-stack-traces
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Build and run Windows Flutter application
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP 'turso_smoke'
+          flutter create --empty --platforms=windows $smokeRoot
+          Push-Location $smokeRoot
+          flutter pub add turso --path "$env:GITHUB_WORKSPACE/packages/database/turso"
+          Copy-Item "$env:GITHUB_WORKSPACE/packages/database/turso/tool/flutter_smoke_main.dart.template" lib/main.dart
+          flutter build windows --release
+          $releaseRoot = "$smokeRoot/build/windows/x64/runner/Release"
+          $process = Start-Process "$releaseRoot/turso_smoke.exe" -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            $LASTEXITCODE = $process.ExitCode
+            Get-Content "$releaseRoot/TURSO_ERROR"
+            throw "Turso Flutter smoke process exited with $LASTEXITCODE."
+          }
+          if (-not (Test-Path "$releaseRoot/turso-flutter-smoke/PASS")) {
+            throw 'Turso Flutter smoke check failed.'
+          }
+
   test:
     runs-on: ubuntu-latest
 
