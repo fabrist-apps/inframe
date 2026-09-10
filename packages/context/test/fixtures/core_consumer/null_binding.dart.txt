@@ -1,0 +1,5 @@
+import 'package:context/context.dart';
+
+void main() {
+  ContextKey<String>('name').bind(null);
+}
