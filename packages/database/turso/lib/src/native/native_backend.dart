@@ -25,6 +25,8 @@ final class NativeBackend implements TursoBackend {
     this.capabilities,
   );
 
+  static const _closeTimeout = Duration(seconds: 5);
+
   final Isolate _isolate;
   final ReceivePort _receivePort;
   final StreamSubscription<Object?> _subscription;
@@ -179,21 +181,9 @@ final class NativeBackend implements TursoBackend {
     if (_closed) return;
     _closed = true;
     try {
-      final requestId = _nextRequestId++;
-      final completer = Completer<Object?>();
-      _pending[requestId] = completer;
-      _workerPort.send([requestId, 'close', null]);
-      await completer.future;
+      await _closeWorker();
     } finally {
-      await _subscription.cancel();
-      await _statusSubscription.cancel();
-      _receivePort.close();
-      _statusPort.close();
-      _isolate.kill();
-      for (final pending in _pending.values) {
-        pending.completeError(const TursoPlatformException('The native worker stopped.'));
-      }
-      _pending.clear();
+      await _disposeWorker(const TursoPlatformException('The native worker stopped.'));
     }
   }
 
@@ -206,23 +196,36 @@ final class NativeBackend implements TursoBackend {
     );
     try {
       if (workerCanClose) {
-        final requestId = _nextRequestId++;
-        final completer = Completer<Object?>();
-        _pending[requestId] = completer;
-        _workerPort.send([requestId, 'close', null]);
-        await completer.future;
+        await _closeWorker();
       }
     } finally {
-      await _subscription.cancel();
-      await _statusSubscription.cancel();
-      _receivePort.close();
-      _statusPort.close();
-      _isolate.kill();
-      for (final pending in _pending.values) {
-        pending.completeError(failure);
-      }
-      _pending.clear();
+      await _disposeWorker(failure);
     }
+  }
+
+  Future<void> _closeWorker() async {
+    final requestId = _nextRequestId++;
+    final completer = Completer<Object?>();
+    _pending[requestId] = completer;
+    _workerPort.send([requestId, 'close', null]);
+    await completer.future.timeout(
+      _closeTimeout,
+      onTimeout: () => throw const TursoPlatformException(
+        'The Turso native worker did not close within five seconds.',
+      ),
+    );
+  }
+
+  Future<void> _disposeWorker(TursoPlatformException failure) async {
+    await _subscription.cancel();
+    await _statusSubscription.cancel();
+    _receivePort.close();
+    _statusPort.close();
+    _isolate.kill();
+    for (final pending in _pending.values) {
+      pending.completeError(failure);
+    }
+    _pending.clear();
   }
 }
 

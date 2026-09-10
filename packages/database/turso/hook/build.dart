@@ -19,7 +19,13 @@ void main(List<String> arguments) async {
         'native/ios/simulator/x64/libturso_sdk_kit.dylib',
       _ => null,
     };
-    if (artifact == null) return;
+    if (artifact == null) {
+      throw BuildError(
+        message:
+            'Turso has no native artifact for ${code.targetOS} '
+            '${code.targetArchitecture}.',
+      );
+    }
 
     output.assets.code.add(
       CodeAsset(

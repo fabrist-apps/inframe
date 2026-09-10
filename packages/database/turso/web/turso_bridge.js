@@ -212,7 +212,7 @@ async function validateSql(sql) {
       case 0:
         return;
       case 1:
-        throw new InputError('SQL must contain one statement.');
+        throw new InputError('SQL must not be empty.');
       case 2:
         throw new InputError('SQL must contain exactly one statement.');
       case 3:
