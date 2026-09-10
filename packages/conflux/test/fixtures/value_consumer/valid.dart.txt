@@ -1,0 +1,23 @@
+import 'package:conflux/conflux.dart';
+
+void main() {
+  const Option<String?> absent = None();
+  const Option<String?> cleared = Some(null);
+  const Some<String?> supplied = Some('Bhaswanth');
+  final String? exactValue = supplied.value;
+  final Option<num> widened = const Some<int>(42);
+  final Option<String> mapped = widened.map((num value) => '$value');
+  final ({String name, int age}) record = const Some('Ada')
+      .zipWith(const Some(37), (name, age) => (name: name, age: age))
+      .getOrElse(() => (name: 'missing', age: 0));
+  final values = <String?>[
+    switch (absent) { Some(:final value) => value, None() => 'absent' },
+    cleared.match(onSome: (value) => value, onNone: () => 'absent'),
+    exactValue,
+    mapped.getOrElse(() => 'missing'),
+    record.name,
+  ];
+  if (values.join('|') != 'absent|null|Bhaswanth|42|Ada') {
+    throw StateError('Incorrect Option composition: $values');
+  }
+}
