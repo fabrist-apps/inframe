@@ -1,7 +1,7 @@
 import 'dart:collection';
 
 import 'package:conflux/effect.dart';
-
+import 'package:conflux/option.dart';
 import 'package:conflux/src/coordination/waiter.dart';
 
 /// Identifies interruption caused by a [Queue] shutting down.
@@ -101,6 +101,53 @@ final class Queue<A> {
         _drain();
       },
     );
+  });
+
+  /// Lazily removes an available item without waiting for a producer.
+  ///
+  /// Returns [None] while an open Queue is empty. A present nullable item is
+  /// returned as [Some] containing `null`.
+  Effect<Option<A>, Never> poll() => Effect.defer(() {
+    if (_isShutdown) return _shutdownEffect();
+    if (_items.isEmpty) return Effect.succeed(const None());
+
+    final item = _items.removeFirst();
+    _drain();
+    return Effect.succeed(Some(item));
+  });
+
+  /// Lazily observes an available item without removing it or waiting.
+  ///
+  /// Returns [None] while an open Queue is empty.
+  Effect<Option<A>, Never> peek() => Effect.defer(() {
+    if (_isShutdown) return _shutdownEffect();
+    if (_items.isEmpty) return Effect.succeed(const None());
+    return Effect.succeed(Some(_items.first));
+  });
+
+  /// Lazily removes at most [limit] currently available items in FIFO order.
+  ///
+  /// This operation never waits for more items and returns an immutable list.
+  /// Zero returns an empty list. A negative limit becomes an [ArgumentError]
+  /// defect when the Effect runs.
+  Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer(() {
+    if (_isShutdown) return _shutdownEffect();
+    if (limit < 0) {
+      return Effect.sync(
+        () => throw ArgumentError.value(
+          limit,
+          'limit',
+          'Must not be negative.',
+        ),
+      );
+    }
+
+    final count = limit < _items.length ? limit : _items.length;
+    final items = <A>[
+      for (var index = 0; index < count; index += 1) _items.removeFirst(),
+    ];
+    _drain();
+    return Effect.succeed(List.unmodifiable(items));
   });
 
   /// Lazily shuts down immediately, discarding items and waking waiters.

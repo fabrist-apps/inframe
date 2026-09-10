@@ -119,6 +119,92 @@ void main() {
       expect(await fixture.run(fixture.queue.take()), 1);
     });
 
+    test('should poll an available item without waiting', () async {
+      final fixture = await _QueueFixture.acquire<int>(1);
+      addTearDown(fixture.close);
+
+      expect(await fixture.run(fixture.queue.poll()), isA<None>());
+      await fixture.run(fixture.queue.offer(1));
+      expect(
+        await fixture.run(fixture.queue.poll()),
+        isA<Some<int>>().having((option) => option.value, 'value', 1),
+      );
+    });
+
+    test('should distinguish a nullable item from an empty Queue', () async {
+      final fixture = await _QueueFixture.acquire<int?>(1);
+      addTearDown(fixture.close);
+
+      expect(await fixture.run(fixture.queue.poll()), isA<None>());
+      await fixture.run(fixture.queue.offer(null));
+      final present = await fixture.run(fixture.queue.poll());
+
+      expect(present, isA<Some<int?>>());
+      expect((present as Some<int?>).value, isNull);
+    });
+
+    test('should peek without removing an item or releasing capacity', () async {
+      final fixture = await _QueueFixture.acquire<int>(1);
+      addTearDown(fixture.close);
+      expect(await fixture.run(fixture.queue.peek()), isA<None>());
+      await fixture.run(fixture.queue.offer(1));
+      var offerCompleted = false;
+      final blockedOffer = fixture.runtime.fork(fixture.queue.offer(2));
+      unawaited(blockedOffer.exit.then((_) => offerCompleted = true));
+      await _flushMicrotasks();
+
+      final peeked = await fixture.run(fixture.queue.peek());
+
+      expect((peeked as Some<int>).value, 1);
+      expect(fixture.queue.size, 1);
+      expect(offerCompleted, isFalse);
+      expect((await fixture.run(fixture.queue.poll()) as Some<int>).value, 1);
+      expect(await blockedOffer.join(), isA<Succeeded<void, Never>>());
+      expect((await fixture.run(fixture.queue.poll()) as Some<int>).value, 2);
+    });
+
+    test('should take an immutable available batch without waiting', () async {
+      final fixture = await _QueueFixture.acquire<int>(4);
+      addTearDown(fixture.close);
+      for (final item in [1, 2, 3]) {
+        await fixture.run(fixture.queue.offer(item));
+      }
+
+      final first = await fixture.run(fixture.queue.takeUpTo(2));
+      expect(first, [1, 2]);
+      expect(() => first.add(4), throwsUnsupportedError);
+      expect(fixture.queue.size, 1);
+      expect(await fixture.run(fixture.queue.takeUpTo(10)), [3]);
+      expect(await fixture.run(fixture.queue.takeUpTo(0)), isEmpty);
+
+      final negative = fixture.queue.takeUpTo(-1);
+      expect(
+        (await fixture.runtime.run(negative) as Failed<List<int>, Never>).cause,
+        isA<Defect<Never>>(),
+      );
+    });
+
+    test('should preserve waiter fairness around nonblocking reads', () async {
+      final fixture = await _QueueFixture.acquire<int>(2);
+      addTearDown(fixture.close);
+      final taker = fixture.runtime.fork(fixture.queue.take());
+      await _flushMicrotasks();
+
+      await fixture.run(fixture.queue.offer(1));
+      expect(_value(await taker.join()), 1);
+      expect(await fixture.run(fixture.queue.poll()), isA<None>());
+
+      await fixture.run(fixture.queue.offer(2));
+      await fixture.run(fixture.queue.offer(3));
+      final blockedOffer = fixture.runtime.fork(fixture.queue.offer(4));
+      await _flushMicrotasks();
+
+      expect(await fixture.run(fixture.queue.takeUpTo(1)), [2]);
+      expect(await blockedOffer.join(), isA<Succeeded<void, Never>>());
+      expect(await fixture.run(fixture.queue.takeUpTo(5)), [3, 4]);
+      expect(fixture.queue.size, 0);
+    });
+
     test('should discard work and interrupt data operations on shutdown', () async {
       final fixture = await _QueueFixture.acquire<int>(1);
       addTearDown(fixture.close);
@@ -134,6 +220,9 @@ void main() {
       _expectQueueShutdown(await blockedOffer.join());
       _expectQueueShutdown(await fixture.runtime.run(fixture.queue.offer(3)));
       _expectQueueShutdown(await fixture.runtime.run(fixture.queue.take()));
+      _expectQueueShutdown(await fixture.runtime.run(fixture.queue.poll()));
+      _expectQueueShutdown(await fixture.runtime.run(fixture.queue.peek()));
+      _expectQueueShutdown(await fixture.runtime.run(fixture.queue.takeUpTo(0)));
     });
 
     test('should interrupt a blocked take on shutdown', () async {
