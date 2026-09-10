@@ -76,7 +76,12 @@ final class Response {
   factory Response._create({required int status, required Headers headers, required _Body body}) {
     _validateStatus(status);
     _validateResponseHeaders(headers);
-    return Response._(statusCode: status, headers: headers, body: body);
+    return Response._(
+      statusCode: status,
+      headers: headers,
+      body: body,
+      suppressBody: _statusSuppressesBody(status),
+    );
   }
 
   /// The status delivered to the consumer.
@@ -87,6 +92,9 @@ final class Response {
 
   final _Body _body;
   final bool _suppressBody;
+
+  /// The body stream, claimed when it is first listened to.
+  Stream<List<int>> get body => _suppressBody ? const Stream.empty() : _body.stream;
 
   /// Creates a metadata view sharing this response's body owner.
   Response withHeaders(Headers headers) {
@@ -99,23 +107,20 @@ final class Response {
     );
   }
 
-  Response _withoutBody() => Response._(
-    statusCode: statusCode,
-    headers: headers,
-    body: _body,
-    suppressBody: true,
-  );
+  Response _withoutBody() => _suppressBody
+      ? this
+      : Response._(statusCode: statusCode, headers: headers, body: _body, suppressBody: true);
 
   /// Buffers the body once and returns a private byte copy.
   Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
     _validateMaxBytes(maxBytes);
     if (_suppressBody) {
-      return const [];
+      return Uint8List(0);
     }
     try {
       return await _body.bytes(maxBytes: maxBytes);
-    } on _BodyLimitFailure {
-      throw ResponseBodyLimitExceededException(maxBytes);
+    } on _BodyLimitFailure catch (error) {
+      throw ResponseBodyLimitExceededException(error.maxBytes);
     }
   }
 
@@ -143,6 +148,9 @@ void _validateStatus(int status) {
     throw ArgumentError.value(status, 'status', 'must be from 200 through 599');
   }
 }
+
+bool _statusSuppressesBody(int status) =>
+    status == HttpStatus.noContent || status == HttpStatus.resetContent || status == 304;
 
 void _validateResponseHeaders(Headers headers) {
   const forbidden = <String>{

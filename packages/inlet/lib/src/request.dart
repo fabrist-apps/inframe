@@ -110,12 +110,15 @@ final class Request {
     exchange: _exchange,
   );
 
+  /// The body stream, claimed when it is first listened to.
+  Stream<List<int>> get body => _exchange.body.stream;
+
   /// Buffers the body once and returns a private byte copy.
   Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
     try {
       return await _exchange.body.bytes(maxBytes: maxBytes);
-    } on _BodyLimitFailure {
-      throw BodyLimitExceededException(maxBytes);
+    } on _BodyLimitFailure catch (error) {
+      throw BodyLimitExceededException(error.maxBytes);
     }
   }
 
