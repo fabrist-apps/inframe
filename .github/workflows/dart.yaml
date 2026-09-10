@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - bhaswanth-isani/fbr-25-turso-dart
 
 permissions:
   contents: read
