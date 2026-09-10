@@ -59,23 +59,36 @@ final class EffectBuilder<E> {
     final exit = await acquire._evaluate(_execution);
     return switch (exit) {
       Failed<A, E>(:final cause) => _abort(cause),
-      Succeeded<A, E>(:final value) => _registerRelease<A>(value, release),
+      Succeeded<A, E>(:final value) => await _registerRelease<A>(value, release),
     };
   }
 
-  A _registerRelease<A>(
+  Future<A> _registerRelease<A>(
     A resource,
     Effect<void, Never> Function(A resource) release,
-  ) {
+  ) async {
     final finalizer = Effect.defer<void, Never>(() => release(resource));
-    if (!_execution.scope._addFinalizer(
+    if (_execution.scope._addFinalizer(
       finalizer,
       _execution.context,
       _execution.clock,
     )) {
-      throw StateError('Cannot acquire a resource in a closed Scope.');
+      return resource;
     }
-    return resource;
+
+    final error = StateError('Cannot acquire a resource in a closed Scope.');
+    final registrationCause = Defect<E>(error, StackTrace.current);
+    final releaseExit = await _runProtected(
+      finalizer,
+      _execution.context,
+      _execution.clock,
+    );
+    return switch (releaseExit) {
+      Succeeded<void, Never>() => throw error,
+      Failed<void, Never>(:final cause) => _abort(
+        Sequential<E>([registrationCause, cause]),
+      ),
+    };
   }
 
   Never _abort(Cause<E> cause) {

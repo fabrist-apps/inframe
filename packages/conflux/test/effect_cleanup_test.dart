@@ -161,6 +161,28 @@ void main() {
       expect(connection.closed, isTrue);
     });
 
+    test('should release a resource acquired after its builder scope closes', () async {
+      final acquired = Completer<_Connection>();
+      final connection = _Connection();
+      late Future<_Connection> acquisition;
+      final program = Effect.build<void, String>(($) {
+        acquisition = $.acquireRelease(
+          Effect.tryFuture<_Connection, String>(
+            () => acquired.future,
+            onError: (error, _) => '$error',
+          ),
+          release: (resource) => Effect.sync(resource.close),
+        );
+      });
+
+      final exit = await Runtime().run(program);
+      acquired.complete(connection);
+
+      expect(exit, isA<Succeeded<void, String>>());
+      await expectLater(acquisition, throwsStateError);
+      expect(connection.closed, isTrue);
+    });
+
     test('should protect finalization from repeated cancellation', () async {
       final bodyStarted = Completer<void>();
       final bodyPending = Completer<void>();

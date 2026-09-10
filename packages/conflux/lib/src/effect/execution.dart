@@ -128,7 +128,14 @@ final class Scope {
     final failures = <Cause<Never>>[];
     final children = List<_OwnedRoot>.of(_children);
     final childFailures = await Future.wait(
-      children.map((child) => child.interruptAndJoin(const ScopeClosed())),
+      children.map(
+        (child) => child
+            .interruptAndJoin(const ScopeClosed())
+            .then<Cause<Never>?>(
+              (cause) => cause,
+              onError: Defect<Never>.new,
+            ),
+      ),
     );
     failures.addAll(childFailures.whereType<Cause<Never>>());
 
