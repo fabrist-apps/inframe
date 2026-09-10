@@ -121,11 +121,18 @@ final class _ServerAdapter {
       return;
     }
 
+    final input = _HttpRequestBody(incoming);
     late final Request request;
     try {
-      request = _adapt(incoming);
+      request = _adapt(incoming, input);
     } on Object {
-      await _sendEmpty(incoming.response, HttpStatus.badRequest);
+      try {
+        await _sendEmpty(incoming.response, HttpStatus.badRequest);
+      } on Object catch (deliveryError, deliveryStackTrace) {
+        _report(deliveryError, deliveryStackTrace);
+      } finally {
+        await _finishInput(input);
+      }
       return;
     }
 
@@ -134,34 +141,41 @@ final class _ServerAdapter {
     try {
       dispatch = await _dispatch(request);
       response = dispatch.response;
-      await _deliver(incoming.response, response);
-    } on Object catch (error, stackTrace) {
-      if (dispatch == null) {
-        _report(error, stackTrace);
-        await _sendEmpty(incoming.response, HttpStatus.internalServerError);
+      await _deliver(incoming.response, response, input);
+    } on _DeliveryFailure catch (failure) {
+      if (failure.committed || dispatch == null) {
+        _report(failure.error, failure.stackTrace);
       } else {
-        final replacement = await _recover(
+        await _close(response!);
+        response = await _recover(
           dispatch.context,
           dispatch.request,
-          error,
-          stackTrace,
+          failure.error,
+          failure.stackTrace,
         );
-        response = replacement;
         try {
-          await _deliver(incoming.response, replacement);
-        } on Object catch (replacementError, replacementStackTrace) {
-          _report(replacementError, replacementStackTrace);
+          await _deliver(incoming.response, response, input);
+        } on _DeliveryFailure catch (replacementFailure) {
+          _report(replacementFailure.error, replacementFailure.stackTrace);
         }
+      }
+    } on Object catch (error, stackTrace) {
+      _report(error, stackTrace);
+      try {
+        await _sendEmpty(incoming.response, HttpStatus.internalServerError);
+      } on Object catch (deliveryError, deliveryStackTrace) {
+        _report(deliveryError, deliveryStackTrace);
       }
     } finally {
       if (response != null) {
         await _close(response);
       }
       await _close(request);
+      await _finishInput(input);
     }
   }
 
-  Request _adapt(HttpRequest incoming) {
+  Request _adapt(HttpRequest incoming, _HttpRequestBody input) {
     final rawHeaders = <String, List<String>>{};
     incoming.headers.forEach((name, values) {
       rawHeaders[name] = List.of(values);
@@ -179,26 +193,41 @@ final class _ServerAdapter {
       method: incoming.method,
       uri: incoming.uri,
       headers: Headers.from(rawHeaders),
-      body: incoming,
+      body: input,
       connection: connection,
     );
   }
 
-  Future<void> _deliver(HttpResponse target, Response response) async {
-    target
-      ..statusCode = response.statusCode
-      ..bufferOutput = false;
-    for (final MapEntry(key: name, value: values) in response.headers.toMap().entries) {
-      for (final value in values) {
-        target.headers.add(name, value);
+  Future<void> _deliver(
+    HttpResponse target,
+    Response response,
+    _HttpRequestBody input,
+  ) async {
+    var committed = false;
+    try {
+      if (!input.isComplete) {
+        input.pause();
+        target.persistentConnection = false;
       }
+      target
+        ..statusCode = response.statusCode
+        ..bufferOutput = false;
+      for (final MapEntry(key: name, value: values) in response.headers.toMap().entries) {
+        for (final value in values) {
+          target.headers.add(name, value);
+        }
+      }
+      final knownLength = response._body.knownLength;
+      if (knownLength != null) {
+        target.contentLength = response._suppressBody ? 0 : knownLength;
+      }
+      final delivery = target.addStream(response.body);
+      committed = true;
+      await delivery;
+      await target.close();
+    } on Object catch (error, stackTrace) {
+      throw _DeliveryFailure(error, stackTrace, committed: committed);
     }
-    final knownLength = response._body.knownLength;
-    if (knownLength != null) {
-      target.contentLength = response._suppressBody ? 0 : knownLength;
-    }
-    await target.addStream(response.body);
-    await target.close();
   }
 
   Future<void> _sendEmpty(HttpResponse response, int status) async {
@@ -219,6 +248,164 @@ final class _ServerAdapter {
     } on Object catch (error, stackTrace) {
       _report(error, stackTrace);
     }
+  }
+
+  Future<void> _finishInput(_HttpRequestBody input) async {
+    try {
+      await input.finish();
+    } on Object catch (error, stackTrace) {
+      _report(error, stackTrace);
+    }
+  }
+}
+
+final class _DeliveryFailure implements Exception {
+  const _DeliveryFailure(
+    this.error,
+    this.stackTrace, {
+    required this.committed,
+  });
+
+  final Object error;
+  final StackTrace stackTrace;
+  final bool committed;
+}
+
+final class _HttpRequestBody extends Stream<List<int>> {
+  _HttpRequestBody(HttpRequest request) {
+    try {
+      _subscription = request.listen(
+        _add,
+        onError: _addError,
+        onDone: _complete,
+        cancelOnError: false,
+      );
+      _pausePhysical();
+      final hasNoBody =
+          request.contentLength == 0 ||
+          (request.contentLength < 0 && !request.headers.chunkedTransferEncoding);
+      if (hasNoBody) {
+        _resumePhysical();
+        _completeCleanly = true;
+      }
+    } on Object catch (_, stackTrace) {
+      _terminalError = const MalformedBodyException();
+      _terminalStackTrace = stackTrace;
+    }
+  }
+
+  StreamSubscription<List<int>>? _subscription;
+  StreamController<List<int>>? _controller;
+  Object? _terminalError;
+  StackTrace? _terminalStackTrace;
+  bool _listened = false;
+  bool _completeCleanly = false;
+  bool _paused = false;
+  Future<void>? _finishFuture;
+
+  bool get isComplete => _completeCleanly;
+
+  void pause() {
+    if (!_completeCleanly) {
+      _pausePhysical();
+    }
+  }
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int>)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    if (_listened) {
+      throw StateError('The HTTP request body can be listened to only once.');
+    }
+    _listened = true;
+
+    final controller = StreamController<List<int>>(sync: true);
+    _controller = controller;
+    controller
+      ..onPause = _pausePhysical
+      ..onResume = _resumePhysical
+      ..onCancel = _pauseAfterCancellation;
+    final downstream = controller.stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError ?? false,
+    );
+
+    final terminalError = _terminalError;
+    if (terminalError != null) {
+      controller.addError(terminalError, _terminalStackTrace);
+      unawaited(controller.close());
+    } else if (_completeCleanly) {
+      unawaited(controller.close());
+    } else {
+      _resumePhysical();
+    }
+    return downstream;
+  }
+
+  void _add(List<int> chunk) {
+    _controller?.add(chunk);
+  }
+
+  void _addError(Object _, StackTrace stackTrace) {
+    if (_terminalError != null || _completeCleanly) {
+      return;
+    }
+    _terminalError = const MalformedBodyException();
+    _terminalStackTrace = stackTrace;
+    final controller = _controller;
+    if (controller != null) {
+      controller.addError(_terminalError!, stackTrace);
+      unawaited(controller.close());
+    }
+  }
+
+  void _complete() {
+    if (_terminalError != null || _completeCleanly) {
+      return;
+    }
+    _completeCleanly = true;
+    final close = _controller?.close();
+    if (close != null) {
+      unawaited(close);
+    }
+  }
+
+  Future<void> _pauseAfterCancellation() async {
+    pause();
+  }
+
+  void _pausePhysical() {
+    if (_paused || _completeCleanly) {
+      return;
+    }
+    _paused = true;
+    _subscription?.pause();
+  }
+
+  void _resumePhysical() {
+    if (!_paused || _completeCleanly) {
+      return;
+    }
+    _paused = false;
+    _subscription?.resume();
+  }
+
+  Future<void> finish() {
+    final existing = _finishFuture;
+    if (existing != null) {
+      return existing;
+    }
+    if (_completeCleanly) {
+      return _finishFuture = Future<void>.value();
+    }
+    final subscription = _subscription;
+    return _finishFuture = subscription == null ? Future<void>.value() : subscription.cancel();
   }
 }
 
