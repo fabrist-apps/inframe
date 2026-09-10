@@ -1,0 +1,52 @@
+import 'dart:io';
+
+import 'package:flutter/widgets.dart';
+import 'package:turso/turso.dart';
+
+void main() => runApp(const _SmokeApp());
+
+final class _SmokeApp extends StatefulWidget {
+  const _SmokeApp();
+
+  @override
+  State<_SmokeApp> createState() => _SmokeAppState();
+}
+
+final class _SmokeAppState extends State<_SmokeApp> {
+  @override
+  void initState() {
+    super.initState();
+    _runSmoke().catchError((Object error, StackTrace stackTrace) {
+      File('${File(Platform.resolvedExecutable).parent.path}/TURSO_ERROR').writeAsStringSync(
+        '$error\n$stackTrace',
+      );
+      stderr.writeln(error);
+      stderr.writeln(stackTrace);
+      exit(1);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+Future<void> _runSmoke() async {
+  final directory = Directory(
+    '${File(Platform.resolvedExecutable).parent.path}/turso-flutter-smoke',
+  );
+  await directory.create(recursive: true);
+  final databasePath = '${directory.path}/database.turso';
+
+  final database = await TursoDatabase.open(TursoLocation.file(databasePath));
+  await database.execute('CREATE TABLE IF NOT EXISTS smoke (value TEXT)');
+  await database.execute('DELETE FROM smoke');
+  await database.execute('INSERT INTO smoke VALUES (?)', parameters: const ['packaged']);
+  await database.close();
+
+  final reopened = await TursoDatabase.open(TursoLocation.file(databasePath));
+  final value = (await reopened.query('SELECT value FROM smoke')).rows.single.getString('value');
+  await reopened.close();
+  if (value != 'packaged') throw StateError('Packaged Turso persistence failed.');
+  await File('${directory.path}/PASS').writeAsString('PASS');
+  exit(0);
+}

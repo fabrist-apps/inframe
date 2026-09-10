@@ -8,6 +8,7 @@ workspace:
   - packages/context
   - packages/inlet
   - packages/database/clickhouse
+  - packages/database/turso
   - packages/json_patch
   - packages/chrono_id
   - packages/conflux
