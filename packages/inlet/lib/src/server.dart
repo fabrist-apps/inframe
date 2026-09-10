@@ -27,12 +27,11 @@ final class InletServer {
     if (force && !_forced) {
       _forced = true;
       final forceClose = _closeTransport(force: true);
+      _observeAdditionalClose(forceClose);
       final existing = _closeFuture;
       if (existing != null) {
-        _observeAdditionalClose(forceClose);
         return existing;
       }
-      _observeAdditionalClose(forceClose);
       return _closeFuture = forceClose;
     }
     final existing = _closeFuture;
@@ -48,21 +47,14 @@ final class InletServer {
         closing.complete();
       } on Object catch (error, stackTrace) {
         _adapter.report(error, stackTrace);
-        if (!closing.isCompleted) {
-          closing.completeError(error, stackTrace);
-        }
+        closing.completeError(error, stackTrace);
       }
     });
     return closing.future;
   }
 
-  Future<void> _closeTransport({required bool force}) {
-    try {
-      return _server.close(force: force);
-    } on Object catch (error, stackTrace) {
-      return Future<void>.error(error, stackTrace);
-    }
-  }
+  Future<void> _closeTransport({required bool force}) =>
+      Future<void>.sync(() => _server.close(force: force));
 
   void _observeAdditionalClose(Future<void> close) {
     unawaited(
@@ -153,7 +145,7 @@ final class _ServerAdapter {
       } on Object catch (error, stackTrace) {
         _report(error, stackTrace);
       } finally {
-        await _finishInput(input);
+        await _cleanUp(input.finish);
       }
       return;
     }
@@ -167,7 +159,7 @@ final class _ServerAdapter {
       } on Object catch (deliveryError, deliveryStackTrace) {
         _report(deliveryError, deliveryStackTrace);
       } finally {
-        await _finishInput(input);
+        await _cleanUp(input.finish);
       }
       return;
     }
@@ -187,7 +179,7 @@ final class _ServerAdapter {
       if (failure.committed || dispatch == null) {
         _report(failure.error, failure.stackTrace);
       } else {
-        await _close(response!);
+        await _cleanUp(response!.close);
         response = await _recover(
           dispatch.context,
           dispatch.request,
@@ -214,10 +206,10 @@ final class _ServerAdapter {
       }
     } finally {
       if (response != null) {
-        await _close(response);
+        await _cleanUp(response.close);
       }
-      await _close(request);
-      await _finishInput(input);
+      await _cleanUp(request.close);
+      await _cleanUp(input.finish);
     }
   }
 
@@ -311,22 +303,9 @@ final class _ServerAdapter {
     await response.close();
   }
 
-  Future<void> _close(Object value) async {
+  Future<void> _cleanUp(Future<void> Function() operation) async {
     try {
-      switch (value) {
-        case final Request request:
-          await request.close();
-        case final Response response:
-          await response.close();
-      }
-    } on Object catch (error, stackTrace) {
-      _report(error, stackTrace);
-    }
-  }
-
-  Future<void> _finishInput(_HttpRequestBody input) async {
-    try {
-      await input.finish();
+      await operation();
     } on Object catch (error, stackTrace) {
       _report(error, stackTrace);
     }
@@ -402,7 +381,7 @@ final class _HttpRequestBody extends Stream<List<int>> {
     controller
       ..onPause = _pausePhysical
       ..onResume = _resumePhysical
-      ..onCancel = _pauseAfterCancellation;
+      ..onCancel = pause;
     final downstream = controller.stream.listen(
       onData,
       onError: onError,
@@ -448,10 +427,6 @@ final class _HttpRequestBody extends Stream<List<int>> {
     if (close != null) {
       unawaited(close);
     }
-  }
-
-  Future<void> _pauseAfterCancellation() async {
-    pause();
   }
 
   void _pausePhysical() {

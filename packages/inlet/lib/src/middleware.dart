@@ -22,16 +22,16 @@ final class _DispatchState {
   }
 
   Never rejectContinuation(String message) {
-    final error = _ContinuationStateError(message)..wasReported = true;
+    final error = _ContinuationStateError(message, wasReported: true);
     _report(error, StackTrace.current);
     throw error;
   }
 }
 
 final class _ContinuationStateError extends StateError {
-  _ContinuationStateError(super.message);
+  _ContinuationStateError(super.message, {this.wasReported = false});
 
-  bool wasReported = false;
+  final bool wasReported;
 }
 
 Future<Response> _runMiddleware(
