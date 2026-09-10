@@ -16,8 +16,8 @@ sealed class TursoLocation {
 final class TursoFileLocation extends TursoLocation {
   /// Creates a validated native filesystem location.
   TursoFileLocation(this.path) {
-    if (path.trim().isEmpty) {
-      throw ArgumentError.value(path, 'path', 'Must not be empty.');
+    if (path.trim().isEmpty || path == ':memory:') {
+      throw ArgumentError.value(path, 'path', 'Must identify persistent storage.');
     }
     final uri = Uri.tryParse(path);
     if (uri != null && _networkSchemes.contains(uri.scheme)) {
@@ -35,11 +35,11 @@ const _networkSchemes = {'http', 'https', 'libsql', 'ws', 'wss'};
 final class TursoBrowserLocation extends TursoLocation {
   /// Creates a validated browser storage location.
   TursoBrowserLocation(this.name) {
-    if (name.trim().isEmpty || name.contains('/') || name.contains(r'\')) {
+    if (name.trim().isEmpty || name == ':memory:' || name.contains('/') || name.contains(r'\')) {
       throw ArgumentError.value(
         name,
         'name',
-        'Must be nonempty and contain no path separators.',
+        'Must identify persistent storage and contain no path separators.',
       );
     }
   }
