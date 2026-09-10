@@ -2,8 +2,8 @@
 
 Internal Dart and Flutter bindings for an embedded Turso database.
 
-The package is under active implementation. SQL and persistent storage currently run on macOS ARM64
-and desktop Chrome. Transactions, encryption, the remaining native targets, and the complete browser
+The package is under active implementation. SQL, transactions, persistent storage, and encryption
+currently run on macOS ARM64 and desktop Chrome. The remaining native targets and complete browser
 matrix are still being verified.
 
 ## Native example
@@ -66,6 +66,22 @@ parent database fail immediately and the handle expires when the callback return
 then releases the connection and worker. Repeated calls share the same shutdown future. A worker
 failure or failed rollback retires the connection; later operations fail and diagnostics treat an
 interrupted write as having an uncertain outcome.
+
+## Encryption
+
+Pass `TursoEncryption` with either `TursoCipher.aegis256` or `TursoCipher.aes256gcm` and exactly 32
+key bytes. Both ciphers have been verified with persistent reopen on macOS ARM64 and desktop Chrome.
+Wrong keys and missing encryption settings fail open; the package never retries as plaintext.
+
+The application owns key generation and secure storage. The package copies key bytes at its public
+boundary and redacts them from its diagnostics, but it does not promise managed-runtime memory
+zeroization.
+
+Encryption uses unchanged upstream Turso `v0.8.0-pre.10` behavior. Native temporary query files can
+bypass page encryption under upstream's default file-based temporary-storage policy; this is based
+on source inspection rather than a forced-spill reproduction. `VACUUM INTO` produced a plaintext
+copy in a local reproduction. Applications should not assume that every byte written by every SQL
+command is encrypted. The package does not force `temp_store`, rewrite SQL, or restrict exports.
 
 ## Browser setup
 

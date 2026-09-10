@@ -284,12 +284,6 @@ final class _NativeDatabase {
     required String? cipher,
     required Uint8List? key,
   }) {
-    if (cipher != null || key != null) {
-      throw const TursoUnsupportedException(
-        'Encryption is unavailable in this native build.',
-      );
-    }
-
     final version = bindings.turso_version().cast<Utf8>().toDartString();
     if (version != '0.8.0-pre.10') {
       throw TursoPlatformException(
@@ -306,16 +300,19 @@ final class _NativeDatabase {
       _checkStatic(setupStatus, errorOut);
 
       final pathPointer = path.toNativeUtf8();
+      final experimentalFeaturesPointer = key == null ? nullptr : 'encryption'.toNativeUtf8();
+      final cipherPointer = cipher == null ? nullptr : cipher.toNativeUtf8();
+      final hexKeyPointer = key == null ? nullptr : _encodeHex(key).toNativeUtf8();
       final config = calloc<bindings.turso_database_config_t>();
       final databaseOut = calloc<Pointer<bindings.turso_database_t>>();
       try {
         config.ref
           ..async_io = 0
           ..path = pathPointer.cast()
-          ..experimental_features = nullptr
+          ..experimental_features = experimentalFeaturesPointer.cast()
           ..vfs = nullptr
-          ..encryption_cipher = nullptr
-          ..encryption_hexkey = nullptr
+          ..encryption_cipher = cipherPointer.cast()
+          ..encryption_hexkey = hexKeyPointer.cast()
           ..page_codec = nullptr
           ..open_flags = 0;
         _checkStatic(
@@ -326,6 +323,9 @@ final class _NativeDatabase {
       } finally {
         calloc
           ..free(pathPointer)
+          ..free(experimentalFeaturesPointer)
+          ..free(cipherPointer)
+          ..free(hexKeyPointer)
           ..free(config)
           ..free(databaseOut);
       }
@@ -662,6 +662,9 @@ final class _NativeDatabase {
     if (failure != null) Error.throwWithStackTrace(failure, failureStack!);
   }
 }
+
+String _encodeHex(Uint8List bytes) =>
+    bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
 
 void _checkStatic(
   bindings.turso_status_code_t status,

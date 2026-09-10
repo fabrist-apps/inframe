@@ -23,7 +23,7 @@ final class TursoEncryption {
   /// Creates encryption configuration with a raw [key].
   TursoEncryption({required this.cipher, required Uint8List key}) : _key = Uint8List.fromList(key) {
     if (key.length != 32) {
-      throw ArgumentError.value(key, 'key', 'Must contain exactly 32 bytes.');
+      throw ArgumentError('Must contain exactly 32 bytes.', 'key');
     }
   }
 

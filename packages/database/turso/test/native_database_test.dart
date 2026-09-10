@@ -53,6 +53,52 @@ void main() {
       await reopened.close();
     });
 
+    for (final cipher in TursoCipher.values) {
+      test('should persist ${cipher.name} encryption without plaintext fallback', () async {
+        final path = '${temporaryDirectory.path}/${cipher.name}.turso';
+        final key = Uint8List.fromList(List<int>.generate(32, (index) => index + 1));
+        final encryption = TursoEncryption(cipher: cipher, key: key);
+        final database = await TursoDatabase.open(
+          TursoLocation.file(path),
+          encryption: encryption,
+        );
+        await database.execute('CREATE TABLE secrets (value TEXT)');
+        await database.execute(
+          'INSERT INTO secrets VALUES (?)',
+          parameters: const ['encrypted'],
+        );
+        await database.close();
+
+        final wrongKey = Uint8List.fromList(key)..[0] ^= 0xff;
+        final wrongHex = wrongKey.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+        await expectLater(
+          TursoDatabase.open(
+            TursoLocation.file(path),
+            encryption: TursoEncryption(cipher: cipher, key: wrongKey),
+          ),
+          throwsA(
+            isA<TursoDatabaseException>().having(
+              (error) => error.message,
+              'diagnostic',
+              isNot(contains(wrongHex)),
+            ),
+          ),
+        );
+        await expectLater(
+          TursoDatabase.open(TursoLocation.file(path)),
+          throwsA(isA<TursoDatabaseException>()),
+        );
+
+        final reopened = await TursoDatabase.open(
+          TursoLocation.file(path),
+          encryption: encryption,
+        );
+        final result = await reopened.query('SELECT value FROM secrets');
+        expect(result.rows.single.getString('value'), 'encrypted');
+        await reopened.close();
+      });
+    }
+
     test('should preserve duplicate columns by index', () async {
       final database = await TursoDatabase.open(TursoLocation.memory());
       addTearDown(database.close);

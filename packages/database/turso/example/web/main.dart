@@ -12,12 +12,14 @@ Future<void> main() async {
   try {
     if (web.window.localStorage.getItem(_phaseKey) == null) {
       await _writePersistentData();
+      await _writeEncryptedData();
       web.window.localStorage.setItem(_phaseKey, 'reload');
       web.window.location.reload();
       return;
     }
 
     await _verifyReloadedData();
+    await _verifyEncryptedData();
     await _verifyTransactions();
     await _verifyWorkerDeath();
     await _verifyCloseFailure();
@@ -122,6 +124,61 @@ Future<void> _verifyTransactions() async {
     await database.close();
   }
 }
+
+Future<void> _writeEncryptedData() async {
+  for (final cipher in TursoCipher.values) {
+    final database = await TursoDatabase.open(
+      TursoLocation.browser(_encryptedDatabaseName(cipher)),
+      encryption: TursoEncryption(cipher: cipher, key: _encryptionKey()),
+      web: _bridge,
+    );
+    try {
+      await database.execute('CREATE TABLE IF NOT EXISTS secrets (value TEXT)');
+      await database.execute('DELETE FROM secrets');
+      await database.execute(
+        'INSERT INTO secrets VALUES (?)',
+        parameters: ['encrypted with ${cipher.name}'],
+      );
+    } finally {
+      await database.close();
+    }
+  }
+}
+
+Future<void> _verifyEncryptedData() async {
+  for (final cipher in TursoCipher.values) {
+    final location = TursoLocation.browser(_encryptedDatabaseName(cipher));
+    final wrongKey = _encryptionKey()..[0] ^= 0xff;
+    await _expectFailure<TursoPlatformException>(
+      () => TursoDatabase.open(
+        location,
+        encryption: TursoEncryption(cipher: cipher, key: wrongKey),
+        web: _bridge,
+      ),
+    );
+    await _expectFailure<TursoPlatformException>(
+      () => TursoDatabase.open(location, web: _bridge),
+    );
+
+    final database = await TursoDatabase.open(
+      location,
+      encryption: TursoEncryption(cipher: cipher, key: _encryptionKey()),
+      web: _bridge,
+    );
+    try {
+      final value = (await database.query('SELECT value FROM secrets')).rows.single.getString(
+        'value',
+      );
+      _expect(value == 'encrypted with ${cipher.name}', '${cipher.name} data did not persist.');
+    } finally {
+      await database.close();
+    }
+  }
+}
+
+String _encryptedDatabaseName(TursoCipher cipher) => 'turso-dart-web-${cipher.name}-encryption.db';
+
+Uint8List _encryptionKey() => Uint8List.fromList(List<int>.generate(32, (index) => index + 1));
 
 Future<void> _writePersistentData() async {
   final database = await TursoDatabase.open(

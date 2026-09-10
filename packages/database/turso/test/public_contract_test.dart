@@ -24,6 +24,19 @@ void main() {
         () => TursoEncryption(cipher: TursoCipher.aes256gcm, key: Uint8List(31)),
         throwsArgumentError,
       );
+      expect(
+        () => TursoEncryption(
+          cipher: TursoCipher.aes256gcm,
+          key: Uint8List.fromList(List<int>.filled(31, 171)),
+        ),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'diagnostic',
+            isNot(contains('171')),
+          ),
+        ),
+      );
     });
   });
 

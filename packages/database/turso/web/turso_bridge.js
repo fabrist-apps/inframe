@@ -4,6 +4,7 @@ const sqlGuard = loadSqlGuard();
 const upstreamModule = import('./turso_upstream.js');
 
 let database;
+const sensitiveValues = new Set();
 
 class InputError extends Error {}
 class UnsupportedError extends Error {}
@@ -49,13 +50,10 @@ async function open({ path, persistent, encryption }) {
   if (persistent && typeof navigator.storage?.getDirectory !== 'function') {
     throw new UnsupportedError('Origin-private file storage is unavailable.');
   }
-  if (encryption !== null) {
-    throw new UnsupportedError('Encryption is unavailable in this browser build.');
-  }
-
   await sqlGuard;
   const { Database } = await upstreamModule;
-  const candidate = new Database(path);
+  const options = encryption === null ? {} : encryptionOptions(encryption);
+  const candidate = new Database(path, options);
   try {
     await candidate.connect();
     database = candidate;
@@ -71,6 +69,30 @@ async function open({ path, persistent, encryption }) {
     upstreamVersion,
     capabilities: { fts: false, vectorFunctions: false, vectorIndexes: false },
   };
+}
+
+function encryptionOptions(encryption) {
+  const hexkey = encryption.key.map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  sensitiveValues.add(hexkey);
+  sensitiveValues.add(encryption.key.join(','));
+  return {
+    experimental: ['encryption'],
+    encryption: {
+      cipher: browserCipher(encryption.cipher),
+      hexkey,
+    },
+  };
+}
+
+function browserCipher(cipher) {
+  switch (cipher) {
+    case 'aes256gcm':
+      return 1;
+    case 'aegis256':
+      return 2;
+    default:
+      throw new UnsupportedError(`Unsupported Turso encryption cipher: ${cipher}.`);
+  }
 }
 
 async function query({ sql, parameters }) {
@@ -204,7 +226,10 @@ async function validateSql(sql) {
 }
 
 function encodeError(error, operation) {
-  const message = error instanceof Error ? error.message : String(error);
+  let message = error instanceof Error ? error.message : String(error);
+  for (const sensitiveValue of sensitiveValues) {
+    message = message.replaceAll(sensitiveValue, '[REDACTED]');
+  }
   if (error instanceof InputError) return { kind: 'argument', message };
   if (error instanceof UnsupportedError) return { kind: 'unsupported', message };
   if (error instanceof SqlError) return { kind: 'database', message, code: null };
