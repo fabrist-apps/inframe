@@ -66,6 +66,39 @@ Cause<Never>? _defectsOnly<E>(Cause<E> cause) => switch (cause) {
   ),
 };
 
+bool _containsFatal<E>(Cause<E> cause) => switch (cause) {
+  Defect<E>() || Interrupted<E>() => true,
+  Expected<E>() => false,
+  Sequential<E>(:final causes) ||
+  Parallel<E>(:final causes) => causes.any((cause) => _containsFatal<E>(cause)),
+};
+
+List<E> _expectedErrors<E>(Cause<E> cause) => switch (cause) {
+  Expected<E>(:final error) => [error],
+  Defect<E>() || Interrupted<E>() => const [],
+  Sequential<E>(:final causes) || Parallel<E>(:final causes) => [
+    for (final cause in causes) ..._expectedErrors<E>(cause),
+  ],
+};
+
+Cause<F> _mapCause<E, F>(Cause<E> cause, F Function(E error) transform) => switch (cause) {
+  Expected<E>(:final error) => Expected(transform(error)),
+  Defect<E>(:final error, :final stackTrace) => Defect(error, stackTrace),
+  Interrupted<E>(:final reason) => Interrupted(reason),
+  Sequential<E>(:final causes) => Sequential(
+    causes.map((cause) => _mapCause<E, F>(cause, transform)),
+  ),
+  Parallel<E>(:final causes) => Parallel(
+    causes.map((cause) => _mapCause<E, F>(cause, transform)),
+  ),
+};
+
+Option<E> _primaryError<E>(Cause<E> cause) {
+  if (_containsFatal(cause)) return const None();
+  final errors = _expectedErrors(cause);
+  return errors.isEmpty ? const None() : Some(errors.first);
+}
+
 Cause<Never>? _combineCleanupCauses(
   Iterable<Cause<Never>> causes, {
   required bool sequential,

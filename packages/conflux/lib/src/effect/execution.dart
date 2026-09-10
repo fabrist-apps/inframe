@@ -14,9 +14,9 @@ final class _Execution {
   final _Cancellation cancellation;
   var _steps = 0;
 
-  Future<void> yieldIfNeeded() async {
+  Future<void>? schedulingBoundary() {
     _steps += 1;
-    if (_steps % 256 == 0) await Future<void>.delayed(Duration.zero);
+    return _steps % 256 == 0 ? Future<void>.delayed(Duration.zero) : null;
   }
 }
 

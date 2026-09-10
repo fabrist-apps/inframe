@@ -13,4 +13,23 @@ Future<void> main() async {
   } else {
     throw StateError('Unexpected exit: $exit');
   }
+
+  final Effect<int, _BaseError> widened = Effect.fail<int, _SpecificError>(
+    const _SpecificError(),
+  );
+  final recovered = widened.catchError(
+    (_) => Effect.succeed<int, _BaseError>(1),
+  );
+  final widenedExit = await Runtime().run(recovered);
+  if (widenedExit is! Succeeded<int, _BaseError>) {
+    throw StateError('Expected widened recovery to succeed.');
+  }
+}
+
+sealed class _BaseError {
+  const _BaseError();
+}
+
+final class _SpecificError extends _BaseError {
+  const _SpecificError();
 }
