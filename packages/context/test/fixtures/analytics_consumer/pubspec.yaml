@@ -1,4 +1,4 @@
-name: core_consumer
+name: analytics_consumer
 publish_to: none
 
 environment:

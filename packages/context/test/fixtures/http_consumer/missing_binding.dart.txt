@@ -1,0 +1,12 @@
+import 'package:web_server/web_server.dart';
+import 'package:context/context.dart';
+
+void main() {
+  final context = Context();
+  try {
+    context.http;
+    throw StateError('Missing setup did not fail');
+  } on MissingContextValue catch (error) {
+    if (error.debugName != 'http') rethrow;
+  }
+}

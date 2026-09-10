@@ -1,0 +1,17 @@
+import 'package:context/context.dart';
+
+/// A recording capability used only by the consumer fixtures.
+final class Analytics {
+  final events = <String>[];
+
+  void track(String event) => events.add(event);
+}
+
+final _analyticsKey = ContextKey<Analytics>('analytics');
+
+extension AnalyticsContext on Context {
+  Analytics get analytics => require(_analyticsKey);
+
+  Context withAnalytics(Analytics analytics) =>
+      withBinding(_analyticsKey.bind(analytics));
+}

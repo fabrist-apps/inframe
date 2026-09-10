@@ -1,0 +1,7 @@
+import 'package:context/context.dart';
+
+void main() {
+  final context = Context();
+  context.analytics;
+  context.http;
+}
