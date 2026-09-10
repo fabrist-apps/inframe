@@ -4,4 +4,6 @@ library;
 export 'effect.dart';
 export 'non_empty_list.dart';
 export 'option.dart';
+export 'pubsub.dart';
+export 'queue.dart';
 export 'result.dart';

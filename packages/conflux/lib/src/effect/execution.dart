@@ -16,6 +16,9 @@ final class EffectExecution {
     required this.cancellation,
   });
 
+  /// Number of evaluations between cooperative scheduling boundaries.
+  static const schedulingInterval = 256;
+
   /// The context currently visible to this execution.
   Context context;
 
@@ -32,7 +35,7 @@ final class EffectExecution {
   /// Returns an asynchronous fairness boundary at regular intervals.
   Future<void>? schedulingBoundary() {
     _steps += 1;
-    return _steps % 256 == 0 ? Future<void>.delayed(Duration.zero) : null;
+    return _steps % schedulingInterval == 0 ? Future<void>.delayed(Duration.zero) : null;
   }
 
   /// Evaluates [effect], closes this execution's scope, and appends cleanup failures.
