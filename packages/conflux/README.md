@@ -80,6 +80,22 @@ final queued = Effect.build<int, Never>(($) async {
 final value = await queued.runFuture();
 ```
 
+`PubSub.bounded` broadcasts each committed publication to the subscribers that
+were active when publishing began. Each subscription has the configured bounded
+capacity, so the slowest subscriber applies backpressure. Subscriptions belong
+to their acquiring scopes and unsubscribe automatically:
+
+```dart
+final broadcast = Effect.build<int, Never>(($) async {
+  final pubsub = await $(PubSub.bounded<int>(1));
+  final subscription = await $(pubsub.subscribe());
+  await $(pubsub.publish(42));
+  return $(subscription.take());
+});
+
+final value = await broadcast.runFuture();
+```
+
 Ordinary recovery runs once for a cause containing only expected errors and
 uses the first expected leaf in deterministic execution/source order. A defect
 or interruption prevents recovery and retains the complete cause. `tapCause`
