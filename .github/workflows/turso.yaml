@@ -138,7 +138,22 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE/packages/database/turso/tool/flutter_smoke_main.dart.template" lib/main.dart
           flutter build windows --release
           $releaseRoot = "$smokeRoot/build/windows/x64/runner/Release"
-          $process = Start-Process "$releaseRoot/turso_smoke.exe" -ArgumentList '--enable-software-rendering' -PassThru -Wait
+          Get-ChildItem $releaseRoot -Recurse | ForEach-Object { $_.FullName }
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $visualStudioRoot = & $vswhere -latest -property installationPath
+          $dumpbin = Get-ChildItem "$visualStudioRoot/VC/Tools/MSVC" -Filter dumpbin.exe -Recurse |
+            Where-Object { $_.FullName -match 'Hostx64\\x64\\dumpbin.exe$' } |
+            Select-Object -First 1
+          $binaries = @(
+            "$releaseRoot/turso_smoke.exe",
+            "$releaseRoot/flutter_windows.dll",
+            (Get-ChildItem $releaseRoot -Filter turso_sdk_kit.dll -Recurse | Select-Object -First 1).FullName
+          )
+          foreach ($binary in $binaries) {
+            Write-Host "Dependencies for $binary"
+            & $dumpbin.FullName /DEPENDENTS $binary
+          }
+          $process = Start-Process "$releaseRoot/turso_smoke.exe" -WorkingDirectory $releaseRoot -ArgumentList '--enable-software-rendering' -PassThru -Wait
           if ($process.ExitCode -ne 0) {
             $exitCode = $process.ExitCode
             Write-Host "Turso Flutter smoke process exited with $exitCode (0x$($exitCode.ToString('X8')))."
