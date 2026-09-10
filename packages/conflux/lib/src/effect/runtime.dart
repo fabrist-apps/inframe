@@ -78,7 +78,7 @@ final class Runtime {
     );
     late final Fiber<A, E> fiber;
     late final _OwnedRoot root;
-    final exit = _runRoot(effect, execution, scope).whenComplete(
+    final exit = _runScoped(effect, execution).whenComplete(
       () => _roots.remove(root),
     );
     fiber = Fiber._(cancellation, exit);
@@ -91,14 +91,6 @@ final class Runtime {
     });
     _roots.add(root);
     return fiber;
-  }
-
-  Future<Exit<A, E>> _runRoot<A, E>(
-    Effect<A, E> effect,
-    _Execution execution,
-    Scope scope,
-  ) async {
-    return _runScoped(effect, execution);
   }
 
   /// Runs [effect] in a fresh root scope and returns after scope cleanup.

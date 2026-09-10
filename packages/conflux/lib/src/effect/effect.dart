@@ -36,22 +36,12 @@ final class Effect<A, E> {
   /// Lazily invokes a synchronous callback when the effect runs.
   ///
   /// A thrown object becomes a [Defect] with its original stack trace.
-  static Effect<A, Never> sync<A>(A Function() callback) => Effect._((_) async {
-    try {
-      return Succeeded(callback());
-    } on Object catch (error, stackTrace) {
-      return Failed(Defect(error, stackTrace));
-    }
-  });
+  static Effect<A, Never> sync<A>(A Function() callback) =>
+      Effect._((_) async => Succeeded(callback()));
 
   /// Lazily chooses another effect for each execution.
-  static Effect<A, E> defer<A, E>(Effect<A, E> Function() factory) => Effect._((execution) async {
-    try {
-      return await factory()._evaluate(execution);
-    } on Object catch (error, stackTrace) {
-      return Failed(Defect(error, stackTrace));
-    }
-  });
+  static Effect<A, E> defer<A, E>(Effect<A, E> Function() factory) =>
+      Effect._((execution) => factory()._evaluate(execution));
 
   /// Converts a synchronous [Result] into an effect.
   static Effect<A, E> fromResult<A, E>(Result<A, E> result) => switch (result) {
@@ -133,13 +123,7 @@ final class Effect<A, E> {
 
   /// Reads a value from the execution [Context] when run.
   static Effect<A, Never> context<A>(A Function(Context context) select) =>
-      Effect._((execution) async {
-        try {
-          return Succeeded(select(execution.context));
-        } on Object catch (error, stackTrace) {
-          return Failed(Defect(error, stackTrace));
-        }
-      });
+      Effect._((execution) async => Succeeded(select(execution.context)));
 
   /// Builds an effect with a callback-local callable binder.
   ///
