@@ -21,8 +21,10 @@ final class _PatchApplication {
           _replace(operation.path, operation.value, index);
         case JsonTest():
           _test(operation.path, operation.value, index);
-        case JsonMove() || JsonCopy():
-          throw UnsupportedError('Move and copy operations are implemented by FBR-8.');
+        case JsonMove():
+          _move(operation.from, operation.path, index);
+        case JsonCopy():
+          _copy(operation.from, operation.path, index);
       }
     }
     return root;
@@ -126,6 +128,27 @@ final class _PatchApplication {
         'Target does not match the expected value.',
       );
     }
+  }
+
+  void _move(JsonPointer from, JsonPointer path, int operationIndex) {
+    _resolveValue(from, operationIndex);
+    if (_isProperPointerPrefix(from, path)) {
+      _fail(
+        operationIndex,
+        path,
+        JsonPatchFailure.invalidMove,
+        'A value cannot be moved into its own descendant.',
+      );
+    }
+    if (from == path) return;
+
+    final value = _remove(from, operationIndex);
+    _add(path, value, operationIndex);
+  }
+
+  void _copy(JsonPointer from, JsonPointer path, int operationIndex) {
+    final value = _resolveValue(from, operationIndex);
+    _add(path, value, operationIndex);
   }
 
   ({Object parent, String segment}) _resolveParent(JsonPointer path, int operationIndex) {
@@ -248,6 +271,14 @@ final class _PatchApplication {
     }
     return index;
   }
+}
+
+bool _isProperPointerPrefix(JsonPointer prefix, JsonPointer pointer) {
+  if (prefix.segments.length >= pointer.segments.length) return false;
+  for (var index = 0; index < prefix.segments.length; index++) {
+    if (prefix.segments[index] != pointer.segments[index]) return false;
+  }
+  return true;
 }
 
 bool _isCanonicalArrayIndex(String segment) {
