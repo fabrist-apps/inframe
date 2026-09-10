@@ -27,7 +27,7 @@ final class ClickHouseQueryResult {
 }
 
 Object? _freeze(Object? value) => switch (value) {
-  final Map<String, Object?> map => _freezeMap(map),
+  final Map<Object?, Object?> map => _freezeNestedMap(map),
   final Iterable<Object?> values => List<Object?>.unmodifiable(values.map(_freeze)),
   _ => value,
 };
@@ -35,3 +35,15 @@ Object? _freeze(Object? value) => switch (value) {
 Map<String, Object?> _freezeMap(Map<String, Object?> map) => Map<String, Object?>.unmodifiable(
   map.map((key, value) => MapEntry<String, Object?>(key, _freeze(value))),
 );
+
+Map<String, Object?> _freezeNestedMap(Map<Object?, Object?> map) {
+  final copy = <String, Object?>{};
+  for (final entry in map.entries) {
+    final key = entry.key;
+    if (key is! String) {
+      throw ArgumentError.value(map, 'rows', 'Nested JSON object keys must be strings.');
+    }
+    copy[key] = _freeze(entry.value);
+  }
+  return Map<String, Object?>.unmodifiable(copy);
+}

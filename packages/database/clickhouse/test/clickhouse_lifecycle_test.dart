@@ -15,7 +15,7 @@ void main() {
       final client = createClient(server);
       addTearDown(client.close);
 
-      final query = client.query('SELECT 1', timeout: const Duration(milliseconds: 50));
+      final query = client.query('SELECT 1', timeout: const Duration(seconds: 1));
       final expectation = expectLater(
         query,
         throwsA(

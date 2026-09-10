@@ -13,6 +13,7 @@ final client = ClickHouseClient(
   password: password,
 );
 
+// The caller supplies encodedEvents, batchId, and appId.
 try {
   await client.insert(
     table: 'events',

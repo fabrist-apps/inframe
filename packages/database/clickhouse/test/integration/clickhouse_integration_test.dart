@@ -66,8 +66,8 @@ void main() {
       });
 
       test('should create, insert, query, and deduplicate a batch', () async {
-        final table = 'fbr1_events.${DateTime.now().microsecondsSinceEpoch}';
-        final quotedTable = '`${table.replaceAll('`', r'\`')}`';
+        final table = 'fbr1.events`archive\\${DateTime.now().microsecondsSinceEpoch}';
+        final quotedTable = quoteIdentifier(table);
         await client.command('''
           CREATE TABLE $quotedTable (
             id UInt64,
@@ -107,5 +107,11 @@ void main() {
     skip: endpoint == null || password == null
         ? 'Set CLICKHOUSE_URL and CLICKHOUSE_PASSWORD.'
         : false,
+    tags: 'integration',
   );
+}
+
+String quoteIdentifier(String identifier) {
+  final escaped = identifier.replaceAll(r'\', r'\\').replaceAll('`', r'\`');
+  return '`$escaped`';
 }

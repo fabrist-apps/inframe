@@ -136,6 +136,28 @@ void main() {
       );
     });
 
+    test('should preserve a ClickHouse error code supplied only by a response header', () async {
+      final server = await responseServer(
+        utf8.encode('Rejected'),
+        statusCode: HttpStatus.badRequest,
+        exceptionCode: 516,
+      );
+      addTearDown(() => server.close(force: true));
+      final client = createClient(server);
+      addTearDown(client.close);
+
+      await expectLater(
+        client.command('SELECT 1'),
+        throwsA(
+          isA<ClickHouseServerException>().having(
+            (error) => error.clickHouseCode,
+            'clickHouseCode',
+            516,
+          ),
+        ),
+      );
+    });
+
     test('should recognize a late server error after HTTP 200', () async {
       final server = await responseServer(
         utf8.encode('$validResult\nCode: 241. DB::Exception: Memory limit exceeded'),
@@ -278,6 +300,7 @@ Future<HttpServer> responseServer(
   int statusCode = HttpStatus.ok,
   String? contentEncoding,
   String? queryId,
+  int? exceptionCode,
 }) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   server.listen((request) async {
@@ -288,6 +311,9 @@ Future<HttpServer> responseServer(
     }
     if (queryId != null) {
       request.response.headers.set('x-clickhouse-query-id', queryId);
+    }
+    if (exceptionCode != null) {
+      request.response.headers.set('x-clickhouse-exception-code', exceptionCode);
     }
     request.response.add(body);
     await request.response.close();

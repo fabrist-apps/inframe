@@ -10,6 +10,7 @@ void main() {
       for (final endpoint in [
         'ftp://clickhouse.example',
         'http:///missing-host',
+        'http://@clickhouse.example',
         'http://user:password@clickhouse.example',
         'http://clickhouse.example?setting=value',
         'http://clickhouse.example#fragment',
