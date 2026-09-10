@@ -180,6 +180,131 @@ final class Effect<A, E> {
     );
     return _runScoped(effect, child);
   });
+
+  /// Collects Effects in input order, sequentially unless [concurrency] is set.
+  static Effect<List<A>, E> all<A, E>(
+    Iterable<Effect<A, E>> effects, {
+    int concurrency = 1,
+  }) {
+    if (concurrency <= 0) {
+      throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
+    }
+    return Effect._((execution) {
+      return _collectEffects(List.of(effects), execution, concurrency);
+    });
+  }
+
+  /// Maps [inputs] to Effects and collects their values in input order.
+  static Effect<List<A>, E> forEach<I, A, E>(
+    Iterable<I> inputs,
+    Effect<A, E> Function(I input) effect, {
+    int concurrency = 1,
+  }) {
+    if (concurrency <= 0) {
+      throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
+    }
+    return Effect.defer(() {
+      final effects = inputs.map(
+        (input) => Effect.defer<A, E>(() => effect(input)),
+      );
+      return all(effects, concurrency: concurrency);
+    });
+  }
+}
+
+sealed class _ValueSlot<A> {
+  const _ValueSlot();
+}
+
+final class _EmptySlot<A> extends _ValueSlot<A> {
+  const _EmptySlot();
+}
+
+final class _FilledSlot<A> extends _ValueSlot<A> {
+  const _FilledSlot(this.value);
+
+  final A value;
+}
+
+final class _IndexedExit<A, E> {
+  const _IndexedExit(this.index, this.exit);
+
+  final int index;
+  final Exit<A, E> exit;
+}
+
+Future<Exit<List<A>, E>> _collectEffects<A, E>(
+  List<Effect<A, E>> effects,
+  _Execution execution,
+  int concurrency,
+) async {
+  if (effects.isEmpty) return Succeeded(List.unmodifiable(const []));
+
+  final slots = List<_ValueSlot<A>>.filled(
+    effects.length,
+    const _EmptySlot(),
+  );
+  final active = <int, Fiber<A, E>>{};
+  var nextIndex = 0;
+
+  void startNext() {
+    final index = nextIndex++;
+    active[index] = execution.scope._fork(effects[index], execution);
+  }
+
+  while (nextIndex < effects.length && active.length < concurrency) {
+    startNext();
+  }
+
+  while (active.isNotEmpty) {
+    final completed = await Future.any(
+      active.entries.map((entry) async {
+        return _IndexedExit(entry.key, await entry.value.join());
+      }),
+    );
+    active.remove(completed.index);
+
+    switch (completed.exit) {
+      case Succeeded<A, E>(:final value):
+        slots[completed.index] = _FilledSlot(value);
+        if (nextIndex < effects.length) startNext();
+      case Failed<A, E>(:final cause):
+        final cleanupFailures = <MapEntry<int, Cause<Never>>>[];
+        await Future.wait(
+          active.entries.map((entry) async {
+            final loser = await entry.value.interrupt(const _CollectionStopped());
+            if (loser case Failed<A, E>(:final cause)) {
+              final cleanup = _defectsOnly(cause);
+              if (cleanup != null) {
+                cleanupFailures.add(MapEntry(entry.key, cleanup));
+              }
+            }
+          }),
+        );
+        cleanupFailures.sort((left, right) => left.key.compareTo(right.key));
+        if (cleanupFailures.isEmpty) return Failed(cause);
+        final concurrentCleanup = _combineCleanupCauses(
+          cleanupFailures.map((entry) => entry.value),
+          sequential: false,
+        )!;
+        return Failed(Sequential([cause, concurrentCleanup]));
+    }
+  }
+
+  final values = slots.map((slot) {
+    return switch (slot) {
+      _FilledSlot<A>(:final value) => value,
+      _EmptySlot<A>() => throw StateError('Collection completed without a value.'),
+    };
+  });
+  return Succeeded(List.unmodifiable(values));
+}
+
+final class _CollectionStopped {
+  const _CollectionStopped();
+
+  @override
+  String toString() => 'Collection stopped after a branch failed';
 }
 
 /// Cleanup operations that run before an Effect returns to its caller.

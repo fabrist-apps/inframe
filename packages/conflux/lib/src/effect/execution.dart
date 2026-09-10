@@ -73,8 +73,6 @@ final class Scope {
     return true;
   }
 
-  // This becomes the child-work entrypoint for collection combinators.
-  // ignore: unused_element
   Fiber<A, E> _fork<A, E>(Effect<A, E> effect, _Execution parent) {
     if (_closed) {
       final cancellation = _Cancellation()..cancel(const ScopeClosed());
