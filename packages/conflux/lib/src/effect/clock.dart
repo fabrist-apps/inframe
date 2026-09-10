@@ -1,4 +1,4 @@
-part of '../../effect.dart';
+import 'dart:async';
 
 /// A cancellable registration created by [Clock.sleep].
 abstract interface class CancellableWait {

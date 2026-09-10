@@ -1,8 +1,62 @@
-part of '../../effect.dart';
+import 'package:conflux/option.dart';
 
-/// Explains why an [Effect] failed.
+/// Explains why an Effect failed.
 sealed class Cause<E> {
   const Cause();
+
+  /// Whether this cause contains a defect or interruption.
+  bool get containsFatal => switch (this) {
+    Defect<E>() || Interrupted<E>() => true,
+    Expected<E>() => false,
+    Sequential<E>(:final causes) ||
+    Parallel<E>(:final causes) => causes.any((cause) => cause.containsFatal),
+  };
+
+  /// Whether this cause contains an interruption.
+  bool get containsInterruption => switch (this) {
+    Interrupted<E>() => true,
+    Sequential<E>(:final causes) || Parallel<E>(:final causes) => causes.any(
+      (cause) => cause.containsInterruption,
+    ),
+    Expected<E>() || Defect<E>() => false,
+  };
+
+  /// Expected errors in deterministic traversal order.
+  List<E> get expectedErrors => switch (this) {
+    Expected<E>(:final error) => [error],
+    Defect<E>() || Interrupted<E>() => const [],
+    Sequential<E>(:final causes) || Parallel<E>(:final causes) => [
+      for (final cause in causes) ...cause.expectedErrors,
+    ],
+  };
+
+  /// The first expected error when every leaf is expected.
+  Option<E> get primaryError {
+    if (containsFatal) return const None();
+    final errors = expectedErrors;
+    return errors.isEmpty ? const None() : Some(errors.first);
+  }
+
+  /// Transforms every expected error while preserving cause structure.
+  Cause<F> mapExpected<F>(F Function(E error) transform) => switch (this) {
+    Expected<E>(:final error) => Expected(transform(error)),
+    Defect<E>(:final error, :final stackTrace) => Defect(error, stackTrace),
+    Interrupted<E>(:final reason) => Interrupted(reason),
+    Sequential<E>(:final causes) => Sequential(
+      causes.map((cause) => cause.mapExpected(transform)),
+    ),
+    Parallel<E>(:final causes) => Parallel(
+      causes.map((cause) => cause.mapExpected(transform)),
+    ),
+  };
+
+  static List<Cause<T>> _nonEmpty<T>(Iterable<Cause<T>> causes) {
+    final values = List<Cause<T>>.unmodifiable(causes);
+    if (values.isEmpty) {
+      throw ArgumentError.value(causes, 'causes', 'Must not be empty.');
+    }
+    return values;
+  }
 }
 
 /// A recoverable domain failure.
@@ -38,7 +92,7 @@ final class Interrupted<E> extends Cause<E> {
 /// Failures that occurred one after another.
 final class Sequential<E> extends Cause<E> {
   /// Creates a non-empty ordered sequential cause.
-  Sequential(Iterable<Cause<E>> causes) : causes = _nonEmptyCauses(causes, 'causes');
+  Sequential(Iterable<Cause<E>> causes) : causes = Cause._nonEmpty(causes);
 
   /// Failures in execution order.
   final List<Cause<E>> causes;
@@ -47,77 +101,44 @@ final class Sequential<E> extends Cause<E> {
 /// Failures from concurrent branches in source order.
 final class Parallel<E> extends Cause<E> {
   /// Creates a non-empty ordered parallel cause.
-  Parallel(Iterable<Cause<E>> causes) : causes = _nonEmptyCauses(causes, 'causes');
+  Parallel(Iterable<Cause<E>> causes) : causes = Cause._nonEmpty(causes);
 
   /// Branch failures in source order.
   final List<Cause<E>> causes;
 }
 
-List<Cause<E>> _nonEmptyCauses<E>(
-  Iterable<Cause<E>> causes,
-  String name,
-) {
-  final values = List<Cause<E>>.unmodifiable(causes);
-  if (values.isEmpty) {
-    throw ArgumentError.value(causes, name, 'Must not be empty.');
-  }
-  return values;
-}
-
-Cause<Never>? _defectsOnly<E>(Cause<E> cause) => switch (cause) {
-  Expected<E>() || Interrupted<E>() => null,
-  Defect<E>(:final error, :final stackTrace) => Defect(error, stackTrace),
-  Sequential<E>(:final causes) => _combineCleanupCauses(
-    causes.map((cause) => _defectsOnly<E>(cause)).whereType<Cause<Never>>(),
-    sequential: true,
-  ),
-  Parallel<E>(:final causes) => _combineCleanupCauses(
-    causes.map((cause) => _defectsOnly<E>(cause)).whereType<Cause<Never>>(),
-    sequential: false,
-  ),
-};
-
-bool _containsFatal<E>(Cause<E> cause) => switch (cause) {
-  Defect<E>() || Interrupted<E>() => true,
-  Expected<E>() => false,
-  Sequential<E>(:final causes) ||
-  Parallel<E>(:final causes) => causes.any((cause) => _containsFatal<E>(cause)),
-};
-
-List<E> _expectedErrors<E>(Cause<E> cause) => switch (cause) {
-  Expected<E>(:final error) => [error],
-  Defect<E>() || Interrupted<E>() => const [],
-  Sequential<E>(:final causes) || Parallel<E>(:final causes) => [
-    for (final cause in causes) ..._expectedErrors<E>(cause),
-  ],
-};
-
-Cause<F> _mapCause<E, F>(Cause<E> cause, F Function(E error) transform) => switch (cause) {
-  Expected<E>(:final error) => Expected(transform(error)),
-  Defect<E>(:final error, :final stackTrace) => Defect(error, stackTrace),
-  Interrupted<E>(:final reason) => Interrupted(reason),
-  Sequential<E>(:final causes) => Sequential(
-    causes.map((cause) => _mapCause<E, F>(cause, transform)),
-  ),
-  Parallel<E>(:final causes) => Parallel(
-    causes.map((cause) => _mapCause<E, F>(cause, transform)),
-  ),
-};
-
-Option<E> _primaryError<E>(Cause<E> cause) {
-  if (_containsFatal(cause)) return const None();
-  final errors = _expectedErrors(cause);
-  return errors.isEmpty ? const None() : Some(errors.first);
-}
-
-Cause<Never>? _combineCleanupCauses(
-  Iterable<Cause<Never>> causes, {
-  required bool sequential,
-}) {
-  final values = List<Cause<Never>>.of(causes);
-  return switch (values) {
-    [] => null,
-    [final only] => only,
-    _ => sequential ? Sequential(values) : Parallel(values),
+/// Runtime-only cause reductions used while joining interrupted work.
+extension CauseRuntimeOperations<E> on Cause<E> {
+  /// Retains defects while discarding expected errors and interruptions.
+  Cause<Never>? get defectsOnly => switch (this) {
+    Expected<E>() || Interrupted<E>() => null,
+    Defect<E>(:final error, :final stackTrace) => Defect(error, stackTrace),
+    Sequential<E>(:final causes) => CauseGroup.sequential(
+      causes.map((cause) => cause.defectsOnly).whereType<Cause<Never>>(),
+    ),
+    Parallel<E>(:final causes) => CauseGroup.parallel(
+      causes.map((cause) => cause.defectsOnly).whereType<Cause<Never>>(),
+    ),
   };
+}
+
+/// Builds optional cause groups without empty or singleton wrappers.
+abstract final class CauseGroup {
+  /// Combines [causes] in execution order, omitting unnecessary wrappers.
+  static Cause<E>? sequential<E>(Iterable<Cause<E>> causes) => _combine(causes, Sequential.new);
+
+  /// Combines concurrent [causes] in source order, omitting unnecessary wrappers.
+  static Cause<E>? parallel<E>(Iterable<Cause<E>> causes) => _combine(causes, Parallel.new);
+
+  static Cause<E>? _combine<E>(
+    Iterable<Cause<E>> causes,
+    Cause<E> Function(Iterable<Cause<E>>) group,
+  ) {
+    final values = List<Cause<E>>.of(causes);
+    return switch (values) {
+      [] => null,
+      [final only] => only,
+      _ => group(values),
+    };
+  }
 }

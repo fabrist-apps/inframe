@@ -1,17 +1,17 @@
 /// Lazy, typed effects and their execution runtime.
 library;
 
-import 'dart:async';
-
-import 'package:conflux/non_empty_list.dart';
-import 'package:conflux/option.dart';
-import 'package:conflux/result.dart';
-import 'package:context/context.dart';
-
-part 'src/effect/builder.dart';
-part 'src/effect/cause.dart';
-part 'src/effect/clock.dart';
-part 'src/effect/effect.dart';
-part 'src/effect/execution.dart';
-part 'src/effect/exit.dart';
-part 'src/effect/runtime.dart';
+export 'src/effect/builder.dart' show EffectBuilder;
+export 'src/effect/cause.dart' show Cause, Defect, Expected, Interrupted, Parallel, Sequential;
+export 'src/effect/clock.dart' show CancellableWait, Clock, SystemClock;
+export 'src/effect/effect.dart'
+    show
+        Effect,
+        EffectCleanup,
+        EffectObservation,
+        EffectRecovery,
+        EffectTransformation,
+        FlattenEffect;
+export 'src/effect/execution.dart' show Fiber, Scope, ScopeClosed;
+export 'src/effect/exit.dart' show Exit, Failed, Succeeded;
+export 'src/effect/runtime.dart' show EffectException, EffectRunning, Runtime, RuntimeClosed;

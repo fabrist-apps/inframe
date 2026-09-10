@@ -1,4 +1,11 @@
-part of '../../effect.dart';
+import 'dart:async';
+
+import 'package:conflux/src/effect/cause.dart';
+import 'package:conflux/src/effect/clock.dart';
+import 'package:conflux/src/effect/effect.dart';
+import 'package:conflux/src/effect/execution.dart';
+import 'package:conflux/src/effect/exit.dart';
+import 'package:context/context.dart';
 
 /// Why a [Runtime] interrupted its roots during shutdown.
 final class RuntimeClosed {
@@ -21,34 +28,6 @@ final class EffectException<E> implements Exception {
   String toString() => 'EffectException: $cause';
 }
 
-final class _OwnedRoot {
-  _OwnedRoot(this._interrupt);
-
-  final Future<Cause<Never>?> Function(Object? reason) _interrupt;
-
-  Future<Cause<Never>?> interruptAndJoin(Object? reason) => _interrupt(reason);
-}
-
-/// A running Effect with cooperative interruption and an eventual [Exit].
-final class Fiber<A, E> {
-  Fiber._(this._cancellation, this._exit);
-
-  final _Cancellation _cancellation;
-  final Future<Exit<A, E>> _exit;
-
-  /// The eventual execution outcome.
-  Future<Exit<A, E>> get exit => _exit;
-
-  /// Waits for this fiber's eventual outcome.
-  Future<Exit<A, E>> join() => _exit;
-
-  /// Requests cooperative interruption and waits for cleanup and completion.
-  Future<Exit<A, E>> interrupt([Object? reason]) {
-    _cancellation.cancel(reason);
-    return _exit;
-  }
-}
-
 /// Owns root [Effect] executions, their [Context], and their [Clock].
 final class Runtime {
   /// Creates a runtime using an empty context when [context] is omitted.
@@ -63,33 +42,33 @@ final class Runtime {
   final Clock clock;
 
   var _closed = false;
-  final _roots = <_OwnedRoot>{};
+  final _roots = <OwnedEffect>{};
 
   /// Starts [effect] as a runtime-owned root execution.
   Fiber<A, E> fork<A, E>(Effect<A, E> effect) {
     if (_closed) throw StateError('Runtime is closed.');
-    final scope = Scope._();
-    final cancellation = _Cancellation();
-    final execution = _Execution(
+    final scope = ScopeAccess.create();
+    final cancellation = EffectCancellation();
+    final execution = EffectExecution(
       context: context,
       scope: scope,
       clock: clock,
       cancellation: cancellation,
     );
     late final Fiber<A, E> fiber;
-    late final _OwnedRoot root;
+    late final OwnedEffect root;
     final exit =
         Future<Exit<A, E>>.microtask(
-          () => _runScoped(effect, execution),
+          () => execution.runScoped(effect),
         ).whenComplete(
           () => _roots.remove(root),
         );
-    fiber = Fiber._(cancellation, exit);
-    root = _OwnedRoot((reason) async {
+    fiber = FiberAccess.create(cancellation, exit);
+    root = OwnedEffect((reason) async {
       final exit = await fiber.interrupt(reason);
       return switch (exit) {
         Succeeded<A, E>() => null,
-        Failed<A, E>(:final cause) => _defectsOnly(cause),
+        Failed<A, E>(:final cause) => cause.defectsOnly,
       };
     });
     _roots.add(root);
@@ -105,9 +84,30 @@ final class Runtime {
   Future<void> close() async {
     if (_closed && _roots.isEmpty) return;
     _closed = true;
-    final roots = List<_OwnedRoot>.of(_roots);
+    final roots = List<OwnedEffect>.of(_roots);
     await Future.wait(
       roots.map((root) => root.interruptAndJoin(const RuntimeClosed())),
     );
+  }
+}
+
+/// Convenience execution for callers that do not need a reusable [Runtime].
+extension EffectRunning<A, E> on Effect<A, E> {
+  /// Runs this Effect in a temporary Runtime and returns its complete [Exit].
+  Future<Exit<A, E>> runFutureExit({Context? context, Clock? clock}) async {
+    final runtime = Runtime(context: context, clock: clock);
+    try {
+      return await runtime.run(this);
+    } finally {
+      await runtime.close();
+    }
+  }
+
+  /// Runs this Effect and returns its value or throws [EffectException].
+  Future<A> runFuture({Context? context, Clock? clock}) async {
+    return switch (await runFutureExit(context: context, clock: clock)) {
+      Succeeded<A, E>(:final value) => value,
+      Failed<A, E>(:final cause) => throw EffectException(cause),
+    };
   }
 }

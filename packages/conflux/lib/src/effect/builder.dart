@@ -1,4 +1,11 @@
-part of '../../effect.dart';
+import 'dart:async';
+
+import 'package:conflux/result.dart';
+import 'package:conflux/src/effect/cause.dart';
+import 'package:conflux/src/effect/effect.dart';
+import 'package:conflux/src/effect/execution.dart';
+import 'package:conflux/src/effect/exit.dart';
+import 'package:context/context.dart';
 
 final class _BindSignal implements Exception {
   const _BindSignal();
@@ -8,7 +15,7 @@ final class _BindSignal implements Exception {
 final class EffectBuilder<E> {
   EffectBuilder._(this._execution);
 
-  final _Execution _execution;
+  final EffectExecution _execution;
   Cause<E>? _terminalCause;
   var _active = true;
 
@@ -21,7 +28,7 @@ final class EffectBuilder<E> {
   /// Runs [effect] and returns its successful value.
   Future<A> call<A>(Effect<A, E> effect) async {
     _checkUsable();
-    final exit = await effect._evaluate(_execution);
+    final exit = await EffectAccess.evaluate(effect, _execution);
     _checkUsable();
     return switch (exit) {
       Succeeded<A, E>(:final value) => value,
@@ -41,7 +48,8 @@ final class EffectBuilder<E> {
   /// Registers [finalizer] for protected execution when this scope closes.
   void addFinalizer(Effect<void, Never> finalizer) {
     _checkUsable();
-    if (!_execution.scope._addFinalizer(
+    if (!ScopeAccess.addFinalizer(
+      _execution.scope,
       finalizer,
       _execution.context,
       _execution.clock,
@@ -56,7 +64,7 @@ final class EffectBuilder<E> {
     required Effect<void, Never> Function(A resource) release,
   }) async {
     _checkUsable();
-    final exit = await acquire._evaluate(_execution);
+    final exit = await EffectAccess.evaluate(acquire, _execution);
     return switch (exit) {
       Failed<A, E>(:final cause) => _abort(cause),
       Succeeded<A, E>(:final value) => await _registerRelease<A>(value, release),
@@ -68,7 +76,8 @@ final class EffectBuilder<E> {
     Effect<void, Never> Function(A resource) release,
   ) async {
     final finalizer = Effect.defer<void, Never>(() => release(resource));
-    if (_execution.scope._addFinalizer(
+    if (ScopeAccess.addFinalizer(
+      _execution.scope,
       finalizer,
       _execution.context,
       _execution.clock,
@@ -78,7 +87,7 @@ final class EffectBuilder<E> {
 
     final error = StateError('Cannot acquire a resource in a closed Scope.');
     final registrationCause = Defect<E>(error, StackTrace.current);
-    final releaseExit = await _runProtected(
+    final releaseExit = await EffectExecution.runProtected(
       finalizer,
       _execution.context,
       _execution.clock,
@@ -108,4 +117,16 @@ final class EffectBuilder<E> {
   }
 
   void _deactivate() => _active = false;
+}
+
+/// Uses builder internals without widening its callback-facing API.
+abstract final class EffectBuilderAccess {
+  /// Creates a callback-local builder for [execution].
+  static EffectBuilder<E> create<E>(EffectExecution execution) => EffectBuilder._(execution);
+
+  /// Returns the cause that stopped [builder], if one was bound.
+  static Cause<E>? terminalCause<E>(EffectBuilder<E> builder) => builder._terminalCause;
+
+  /// Prevents [builder] from escaping its callback.
+  static void deactivate<E>(EffectBuilder<E> builder) => builder._deactivate();
 }
