@@ -1,5 +1,3 @@
-import 'dart:collection';
-
 /// An immutable, case-insensitive collection of HTTP header values.
 final class Headers {
   /// Creates empty headers.
@@ -62,7 +60,7 @@ final class Headers {
   }
 
   /// Returns an immutable snapshot of all header names and values.
-  Map<String, List<String>> toMap() => UnmodifiableMapView(_values);
+  Map<String, List<String>> toMap() => _values;
 
   Headers _replace(String name, List<String> values) {
     final copied = Map<String, List<String>>.of(_values)..[name] = List.unmodifiable(values);

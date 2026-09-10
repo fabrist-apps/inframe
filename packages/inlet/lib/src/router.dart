@@ -28,7 +28,6 @@ class Router {
       rawPath: path,
       pattern: _RoutePattern.parse(path, strict: _strict),
       handler: handler,
-      scopes: const [],
       middleware: List.unmodifiable(middleware),
     );
     _ensureNoConflict(registration, _registrations);
@@ -83,11 +82,7 @@ class Router {
         rawPath: rawPath,
         pattern: _RoutePattern.parse(rawPath, strict: _strict),
         handler: child.handler,
-        scopes: List.unmodifiable([
-          if (childScope.isNotEmpty) childScope,
-          ...child.scopes,
-        ]),
-        middleware: child.middleware,
+        middleware: List.unmodifiable([...childScope, ...child.middleware]),
       );
       _ensureNoConflict(registration, [..._registrations, ...mounted]);
       mounted.add(registration);
@@ -159,7 +154,6 @@ final class _RouteRegistration {
     required this.rawPath,
     required this.pattern,
     required this.handler,
-    required this.scopes,
     required this.middleware,
   });
 
@@ -167,7 +161,6 @@ final class _RouteRegistration {
   final String rawPath;
   final _RoutePattern pattern;
   final Handler handler;
-  final List<List<Middleware>> scopes;
   final List<Middleware> middleware;
 }
 

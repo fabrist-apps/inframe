@@ -71,7 +71,6 @@ extension on Inlet {
     required InternetAddress? address,
     required int port,
     required int backlog,
-    required bool shared,
     required Duration? idleTimeout,
     required bool isSecure,
     required Future<HttpServer> Function(InternetAddress address) bind,
@@ -264,18 +263,12 @@ final class _ServerAdapter {
   }) async {
     var committed = false;
     try {
-      final suppressBody =
-          response.statusCode == HttpStatus.noContent ||
-          response.statusCode == HttpStatus.resetContent ||
-          response.statusCode == HttpStatus.notModified ||
-          isHead;
+      final suppressBody = response._suppressBody || isHead;
       if (!suppressBody && !response._body.isUntouched) {
         throw StateError('The response body has already been consumed or closed.');
       }
       _prepareTarget(target, input, reset: resetTarget);
-      target
-        ..statusCode = response.statusCode
-        ..bufferOutput = false;
+      target.statusCode = response.statusCode;
       for (final MapEntry(key: name, value: values) in response.headers.toMap().entries) {
         for (final value in values) {
           target.headers.add(name, value);

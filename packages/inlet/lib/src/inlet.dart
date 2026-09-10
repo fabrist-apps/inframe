@@ -73,7 +73,6 @@ final class Inlet extends Router {
     address: address,
     port: port,
     backlog: backlog,
-    shared: shared,
     idleTimeout: idleTimeout,
     isSecure: false,
     bind: (bindAddress) => HttpServer.bind(
@@ -96,7 +95,6 @@ final class Inlet extends Router {
     address: address,
     port: port,
     backlog: backlog,
-    shared: shared,
     idleTimeout: idleTimeout,
     isSecure: true,
     bind: (bindAddress) => HttpServer.bindSecure(
@@ -131,7 +129,6 @@ final class Inlet extends Router {
       _MatchedRoute(:final registration, :final pathParameters) => (
         middleware: <Middleware>[
           ...router.rootMiddleware,
-          for (final scope in registration.scopes) ...scope,
           ...registration.middleware,
         ],
         terminal: registration.handler,
