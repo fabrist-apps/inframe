@@ -110,6 +110,8 @@ final class Request {
     exchange: _exchange,
   );
 
+  bool _sharesExchange(Request other) => identical(_exchange, other._exchange);
+
   /// The body stream, claimed when it is first listened to.
   Stream<List<int>> get body => _exchange.body.stream;
 

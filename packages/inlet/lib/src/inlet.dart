@@ -8,6 +8,7 @@ import 'package:context/context.dart';
 import 'package:inlet/src/headers.dart';
 
 part 'body.dart';
+part 'middleware.dart';
 part 'request.dart';
 part 'response.dart';
 part 'router.dart';
@@ -55,40 +56,69 @@ final class Inlet extends Router {
     final router = _admit(request);
     final dispatchContext = context ?? this.context;
     final resolution = router.resolve(request);
-    if (resolution case _BadRoutePath()) {
-      return Response.empty(status: HttpStatus.badRequest);
-    }
-    if (resolution case _RouteNotFound()) {
-      return Response.empty(status: HttpStatus.notFound);
-    }
-    if (resolution case _MethodNotAllowed(:final allowedMethods)) {
-      return Response.empty(
-        status: HttpStatus.methodNotAllowed,
-        headers: const Headers.empty().set(HttpHeaders.allowHeader, allowedMethods.join(', ')),
-      );
-    }
-    final matched = resolution as _MatchedRoute;
-    final matchedRequest = request._withPathParameters(matched.pathParameters);
+    final (:middleware, :terminal, :dispatchRequest, :suppressBody) = switch (resolution) {
+      _BadRoutePath() => (
+        middleware: router.rootMiddleware,
+        terminal: _badRequest,
+        dispatchRequest: request,
+        suppressBody: false,
+      ),
+      _RouteNotFound() => (
+        middleware: router.rootMiddleware,
+        terminal: _notFound,
+        dispatchRequest: request,
+        suppressBody: false,
+      ),
+      _MethodNotAllowed(:final allowedMethods) => (
+        middleware: router.rootMiddleware,
+        terminal: _methodNotAllowed(allowedMethods),
+        dispatchRequest: request,
+        suppressBody: false,
+      ),
+      _MatchedRoute(:final registration, :final pathParameters, :final suppressBody) => (
+        middleware: <Middleware>[
+          ...router.rootMiddleware,
+          for (final scope in registration.scopes) ...scope,
+          ...registration.middleware,
+        ],
+        terminal: registration.handler,
+        dispatchRequest: request._withPathParameters(pathParameters),
+        suppressBody: suppressBody,
+      ),
+    };
+    final dispatch = _DispatchState(dispatchContext, dispatchRequest, _report);
+
+    late final Response response;
     try {
-      final response = await matched.registration.handler(dispatchContext, matchedRequest);
-      return matched.suppressBody ? response._withoutBody() : response;
-    } on MalformedBodyException {
-      return Response.empty(status: HttpStatus.badRequest);
-    } on BodyLimitExceededException {
-      return Response.empty(status: HttpStatus.requestEntityTooLarge);
+      response = await _runMiddleware(
+        middleware,
+        terminal,
+        dispatch,
+        dispatchContext,
+        dispatchRequest,
+      );
     } on Object catch (error, stackTrace) {
-      _report(error, stackTrace);
+      if (_isUnexpected(error) && !_wasReported(error)) {
+        _report(error, stackTrace);
+      }
       final errorHandler = onError;
       if (errorHandler != null) {
         try {
-          final response = await errorHandler(dispatchContext, matchedRequest, error, stackTrace);
-          return matched.suppressBody ? response._withoutBody() : response;
+          response = await errorHandler(
+            dispatch.context,
+            dispatch.request,
+            error,
+            stackTrace,
+          );
         } on Object catch (hookError, hookStackTrace) {
           _report(hookError, hookStackTrace);
+          response = Response.empty(status: HttpStatus.internalServerError);
         }
+      } else {
+        response = _defaultErrorResponse(error);
       }
-      return Response.empty(status: HttpStatus.internalServerError);
     }
+    return suppressBody ? response._withoutBody() : response;
   }
 
   void _report(Object error, StackTrace stackTrace) {
@@ -108,3 +138,29 @@ final class Inlet extends Router {
     }
   }
 }
+
+Response _badRequest(Context _, Request _) => Response.empty(status: HttpStatus.badRequest);
+
+Response _notFound(Context _, Request _) => Response.empty(status: HttpStatus.notFound);
+
+Handler _methodNotAllowed(List<String> allowedMethods) =>
+    (_, _) => Response.empty(
+      status: HttpStatus.methodNotAllowed,
+      headers: const Headers.empty().set(
+        HttpHeaders.allowHeader,
+        allowedMethods.join(', '),
+      ),
+    );
+
+Response _defaultErrorResponse(Object error) => switch (error) {
+  MalformedBodyException() => Response.empty(status: HttpStatus.badRequest),
+  BodyLimitExceededException() => Response.empty(
+    status: HttpStatus.requestEntityTooLarge,
+  ),
+  _ => Response.empty(status: HttpStatus.internalServerError),
+};
+
+bool _isUnexpected(Object error) =>
+    error is! MalformedBodyException && error is! BodyLimitExceededException;
+
+bool _wasReported(Object error) => error is _ContinuationStateError && error.wasReported;

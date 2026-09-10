@@ -101,7 +101,11 @@ class Router {
       return frozen;
     }
 
-    final candidate = _CompiledRouter.compile(_registrations, strict: _strict);
+    final candidate = _CompiledRouter.compile(
+      _registrations,
+      rootMiddleware: _middleware,
+      strict: _strict,
+    );
     request._admit();
     _compiled = candidate;
     return candidate;
@@ -224,10 +228,15 @@ final class _WildcardSegment extends _PatternSegment {
 }
 
 final class _CompiledRouter {
-  const _CompiledRouter(this.root, {required this.strict});
+  const _CompiledRouter(
+    this.root, {
+    required this.rootMiddleware,
+    required this.strict,
+  });
 
   factory _CompiledRouter.compile(
     List<_RouteRegistration> registrations, {
+    required List<Middleware> rootMiddleware,
     required bool strict,
   }) {
     final root = _BuildRouteNode();
@@ -242,10 +251,15 @@ final class _CompiledRouter {
       }
       node.endpoints[registration.method] = registration;
     }
-    return _CompiledRouter(root.freeze(), strict: strict);
+    return _CompiledRouter(
+      root.freeze(),
+      rootMiddleware: List.unmodifiable(rootMiddleware),
+      strict: strict,
+    );
   }
 
   final _CompiledRouteNode root;
+  final List<Middleware> rootMiddleware;
   final bool strict;
 
   _RouteResolution resolve(Request request) {
