@@ -1,4 +1,7 @@
-use std::{mem, slice};
+use std::{
+    alloc::{self, Layout},
+    slice,
+};
 
 use turso_parser::parser::Parser;
 
@@ -10,15 +13,24 @@ const INVALID_UTF8: u32 = 4;
 
 #[no_mangle]
 pub extern "C" fn turso_sql_guard_alloc(length: usize) -> *mut u8 {
-    let mut bytes = Vec::<u8>::with_capacity(length);
-    let pointer = bytes.as_mut_ptr();
-    mem::forget(bytes);
+    if length == 0 {
+        return std::ptr::NonNull::<u8>::dangling().as_ptr();
+    }
+    let layout = Layout::array::<u8>(length).expect("valid SQL guard allocation");
+    let pointer = unsafe { alloc::alloc(layout) };
+    if pointer.is_null() {
+        alloc::handle_alloc_error(layout);
+    }
     pointer
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn turso_sql_guard_dealloc(pointer: *mut u8, length: usize) {
-    drop(Vec::from_raw_parts(pointer, 0, length));
+    if length == 0 {
+        return;
+    }
+    let layout = Layout::array::<u8>(length).expect("valid SQL guard allocation");
+    alloc::dealloc(pointer, layout);
 }
 
 /// Checks that `sql` contains exactly one statement using the pinned Turso parser.

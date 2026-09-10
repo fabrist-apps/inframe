@@ -169,6 +169,14 @@ void main() {
       expect(row.getDouble('real_number'), 7.5);
       expect(row.getDouble('forced_real'), 7.0);
 
+      final blobFirst = await database.query(
+        'SELECT ? AS payload',
+        parameters: [
+          Uint8List.fromList([1, 2, 3]),
+        ],
+      );
+      expect(blobFirst.rows.single.getBlob('payload'), [1, 2, 3]);
+
       await database.execute('CREATE TABLE changed (value INTEGER)');
       final inserted = await database.execute(
         'INSERT INTO changed VALUES (1), (2) RETURNING value',

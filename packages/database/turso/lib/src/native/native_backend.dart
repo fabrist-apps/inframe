@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'package:turso/src/internal/backend.dart';
+import 'package:turso/src/internal/parameters.dart';
 import 'package:turso/src/native/turso_bindings_generated.dart' as bindings;
 import 'package:turso/src/turso_exception.dart';
 import 'package:turso/src/turso_location.dart';
@@ -132,14 +133,14 @@ final class NativeBackend implements TursoBackend {
   }
 
   @override
-  Future<List<Object?>> query(String sql, List<Object?> parameters) async {
-    final result = await _request('query', [sql, parameters]);
+  Future<List<Object?>> query(String sql, SqlParameterSnapshot parameters) async {
+    final result = await _request('query', [sql, parameters.named, parameters.values]);
     return result! as List<Object?>;
   }
 
   @override
-  Future<BigInt> execute(String sql, List<Object?> parameters) async {
-    final result = await _request('execute', [sql, parameters]);
+  Future<BigInt> execute(String sql, SqlParameterSnapshot parameters) async {
+    final result = await _request('execute', [sql, parameters.named, parameters.values]);
     return BigInt.parse(result! as String);
   }
 
@@ -246,11 +247,13 @@ void _runNativeWorker(List<Object?> start) {
         final result = switch (request[1]) {
           'query' => database!.query(
             (request[2]! as List<Object?>)[0]! as String,
-            (request[2]! as List<Object?>)[1]! as List<Object?>,
+            (request[2]! as List<Object?>)[2]! as List<Object?>,
+            named: (request[2]! as List<Object?>)[1]! as bool,
           ),
           'execute' => database!.execute(
             (request[2]! as List<Object?>)[0]! as String,
-            (request[2]! as List<Object?>)[1]! as List<Object?>,
+            (request[2]! as List<Object?>)[2]! as List<Object?>,
+            named: (request[2]! as List<Object?>)[1]! as bool,
           ),
           'close' => null,
           _ => throw StateError('Unknown native request: ${request[1]}.'),
@@ -337,7 +340,8 @@ final class _NativeDatabase {
       final experimentalFeaturesPointer = (key == null ? 'index_method' : 'encryption,index_method')
           .toNativeUtf8();
       final cipherPointer = cipher == null ? nullptr : cipher.toNativeUtf8();
-      final hexKeyPointer = key == null ? nullptr : _encodeHex(key).toNativeUtf8();
+      final hexKey = key == null ? null : _encodeHex(key);
+      final hexKeyPointer = hexKey == null ? nullptr : hexKey.toNativeUtf8();
       final config = calloc<bindings.turso_database_config_t>();
       final databaseOut = calloc<Pointer<bindings.turso_database_t>>();
       try {
@@ -356,6 +360,16 @@ final class _NativeDatabase {
         );
         database = databaseOut.value;
       } finally {
+        if (hexKey != null) {
+          hexKeyPointer
+              .cast<Uint8>()
+              .asTypedList(hexKey.length + 1)
+              .fillRange(
+                0,
+                hexKey.length + 1,
+                0,
+              );
+        }
         calloc
           ..free(pathPointer)
           ..free(experimentalFeaturesPointer)
@@ -392,8 +406,8 @@ final class _NativeDatabase {
   final Pointer<bindings.turso_connection_t> _connection;
   var _closed = false;
 
-  List<Object?> query(String sql, List<Object?> parameters) {
-    final statement = _prepare(sql, parameters);
+  List<Object?> query(String sql, List<Object?> parameters, {required bool named}) {
+    final statement = _prepare(sql, parameters, named: named);
     try {
       final columnCount = bindings.turso_statement_column_count(statement);
       final columns = [
@@ -426,8 +440,8 @@ final class _NativeDatabase {
     }
   }
 
-  String execute(String sql, List<Object?> parameters) {
-    final statement = _prepare(sql, parameters);
+  String execute(String sql, List<Object?> parameters, {required bool named}) {
+    final statement = _prepare(sql, parameters, named: named);
     final rowsChanged = calloc<Uint64>();
     try {
       while (true) {
@@ -445,7 +459,11 @@ final class _NativeDatabase {
     }
   }
 
-  Pointer<bindings.turso_statement_t> _prepare(String sql, List<Object?> parameters) {
+  Pointer<bindings.turso_statement_t> _prepare(
+    String sql,
+    List<Object?> parameters, {
+    required bool named,
+  }) {
     final sqlPointer = sql.toNativeUtf8();
     final statementOut = calloc<Pointer<bindings.turso_statement_t>>();
     final tailIndex = calloc<Size>();
@@ -465,7 +483,7 @@ final class _NativeDatabase {
       }
       try {
         _rejectTrailingStatement(sql, tailIndex.value);
-        _bind(statement, parameters);
+        _bind(statement, parameters, named: named);
       } on Object {
         _finalize(statement);
         rethrow;
@@ -511,10 +529,13 @@ final class _NativeDatabase {
     }
   }
 
-  void _bind(Pointer<bindings.turso_statement_t> statement, List<Object?> parameters) {
+  void _bind(
+    Pointer<bindings.turso_statement_t> statement,
+    List<Object?> parameters, {
+    required bool named,
+  }) {
     final expectedCount = bindings.turso_statement_parameters_count(statement);
-    final isNamed = parameters.isNotEmpty && parameters.first is List<Object?>;
-    if (!isNamed) {
+    if (!named) {
       if (parameters.length != expectedCount) {
         throw ArgumentError(
           'Expected $expectedCount positional parameters, got ${parameters.length}.',

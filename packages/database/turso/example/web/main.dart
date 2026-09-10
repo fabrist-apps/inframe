@@ -260,6 +260,16 @@ Future<void> _writePersistentData() async {
       namedParameters: const {':value': 2},
     );
     _expect(repeated.rows.single.getInt('total') == 4, 'Repeated binding failed.');
+    final blobFirst = await database.query(
+      'SELECT ? AS payload',
+      parameters: [
+        Uint8List.fromList([1, 2, 3]),
+      ],
+    );
+    _expect(
+      _bytesEqual(blobFirst.rows.single.getBlob('payload'), const [1, 2, 3]),
+      'A first positional BLOB parameter changed.',
+    );
   } finally {
     await database.close();
   }
@@ -368,6 +378,14 @@ Future<void> _expectFailure<T extends Object>(Future<Object?> Function() action)
 
 void _expect(bool condition, String message) {
   if (!condition) throw StateError(message);
+}
+
+bool _bytesEqual(List<int> first, List<int> second) {
+  if (first.length != second.length) return false;
+  for (var index = 0; index < first.length; index++) {
+    if (first[index] != second[index]) return false;
+  }
+  return true;
 }
 
 bool _listEquals(List<int> left, List<int> right) {

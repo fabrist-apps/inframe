@@ -143,7 +143,7 @@ final class TursoDatabase {
   }
 
   Future<T> _runTransaction<T>(Future<T> Function(TursoTransaction tx) action) async {
-    await _runBackendOperation(() => _backend.execute('BEGIN DEFERRED', const []));
+    await _runBackendOperation(() => _backend.execute('BEGIN DEFERRED', emptySqlParameters));
     final transaction = _ManagedTransaction(_backend, _runBackendOperation);
     late T result;
     Object? primaryError;
@@ -172,7 +172,7 @@ final class TursoDatabase {
     }
 
     try {
-      await _runBackendOperation(() => _backend.execute('COMMIT', const []));
+      await _runBackendOperation(() => _backend.execute('COMMIT', emptySqlParameters));
     } on Object catch (error, stackTrace) {
       await _rollbackAndThrow(error, stackTrace);
     }
@@ -181,7 +181,7 @@ final class TursoDatabase {
 
   Future<Never> _rollbackAndThrow(Object primaryError, StackTrace primaryStackTrace) async {
     try {
-      await _runBackendOperation(() => _backend.execute('ROLLBACK', const []));
+      await _runBackendOperation(() => _backend.execute('ROLLBACK', emptySqlParameters));
     } on Object catch (rollbackError, rollbackStackTrace) {
       await _retire(
         const TursoPlatformException(

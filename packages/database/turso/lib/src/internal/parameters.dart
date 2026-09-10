@@ -5,6 +5,12 @@ const int portableSafeInteger = 9007199254740991;
 final BigInt _minimumInt64 = BigInt.parse('-9223372036854775808');
 final BigInt _maximumInt64 = BigInt.parse('9223372036854775807');
 
+/// An immutable operation-time snapshot of SQL parameters and their binding mode.
+typedef SqlParameterSnapshot = ({bool named, List<Object?> values});
+
+/// An empty positional parameter snapshot.
+const SqlParameterSnapshot emptySqlParameters = (named: false, values: <Object?>[]);
+
 /// Rejects SQL text that cannot cross the native C string boundary intact.
 void validateSql(String sql) {
   if (sql.contains('\u0000')) {
@@ -13,7 +19,7 @@ void validateSql(String sql) {
 }
 
 /// Copies and normalizes arguments before an operation enters the queue.
-List<Object?> snapshotParameters(
+SqlParameterSnapshot snapshotParameters(
   List<Object?> parameters,
   Map<String, Object?> namedParameters,
 ) {
@@ -22,11 +28,14 @@ List<Object?> snapshotParameters(
   }
 
   if (namedParameters.isNotEmpty) {
-    return [
-      for (final entry in namedParameters.entries) [entry.key, _normalize(entry.value)],
-    ];
+    return (
+      named: true,
+      values: [
+        for (final entry in namedParameters.entries) [entry.key, _normalize(entry.value)],
+      ],
+    );
   }
-  return [for (final value in parameters) _normalize(value)];
+  return (named: false, values: [for (final value in parameters) _normalize(value)]);
 }
 
 Object? _normalize(Object? value) {
