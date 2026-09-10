@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conflux/conflux.dart';
+import 'package:conflux/src/effect/execution.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -458,15 +459,15 @@ Future<void> _flushMicrotasks() async {
 }
 
 Effect<A, E> _atWaiterRegistrationBoundary<A, E>(Effect<A, E> effect) {
-  // The operation's defer is step 255; its waiter adapter reaches the runtime's
-  // cooperative boundary at step 256.
-  return _afterEvaluationSteps(effect, 254);
+  // The operation's defer is the preceding step; its waiter adapter reaches
+  // the runtime's next cooperative boundary.
+  return _afterEvaluationSteps(effect, EffectExecution.schedulingInterval - 2);
 }
 
 Effect<A, E> _atSubscriptionRegistrationBoundary<A, E>(Effect<A, E> effect) {
-  // The former subscription acquisition created state at step 255, immediately
-  // before finalizer registration crossed the step-256 boundary.
-  return _afterEvaluationSteps(effect, 252);
+  // The former subscription acquisition created state one step before the
+  // boundary, immediately before finalizer registration could complete.
+  return _afterEvaluationSteps(effect, EffectExecution.schedulingInterval - 4);
 }
 
 Effect<A, E> _afterEvaluationSteps<A, E>(Effect<A, E> effect, int count) {
