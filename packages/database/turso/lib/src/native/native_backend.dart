@@ -125,7 +125,7 @@ final class NativeBackend implements TursoBackend {
       statusPort,
       statusSubscription,
       handshake[1]! as SendPort,
-      const TursoCapabilities(fts: false, vectorFunctions: false, vectorIndexes: false),
+      const TursoCapabilities(fts: true, vectorFunctions: true, vectorIndexes: false),
     );
     if (failedBeforeBackend) backend._handleWorkerFailure();
     return backend;
@@ -300,7 +300,8 @@ final class _NativeDatabase {
       _checkStatic(setupStatus, errorOut);
 
       final pathPointer = path.toNativeUtf8();
-      final experimentalFeaturesPointer = key == null ? nullptr : 'encryption'.toNativeUtf8();
+      final experimentalFeaturesPointer = (key == null ? 'index_method' : 'encryption,index_method')
+          .toNativeUtf8();
       final cipherPointer = cipher == null ? nullptr : cipher.toNativeUtf8();
       final hexKeyPointer = key == null ? nullptr : _encodeHex(key).toNativeUtf8();
       final config = calloc<bindings.turso_database_config_t>();

@@ -180,6 +180,15 @@ String _encryptedDatabaseName(TursoCipher cipher) => 'turso-dart-web-${cipher.na
 
 Uint8List _encryptionKey() => Uint8List.fromList(List<int>.generate(32, (index) => index + 1));
 
+Future<void> _verifyVectorFunctions(TursoDatabase database) async {
+  final result = await database.query(
+    "SELECT vector_extract(vector32('[1, 2]')) AS value, "
+    "vector_distance_l2(vector32('[0, 0]'), vector32('[3, 4]')) AS distance",
+  );
+  _expect(result.rows.single.getString('value') == '[1,2]', 'Vector conversion failed.');
+  _expect(result.rows.single.getDouble('distance') == 5.0, 'Vector distance failed.');
+}
+
 Future<void> _writePersistentData() async {
   final database = await TursoDatabase.open(
     TursoLocation.browser(_databaseName),
@@ -187,8 +196,12 @@ Future<void> _writePersistentData() async {
   );
   try {
     _expect(!database.capabilities.fts, 'Web FTS must remain unavailable.');
-    _expect(!database.capabilities.vectorFunctions, 'Unverified vector functions were advertised.');
+    _expect(
+      database.capabilities.vectorFunctions,
+      'Verified vector functions were not advertised.',
+    );
     _expect(!database.capabilities.vectorIndexes, 'Unverified vector indexes were advertised.');
+    await _verifyVectorFunctions(database);
     await database.execute(
       'CREATE TABLE IF NOT EXISTS values_table ( '
       'minimum INTEGER, maximum INTEGER, title TEXT, payload BLOB)',

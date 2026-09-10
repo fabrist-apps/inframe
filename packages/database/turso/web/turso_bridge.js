@@ -67,7 +67,7 @@ async function open({ path, persistent, encryption }) {
   }
   return {
     upstreamVersion,
-    capabilities: { fts: false, vectorFunctions: false, vectorIndexes: false },
+    capabilities: { fts: false, vectorFunctions: true, vectorIndexes: false },
   };
 }
 

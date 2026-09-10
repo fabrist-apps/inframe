@@ -116,8 +116,28 @@ dart run tool/serve_web_example.dart
 
 The OPFS persistence, reload, lock-release, memory, and shared SQL contract checks were run against
 desktop Chrome `152.0.7977.65` on macOS. The same browser check covers callback transaction commit,
-rollback, isolation, and handle expiry. Web FTS and vector capabilities remain unadvertised until a
-later slice verifies them.
+rollback, isolation, and handle expiry.
+
+## SQL features
+
+`capabilities` reports features verified for the selected packaged artifact:
+
+| Backend | FTS | Vector functions | Vector indexes |
+| --- | --- | --- | --- |
+| Native | Yes | Yes | No |
+| Web | No | Yes | No |
+
+Native FTS uses upstream's raw SQL surface:
+
+```sql
+CREATE INDEX documents_fts ON documents USING fts (title, body);
+SELECT id FROM documents WHERE fts_match(title, body, 'database');
+```
+
+Both backends support verified vector conversion and scalar distance functions, for example
+`vector_distance_l2(vector32('[0, 0]'), vector32('[3, 4]'))`. General approximate nearest-neighbor
+indexing is not advertised. These checks execute against unchanged Turso `v0.8.0-pre.10`; web FTS is
+unavailable in v1.
 
 ## Upstream
 
