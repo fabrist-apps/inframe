@@ -1,0 +1,11 @@
+name: inframe_workspace
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+workspace:
+  - packages/database/clickhouse
+
+dev_dependencies:
+  very_good_analysis: ^10.0.0

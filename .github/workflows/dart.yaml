@@ -1,0 +1,58 @@
+name: Dart
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.3
+
+      - name: Resolve workspace dependencies
+        run: dart pub get
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: dart analyze
+
+      - name: Run controlled HTTP tests
+        run: dart test packages/database/clickhouse/test --exclude-tags integration --chain-stack-traces
+
+      - name: Run ClickHouse integration tests
+        env:
+          CLICKHOUSE_URL: http://127.0.0.1:18123
+          CLICKHOUSE_PASSWORD: test-password
+          CLICKHOUSE_ALLOW_INSECURE_HTTP: 'true'
+        run: |
+          docker run --detach --rm --name inframe-clickhouse-test \
+            --publish 127.0.0.1:18123:8123 \
+            --env CLICKHOUSE_PASSWORD=test-password \
+            clickhouse:26.8.2.7@sha256:2c0ce0d50655752e01b859cbbaf275f6c8009be7178e48e9113b060cb472bf25
+          trap 'docker stop inframe-clickhouse-test' EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent --show-error \
+              --user default:test-password \
+              http://127.0.0.1:18123/ping; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error \
+            --user default:test-password \
+            http://127.0.0.1:18123/ping
+          dart test packages/database/clickhouse/test/integration --chain-stack-traces
