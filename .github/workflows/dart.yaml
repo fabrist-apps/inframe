@@ -41,6 +41,12 @@ jobs:
       - name: Run controlled HTTP tests
         run: dart test packages/database/clickhouse/test --exclude-tags integration --chain-stack-traces
 
+      - name: Run JSON Patch tests on the Dart VM
+        run: dart test packages/json_patch/test --chain-stack-traces
+
+      - name: Run JSON Patch public example
+        run: dart run packages/json_patch/example/json_patch_example.dart
+
       - name: Run ClickHouse integration tests
         env:
           CLICKHOUSE_URL: http://127.0.0.1:18123

@@ -28,4 +28,20 @@ When implementation would change an agreed product contract, report the conflict
 
 ## Repository guidance
 
-The repository is at an initial stage. Do not invent package boundaries, commands, or deployment procedures and present them as established conventions. Update this file as the workspace, build commands, generated-code rules, and test commands become concrete.
+This repository is a Dart pub workspace. Run workspace commands from the repository root:
+
+```sh
+dart pub get
+dart format --output=none --set-exit-if-changed .
+dart analyze
+```
+
+Run package tests by path so integration suites keep their explicit environment setup:
+
+```sh
+dart test packages/json_patch/test --chain-stack-traces
+dart test packages/database/clickhouse/test --exclude-tags integration --chain-stack-traces
+```
+
+The ClickHouse integration suite and its disposable service setup are defined in
+`.github/workflows/dart.yaml`. Do not point it at a live database.

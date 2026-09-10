@@ -7,6 +7,7 @@ environment:
 workspace:
   - packages/context
   - packages/database/clickhouse
+  - packages/json_patch
   - packages/chrono_id
 
 dev_dependencies:
