@@ -15,7 +15,6 @@ permissions:
 
 jobs:
   turso-linux:
-    if: false # Temporarily disabled while the Windows runner is isolated.
     runs-on: blacksmith-2vcpu-ubuntu-2404
 
     steps:
@@ -100,61 +99,7 @@ jobs:
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py chrome
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py firefox
 
-  turso-windows:
-    runs-on: blacksmith-2vcpu-windows-2025
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: dart-lang/setup-dart@v1
-        with:
-          sdk: 3.13.3
-      - name: Resolve workspace dependencies
-        run: dart pub get
-      - name: Verify packaged Windows SDK artifact
-        shell: pwsh
-        run: |
-          $actual = (Get-FileHash packages/database/turso/native/windows/x64/turso_sdk_kit.dll -Algorithm SHA256).Hash.ToLower()
-          if ($actual -ne 'd98951e2cc584ac98a2ada9f839a5901267c6fc0ee23eceed27b22393e51a60d') {
-            throw "Unexpected Turso SDK hash: $actual"
-          }
-      - name: Run Turso engine tests
-        working-directory: packages/database/turso
-        run: dart test test --chain-stack-traces
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-      - name: Install the Visual C++ runtime
-        shell: pwsh
-        run: choco install vcredist140 --yes --no-progress
-      - name: Build and run Windows Flutter application
-        shell: pwsh
-        run: |
-          $smokeRoot = Join-Path $env:RUNNER_TEMP 'turso_smoke'
-          flutter create --empty --platforms=windows $smokeRoot
-          Push-Location $smokeRoot
-          flutter pub add turso --path "$env:GITHUB_WORKSPACE/packages/database/turso"
-          Copy-Item "$env:GITHUB_WORKSPACE/packages/database/turso/tool/flutter_smoke_main.dart.template" lib/main.dart
-          flutter build windows --release
-          $releaseRoot = "$smokeRoot/build/windows/x64/runner/Release"
-          & "$env:GITHUB_WORKSPACE/packages/database/turso/tool/diagnose_windows.ps1" -Bundle $releaseRoot
-          $process = Start-Process "$releaseRoot/turso_smoke.exe" -WorkingDirectory $releaseRoot -ArgumentList '--enable-software-rendering' -PassThru -Wait
-          if ($process.ExitCode -ne 0) {
-            $exitCode = $process.ExitCode
-            Write-Host "Turso Flutter smoke process exited with $exitCode (0x$($exitCode.ToString('X8')))."
-            $errorPath = "$releaseRoot/TURSO_ERROR"
-            if (Test-Path $errorPath) {
-              Get-Content $errorPath
-            }
-            throw "Turso Flutter smoke process failed."
-          }
-          if (-not (Test-Path "$releaseRoot/turso-flutter-smoke/PASS")) {
-            throw 'Turso Flutter smoke check failed.'
-          }
-
   turso-apple:
-    if: false # Temporarily disabled while the Windows runner is isolated.
     runs-on: blacksmith-6vcpu-macos-latest
 
     steps:

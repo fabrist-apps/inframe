@@ -267,7 +267,7 @@ Future<void> _writePersistentData() async {
       ],
     );
     _expect(
-      _bytesEqual(blobFirst.rows.single.getBlob('payload'), const [1, 2, 3]),
+      _listEquals(blobFirst.rows.single.getBlob('payload'), const [1, 2, 3]),
       'A first positional BLOB parameter changed.',
     );
   } finally {
@@ -378,14 +378,6 @@ Future<void> _expectFailure<T extends Object>(Future<Object?> Function() action)
 
 void _expect(bool condition, String message) {
   if (!condition) throw StateError(message);
-}
-
-bool _bytesEqual(List<int> first, List<int> second) {
-  if (first.length != second.length) return false;
-  for (var index = 0; index < first.length; index++) {
-    if (first[index] != second[index]) return false;
-  }
-  return true;
 }
 
 bool _listEquals(List<int> left, List<int> right) {

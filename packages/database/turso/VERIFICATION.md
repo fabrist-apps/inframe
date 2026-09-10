@@ -1,8 +1,8 @@
 # Verification record
 
-This file records the environments and evidence behind the package support claims. The GitHub
-Actions workflow verifies the complete matrix on every pull request. Artifact provenance and hashes
-are recorded separately in [native/README.md](native/README.md) and [web/README.md](web/README.md).
+This file records the environments and evidence behind the package support claims. GitHub Actions
+verifies the enabled matrix when this package changes. Artifact provenance and hashes are recorded
+separately in [native/README.md](native/README.md) and [web/README.md](web/README.md).
 
 ## Runtime matrix
 
@@ -15,7 +15,7 @@ are printed in each job log so a later image update produces a new, attributable
 | iOS | macOS 26 ARM64 runner; first available iPhone simulator; physical-device release build | Flutter integration contract on the simulator; ARM64 device-framework packaging check |
 | macOS | macOS 26 ARM64 runner | Complete native Dart contract using the packaged dylib |
 | Linux | Ubuntu 24.04 x64 runner | Complete native Dart contract and a release Flutter application under Xvfb |
-| Windows | Windows x64 runner | Complete native Dart contract and a release Flutter application process |
+| Windows | Blacksmith Windows Server 2025 x64 runner | Temporarily disabled: the native Dart contract passes, but the Server Core image cannot load `OPENGL32.dll`, which prevents the Flutter engine from starting |
 | Web | Ubuntu 24.04 for Chrome and Firefox; macOS 26 ARM64 for Safari | Compiled Dart application through Selenium and each browser's native WebDriver |
 
 The recorded stable desktop browsers are:
@@ -33,10 +33,10 @@ Mobile browsers are excluded; Android and iOS use their native Flutter targets.
 
 | Contract | Evidence |
 | --- | --- |
-| Native values, bindings, persistence, memory opening, encryption failures, and lifecycle | `test/native_database_test.dart` on macOS, Linux, and Windows; `tool/flutter_native_runtime_test.dart.template` on Android and iOS |
+| Native values, bindings, persistence, memory opening, encryption failures, and lifecycle | `test/native_database_test.dart` on macOS and Linux, with Windows verified before its temporary CI disablement; `tool/flutter_native_runtime_test.dart.template` on Android and iOS |
 | Transactions, serialization, submitted-work draining, rollback/commit failure, and retirement | `test/transaction_test.dart` on desktop native targets; the representative transaction and lifecycle cases in the mobile integration suite |
 | Native encryption, FTS rollback/reopen, and vector functions | `test/feature_test.dart` on desktop native targets and both ciphers in the mobile integration suite |
-| Flutter native artifact loading | Release Flutter applications on Linux and Windows, Android emulator plus ARM64 APK, iOS simulator plus device build |
+| Flutter native artifact loading | Release Flutter application on Linux, Android emulator plus ARM64 APK, and iOS simulator plus device build; Windows is temporarily disabled as described above |
 | Browser persistence/reload, storage lock release, failed-open cleanup, and memory opening | `example/web/main.dart` in Chrome, Firefox, and Safari |
 | Browser bindings, exact integers, immutable results, transactions, lifecycle, encryption, and vectors | `example/web/main.dart` in Chrome, Firefox, and Safari |
 | Web FTS exclusion | The browser suite asserts `fts == false`; native suites execute FTS SQL |

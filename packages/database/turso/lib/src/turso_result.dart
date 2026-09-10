@@ -69,7 +69,7 @@ final class TursoRow {
   String getString(String name) => _require<String>(name, 'TEXT');
 
   /// Returns a defensive copy of a SQL BLOB.
-  Uint8List getBlob(String name) => Uint8List.fromList(_require<Uint8List>(name, 'BLOB'));
+  Uint8List getBlob(String name) => _require<Uint8List>(name, 'BLOB');
 
   T _require<T>(String name, String sqlType) {
     final result = value(name);
