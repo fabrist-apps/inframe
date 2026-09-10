@@ -33,6 +33,12 @@ jobs:
       - name: Run context tests and consumer checks
         run: dart test packages/context/test --chain-stack-traces
 
+      - name: Run Inlet tests and examples
+        run: |
+          dart test packages/inlet/test --chain-stack-traces
+          dart run packages/inlet/example/inlet_example.dart
+          dart run packages/inlet/example/stream_transfers.dart
+
       - name: Run Conflux tests and consumer checks
         run: dart test packages/conflux/test --chain-stack-traces
 
