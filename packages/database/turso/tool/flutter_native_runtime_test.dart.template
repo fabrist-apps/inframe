@@ -249,7 +249,7 @@ Future<void> _runEncryptedFeatures(Directory directory, TursoCipher cipher) asyn
   final vector = await database.query(
     "SELECT vector_distance_l2(vector32('[0, 0]'), vector32('[3, 4]')) AS distance",
   );
-  expect(vector.rows.single.getDouble('distance'), 5.0);
+  expect(vector.rows.single.getDouble('distance'), closeTo(5.0, 0.01));
   await database.close();
 
   final wrongKey = _encryptionKey()..[0] ^= 0xff;

@@ -134,11 +134,15 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE/packages/database/turso/tool/flutter_smoke_main.dart.template" lib/main.dart
           flutter build windows --release
           $releaseRoot = "$smokeRoot/build/windows/x64/runner/Release"
-          $process = Start-Process "$releaseRoot/turso_smoke.exe" -PassThru -Wait
+          $process = Start-Process "$releaseRoot/turso_smoke.exe" -ArgumentList '--enable-software-rendering' -PassThru -Wait
           if ($process.ExitCode -ne 0) {
-            $LASTEXITCODE = $process.ExitCode
-            Get-Content "$releaseRoot/TURSO_ERROR"
-            throw "Turso Flutter smoke process exited with $LASTEXITCODE."
+            $exitCode = $process.ExitCode
+            Write-Host "Turso Flutter smoke process exited with $exitCode (0x$($exitCode.ToString('X8')))."
+            $errorPath = "$releaseRoot/TURSO_ERROR"
+            if (Test-Path $errorPath) {
+              Get-Content $errorPath
+            }
+            throw "Turso Flutter smoke process failed."
           }
           if (-not (Test-Path "$releaseRoot/turso-flutter-smoke/PASS")) {
             throw 'Turso Flutter smoke check failed.'
