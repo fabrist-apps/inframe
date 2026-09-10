@@ -41,7 +41,7 @@ final program = Effect.build<String, String>(($) async {
     service.connect(count),
     release: (connection) => connection.closeEffect(),
   );
-  return $(connection.load());
+  return await $(connection.load());
 });
 
 final runtime = Runtime(context: Context().withBinding(serviceKey.bind(service)));

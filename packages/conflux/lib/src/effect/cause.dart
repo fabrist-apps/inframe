@@ -37,8 +37,8 @@ final class Interrupted<E> extends Cause<E> {
 
 /// Failures that occurred one after another.
 final class Sequential<E> extends Cause<E> {
-  /// Creates an ordered sequential cause.
-  Sequential(Iterable<Cause<E>> causes) : causes = List.unmodifiable(causes);
+  /// Creates a non-empty ordered sequential cause.
+  Sequential(Iterable<Cause<E>> causes) : causes = _nonEmptyCauses(causes, 'causes');
 
   /// Failures in execution order.
   final List<Cause<E>> causes;
@@ -46,11 +46,22 @@ final class Sequential<E> extends Cause<E> {
 
 /// Failures from concurrent branches in source order.
 final class Parallel<E> extends Cause<E> {
-  /// Creates an ordered parallel cause.
-  Parallel(Iterable<Cause<E>> causes) : causes = List.unmodifiable(causes);
+  /// Creates a non-empty ordered parallel cause.
+  Parallel(Iterable<Cause<E>> causes) : causes = _nonEmptyCauses(causes, 'causes');
 
   /// Branch failures in source order.
   final List<Cause<E>> causes;
+}
+
+List<Cause<E>> _nonEmptyCauses<E>(
+  Iterable<Cause<E>> causes,
+  String name,
+) {
+  final values = List<Cause<E>>.unmodifiable(causes);
+  if (values.isEmpty) {
+    throw ArgumentError.value(causes, name, 'Must not be empty.');
+  }
+  return values;
 }
 
 Cause<Never>? _defectsOnly<E>(Cause<E> cause) => switch (cause) {

@@ -79,6 +79,30 @@ final class Effect<A, E> {
       }
     }
 
+    Future<Cause<E>> cancellationCause(Object? reason) async {
+      Cause<E> cause = Interrupted(reason);
+      if (onCancel != null) {
+        try {
+          await onCancel();
+        } on Object catch (error, stackTrace) {
+          cause = Sequential([cause, Defect(error, stackTrace)]);
+        }
+      }
+      return cause;
+    }
+
+    if (execution.cancellation.isCancelled) {
+      unawaited(
+        future.then<void>(
+          (_) {},
+          onError: (Object _, StackTrace _) {},
+        ),
+      );
+      return Failed(
+        await cancellationCause(execution.cancellation.reason),
+      );
+    }
+
     final completion = Completer<Exit<A, E>>();
     var settled = false;
     late final void Function() stopListening;
@@ -94,15 +118,7 @@ final class Effect<A, E> {
       if (settled) return;
       settled = true;
       stopListening();
-      Cause<E> cause = Interrupted(reason);
-      if (onCancel != null) {
-        try {
-          await onCancel();
-        } on Object catch (error, stackTrace) {
-          cause = Sequential([cause, Defect(error, stackTrace)]);
-        }
-      }
-      completion.complete(Failed(cause));
+      completion.complete(Failed(await cancellationCause(reason)));
     });
 
     unawaited(

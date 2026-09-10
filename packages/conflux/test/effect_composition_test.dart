@@ -5,6 +5,11 @@ import 'package:test/test.dart';
 
 void main() {
   group('Effect composition', () {
+    test('should reject composite causes without a failure leaf', () {
+      expect(() => Sequential<String>(const []), throwsArgumentError);
+      expect(() => Parallel<String>(const []), throwsArgumentError);
+    });
+
     test('should transform and sequence successful values', () async {
       final effect = Effect.succeed<int, String>(2)
           .map((value) => value + 1)

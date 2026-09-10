@@ -55,6 +55,34 @@ void main() {
       expect(() => runtime.fork(Effect.succeed<void, Never>(null)), throwsStateError);
     });
 
+    test('should register root ownership before user work begins', () async {
+      final started = Completer<void>();
+      final pending = Completer<void>();
+      late Future<void> closing;
+      var cancelled = false;
+      late final Runtime runtime;
+      runtime = Runtime();
+      final fiber = runtime.fork(
+        Effect.tryFuture<void, Never>(
+          () {
+            closing = runtime.close();
+            started.complete();
+            return pending.future;
+          },
+          onError: (error, _) => throw StateError('$error'),
+          onCancel: () => cancelled = true,
+        ),
+      );
+
+      await started.future;
+      await closing;
+
+      expect(cancelled, isTrue);
+      expect((await fiber.join() as Failed<void, Never>).cause, isA<Interrupted<Never>>());
+      pending.completeError(StateError('late'));
+      await Future<void>.delayed(Duration.zero);
+    });
+
     test('should map foreign failures only through the supplied mapper', () async {
       final mapped = await Runtime().run(
         Effect.tryFuture<int, String>(

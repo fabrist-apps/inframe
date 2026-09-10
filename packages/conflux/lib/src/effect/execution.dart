@@ -95,10 +95,13 @@ final class Scope {
     );
     late final Fiber<A, E> fiber;
     late final _OwnedRoot ownedChild;
-    final exit = _runScoped(effect, execution).whenComplete(() {
-      stopParentCancellation();
-      _children.remove(ownedChild);
-    });
+    final exit =
+        Future<Exit<A, E>>.microtask(
+          () => _runScoped(effect, execution),
+        ).whenComplete(() {
+          stopParentCancellation();
+          _children.remove(ownedChild);
+        });
     fiber = Fiber._(cancellation, exit);
     ownedChild = _OwnedRoot((reason) async {
       final childExit = await fiber.interrupt(reason);

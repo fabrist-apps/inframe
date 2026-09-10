@@ -78,9 +78,12 @@ final class Runtime {
     );
     late final Fiber<A, E> fiber;
     late final _OwnedRoot root;
-    final exit = _runScoped(effect, execution).whenComplete(
-      () => _roots.remove(root),
-    );
+    final exit =
+        Future<Exit<A, E>>.microtask(
+          () => _runScoped(effect, execution),
+        ).whenComplete(
+          () => _roots.remove(root),
+        );
     fiber = Fiber._(cancellation, exit);
     root = _OwnedRoot((reason) async {
       final exit = await fiber.interrupt(reason);
