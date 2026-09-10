@@ -11,4 +11,8 @@ void main() {
   if (description != 'The field was supplied as null.') {
     throw StateError('Unexpected description: $description');
   }
+
+  const Result<int, String> count = Success(42);
+  final label = count.map((value) => 'Count: $value').getOrElse((error) => 'Error: $error');
+  if (label != 'Count: 42') throw StateError('Unexpected result: $label');
 }

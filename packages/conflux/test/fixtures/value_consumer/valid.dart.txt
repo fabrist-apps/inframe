@@ -20,4 +20,25 @@ void main() {
   if (values.join('|') != 'absent|null|Bhaswanth|42|Ada') {
     throw StateError('Incorrect Option composition: $values');
   }
+
+  const Result<int, Never> infallible = Success(42);
+  final Result<num, Object> widenedResult = infallible;
+  final Result<String, String> composed = widenedResult
+      .map((num value) => '$value')
+      .mapError((Object error) => '$error');
+  final exhaustive = switch (composed) {
+    Success<String, String>(:final value) => value,
+    Failure<String, String>(:final error) => error,
+  };
+  if (exhaustive != '42') {
+    throw StateError('Incorrect Result composition: $exhaustive');
+  }
+  if (describeResult(composed) != 'success:42') {
+    throw StateError('Generic Result pattern did not match');
+  }
 }
+
+String describeResult<A, E>(Result<A, E> result) => switch (result) {
+  Success<A, E>(:final value) => 'success:$value',
+  Failure<A, E>(:final error) => 'failure:$error',
+};
