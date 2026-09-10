@@ -120,6 +120,10 @@ void main() {
         throwsArgumentError,
       );
       await expectLater(database.query('SELECT 1; SELECT 2'), throwsArgumentError);
+      await expectLater(
+        database.query('SELECT 1 AS value\u0000; SELECT 2 AS value'),
+        throwsArgumentError,
+      );
       final repeated = await database.query(
         'SELECT :value + :value AS total',
         namedParameters: const {':value': 2},

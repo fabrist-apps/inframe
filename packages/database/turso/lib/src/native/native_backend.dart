@@ -198,19 +198,30 @@ final class NativeBackend implements TursoBackend {
 
   @override
   Future<void> retire() async {
+    final workerCanClose = _workerFailure == null;
     _closed = true;
     final failure = _workerFailure ??= const TursoPlatformException(
       'The Turso native worker was retired; an interrupted write may have committed.',
     );
-    await _subscription.cancel();
-    await _statusSubscription.cancel();
-    _receivePort.close();
-    _statusPort.close();
-    _isolate.kill();
-    for (final pending in _pending.values) {
-      pending.completeError(failure);
+    try {
+      if (workerCanClose) {
+        final requestId = _nextRequestId++;
+        final completer = Completer<Object?>();
+        _pending[requestId] = completer;
+        _workerPort.send([requestId, 'close', null]);
+        await completer.future;
+      }
+    } finally {
+      await _subscription.cancel();
+      await _statusSubscription.cancel();
+      _receivePort.close();
+      _statusPort.close();
+      _isolate.kill();
+      for (final pending in _pending.values) {
+        pending.completeError(failure);
+      }
+      _pending.clear();
     }
-    _pending.clear();
   }
 }
 

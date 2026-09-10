@@ -19,6 +19,9 @@ final class TursoFileLocation extends TursoLocation {
     if (path.trim().isEmpty || path == ':memory:') {
       throw ArgumentError.value(path, 'path', 'Must identify persistent storage.');
     }
+    if (path.contains('\u0000')) {
+      throw ArgumentError.value(path, 'path', 'Must not contain NUL characters.');
+    }
     final uri = Uri.tryParse(path);
     if (uri != null && _networkSchemes.contains(uri.scheme)) {
       throw ArgumentError.value(path, 'path', 'Network database URLs are not supported.');

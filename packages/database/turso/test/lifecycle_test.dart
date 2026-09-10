@@ -104,6 +104,25 @@ void main() {
       expect(failure.rollbackError, isA<TursoDatabaseException>());
       expect(callbacks, 1);
     });
+
+    test('failed rollback releases native database files', () async {
+      final temporaryDirectory = await Directory.systemTemp.createTemp('turso-retirement-');
+      final path = '${temporaryDirectory.path}/database.db';
+      final database = await TursoDatabase.open(TursoLocation.file(path));
+      await database.execute('CREATE TABLE values_table (value INTEGER PRIMARY KEY)');
+
+      await expectLater(
+        database.transaction((tx) async {
+          await tx.execute('INSERT INTO values_table VALUES (1)');
+          await tx.execute('INSERT OR ROLLBACK INTO values_table VALUES (1)');
+        }),
+        throwsA(isA<TursoTransactionException>()),
+      );
+      await database.close();
+
+      expect(await _openNativeFiles(path), isEmpty);
+      await temporaryDirectory.delete(recursive: true);
+    });
   });
 }
 
@@ -122,4 +141,33 @@ Future<Never> _throwLifecycleFailure(Exception failure) async {
 
 final class _LifecycleFailure implements Exception {
   const _LifecycleFailure();
+}
+
+Future<List<String>> _openNativeFiles(String path) async {
+  final canonicalPath = File(path).resolveSymbolicLinksSync();
+  if (Platform.isLinux) {
+    return [
+      for (final descriptor in Directory('/proc/self/fd').listSync())
+        if (_resolvedPath(descriptor)?.startsWith(canonicalPath) ?? false)
+          _resolvedPath(descriptor)!,
+    ];
+  }
+  if (Platform.isMacOS) {
+    final result = await Process.run('lsof', ['-p', '$pid', '-Fn']);
+    return result.stdout
+        .toString()
+        .split('\n')
+        .where((line) => line.startsWith('n$canonicalPath'))
+        .map((line) => line.substring(1))
+        .toList();
+  }
+  return const [];
+}
+
+String? _resolvedPath(FileSystemEntity descriptor) {
+  try {
+    return descriptor.resolveSymbolicLinksSync();
+  } on FileSystemException {
+    return null;
+  }
 }

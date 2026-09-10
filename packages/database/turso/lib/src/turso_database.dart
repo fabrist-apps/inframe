@@ -51,6 +51,7 @@ final class TursoDatabase {
     Map<String, Object?> namedParameters = const {},
   }) => Future<TursoQueryResult>.sync(() {
     _ensureOutsideTransactionCallback();
+    validateSql(sql);
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
       final wireResult = await _runBackendOperation(() => _backend.query(sql, snapshot));
@@ -68,6 +69,7 @@ final class TursoDatabase {
     Map<String, Object?> namedParameters = const {},
   }) => Future<TursoExecuteResult>.sync(() {
     _ensureOutsideTransactionCallback();
+    validateSql(sql);
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
       final rowsAffected = await _runBackendOperation(() => _backend.execute(sql, snapshot));
@@ -264,6 +266,7 @@ final class _ManagedTransaction implements TursoTransaction {
     Map<String, Object?> namedParameters = const {},
   }) => Future<TursoQueryResult>.sync(() {
     _ensureAccepting();
+    validateSql(sql);
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
       final wireResult = await _runBackendOperation(() => _backend.query(sql, snapshot));
@@ -278,6 +281,7 @@ final class _ManagedTransaction implements TursoTransaction {
     Map<String, Object?> namedParameters = const {},
   }) => Future<TursoExecuteResult>.sync(() {
     _ensureAccepting();
+    validateSql(sql);
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
       final rowsAffected = await _runBackendOperation(() => _backend.execute(sql, snapshot));

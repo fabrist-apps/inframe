@@ -68,7 +68,7 @@ SQL accepts either positional parameters or named parameters using their full pl
 such as `{':id': 42}`. One call cannot use both. Supported values are `null`, `String`, finite
 numbers, signed 64-bit `BigInt` values, and `Uint8List`. The package copies mutable parameter lists,
 maps, and blobs when accepting an operation. Missing, extra, mixed, and unsupported bindings fail
-before execution, as do multiple SQL statements.
+before execution, as do multiple SQL statements and SQL containing NUL characters.
 
 Every SQL INTEGER returns as `BigInt`. Integral Dart numbers bind as integers only within
 ±9,007,199,254,740,991; use `BigInt` outside that portable range. `getInt` enforces the same range.

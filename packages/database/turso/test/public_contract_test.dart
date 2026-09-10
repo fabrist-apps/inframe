@@ -10,6 +10,7 @@ void main() {
       expect(() => TursoLocation.file(':memory:'), throwsArgumentError);
       expect(() => TursoLocation.file('https://example.com/database'), throwsArgumentError);
       expect(() => TursoLocation.file('libsql://example.com/database'), throwsArgumentError);
+      expect(() => TursoLocation.file('database\u0000ignored.db'), throwsArgumentError);
       expect(TursoLocation.file(r'C:\data\app.db'), isA<TursoFileLocation>());
       expect(() => TursoLocation.browser('nested/database'), throwsArgumentError);
       expect(() => TursoLocation.browser(r'nested\database'), throwsArgumentError);

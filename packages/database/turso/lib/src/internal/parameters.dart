@@ -5,6 +5,13 @@ const int portableSafeInteger = 9007199254740991;
 final BigInt _minimumInt64 = BigInt.parse('-9223372036854775808');
 final BigInt _maximumInt64 = BigInt.parse('9223372036854775807');
 
+/// Rejects SQL text that cannot cross the native C string boundary intact.
+void validateSql(String sql) {
+  if (sql.contains('\u0000')) {
+    throw ArgumentError.value(sql, 'sql', 'Must not contain NUL characters.');
+  }
+}
+
 /// Copies and normalizes arguments before an operation enters the queue.
 List<Object?> snapshotParameters(
   List<Object?> parameters,
