@@ -33,24 +33,19 @@ final class ConsumerFixtures {
     return ConsumerFixtures._(directory);
   }
 
-  Future<void> resolve(String package) async {
-    final result = await _dart(package, ['pub', 'get', '--offline']);
+  Future<void> resolve(String package) => _dart(package, ['pub', 'get', '--offline']);
+
+  Future<void> analyze(String package, String file) =>
+      _dart(package, ['analyze', '--format=machine', file]);
+
+  Future<void> run(String package, String file) => _dart(package, ['run', file]);
+
+  Future<void> _dart(String package, List<String> arguments) async {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      arguments,
+      workingDirectory: '${_directory.path}/$package',
+    );
     expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
   }
-
-  Future<void> analyze(String package, String file) async {
-    final result = await _dart(package, ['analyze', '--format=machine', file]);
-    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
-  }
-
-  Future<void> run(String package, String file) async {
-    final result = await _dart(package, ['run', file]);
-    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
-  }
-
-  Future<ProcessResult> _dart(String package, List<String> arguments) => Process.run(
-    Platform.resolvedExecutable,
-    arguments,
-    workingDirectory: '${_directory.path}/$package',
-  );
 }

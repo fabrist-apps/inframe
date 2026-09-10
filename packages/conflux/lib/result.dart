@@ -112,15 +112,10 @@ extension ResultInspection<A, E> on Result<A, E> {
   /// Returns the success or throws the object produced from the failure.
   A getOrThrowWith(Object Function(E error) toException) => switch (this) {
     Success<A, E>(:final value) => value,
-    Failure<A, E>(:final error) => _throwMapped(error, toException),
+    // The contract deliberately accepts any object supported by Dart's throw.
+    // ignore: only_throw_errors
+    Failure<A, E>(:final error) => throw toException(error),
   };
-}
-
-A _throwMapped<A, E>(E error, Object Function(E error) toException) {
-  // The public contract deliberately lets callers map failures to any object
-  // accepted by Dart's throw expression, not only Exception or Error values.
-  // ignore: only_throw_errors
-  throw toException(error);
 }
 
 /// Transformations for [Result].
