@@ -210,6 +210,15 @@ final class Effect<A, E> {
       return all(effects, concurrency: concurrency);
     });
   }
+
+  /// Returns the first successful branch after interrupting and cleaning up losers.
+  static Effect<A, E> race<A, E>(Iterable<Effect<A, E>> effects) => Effect._((execution) {
+    final branches = List<Effect<A, E>>.of(effects);
+    if (branches.isEmpty) {
+      throw ArgumentError.value(effects, 'effects', 'Must not be empty.');
+    }
+    return _raceEffects(branches, execution);
+  });
 }
 
 sealed class _ValueSlot<A> {
@@ -305,6 +314,61 @@ final class _CollectionStopped {
 
   @override
   String toString() => 'Collection stopped after a branch failed';
+}
+
+Future<Exit<A, E>> _raceEffects<A, E>(
+  List<Effect<A, E>> effects,
+  _Execution execution,
+) async {
+  final active = <int, Fiber<A, E>>{
+    for (var index = 0; index < effects.length; index += 1)
+      index: execution.scope._fork(effects[index], execution),
+  };
+  final failures = List<Cause<E>?>.filled(effects.length, null);
+
+  while (active.isNotEmpty) {
+    final completed = await Future.any(
+      active.entries.map((entry) async {
+        return _IndexedExit(entry.key, await entry.value.join());
+      }),
+    );
+    active.remove(completed.index);
+
+    switch (completed.exit) {
+      case Failed<A, E>(:final cause):
+        failures[completed.index] = cause;
+      case Succeeded<A, E>(:final value):
+        final cleanupFailures = <MapEntry<int, Cause<Never>>>[];
+        await Future.wait(
+          active.entries.map((entry) async {
+            final loser = await entry.value.interrupt(const _RaceLost());
+            if (loser case Failed<A, E>(:final cause)) {
+              final cleanup = _defectsOnly(cause);
+              if (cleanup != null) {
+                cleanupFailures.add(MapEntry(entry.key, cleanup));
+              }
+            }
+          }),
+        );
+        if (cleanupFailures.isEmpty) return Succeeded(value);
+        cleanupFailures.sort((left, right) => left.key.compareTo(right.key));
+        return Failed(
+          _combineCleanupCauses(
+            cleanupFailures.map((entry) => entry.value),
+            sequential: false,
+          )!,
+        );
+    }
+  }
+
+  return Failed(Parallel(failures.whereType<Cause<E>>()));
+}
+
+final class _RaceLost {
+  const _RaceLost();
+
+  @override
+  String toString() => 'Race branch lost';
 }
 
 /// Cleanup operations that run before an Effect returns to its caller.
