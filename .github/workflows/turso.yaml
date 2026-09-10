@@ -138,6 +138,7 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE/packages/database/turso/tool/flutter_smoke_main.dart.template" lib/main.dart
           flutter build windows --release
           $releaseRoot = "$smokeRoot/build/windows/x64/runner/Release"
+          & "$env:GITHUB_WORKSPACE/packages/database/turso/tool/diagnose_windows.ps1" -Bundle $releaseRoot
           $process = Start-Process "$releaseRoot/turso_smoke.exe" -WorkingDirectory $releaseRoot -ArgumentList '--enable-software-rendering' -PassThru -Wait
           if ($process.ExitCode -ne 0) {
             $exitCode = $process.ExitCode
