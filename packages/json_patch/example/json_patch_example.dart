@@ -3,16 +3,16 @@ import 'dart:convert';
 import 'package:json_patch/json_patch.dart';
 
 void main() {
-  final before = <String, Object?>{
+  final before = {
     'title': 'Draft',
-    'tags': <Object?>['dart', 'flutter'],
+    'tags': ['dart', 'flutter'],
   };
-  final after = <String, Object?>{
+  final after = {
     'title': 'Published',
-    'tags': <Object?>['dart', 'json', 'flutter'],
+    'tags': ['dart', 'json', 'flutter'],
   };
 
-  final typed = JsonPatch(<JsonPatchOperation>[
+  final typed = JsonPatch([
     JsonTest(JsonPointer.parse('/title'), 'Draft'),
   ]);
   final verified = JsonPatch.patch(before, typed);
@@ -26,14 +26,14 @@ void main() {
 
   final removedRoot = JsonPatch.patch(
     before,
-    JsonPatch(<JsonPatchOperation>[const JsonRemove(JsonPointer.root)]),
+    JsonPatch([const JsonRemove(JsonPointer.root)]),
   );
   if (!identical(removedRoot, JsonAbsent.instance)) {
     throw StateError('Removing the root must return JsonAbsent.instance.');
   }
   final recreatedRoot = JsonPatch.patch(
     removedRoot,
-    JsonPatch(<JsonPatchOperation>[JsonAdd(JsonPointer.root, 'created')]),
+    JsonPatch([JsonAdd(JsonPointer.root, 'created')]),
   );
   if (recreatedRoot != 'created') {
     throw StateError('Adding at an absent root must create the document.');
@@ -42,7 +42,7 @@ void main() {
   try {
     JsonPatch.patch(
       before,
-      JsonPatch(<JsonPatchOperation>[JsonRemove(JsonPointer.parse('/missing'))]),
+      JsonPatch([JsonRemove(JsonPointer.parse('/missing'))]),
     );
     throw StateError('Removing a missing member must fail.');
   } on JsonPatchException catch (error) {
