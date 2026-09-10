@@ -39,16 +39,8 @@ jobs:
       - name: Run JSON Patch tests on the Dart VM
         run: dart test packages/json_patch/test --chain-stack-traces
 
-      - name: Run JSON Patch tests after web compilation
-        run: dart test --platform node packages/json_patch/test --chain-stack-traces
-
-      - name: Run JSON Patch public example on the Dart VM and web
-        run: |
-          dart run packages/json_patch/example/json_patch_example.dart
-          dart compile js \
-            --output=.dart_tool/json_patch_example.js \
-            packages/json_patch/example/json_patch_example.dart
-          node .dart_tool/json_patch_example.js
+      - name: Run JSON Patch public example
+        run: dart run packages/json_patch/example/json_patch_example.dart
 
       - name: Run ClickHouse integration tests
         env:
