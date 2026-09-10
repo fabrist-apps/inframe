@@ -40,6 +40,7 @@ Run package tests by path so integration suites keep their explicit environment 
 
 ```sh
 dart test packages/json_patch/test --chain-stack-traces
+dart test --platform node packages/json_patch/test --chain-stack-traces
 dart test packages/database/clickhouse/test --exclude-tags integration --chain-stack-traces
 ```
 
