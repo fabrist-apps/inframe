@@ -19,15 +19,18 @@ final class ClickHouseClient {
   }) {
     final parsedEndpoint = _parseEndpoint(endpoint);
     final validatedTimeout = _requirePositiveDuration(timeout, 'timeout');
-    _requirePositiveInt(maxRequestBytes, 'maxRequestBytes');
-    _requirePositiveInt(maxResponseBytes, 'maxResponseBytes');
+    final validatedMaxRequestBytes = _requirePositiveInt(maxRequestBytes, 'maxRequestBytes');
+    final validatedMaxResponseBytes = _requirePositiveInt(maxResponseBytes, 'maxResponseBytes');
+    final httpClient = HttpClient()..autoUncompress = true;
     return ClickHouseClient._(
       endpoint: parsedEndpoint,
       database: database,
       username: username,
       password: password,
       timeout: validatedTimeout,
-      httpClient: HttpClient(),
+      maxRequestBytes: validatedMaxRequestBytes,
+      maxResponseBytes: validatedMaxResponseBytes,
+      httpClient: httpClient,
     );
   }
 
@@ -37,6 +40,8 @@ final class ClickHouseClient {
     required this._username,
     required this._password,
     required this._timeout,
+    required this._maxRequestBytes,
+    required this._maxResponseBytes,
     required this._httpClient,
   });
 
@@ -45,6 +50,8 @@ final class ClickHouseClient {
   final String _username;
   final String _password;
   final Duration _timeout;
+  final int _maxRequestBytes;
+  final int _maxResponseBytes;
   final HttpClient _httpClient;
   var _closed = false;
 
@@ -58,6 +65,7 @@ final class ClickHouseClient {
     final operationTimeout = _operationTimeout(timeout);
     final requestUri = _requestUri(parameters);
     final body = utf8.encode(sql);
+    _ensureRequestWithinLimit(body);
 
     try {
       return await _query(requestUri, body).timeout(operationTimeout);
@@ -68,17 +76,6 @@ final class ClickHouseClient {
         message:
             'ClickHouse query exceeded its ${operationTimeout.inMicroseconds} microsecond deadline.',
         requestState: ClickHouseRequestState.mayHaveReachedServer,
-      );
-    } on FormatException catch (error) {
-      throw ClickHouseProtocolException(
-        message: 'ClickHouse returned malformed JSON: $error',
-        requestState: ClickHouseRequestState.mayHaveReachedServer,
-      );
-    } on IOException catch (error) {
-      throw ClickHouseTransportException(
-        message: 'ClickHouse query transport failed: $error',
-        requestState: ClickHouseRequestState.mayHaveReachedServer,
-        cause: error,
       );
     }
   }
@@ -91,9 +88,11 @@ final class ClickHouseClient {
   }) async {
     _ensureOpen();
     final operationTimeout = _operationTimeout(timeout);
+    final body = utf8.encode(sql);
+    _ensureRequestWithinLimit(body);
     await _runVoidOperation(
       uri: _requestUri(parameters),
-      body: utf8.encode(sql),
+      body: body,
       timeout: operationTimeout,
       operation: 'command',
     );
@@ -114,6 +113,8 @@ final class ClickHouseClient {
       return;
     }
 
+    final body = utf8.encode('INSERT INTO $quotedTable FORMAT JSONEachRow\n$encodedRows');
+    _ensureRequestWithinLimit(body);
     await _runVoidOperation(
       uri: _requestUri(
         const {},
@@ -122,7 +123,7 @@ final class ClickHouseClient {
           'insert_deduplication_token': ?deduplicationToken,
         },
       ),
-      body: utf8.encode('INSERT INTO $quotedTable FORMAT JSONEachRow\n$encodedRows'),
+      body: body,
       timeout: operationTimeout,
       operation: 'insert',
     );
@@ -143,21 +144,27 @@ final class ClickHouseClient {
       throw _serverException(response.statusCode, response.body, response.queryId);
     }
 
-    final responseText = utf8.decode(response.body);
+    late final String responseText;
     try {
+      responseText = utf8.decode(response.body);
       return _decodeQueryResult(responseText);
-    } on FormatException {
-      final errorCode = _clickHouseErrorCode(responseText);
+    } on FormatException catch (error) {
+      final responseTextForError = utf8.decode(response.body, allowMalformed: true);
+      final errorCode = _clickHouseErrorCode(responseTextForError);
       if (errorCode != null) {
         throw ClickHouseServerException(
-          message: responseText.trim(),
+          message: responseTextForError.trim(),
           requestState: ClickHouseRequestState.mayHaveReachedServer,
           queryId: response.queryId,
           statusCode: response.statusCode,
           clickHouseCode: errorCode,
         );
       }
-      rethrow;
+      throw ClickHouseProtocolException(
+        message: 'ClickHouse returned a malformed query result: $error',
+        requestState: ClickHouseRequestState.mayHaveReachedServer,
+        queryId: response.queryId,
+      );
     }
   }
 
@@ -183,6 +190,13 @@ final class ClickHouseClient {
           clickHouseCode: errorCode,
         );
       }
+      if (responseText.isNotEmpty) {
+        throw ClickHouseProtocolException(
+          message: 'ClickHouse returned unexpected output for a $operation.',
+          requestState: ClickHouseRequestState.mayHaveReachedServer,
+          queryId: response.queryId,
+        );
+      }
     } on ClickHouseException {
       rethrow;
     } on TimeoutException {
@@ -191,34 +205,57 @@ final class ClickHouseClient {
             'ClickHouse $operation exceeded its ${timeout.inMicroseconds} microsecond deadline.',
         requestState: ClickHouseRequestState.mayHaveReachedServer,
       );
-    } on IOException catch (error) {
-      throw ClickHouseTransportException(
-        message: 'ClickHouse $operation transport failed: $error',
-        requestState: ClickHouseRequestState.mayHaveReachedServer,
-        cause: error,
-      );
     }
   }
 
   Future<_HttpResponse> _send(Uri uri, List<int> body) async {
-    final request = await _httpClient.postUrl(uri);
-    request.headers
-      ..set('x-clickhouse-user', _username)
-      ..set('x-clickhouse-key', _password)
-      ..set('x-clickhouse-format', 'JSON')
-      ..contentType = ContentType.text;
-    request.add(body);
+    HttpClientRequest? request;
+    var requestState = ClickHouseRequestState.notSent;
+    String? queryId;
+    try {
+      request = await _httpClient.postUrl(uri);
+      request.headers
+        ..set('x-clickhouse-user', _username)
+        ..set('x-clickhouse-key', _password)
+        ..set('x-clickhouse-format', 'JSON')
+        ..contentType = ContentType.text;
+      request
+        ..contentLength = body.length
+        ..add(body);
 
-    final response = await request.close();
-    final responseBody = await response.fold<List<int>>(
-      <int>[],
-      (bytes, chunk) => bytes..addAll(chunk),
-    );
-    return _HttpResponse(
-      statusCode: response.statusCode,
-      body: responseBody,
-      queryId: response.headers.value('x-clickhouse-query-id'),
-    );
+      requestState = ClickHouseRequestState.mayHaveReachedServer;
+      final response = await request.close();
+      queryId = response.headers.value('x-clickhouse-query-id');
+      final responseBody = <int>[];
+      await for (final chunk in response) {
+        responseBody.addAll(chunk);
+        if (responseBody.length > _maxResponseBytes) {
+          throw ClickHouseSizeLimitException(
+            message: 'ClickHouse response exceeded the $_maxResponseBytes byte limit.',
+            requestState: requestState,
+            queryId: queryId,
+            direction: ClickHouseSizeLimitDirection.response,
+            limit: _maxResponseBytes,
+          );
+        }
+      }
+      return _HttpResponse(
+        statusCode: response.statusCode,
+        body: responseBody,
+        queryId: queryId,
+      );
+    } on ClickHouseException catch (error) {
+      request?.abort(error);
+      rethrow;
+    } on IOException catch (error) {
+      request?.abort(error);
+      throw ClickHouseTransportException(
+        message: 'ClickHouse HTTP transport failed: $error',
+        requestState: requestState,
+        queryId: queryId,
+        cause: error,
+      );
+    }
   }
 
   Uri _requestUri(
@@ -235,6 +272,17 @@ final class ClickHouseClient {
 
   Duration _operationTimeout(Duration? timeout) =>
       timeout == null ? _timeout : _requirePositiveDuration(timeout, 'timeout');
+
+  void _ensureRequestWithinLimit(List<int> body) {
+    if (body.length > _maxRequestBytes) {
+      throw ClickHouseSizeLimitException(
+        message: 'ClickHouse request exceeded the $_maxRequestBytes byte limit.',
+        requestState: ClickHouseRequestState.notSent,
+        direction: ClickHouseSizeLimitDirection.request,
+        limit: _maxRequestBytes,
+      );
+    }
+  }
 
   void _ensureOpen() {
     if (_closed) {

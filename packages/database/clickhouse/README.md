@@ -48,6 +48,19 @@ Use `command` for SQL without row results, such as migrations scheduled by the c
 Commands also use separate parameter binding and complete after server acknowledgement. A failed
 write can have an unknown outcome and does not imply rollback.
 
+## Limits and failures
+
+Requests and responses default to a 16 MiB limit. The request limit counts the encoded body before
+compression and excludes headers and URL parameters. The response limit counts decompressed bytes,
+including error bodies, while they are consumed. A payload exactly at its limit is accepted. These
+limits bound payloads, not the total Dart heap used while validating, encoding, or decoding them.
+
+`ClickHouseException` separates the failure category from whether the request was definitely
+`notSent` or `mayHaveReachedServer`. Server, transport, timeout, protocol, and size-limit failures
+remain distinct. A failed command or insert marked `mayHaveReachedServer` has an unknown outcome and
+may have had partial effects. Failure releases local request resources but does not prove that the
+server cancelled work or rolled it back.
+
 ## Tested server
 
 Integration tests target the official `clickhouse:26.8.2.7` image, pinned to the multi-platform
