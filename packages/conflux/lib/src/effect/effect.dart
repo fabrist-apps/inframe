@@ -102,6 +102,8 @@ final class Effect<A, E> {
 
     stopListening = execution.cancellation.listen((reason) async {
       if (settled) return;
+      settled = true;
+      stopListening();
       Cause<E> cause = Interrupted(reason);
       if (onCancel != null) {
         try {
@@ -110,7 +112,7 @@ final class Effect<A, E> {
           cause = Sequential([cause, Defect(error, stackTrace)]);
         }
       }
-      complete(Failed(cause));
+      completion.complete(Failed(cause));
     });
 
     unawaited(
@@ -142,7 +144,8 @@ final class Effect<A, E> {
   /// Builds an effect with a callback-local callable binder.
   ///
   /// Every asynchronous bind must be awaited. The builder is valid only while
-  /// [body] is active, and every run receives fresh builder state.
+  /// [body] is active, and every run receives fresh builder state. A plain Dart
+  /// await has no cancellation hook; use [tryFuture] for adaptable foreign work.
   static Effect<A, E> build<A, E>(
     FutureOr<A> Function(EffectBuilder<E> $) body,
   ) => Effect._((execution) async {
@@ -565,6 +568,27 @@ Future<Exit<A, E>> _observeFailure<A, E>(
     Succeeded<void, Never>() => original,
     Failed<void, Never>(:final cause) => _appendCleanup(original, cause),
   };
+}
+
+/// Convenience execution for callers that do not need a reusable [Runtime].
+extension EffectRunning<A, E> on Effect<A, E> {
+  /// Runs this Effect in a temporary Runtime and returns its complete [Exit].
+  Future<Exit<A, E>> runFutureExit({Context? context, Clock? clock}) async {
+    final runtime = Runtime(context: context, clock: clock);
+    try {
+      return await runtime.run(this);
+    } finally {
+      await runtime.close();
+    }
+  }
+
+  /// Runs this Effect and returns its value or throws [EffectException].
+  Future<A> runFuture({Context? context, Clock? clock}) async {
+    return switch (await runFutureExit(context: context, clock: clock)) {
+      Succeeded<A, E>(:final value) => value,
+      Failed<A, E>(:final cause) => throw EffectException(cause),
+    };
+  }
 }
 
 /// Cleanup operations that run before an Effect returns to its caller.

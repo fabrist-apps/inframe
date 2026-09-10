@@ -9,6 +9,18 @@ final class RuntimeClosed {
   String toString() => 'Runtime closed';
 }
 
+/// Thrown by [EffectRunning.runFuture] when Effect execution fails.
+final class EffectException<E> implements Exception {
+  /// Creates an exception retaining the complete [cause].
+  const EffectException(this.cause);
+
+  /// The complete expected, defect, interruption, and cleanup diagnostics.
+  final Cause<E> cause;
+
+  @override
+  String toString() => 'EffectException: $cause';
+}
+
 final class _OwnedRoot {
   _OwnedRoot(this._interrupt);
 

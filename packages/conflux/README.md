@@ -1,8 +1,10 @@
 # Conflux
 
-Conflux provides pure functional values and effectful composition for Inframe.
-The current API includes `Option`, which keeps absence separate from a present
-nullable value, and `Result`, which keeps expected failures in the type system.
+Conflux provides pure functional values and lazy effectful composition for
+Inframe. `Option` keeps absence separate from a present nullable value,
+`Result` keeps synchronous expected failures in the type system, and `Effect`
+adds asynchronous execution, Context access, structured concurrency, and
+resource scopes.
 
 ```dart
 import 'package:conflux/conflux.dart';
@@ -26,6 +28,49 @@ final label = parseCount('42')
     .map((count) => 'Count: $count')
     .getOrElse((error) => 'Invalid count: $error');
 ```
+
+An Effect is a reusable description. Construction, `defer`, Context selection,
+and foreign Future factories do no work until execution. `Runtime` owns root
+fibers and waits for their resource cleanup:
+
+```dart
+final program = Effect.build<String, String>(($) async {
+  final count = $.sync(parseCount('42'));
+  final service = $.context.require(serviceKey);
+  final connection = await $.acquireRelease(
+    service.connect(count),
+    release: (connection) => connection.closeEffect(),
+  );
+  return $(connection.load());
+});
+
+final runtime = Runtime(context: Context().withBinding(serviceKey.bind(service)));
+try {
+  final exit = await runtime.run(program);
+  // Inspect Succeeded(value) or Failed(cause).
+} finally {
+  await runtime.close();
+}
+```
+
+Every asynchronous builder bind must be awaited, and the callback-local
+builder cannot be used after its callback ends. Plain Dart `await` has no
+Conflux cancellation hook. Adapt foreign work with `Effect.tryFuture` and
+supply `onCancel` when the external operation can be stopped. Without that
+hook, Conflux observes late completion but cannot claim the work stopped.
+
+Contexts contain borrowed references. Only `acquireRelease`, `addFinalizer`,
+or another explicit cleanup operation transfers ownership to an Effect scope.
+Scopes interrupt and await child fibers before running finalizers once in
+reverse registration order. Finalizers are protected from ordinary
+cancellation, so an uncooperative finalizer can prevent bounded shutdown.
+
+Ordinary recovery runs once for a cause containing only expected errors and
+uses the first expected leaf in deterministic execution/source order. A defect
+or interruption prevents recovery and retains the complete cause. `tapCause`
+can observe that structure before recovery. `validate` intentionally collects
+every expected leaf, while `result` reduces an all-expected cause to its primary
+error and retains `E` in its Effect channel so a mixed cause stays typed.
 
 `getOrNull()` intentionally maps both `None()` and `Some(null)` to `null`. Use
 `match` or an exhaustive switch when that distinction matters. Fallbacks and
