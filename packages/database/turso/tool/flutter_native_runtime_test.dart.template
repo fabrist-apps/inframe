@@ -1,0 +1,68 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+import 'package:turso/turso.dart';
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  group('Turso Flutter native runtime', () {
+    testWidgets('should persist exact bound values and release native files', (_) async {
+      final directory = Directory.systemTemp.createTempSync('turso-flutter-native-');
+      addTearDown(() {
+        if (directory.existsSync()) directory.deleteSync(recursive: true);
+      });
+
+      final path = '${directory.path}/database.turso';
+      final maximumInteger = BigInt.parse('9223372036854775807');
+      final database = await TursoDatabase.open(TursoLocation.file(path));
+      await database.execute(
+        'CREATE TABLE values_table ('
+        'id INTEGER PRIMARY KEY, text_value TEXT, real_value REAL, blob_value BLOB)',
+      );
+      final inputBlob = Uint8List.fromList([1, 2, 3]);
+      await database.execute(
+        'INSERT INTO values_table VALUES (?, ?, ?, ?)',
+        parameters: [maximumInteger, 'mobile', 2.5, inputBlob],
+      );
+      inputBlob[0] = 99;
+      await database.close();
+      await database.close();
+      await expectLater(database.query('SELECT 1'), throwsStateError);
+
+      final reopened = await TursoDatabase.open(TursoLocation.file(path));
+      final result = await reopened.query(
+        'SELECT id, text_value, real_value, blob_value FROM values_table WHERE id = :id',
+        namedParameters: {':id': maximumInteger},
+      );
+      expect(result.rows.single.getBigInt('id'), maximumInteger);
+      expect(result.rows.single.getString('text_value'), 'mobile');
+      expect(result.rows.single.getDouble('real_value'), 2.5);
+      expect(result.rows.single.getBlob('blob_value'), [1, 2, 3]);
+      expect(() => result.rows.add(result.rows.single), throwsUnsupportedError);
+      final outputBlob = result.rows.single.getBlob('blob_value')..[0] = 42;
+      expect(outputBlob, [42, 2, 3]);
+      expect(result.rows.single.getBlob('blob_value'), [1, 2, 3]);
+      await reopened.close();
+
+      directory.deleteSync(recursive: true);
+      expect(directory.existsSync(), isFalse);
+    });
+
+    testWidgets('should isolate in-memory databases', (_) async {
+      final first = await TursoDatabase.open(TursoLocation.memory());
+      await first.execute('CREATE TABLE local_only (value INTEGER)');
+      await first.close();
+
+      final second = await TursoDatabase.open(TursoLocation.memory());
+      addTearDown(second.close);
+      await expectLater(
+        second.query('SELECT * FROM local_only'),
+        throwsA(isA<TursoDatabaseException>()),
+      );
+      expect((await second.query('SELECT 7 AS value')).rows.single.getInt('value'), 7);
+    });
+  });
+}

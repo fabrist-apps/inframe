@@ -3,8 +3,8 @@
 Internal Dart and Flutter bindings for an embedded Turso database.
 
 The package is under active implementation. SQL, transactions, persistent storage, and encryption
-currently run on macOS ARM64 and desktop Chrome. The remaining native targets and complete browser
-matrix are still being verified.
+run through packaged native libraries and the browser bridge. The complete cross-platform contract
+matrix is still being verified.
 
 ## Native example
 
@@ -36,6 +36,20 @@ Future<void> main() async {
 
 The caller owns the database path and creates its parent directory. Each database has one serialized
 connection, and native engine work runs in a dedicated isolate. Queries buffer their complete result.
+
+Packaged native targets are:
+
+| Platform | Minimum | Architectures |
+| --- | --- | --- |
+| Android | API 24 | ARM64, x64 |
+| iOS | 15 | ARM64 device; ARM64 and x64 simulators |
+| macOS | 11 | ARM64 |
+| Linux | glibc 2.35 | x64 |
+| Windows | 10 | x64 |
+
+The Android libraries retain 16 KiB load-segment alignment. Applications receive these versioned
+artifacts through the Dart native-assets build hook and do not need Rust or an Android NDK. Build
+provenance and integrity hashes are recorded in [native/README.md](native/README.md).
 
 SQL accepts either positional parameters or named parameters using their full placeholder spelling,
 such as `{':id': 42}`. Supported values are `null`, `String`, finite numbers, signed 64-bit `BigInt`

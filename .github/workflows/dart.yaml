@@ -88,6 +88,84 @@ jobs:
             throw 'Turso Flutter smoke check failed.'
           }
 
+  turso-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Verify packaged Android SDK artifacts
+        run: |
+          echo '37ca19e7752429b1df92e5370515689c5cdeb861dfc39954abd5e29d911bcbba  packages/database/turso/native/android/arm64/libturso_sdk_kit.so' | sha256sum --check
+          echo 'be8eaf44e2072424512c920e981696a85dd078b8f1a7204f329a3802b1bed41a  packages/database/turso/native/android/x64/libturso_sdk_kit.so' | sha256sum --check
+          for library in packages/database/turso/native/android/*/libturso_sdk_kit.so; do
+            readelf -lW "$library" | awk '/LOAD/ && $NF != "0x4000" { exit 1 }'
+          done
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_7_pro
+          script: bash "$GITHUB_WORKSPACE/packages/database/turso/tool/verify_android.sh"
+
+  turso-ios:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Verify packaged iOS SDK artifacts
+        run: |
+          echo 'bafa6b5e291b3ee4b4a94a05a1e0a9e704cd19ca4a30f1afae6d52c6acbbded2  packages/database/turso/native/ios/device/arm64/libturso_sdk_kit.dylib' | shasum -a 256 --check
+          echo '1f63adf5b46b706c2845510faa544c3e980b391cd37033f07e2b122586b349ed  packages/database/turso/native/ios/simulator/arm64/libturso_sdk_kit.dylib' | shasum -a 256 --check
+          echo '31b78f2cbd83c49f9b393c58d120dfe9ec14d8e67774d56c3898e677174f3910  packages/database/turso/native/ios/simulator/x64/libturso_sdk_kit.dylib' | shasum -a 256 --check
+      - name: Prepare iOS verification application
+        run: |
+          flutter create --empty --platforms=ios "$RUNNER_TEMP/turso_mobile"
+          cd "$RUNNER_TEMP/turso_mobile"
+          flutter pub add turso --path "$GITHUB_WORKSPACE/packages/database/turso"
+          flutter pub add 'dev:integration_test@{"sdk":"flutter"}'
+          mkdir -p integration_test
+          cp "$GITHUB_WORKSPACE/packages/database/turso/tool/flutter_native_runtime_test.dart.template" integration_test/runtime_test.dart
+      - name: Boot an iOS simulator
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available -j \
+            | jq -r '[.devices[] | .[] | select(.name | startswith("iPhone"))][0].udid')"
+          test -n "$DEVICE_ID"
+          echo "IOS_DEVICE_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE_ID" || true
+          open -a Simulator --args -CurrentDeviceUDID "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          flutter devices
+      - name: Run iOS simulator tests
+        working-directory: ${{ runner.temp }}/turso_mobile
+        timeout-minutes: 20
+        run: flutter test integration_test/runtime_test.dart -d "$IOS_DEVICE_ID"
+      - name: Build the iOS device application
+        working-directory: ${{ runner.temp }}/turso_mobile
+        run: |
+          xcrun simctl shutdown "$IOS_DEVICE_ID"
+          flutter build ios --release --no-codesign
+      - name: Verify the packaged iOS device artifact
+        working-directory: ${{ runner.temp }}/turso_mobile
+        run: |
+          find build/ios/iphoneos/Runner.app -path '*turso_sdk_kit.framework/turso_sdk_kit' \
+            -exec file {} \; | grep 'arm64'
+
   test:
     runs-on: ubuntu-latest
 

@@ -10,6 +10,13 @@ void main(List<String> arguments) async {
       (OS.macOS, Architecture.arm64) => 'native/macos/arm64/libturso_sdk_kit.dylib',
       (OS.linux, Architecture.x64) => 'native/linux/x64/libturso_sdk_kit.so',
       (OS.windows, Architecture.x64) => 'native/windows/x64/turso_sdk_kit.dll',
+      (OS.android, Architecture.arm64) => 'native/android/arm64/libturso_sdk_kit.so',
+      (OS.android, Architecture.x64) => 'native/android/x64/libturso_sdk_kit.so',
+      (OS.iOS, Architecture.arm64) when code.iOS.targetSdk == IOSSdk.iPhoneOS =>
+        'native/ios/device/arm64/libturso_sdk_kit.dylib',
+      (OS.iOS, Architecture.arm64) => 'native/ios/simulator/arm64/libturso_sdk_kit.dylib',
+      (OS.iOS, Architecture.x64) when code.iOS.targetSdk == IOSSdk.iPhoneSimulator =>
+        'native/ios/simulator/x64/libturso_sdk_kit.dylib',
       _ => null,
     };
     if (artifact == null) return;
