@@ -125,6 +125,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+      - name: Install the Visual C++ runtime
+        shell: pwsh
+        run: choco install vcredist140 --yes --no-progress
       - name: Build and run Windows Flutter application
         shell: pwsh
         run: |
@@ -135,7 +138,6 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE/packages/database/turso/tool/flutter_smoke_main.dart.template" lib/main.dart
           flutter build windows --release
           $releaseRoot = "$smokeRoot/build/windows/x64/runner/Release"
-          Copy-Item "$env:DART_HOME/bin/vcruntime140.dll" $releaseRoot
           $process = Start-Process "$releaseRoot/turso_smoke.exe" -ArgumentList '--enable-software-rendering' -PassThru -Wait
           if ($process.ExitCode -ne 0) {
             $exitCode = $process.ExitCode
