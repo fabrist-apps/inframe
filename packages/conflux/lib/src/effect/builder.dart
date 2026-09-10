@@ -38,6 +38,46 @@ final class EffectBuilder<E> {
     };
   }
 
+  /// Registers [finalizer] for protected execution when this scope closes.
+  void addFinalizer(Effect<void, Never> finalizer) {
+    _checkUsable();
+    if (!_execution.scope._addFinalizer(
+      finalizer,
+      _execution.context,
+      _execution.clock,
+    )) {
+      throw StateError('Cannot add a finalizer to a closed Scope.');
+    }
+  }
+
+  /// Acquires a resource and atomically transfers its cleanup to this scope.
+  Future<A> acquireRelease<A>(
+    Effect<A, E> acquire, {
+    required Effect<void, Never> Function(A resource) release,
+  }) async {
+    _checkUsable();
+    final exit = await acquire._evaluate(_execution);
+    return switch (exit) {
+      Failed<A, E>(:final cause) => _abort(cause),
+      Succeeded<A, E>(:final value) => _registerRelease<A>(value, release),
+    };
+  }
+
+  A _registerRelease<A>(
+    A resource,
+    Effect<void, Never> Function(A resource) release,
+  ) {
+    final finalizer = Effect.defer<void, Never>(() => release(resource));
+    if (!_execution.scope._addFinalizer(
+      finalizer,
+      _execution.context,
+      _execution.clock,
+    )) {
+      throw StateError('Cannot acquire a resource in a closed Scope.');
+    }
+    return resource;
+  }
+
   Never _abort(Cause<E> cause) {
     _terminalCause ??= cause;
     throw const _BindSignal();

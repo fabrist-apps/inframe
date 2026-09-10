@@ -169,4 +169,59 @@ final class Effect<A, E> {
       execution.context = previous;
     }
   });
+
+  /// Runs [effect] in a child scope and closes it before returning.
+  static Effect<A, E> using<A, E>(Effect<A, E> effect) => Effect._((execution) async {
+    final child = _Execution(
+      context: execution.context,
+      scope: Scope._(),
+      clock: execution.clock,
+      cancellation: execution.cancellation,
+    );
+    return _runScoped(effect, child);
+  });
 }
+
+/// Cleanup operations that run before an Effect returns to its caller.
+extension EffectCleanup<A, E> on Effect<A, E> {
+  /// Runs [finalizer] after every outcome and preserves both failures.
+  Effect<A, E> ensuring(Effect<void, Never> finalizer) => onExit((_) => finalizer);
+
+  /// Runs the Effect returned by [finalizer] after every [Exit].
+  Effect<A, E> onExit(
+    Effect<void, Never> Function(Exit<A, E> exit) finalizer,
+  ) => Effect._((execution) async {
+    final exit = await _evaluate(execution);
+    late final Effect<void, Never> cleanup;
+    try {
+      cleanup = finalizer(exit);
+    } on Object catch (error, stackTrace) {
+      return _appendCleanup(exit, Defect(error, stackTrace));
+    }
+    final cleanupExit = await _runProtected(
+      cleanup,
+      execution.context,
+      execution.clock,
+    );
+    final cleanupCause = switch (cleanupExit) {
+      Succeeded<void, Never>() => null,
+      Failed<void, Never>(:final cause) => cause,
+    };
+    return _appendCleanup(exit, cleanupCause);
+  });
+
+  /// Runs [finalizer] only when the operation is interrupted.
+  Effect<A, E> onCancel(Effect<void, Never> finalizer) => onExit((exit) {
+    if (exit case Failed<A, E>(:final cause) when _containsInterruption<E>(cause)) {
+      return finalizer;
+    }
+    return Effect.succeed<void, Never>(null);
+  });
+}
+
+bool _containsInterruption<E>(Cause<E> cause) => switch (cause) {
+  Interrupted<E>() => true,
+  Sequential<E>(:final causes) ||
+  Parallel<E>(:final causes) => causes.any((cause) => _containsInterruption<E>(cause)),
+  Expected<E>() || Defect<E>() => false,
+};

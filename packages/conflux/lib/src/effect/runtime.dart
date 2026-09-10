@@ -12,9 +12,9 @@ final class RuntimeClosed {
 final class _OwnedRoot {
   _OwnedRoot(this._interrupt);
 
-  final Future<void> Function(Object? reason) _interrupt;
+  final Future<Cause<Never>?> Function(Object? reason) _interrupt;
 
-  Future<void> interruptAndJoin(Object? reason) => _interrupt(reason);
+  Future<Cause<Never>?> interruptAndJoin(Object? reason) => _interrupt(reason);
 }
 
 /// A running Effect with cooperative interruption and an eventual [Exit].
@@ -56,7 +56,7 @@ final class Runtime {
   /// Starts [effect] as a runtime-owned root execution.
   Fiber<A, E> fork<A, E>(Effect<A, E> effect) {
     if (_closed) throw StateError('Runtime is closed.');
-    final scope = _Scope();
+    final scope = Scope._();
     final cancellation = _Cancellation();
     final execution = _Execution(
       context: context,
@@ -71,7 +71,11 @@ final class Runtime {
     );
     fiber = Fiber._(cancellation, exit);
     root = _OwnedRoot((reason) async {
-      await fiber.interrupt(reason);
+      final exit = await fiber.interrupt(reason);
+      return switch (exit) {
+        Succeeded<A, E>() => null,
+        Failed<A, E>(:final cause) => _defectsOnly(cause),
+      };
     });
     _roots.add(root);
     return fiber;
@@ -80,11 +84,9 @@ final class Runtime {
   Future<Exit<A, E>> _runRoot<A, E>(
     Effect<A, E> effect,
     _Execution execution,
-    _Scope scope,
+    Scope scope,
   ) async {
-    final exit = await effect._evaluate(execution);
-    await scope.close();
-    return exit;
+    return _runScoped(effect, execution);
   }
 
   /// Runs [effect] in a fresh root scope and returns after scope cleanup.

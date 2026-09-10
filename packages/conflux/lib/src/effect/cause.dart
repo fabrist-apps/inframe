@@ -52,3 +52,28 @@ final class Parallel<E> extends Cause<E> {
   /// Branch failures in source order.
   final List<Cause<E>> causes;
 }
+
+Cause<Never>? _defectsOnly<E>(Cause<E> cause) => switch (cause) {
+  Expected<E>() || Interrupted<E>() => null,
+  Defect<E>(:final error, :final stackTrace) => Defect(error, stackTrace),
+  Sequential<E>(:final causes) => _combineCleanupCauses(
+    causes.map((cause) => _defectsOnly<E>(cause)).whereType<Cause<Never>>(),
+    sequential: true,
+  ),
+  Parallel<E>(:final causes) => _combineCleanupCauses(
+    causes.map((cause) => _defectsOnly<E>(cause)).whereType<Cause<Never>>(),
+    sequential: false,
+  ),
+};
+
+Cause<Never>? _combineCleanupCauses(
+  Iterable<Cause<Never>> causes, {
+  required bool sequential,
+}) {
+  final values = List<Cause<Never>>.of(causes);
+  return switch (values) {
+    [] => null,
+    [final only] => only,
+    _ => sequential ? Sequential(values) : Parallel(values),
+  };
+}
