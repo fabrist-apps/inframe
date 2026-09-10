@@ -65,6 +65,16 @@ void main() {
         ]),
         throwsFormatException,
       );
+      expect(
+        () => JsonPatch.fromJson(<Object?>[
+          <String, Object?>{
+            'op': 'remove',
+            'path': '',
+            'ignored': Object(),
+          },
+        ]),
+        throwsFormatException,
+      );
     });
   });
 

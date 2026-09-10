@@ -58,31 +58,33 @@ JsonPatchOperation _operationFromJson(Object? json, int index) {
   if (json is! Map<Object?, Object?>) {
     throw FormatException('Operation $index must be an object.');
   }
-  for (final key in json.keys) {
-    if (key is! String) {
-      throw FormatException('Operation $index has a non-string member name.');
-    }
-  }
+  final frozenOperation = _freezeWireJson(
+    json,
+    location:
+        r'$patch'
+        '[$index]',
+  );
+  final operation = frozenOperation! as Map<String, Object?>;
 
-  final operationName = _requiredWireString(json, 'op', index);
-  final path = JsonPointer.parse(_requiredWireString(json, 'path', index));
+  final operationName = _requiredWireString(operation, 'op', index);
+  final path = JsonPointer.parse(_requiredWireString(operation, 'path', index));
   switch (operationName) {
     case 'add':
-      return JsonAdd(path, _requiredWireValue(json, 'value', index));
+      return JsonAdd(path, _requiredWireValue(operation, 'value', index));
     case 'remove':
       return JsonRemove(path);
     case 'replace':
-      return JsonReplace(path, _requiredWireValue(json, 'value', index));
+      return JsonReplace(path, _requiredWireValue(operation, 'value', index));
     case 'test':
-      return JsonTest(path, _requiredWireValue(json, 'value', index));
+      return JsonTest(path, _requiredWireValue(operation, 'value', index));
     case 'move':
       return JsonMove(
-        from: JsonPointer.parse(_requiredWireString(json, 'from', index)),
+        from: JsonPointer.parse(_requiredWireString(operation, 'from', index)),
         path: path,
       );
     case 'copy':
       return JsonCopy(
-        from: JsonPointer.parse(_requiredWireString(json, 'from', index)),
+        from: JsonPointer.parse(_requiredWireString(operation, 'from', index)),
         path: path,
       );
     default:
@@ -90,7 +92,7 @@ JsonPatchOperation _operationFromJson(Object? json, int index) {
   }
 }
 
-String _requiredWireString(Map<Object?, Object?> json, String member, int index) {
+String _requiredWireString(Map<String, Object?> json, String member, int index) {
   final value = json[member];
   if (value is! String) {
     throw FormatException('Operation $index requires a string "$member" member.');
@@ -98,16 +100,11 @@ String _requiredWireString(Map<Object?, Object?> json, String member, int index)
   return value;
 }
 
-Object? _requiredWireValue(Map<Object?, Object?> json, String member, int index) {
+Object? _requiredWireValue(Map<String, Object?> json, String member, int index) {
   if (!json.containsKey(member)) {
     throw FormatException('Operation $index requires a "$member" member.');
   }
-  return _freezeWireJson(
-    json[member],
-    location:
-        r'$patch'
-        '[$index].$member',
-  );
+  return json[member];
 }
 
 Map<String, Object?> _operationToJson(JsonPatchOperation operation) {
