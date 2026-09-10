@@ -12,6 +12,7 @@ part 'middleware.dart';
 part 'request.dart';
 part 'response.dart';
 part 'router.dart';
+part 'server.dart';
 
 /// A request handler.
 typedef Handler = FutureOr<Response> Function(Context context, Request request);
@@ -52,8 +53,57 @@ final class Inlet extends Router {
   final ErrorReporter? onReportError;
 
   /// Dispatches [request] without a network listener.
-  Future<Response> handle(Request request, {Context? context}) async {
-    final router = _admit(request);
+  Future<Response> handle(Request request, {Context? context}) async =>
+      (await _dispatch(request, context: context)).response;
+
+  /// Starts an HTTP listener.
+  Future<InletServer> serve({
+    InternetAddress? address,
+    int port = 8080,
+    int backlog = 0,
+    bool shared = false,
+    Duration? idleTimeout = const Duration(seconds: 120),
+  }) => _startServer(
+    address: address,
+    port: port,
+    backlog: backlog,
+    shared: shared,
+    idleTimeout: idleTimeout,
+    isSecure: false,
+    bind: (bindAddress) => HttpServer.bind(
+      bindAddress,
+      port,
+      backlog: backlog,
+      shared: shared,
+    ),
+  );
+
+  /// Starts an HTTPS listener using [securityContext].
+  Future<InletServer> serveSecure(
+    SecurityContext securityContext, {
+    InternetAddress? address,
+    int port = 8443,
+    int backlog = 0,
+    bool shared = false,
+    Duration? idleTimeout = const Duration(seconds: 120),
+  }) => _startServer(
+    address: address,
+    port: port,
+    backlog: backlog,
+    shared: shared,
+    idleTimeout: idleTimeout,
+    isSecure: true,
+    bind: (bindAddress) => HttpServer.bindSecure(
+      bindAddress,
+      port,
+      securityContext,
+      backlog: backlog,
+      shared: shared,
+    ),
+  );
+
+  Future<_DispatchResult> _dispatch(Request request, {Context? context}) async {
+    final router = await _admit(request);
     final dispatchContext = context ?? this.context;
     final resolution = router.resolve(request);
     final (:middleware, :terminal, :dispatchRequest, :suppressBody) = switch (resolution) {
@@ -98,27 +148,39 @@ final class Inlet extends Router {
         dispatchRequest,
       );
     } on Object catch (error, stackTrace) {
-      if (_isUnexpected(error) && !_wasReported(error)) {
-        _report(error, stackTrace);
-      }
-      final errorHandler = onError;
-      if (errorHandler != null) {
-        try {
-          response = await errorHandler(
-            dispatch.context,
-            dispatch.request,
-            error,
-            stackTrace,
-          );
-        } on Object catch (hookError, hookStackTrace) {
-          _report(hookError, hookStackTrace);
-          response = Response.empty(status: HttpStatus.internalServerError);
-        }
-      } else {
-        response = _defaultErrorResponse(error);
-      }
+      response = await _recover(
+        dispatch.context,
+        dispatch.request,
+        error,
+        stackTrace,
+      );
     }
-    return suppressBody ? response._withoutBody() : response;
+    return _DispatchResult(
+      suppressBody ? response._withoutBody() : response,
+      dispatch.context,
+      dispatch.request,
+    );
+  }
+
+  Future<Response> _recover(
+    Context context,
+    Request request,
+    Object error,
+    StackTrace stackTrace,
+  ) async {
+    if (_isUnexpected(error) && !_wasReported(error)) {
+      _report(error, stackTrace);
+    }
+    final errorHandler = onError;
+    if (errorHandler == null) {
+      return _defaultErrorResponse(error);
+    }
+    try {
+      return await errorHandler(context, request, error, stackTrace);
+    } on Object catch (hookError, hookStackTrace) {
+      _report(hookError, hookStackTrace);
+      return Response.empty(status: HttpStatus.internalServerError);
+    }
   }
 
   void _report(Object error, StackTrace stackTrace) {
@@ -137,6 +199,14 @@ final class Inlet extends Router {
         ..writeln(reporterStackTrace);
     }
   }
+}
+
+final class _DispatchResult {
+  const _DispatchResult(this.response, this.context, this.request);
+
+  final Response response;
+  final Context context;
+  final Request request;
 }
 
 Response _badRequest(Context _, Request _) => Response.empty(status: HttpStatus.badRequest);

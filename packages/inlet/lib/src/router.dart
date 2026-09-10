@@ -13,6 +13,7 @@ class Router {
   final List<_RouteRegistration> _registrations = [];
   final List<Middleware> _middleware = [];
   _CompiledRouter? _compiled;
+  Future<void>? _starting;
 
   /// Registers [handler] for the case-sensitive HTTP [method] and [path].
   void on(
@@ -94,25 +95,59 @@ class Router {
     _registrations.addAll(mounted);
   }
 
-  _CompiledRouter _admit(Request request) {
-    final frozen = _compiled;
-    if (frozen != null) {
-      request._admit();
-      return frozen;
-    }
+  Future<_CompiledRouter> _admit(Request request) async {
+    while (true) {
+      final frozen = _compiled;
+      if (frozen != null) {
+        request._admit();
+        return frozen;
+      }
+      final starting = _starting;
+      if (starting != null) {
+        await starting;
+        continue;
+      }
 
-    final candidate = _CompiledRouter.compile(
-      _registrations,
-      rootMiddleware: _middleware,
-      strict: _strict,
-    );
-    request._admit();
-    _compiled = candidate;
-    return candidate;
+      final candidate = _compile();
+      request._admit();
+      _compiled = candidate;
+      return candidate;
+    }
   }
 
+  Future<T> _freezeAfter<T>(Future<T> Function() start) async {
+    while (true) {
+      if (_compiled != null) {
+        return start();
+      }
+      final starting = _starting;
+      if (starting != null) {
+        await starting;
+        continue;
+      }
+
+      final candidate = _compile();
+      final settled = Completer<void>();
+      _starting = settled.future;
+      try {
+        final value = await start();
+        _compiled = candidate;
+        return value;
+      } finally {
+        _starting = null;
+        settled.complete();
+      }
+    }
+  }
+
+  _CompiledRouter _compile() => _CompiledRouter.compile(
+    _registrations,
+    rootMiddleware: _middleware,
+    strict: _strict,
+  );
+
   void _ensureEditable() {
-    if (_compiled != null) {
+    if (_compiled != null || _starting != null) {
       throw StateError('Routes cannot be changed after first use.');
     }
   }
