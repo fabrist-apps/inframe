@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+from pathlib import Path
 
 from selenium import webdriver
+from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support.ui import WebDriverWait
 
 
@@ -18,6 +20,14 @@ def create_driver(browser: str):
     if browser == 'firefox':
         options = webdriver.FirefoxOptions()
         options.add_argument('-headless')
+        snap_binary = Path('/snap/firefox/current/usr/lib/firefox/firefox')
+        snap_driver = Path('/snap/bin/geckodriver')
+        if snap_binary.is_file() and snap_driver.is_file():
+            options.binary_location = str(snap_binary)
+            return webdriver.Firefox(
+                options=options,
+                service=FirefoxService(executable_path=str(snap_driver)),
+            )
         return webdriver.Firefox(options=options)
     if browser == 'safari':
         return webdriver.Safari()

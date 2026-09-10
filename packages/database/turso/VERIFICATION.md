@@ -22,8 +22,8 @@ The recorded stable desktop browsers are:
 
 | Browser | Version | Runner and driver |
 | --- | --- | --- |
-| Chrome | 152.0.7977.82 | Ubuntu 24.04, headless Chrome through ChromeDriver |
-| Firefox | 155.0 | Ubuntu 24.04, headless Firefox through GeckoDriver |
+| Chrome | 144.0.7559.96 | Ubuntu 24.04, headless Chrome through ChromeDriver |
+| Firefox | 147.0.1 | Ubuntu 24.04, headless Firefox through GeckoDriver |
 | Safari | 26.6.2 (21624.5.1.11.3) | macOS 26 ARM64, actual Safari through the bundled `safaridriver` |
 
 Safari's own WebDriver is used. A generic WebKit engine does not stand in for the Safari check.
