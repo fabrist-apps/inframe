@@ -8,6 +8,7 @@ import 'package:meta/meta.dart';
 part 'src/json_patch_apply.dart';
 part 'src/json_patch_exception.dart';
 part 'src/json_patch_operation.dart';
+part 'src/json_diff.dart';
 part 'src/json_pointer.dart';
 part 'src/json_value.dart';
 
@@ -38,9 +39,7 @@ final class JsonPatch {
   bool get isEmpty => operations.isEmpty;
 
   /// Computes a patch that transforms [before] into [after].
-  static JsonPatch diff(Object? before, Object? after) {
-    throw UnimplementedError('JsonPatch.diff is implemented by FBR-9.');
-  }
+  static JsonPatch diff(Object? before, Object? after) => _JsonDiffer(before, after).run();
 
   /// Applies [patch] without changing [document].
   ///
