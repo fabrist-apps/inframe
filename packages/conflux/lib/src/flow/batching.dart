@@ -2,10 +2,8 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
-import 'package:conflux/src/effect/cause.dart' show CauseRuntimeOperations;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show ScopeAccess;
-import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
 
@@ -29,7 +27,7 @@ abstract final class BatchingFlowSource {
     final mailbox = FlowMailbox<A, E>(capacity, overflow, onOverflow)..registerClose(execution);
     final pump = ScopeAccess.fork(
       execution.scope,
-      _pump(upstream, mailbox),
+      pumpFlow(upstream, mailbox.offer),
       execution,
     );
     unawaited(
@@ -44,21 +42,6 @@ abstract final class BatchingFlowSource {
       }),
     );
     return Succeeded(_TimeBatchCursor(mailbox, duration, maxSize));
-  });
-
-  static Effect<void, E> _pump<A, E>(
-    OpenFlowCursor<A, E> upstream,
-    FlowMailbox<A, E> mailbox,
-  ) => Effect.build((resolve) async {
-    final cursor = await resolve(Effect.defer(upstream));
-    while (true) {
-      switch (await resolve(cursor.next())) {
-        case Some<A>(:final value):
-          await resolve(mailbox.offer(value));
-        case None():
-          return;
-      }
-    }
   });
 }
 
@@ -106,21 +89,19 @@ final class _TimeBatchCursor<A, E> implements FlowSourceCursor<List<A>, E> {
         final batch = <A>[value];
         final deadline = execution.clock.monotonic() + _duration;
         while (batch.length < _maxSize) {
-          final remaining = deadline - execution.clock.monotonic();
-          if (remaining <= Duration.zero) {
-            return Succeeded(Some(List<A>.unmodifiable(batch)));
-          }
-          switch (await EffectAccess.evaluate(_nextOrElapsed(remaining), execution)) {
-            case Failed<_BatchSignal<A>, E>(:final cause):
+          switch (await EffectAccess.evaluate(_mailbox.takeUntil(deadline), execution)) {
+            case Failed<({bool elapsed, Option<A> value}), E>(:final cause):
               return Failed(cause);
-            case Succeeded<_BatchSignal<A>, E>(value: _BatchElapsed<A>()):
-              return Succeeded(Some(List<A>.unmodifiable(batch)));
-            case Succeeded<_BatchSignal<A>, E>(
-              value: _BatchNext<A>(value: None()),
+            case Succeeded<({bool elapsed, Option<A> value}), E>(
+              value: (elapsed: true, value: _),
             ):
               return Succeeded(Some(List<A>.unmodifiable(batch)));
-            case Succeeded<_BatchSignal<A>, E>(
-              value: _BatchNext<A>(value: Some<A>(:final value)),
+            case Succeeded<({bool elapsed, Option<A> value}), E>(
+              value: (elapsed: false, value: None()),
+            ):
+              return Succeeded(Some(List<A>.unmodifiable(batch)));
+            case Succeeded<({bool elapsed, Option<A> value}), E>(
+              value: (elapsed: false, value: Some<A>(:final value)),
             ):
               batch.add(value);
           }
@@ -128,80 +109,4 @@ final class _TimeBatchCursor<A, E> implements FlowSourceCursor<List<A>, E> {
         return Succeeded(Some(List<A>.unmodifiable(batch)));
     }
   });
-
-  Effect<_BatchSignal<A>, E> _nextOrElapsed(Duration remaining) =>
-      EffectAccess.create((execution) async {
-        final next = ScopeAccess.fork(
-          execution.scope,
-          _mailbox.take().map<_BatchSignal<A>>(_BatchNext.new),
-          execution,
-        );
-        final timer = ScopeAccess.fork(
-          execution.scope,
-          Effect.sleep(remaining).map<_BatchSignal<A>>((_) => const _BatchElapsed()),
-          execution,
-        );
-        final winner = await Future.any<_BatchRace<A, E>>([
-          next.exit.then(_BatchNextFinished.new),
-          timer.exit.then(_BatchTimerFinished.new),
-        ]);
-
-        return switch (winner) {
-          _BatchNextFinished<A, E>(:final exit) => exit.appendCleanup(
-            _defectsOnly(await timer.interrupt(const _BatchRaceLost())),
-          ),
-          _BatchTimerFinished<A, E>(exit: Succeeded<_BatchSignal<A>, Never>(:final value)) =>
-            Succeeded<_BatchSignal<A>, E>(value).appendCleanup(
-              _defectsOnly(await next.interrupt(const _BatchRaceLost())),
-            ),
-          _BatchTimerFinished<A, E>(exit: Failed<_BatchSignal<A>, Never>(:final cause)) =>
-            Failed<_BatchSignal<A>, E>(cause.mapExpected<E>(_widenNever)).appendCleanup(
-              _defectsOnly(await next.interrupt(const _BatchRaceLost())),
-            ),
-        };
-      });
 }
-
-Cause<Never>? _defectsOnly<A, E>(Exit<A, E> exit) => switch (exit) {
-  Succeeded<A, E>() => null,
-  Failed<A, E>(:final cause) => cause.defectsOnly,
-};
-
-sealed class _BatchSignal<A> {
-  const _BatchSignal();
-}
-
-final class _BatchNext<A> extends _BatchSignal<A> {
-  const _BatchNext(this.value);
-
-  final Option<A> value;
-}
-
-final class _BatchElapsed<A> extends _BatchSignal<A> {
-  const _BatchElapsed();
-}
-
-sealed class _BatchRace<A, E> {
-  const _BatchRace();
-}
-
-final class _BatchNextFinished<A, E> extends _BatchRace<A, E> {
-  const _BatchNextFinished(this.exit);
-
-  final Exit<_BatchSignal<A>, E> exit;
-}
-
-final class _BatchTimerFinished<A, E> extends _BatchRace<A, E> {
-  const _BatchTimerFinished(this.exit);
-
-  final Exit<_BatchSignal<A>, Never> exit;
-}
-
-final class _BatchRaceLost {
-  const _BatchRaceLost();
-
-  @override
-  String toString() => 'Flow batch race lost';
-}
-
-E _widenNever<E>(Never error) => error;

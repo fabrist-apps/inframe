@@ -72,7 +72,6 @@ final class _SharedFlowState<A, E> {
     if (connection == null) {
       connection = _SharedConnection(
         _nextConnectionId++,
-        this,
         Runtime(context: execution.context, clock: execution.clock),
         replay,
       );
@@ -125,20 +124,16 @@ final class _SharedFlowState<A, E> {
     _cleanup = cleanup;
     return cleanup;
   }
-
-  bool owns(_SharedConnection<A, E> connection) => identical(_connection, connection);
 }
 
 final class _SharedConnection<A, E> {
   _SharedConnection(
     this.id,
-    this._owner,
     this._runtime,
     this._replayCapacity,
   );
 
   final int id;
-  final _SharedFlowState<A, E> _owner;
   final Runtime _runtime;
   final int _replayCapacity;
   final ListQueue<A> _replay = ListQueue();
@@ -169,26 +164,13 @@ final class _SharedConnection<A, E> {
   }
 
   void start(OpenFlowCursor<A, E> upstream) {
-    final pump = _runtime.fork(_pumpSource(upstream));
+    final pump = _runtime.fork(pumpFlow(upstream, _publish));
     _pump = pump;
     unawaited(pump.exit.then(_finished));
   }
 
-  Effect<void, E> _pumpSource(OpenFlowCursor<A, E> upstream) =>
-      Effect.build<void, E>((resolve) async {
-        final cursor = await resolve(Effect.defer(upstream));
-        while (true) {
-          switch (await resolve(cursor.next())) {
-            case Some<A>(:final value):
-              await resolve(_publish(value));
-            case None():
-              return;
-          }
-        }
-      });
-
   Effect<void, E> _publish(A value) => EffectAccess.create((execution) async {
-    if (_closing || !_owner.owns(this)) return const Succeeded(null);
+    if (_closing) return const Succeeded(null);
     if (_replayCapacity > 0) {
       if (_replay.length == _replayCapacity) _replay.removeFirst();
       _replay.addLast(value);
@@ -208,7 +190,7 @@ final class _SharedConnection<A, E> {
   });
 
   void _finished(Exit<void, E> exit) {
-    if (_closing || !_owner.owns(this)) return;
+    if (_closing) return;
     _terminal = exit;
     for (final subscriber in _subscribers) {
       subscriber.active = false;

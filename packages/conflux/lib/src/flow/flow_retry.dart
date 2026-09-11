@@ -11,9 +11,7 @@ abstract final class RetryFlowSource {
   static Effect<FlowSourceCursor<A, E>, E> open<A, E, O>(
     OpenFlowCursor<A, E> upstream,
     Schedule<E, O, E> schedule,
-  ) => Effect.defer(
-    () => Effect.succeed(_RetryCursor(upstream, schedule.driver())),
-  );
+  ) => Effect.succeed(_RetryCursor(upstream, schedule.driver()));
 }
 
 final class _RetryCursor<A, E, O> implements FlowSourceCursor<A, E> {

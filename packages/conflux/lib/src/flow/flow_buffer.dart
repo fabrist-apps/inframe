@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/src/coordination/waiter.dart';
+import 'package:conflux/src/effect/cause.dart' show CauseRuntimeOperations;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show EffectExecution, ScopeAccess;
+import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
 
 /// The action a Flow operation takes when its owned buffer is full.
 enum FlowOverflowPolicy {
@@ -115,10 +118,71 @@ final class FlowMailbox<A, E> {
     };
   });
 
-  /// Takes an immediately available value or terminal outcome without waiting.
+  /// Takes a value or terminal outcome before the monotonic [deadline].
   ///
-  /// The outer [Option] is absent while the mailbox remains open and empty.
-  Option<Exit<Option<A>, E>> poll() {
+  /// An elapsed result has `elapsed: true` and an absent value. Ordinary
+  /// completion has `elapsed: false` and an absent value. A queued outcome wins
+  /// over an already reached deadline.
+  Effect<({bool elapsed, Option<A> value}), E> takeUntil(Duration deadline) =>
+      EffectAccess.create((execution) async {
+        switch (_poll()) {
+          case Some<Exit<Option<A>, E>>(:final value):
+            return switch (value) {
+              Succeeded<Option<A>, E>(:final value) => Succeeded((
+                elapsed: false,
+                value: value,
+              )),
+              Failed<Option<A>, E>(:final cause) => Failed(cause),
+            };
+          case None():
+            break;
+        }
+        final remaining = deadline - execution.clock.monotonic();
+        if (remaining <= Duration.zero) {
+          return const Succeeded((elapsed: true, value: None()));
+        }
+
+        final next = ScopeAccess.fork(execution.scope, take(), execution);
+        final timer = ScopeAccess.fork(
+          execution.scope,
+          Effect.sleep(remaining),
+          execution,
+        );
+        final winner = await Future.any<_MailboxTimedRace<A, E>>([
+          next.exit.then(_MailboxTakeFinished.new),
+          timer.exit.then(_MailboxTimerFinished.new),
+        ]);
+        return switch (winner) {
+          _MailboxTakeFinished<A, E>(:final exit) => switch (exit) {
+            Succeeded<Option<A>, E>(:final value) =>
+              Succeeded<({bool elapsed, Option<A> value}), E>((
+                elapsed: false,
+                value: value,
+              )).appendCleanup(
+                _defectsOnly(await timer.interrupt(const _MailboxRaceLost())),
+              ),
+            Failed<Option<A>, E>(:final cause) =>
+              Failed<({bool elapsed, Option<A> value}), E>(cause).appendCleanup(
+                _defectsOnly(await timer.interrupt(const _MailboxRaceLost())),
+              ),
+          },
+          _MailboxTimerFinished<A, E>(exit: Succeeded<void, Never>()) =>
+            Succeeded<({bool elapsed, Option<A> value}), E>((
+              elapsed: true,
+              value: const None(),
+            )).appendCleanup(
+              _defectsOnly(await next.interrupt(const _MailboxRaceLost())),
+            ),
+          _MailboxTimerFinished<A, E>(exit: Failed<void, Never>(:final cause)) =>
+            Failed<({bool elapsed, Option<A> value}), E>(
+              cause.mapExpected<E>(_widenNever),
+            ).appendCleanup(
+              _defectsOnly(await next.interrupt(const _MailboxRaceLost())),
+            ),
+        };
+      });
+
+  Option<Exit<Option<A>, E>> _poll() {
     if (_values.isNotEmpty) {
       final value = _values.removeFirst();
       _acceptOffers();
@@ -236,6 +300,34 @@ final class FlowMailbox<A, E> {
     execution.context,
     execution.clock,
   );
+}
+
+Cause<Never>? _defectsOnly<A, E>(Exit<A, E> exit) => switch (exit) {
+  Succeeded<A, E>() => null,
+  Failed<A, E>(:final cause) => cause.defectsOnly,
+};
+
+sealed class _MailboxTimedRace<A, E> {
+  const _MailboxTimedRace();
+}
+
+final class _MailboxTakeFinished<A, E> extends _MailboxTimedRace<A, E> {
+  const _MailboxTakeFinished(this.exit);
+
+  final Exit<Option<A>, E> exit;
+}
+
+final class _MailboxTimerFinished<A, E> extends _MailboxTimedRace<A, E> {
+  const _MailboxTimerFinished(this.exit);
+
+  final Exit<void, Never> exit;
+}
+
+final class _MailboxRaceLost {
+  const _MailboxRaceLost();
+
+  @override
+  String toString() => 'Flow mailbox timed take race lost';
 }
 
 final class _PendingMailboxOffer<A, E> {

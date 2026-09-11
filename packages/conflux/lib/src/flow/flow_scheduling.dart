@@ -2,10 +2,8 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
-import 'package:conflux/src/effect/cause.dart' show CauseRuntimeOperations;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show ScopeAccess;
-import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
 
@@ -66,7 +64,15 @@ abstract final class FlowSchedulingSource {
 
     final source = ScopeAccess.fork(
       execution.scope,
-      _pump(upstream, input),
+      pumpFlow(
+        upstream,
+        (value) => EffectAccess.create((execution) {
+          return EffectAccess.evaluate(
+            input.offer(_Stamped(value, execution.clock.monotonic())),
+            execution,
+          );
+        }),
+      ),
       execution,
     );
     unawaited(
@@ -100,28 +106,6 @@ abstract final class FlowSchedulingSource {
     return Succeeded(_ScheduledCursor(output));
   });
 
-  static Effect<void, E> _pump<A, E>(
-    OpenFlowCursor<A, E> upstream,
-    FlowMailbox<_Stamped<A>, E> input,
-  ) => Effect.build((resolve) async {
-    final cursor = await resolve(Effect.defer(upstream));
-    while (true) {
-      switch (await resolve(cursor.next())) {
-        case Some<A>(:final value):
-          await resolve(
-            EffectAccess.create((execution) {
-              return EffectAccess.evaluate(
-                input.offer(_Stamped(value, execution.clock.monotonic())),
-                execution,
-              );
-            }),
-          );
-        case None():
-          return;
-      }
-    }
-  });
-
   static Effect<void, E> _debounce<A, E>(
     FlowMailbox<_Stamped<A>, E> input,
     FlowMailbox<A, E> output,
@@ -140,19 +124,23 @@ abstract final class FlowSchedulingSource {
       }
 
       final current = pending;
-      final signal = await resolve(_nextOrElapsed(input, current.receivedAt + duration));
-      switch (signal) {
-        case _TimingNext<_Stamped<A>>(value: Some<_Stamped<A>>(:final value)):
+      final taken = await resolve(
+        input.takeUntil(current.receivedAt + duration),
+      );
+      if (taken.elapsed) {
+        await resolve(output.offer(current.value));
+        pending = null;
+        continue;
+      }
+      switch (taken.value) {
+        case Some<_Stamped<A>>(:final value):
           if (value.receivedAt >= current.receivedAt + duration) {
             await resolve(output.offer(current.value));
           }
           pending = value;
-        case _TimingNext<_Stamped<A>>(value: None()):
+        case None():
           await resolve(output.offer(current.value));
           return;
-        case _TimingElapsed<_Stamped<A>>():
-          await resolve(output.offer(current.value));
-          pending = null;
       }
     }
   });
@@ -175,59 +163,6 @@ abstract final class FlowSchedulingSource {
       }
     }
   });
-
-  static Effect<_TimingSignal<A>, E> _nextOrElapsed<A, E>(
-    FlowMailbox<A, E> input,
-    Duration deadline,
-  ) => EffectAccess.create((execution) async {
-    switch (input.poll()) {
-      case Some<Exit<Option<A>, E>>(:final value):
-        return switch (value) {
-          Succeeded<Option<A>, E>(:final value) => Succeeded(_TimingNext(value)),
-          Failed<Option<A>, E>(:final cause) => Failed(cause),
-        };
-      case None():
-        break;
-    }
-    final remaining = deadline - execution.clock.monotonic();
-    if (remaining <= Duration.zero) {
-      return const Succeeded(_TimingElapsed());
-    }
-    final next = ScopeAccess.fork(
-      execution.scope,
-      input.take().map<_TimingSignal<A>>(_TimingNext.new),
-      execution,
-    );
-    final timer = ScopeAccess.fork(
-      execution.scope,
-      Effect.sleep(remaining).map<_TimingSignal<A>>((_) => const _TimingElapsed()),
-      execution,
-    );
-    final winner = await Future.any<_TimingRace<A, E>>([
-      next.exit.then(_TimingNextFinished.new),
-      timer.exit.then(_TimingTimerFinished.new),
-    ]);
-
-    return switch (winner) {
-      _TimingNextFinished<A, E>(:final exit) => exit.appendCleanup(
-        _defectsOnly(await timer.interrupt(const _TimingRaceLost())),
-      ),
-      _TimingTimerFinished<A, E>(
-        exit: Succeeded<_TimingSignal<A>, Never>(:final value),
-      ) =>
-        Succeeded<_TimingSignal<A>, E>(value).appendCleanup(
-          _defectsOnly(await next.interrupt(const _TimingRaceLost())),
-        ),
-      _TimingTimerFinished<A, E>(
-        exit: Failed<_TimingSignal<A>, Never>(:final cause),
-      ) =>
-        Failed<_TimingSignal<A>, E>(
-          cause.mapExpected<E>(_widenNever),
-        ).appendCleanup(
-          _defectsOnly(await next.interrupt(const _TimingRaceLost())),
-        ),
-    };
-  });
 }
 
 final class _ScheduledCursor<A, E> implements FlowSourceCursor<A, E> {
@@ -245,47 +180,3 @@ final class _Stamped<A> {
   final A value;
   final Duration receivedAt;
 }
-
-Cause<Never>? _defectsOnly<A, E>(Exit<A, E> exit) => switch (exit) {
-  Succeeded<A, E>() => null,
-  Failed<A, E>(:final cause) => cause.defectsOnly,
-};
-
-sealed class _TimingSignal<A> {
-  const _TimingSignal();
-}
-
-final class _TimingNext<A> extends _TimingSignal<A> {
-  const _TimingNext(this.value);
-
-  final Option<A> value;
-}
-
-final class _TimingElapsed<A> extends _TimingSignal<A> {
-  const _TimingElapsed();
-}
-
-sealed class _TimingRace<A, E> {
-  const _TimingRace();
-}
-
-final class _TimingNextFinished<A, E> extends _TimingRace<A, E> {
-  const _TimingNextFinished(this.exit);
-
-  final Exit<_TimingSignal<A>, E> exit;
-}
-
-final class _TimingTimerFinished<A, E> extends _TimingRace<A, E> {
-  const _TimingTimerFinished(this.exit);
-
-  final Exit<_TimingSignal<A>, Never> exit;
-}
-
-final class _TimingRaceLost {
-  const _TimingRaceLost();
-
-  @override
-  String toString() => 'Flow timing race lost';
-}
-
-E _widenNever<E>(Never error) => error;

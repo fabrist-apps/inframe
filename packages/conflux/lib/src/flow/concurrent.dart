@@ -183,7 +183,7 @@ final class _MergeCoordinator<A, E> {
     final id = _nextId++;
     final fiber = ScopeAccess.fork(
       _execution.scope,
-      _pumpFlow(open, emit),
+      pumpFlow(open, emit),
       _execution,
     );
     _fibers[id] = fiber;
@@ -230,13 +230,7 @@ final class _MergeCoordinator<A, E> {
     final exits = await Future.wait(
       siblings.map((fiber) => fiber.interrupt(const ConcurrentFlowFailed())),
     );
-    final cleanupFailures = exits
-        .whereType<Failed<void, E>>()
-        .map((exit) => exit.cause.defectsOnly)
-        .whereType<Cause<Never>>()
-        .map((cause) => cause.mapExpected<E>(_widenNever));
-    final parallelCleanup = CauseGroup.parallel(cleanupFailures);
-    _mailbox.fail(CauseGroup.sequential([original, ?parallelCleanup])!);
+    _mailbox.fail(_appendParallelCleanup(original, exits));
   }
 
   void close() {
@@ -289,7 +283,7 @@ final class _SwitchCoordinator<Outer, A, E> {
 
     final outer = ScopeAccess.fork(
       _execution.scope,
-      _pumpFlow(
+      pumpFlow(
         _upstream,
         (value) => Effect.sync(() => _slot.put(value)).mapError<E>(_widenNever),
       ),
@@ -338,7 +332,7 @@ final class _SwitchCoordinator<Outer, A, E> {
   void _startInner(Outer value, int generation) {
     final inner = ScopeAccess.fork(
       _execution.scope,
-      _pumpFlow(
+      pumpFlow(
         () => Effect.defer(() => _transform(value)()),
         (value) => _mailbox.offer(_GenerationValue(value, generation)),
       ),
@@ -456,7 +450,7 @@ final class _ExhaustCoordinator<Outer, A, E> {
   void start() {
     final outer = ScopeAccess.fork(
       _execution.scope,
-      _pumpFlow(_upstream, _accept),
+      pumpFlow(_upstream, _accept),
       _execution,
     );
     _outer = outer;
@@ -467,7 +461,7 @@ final class _ExhaustCoordinator<Outer, A, E> {
     if (_inner != null || _terminalizing || _closed) return;
     final inner = ScopeAccess.fork(
       _execution.scope,
-      _pumpFlow(
+      pumpFlow(
         () => Effect.defer(() => _transform(value)()),
         _mailbox.offer,
       ),
@@ -580,21 +574,6 @@ final class _GenerationValue<A> {
   final A value;
   final int generation;
 }
-
-Effect<void, E> _pumpFlow<A, E>(
-  OpenFlowCursor<A, E> open,
-  Effect<void, E> Function(A value) emit,
-) => Effect.build(($) async {
-  final cursor = await $(Effect.defer(open));
-  while (true) {
-    switch (await $(cursor.next())) {
-      case Some<A>(:final value):
-        await $(Effect.defer(() => emit(value)));
-      case None():
-        return;
-    }
-  }
-});
 
 Cause<E> _appendParallelCleanup<E>(
   Cause<E> original,
