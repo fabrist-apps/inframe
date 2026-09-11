@@ -99,6 +99,70 @@ final class Flow<A, E> {
     () => _openCursor().map((cursor) => _MapCursor(cursor, transform)),
   );
 
+  /// Emits only values accepted by [predicate].
+  Flow<A, E> filter(bool Function(A value) predicate) => Flow._(
+    () => _openCursor().map((cursor) => _FilterCursor(cursor, predicate)),
+  );
+
+  /// Transforms values and emits only present results.
+  Flow<B, E> filterMap<B>(Option<B> Function(A value) transform) => Flow._(
+    () => _openCursor().map((cursor) => _FilterMapCursor(cursor, transform)),
+  );
+
+  /// Discards the first [count] values.
+  Flow<A, E> skip(int count) {
+    if (count < 0) {
+      throw ArgumentError.value(count, 'count', 'Must not be negative.');
+    }
+    if (count == 0) return this;
+    return Flow._(
+      () => _openCursor().map((cursor) => _SkipCursor(cursor, count)),
+    );
+  }
+
+  /// Emits the longest prefix accepted by [predicate].
+  Flow<A, E> takeWhile(bool Function(A value) predicate) => Flow._(
+    () => _openCursor().map((cursor) => _TakeWhileCursor(cursor, predicate)),
+  );
+
+  /// Discards the longest prefix accepted by [predicate].
+  Flow<A, E> skipWhile(bool Function(A value) predicate) => Flow._(
+    () => _openCursor().map((cursor) => _SkipWhileCursor(cursor, predicate)),
+  );
+
+  /// Suppresses values equal to the immediately preceding value.
+  ///
+  /// [equals] defaults to `==`. Each consumption retains only its preceding
+  /// value.
+  Flow<A, E> distinctUntilChanged({bool Function(A previous, A current)? equals}) => Flow._(
+    () => _openCursor().map(
+      (cursor) => _DistinctCursor(cursor, equals ?? (previous, current) => previous == current),
+    ),
+  );
+
+  /// Consumes this Flow to completion before opening and consuming [other].
+  Flow<A, E> concat(Flow<A, E> other) => Flow._(
+    () => _openCursor().map(
+      (cursor) => _ConcatCursor(cursor, other._openCursor),
+    ),
+  );
+
+  /// Emits each accumulated state after combining an upstream value.
+  Flow<B, E> scan<B>(B initial, B Function(B state, A value) combine) => Flow._(
+    () => _openCursor().map((cursor) => _ScanCursor(cursor, initial, combine)),
+  );
+
+  /// Emits [values] before opening this Flow.
+  Flow<A, E> startWith(Iterable<A> values) =>
+      Flow.fromIterable(values).widenError<E>().concat(this);
+
+  /// Uses [fallback] only after normal completion without an emitted value.
+  Flow<A, E> switchIfEmpty(Flow<A, E> Function() fallback) => Flow._(
+    () => _openCursor().map(
+      (cursor) => _SwitchIfEmptyCursor(cursor, fallback),
+    ),
+  );
+
   /// Emits at most the first [count] values and then closes upstream.
   Flow<A, E> take(int count) {
     if (count < 0) {
@@ -275,6 +339,215 @@ final class _MapCursor<A, B, E> implements _FlowCursor<B, E> {
       Some<A>(:final value) => Some(_transform(value)),
       None() => const None(),
     };
+  });
+}
+
+final class _FilterCursor<A, E> implements _FlowCursor<A, E> {
+  _FilterCursor(this._upstream, this._predicate);
+
+  final _FlowCursor<A, E> _upstream;
+  final bool Function(A value) _predicate;
+
+  @override
+  Effect<Option<A>, E> next() => Effect.build(($) async {
+    while (true) {
+      final option = await $(_upstream.next());
+      switch (option) {
+        case Some<A>(:final value) when _predicate(value):
+          return option;
+        case Some<A>():
+          continue;
+        case None():
+          return const None();
+      }
+    }
+  });
+}
+
+final class _FilterMapCursor<A, B, E> implements _FlowCursor<B, E> {
+  _FilterMapCursor(this._upstream, this._transform);
+
+  final _FlowCursor<A, E> _upstream;
+  final Option<B> Function(A value) _transform;
+
+  @override
+  Effect<Option<B>, E> next() => Effect.build(($) async {
+    while (true) {
+      switch (await $(_upstream.next())) {
+        case Some<A>(:final value):
+          final transformed = _transform(value);
+          if (transformed case Some<B>()) return transformed;
+        case None():
+          return const None();
+      }
+    }
+  });
+}
+
+final class _SkipCursor<A, E> implements _FlowCursor<A, E> {
+  _SkipCursor(this._upstream, this._remaining);
+
+  final _FlowCursor<A, E> _upstream;
+  int _remaining;
+
+  @override
+  Effect<Option<A>, E> next() => Effect.build(($) async {
+    while (_remaining > 0) {
+      final option = await $(_upstream.next());
+      if (option case None()) return const None();
+      _remaining -= 1;
+    }
+    return $(_upstream.next());
+  });
+}
+
+final class _TakeWhileCursor<A, E> implements _FlowCursor<A, E> {
+  _TakeWhileCursor(this._upstream, this._predicate);
+
+  final _FlowCursor<A, E> _upstream;
+  final bool Function(A value) _predicate;
+  var _done = false;
+
+  @override
+  Effect<Option<A>, E> next() {
+    if (_done) return Effect.succeed(const None());
+    return _upstream.next().map((option) {
+      if (option case Some<A>(:final value) when !_predicate(value)) {
+        _done = true;
+        return const None();
+      }
+      return option;
+    });
+  }
+}
+
+final class _SkipWhileCursor<A, E> implements _FlowCursor<A, E> {
+  _SkipWhileCursor(this._upstream, this._predicate);
+
+  final _FlowCursor<A, E> _upstream;
+  final bool Function(A value) _predicate;
+  var _skipping = true;
+
+  @override
+  Effect<Option<A>, E> next() => Effect.build(($) async {
+    if (!_skipping) return $(_upstream.next());
+    while (true) {
+      final option = await $(_upstream.next());
+      switch (option) {
+        case Some<A>(:final value) when _predicate(value):
+          continue;
+        case Some<A>():
+          _skipping = false;
+          return option;
+        case None():
+          return const None();
+      }
+    }
+  });
+}
+
+final class _DistinctCursor<A, E> implements _FlowCursor<A, E> {
+  _DistinctCursor(this._upstream, this._equals);
+
+  final _FlowCursor<A, E> _upstream;
+  final bool Function(A previous, A current) _equals;
+  late A _previous;
+  var _hasPrevious = false;
+
+  @override
+  Effect<Option<A>, E> next() => Effect.build(($) async {
+    while (true) {
+      final option = await $(_upstream.next());
+      switch (option) {
+        case Some<A>(:final value):
+          if (_hasPrevious && _equals(_previous, value)) continue;
+          _previous = value;
+          _hasPrevious = true;
+          return option;
+        case None():
+          return const None();
+      }
+    }
+  });
+}
+
+final class _ConcatCursor<A, E> implements _FlowCursor<A, E> {
+  _ConcatCursor(this._first, this._openSecond);
+
+  _FlowCursor<A, E>? _first;
+  final _OpenCursor<A, E> _openSecond;
+  _FlowCursor<A, E>? _second;
+
+  @override
+  Effect<Option<A>, E> next() => Effect.build(($) async {
+    final first = _first;
+    if (first != null) {
+      final option = await $(first.next());
+      if (option case Some<A>()) return option;
+      _first = null;
+    }
+    final existingSecond = _second;
+    late final _FlowCursor<A, E> activeSecond;
+    if (existingSecond != null) {
+      activeSecond = existingSecond;
+    } else {
+      activeSecond = await $(
+        Effect.defer<_FlowCursor<A, E>, E>(_openSecond),
+      );
+      _second = activeSecond;
+    }
+    return $(activeSecond.next());
+  });
+}
+
+final class _ScanCursor<A, B, E> implements _FlowCursor<B, E> {
+  _ScanCursor(this._upstream, this._state, this._combine);
+
+  final _FlowCursor<A, E> _upstream;
+  final B Function(B state, A value) _combine;
+  B _state;
+
+  @override
+  Effect<Option<B>, E> next() => _upstream.next().map((option) {
+    return switch (option) {
+      Some<A>(:final value) => Some(_state = _combine(_state, value)),
+      None() => const None(),
+    };
+  });
+}
+
+final class _SwitchIfEmptyCursor<A, E> implements _FlowCursor<A, E> {
+  _SwitchIfEmptyCursor(this._upstream, this._fallback);
+
+  final _FlowCursor<A, E> _upstream;
+  final Flow<A, E> Function() _fallback;
+  _FlowCursor<A, E>? _fallbackCursor;
+  var _emitted = false;
+  var _upstreamDone = false;
+
+  @override
+  Effect<Option<A>, E> next() => Effect.build(($) async {
+    if (!_upstreamDone) {
+      final option = await $(_upstream.next());
+      if (option case Some<A>()) {
+        _emitted = true;
+        return option;
+      }
+      _upstreamDone = true;
+      if (_emitted) return const None();
+    }
+
+    final existingFallback = _fallbackCursor;
+    late final _FlowCursor<A, E> activeFallback;
+    if (existingFallback != null) {
+      activeFallback = existingFallback;
+    } else {
+      activeFallback = await $(
+        Effect.defer<_FlowCursor<A, E>, E>(() => _fallback()._openCursor()),
+      );
+      _fallbackCursor = activeFallback;
+    }
+    return $(activeFallback.next());
   });
 }
 
