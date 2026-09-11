@@ -9,7 +9,9 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart'
     show EffectCancellation, EffectExecution, ScopeAccess, ScopeClosed;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
+import 'package:conflux/src/flow/concurrent.dart';
 import 'package:conflux/src/flow/coordination_adapter.dart';
+import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
 import 'package:conflux/src/flow/stream_adapter.dart';
 import 'package:context/context.dart';
@@ -86,20 +88,32 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow)? onOverflow,
   }) {
-    if (capacity <= 0) {
-      throw ArgumentError.value(capacity, 'capacity', 'Must be positive.');
-    }
-    if (overflow == FlowOverflowPolicy.fail && onOverflow == null) {
-      throw ArgumentError.value(
-        onOverflow,
-        'onOverflow',
-        'Must be supplied when overflow is FlowOverflowPolicy.fail.',
-      );
-    }
+    validateFlowBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => StreamFlowSource.open(
         source,
         onError: onError,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Concurrently merges [sources] as their values become available.
+  ///
+  /// [capacity] bounds the shared output buffer. Backpressure waits for the
+  /// consumer by default; the other [overflow] policies match [fromStream].
+  static Flow<A, E> merge<A, E>(
+    Iterable<Flow<A, E>> sources, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => ConcurrentFlowSource.openMerge(
+        sources.map((source) => source.open),
         capacity: capacity,
         overflow: overflow,
         onOverflow: onOverflow,
@@ -232,6 +246,33 @@ final class Flow<A, E> {
   Flow<B, E> concatMap<B>(Flow<B, E> Function(A value) transform) => Flow._(
     () => open().map((cursor) => _ConcatMapCursor(cursor, transform)),
   );
+
+  /// Concurrently consumes mapped inner Flows and emits available values.
+  ///
+  /// At most [concurrency] inners are active. [capacity] bounds their shared
+  /// output buffer, whose overflow behavior matches [fromStream].
+  Flow<B, E> mergeMap<B>(
+    Flow<B, E> Function(A value) transform, {
+    required int concurrency,
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    if (concurrency <= 0) {
+      throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
+    }
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => ConcurrentFlowSource.openMergeMap(
+        open,
+        (value) => transform(value).open,
+        concurrency: concurrency,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
 
   /// Runs source acquisition and every pull with [context].
   Flow<A, E> withContext(Context context) => Flow._(() => open().withContext(context));
