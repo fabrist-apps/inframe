@@ -48,6 +48,12 @@ final class _ValueCacheExpiry<K, A> extends CacheExpiry<K, A> {
 /// Acquire a Cache inside the Effect scope that should own its lookup work.
 /// The Cache captures that scope's Context and Clock, so later callers cannot
 /// change lookup dependencies or expiry by running operations elsewhere.
+/// Request-dependent lookups need a request-scoped Cache or keys that include
+/// the dependency context that distinguishes their results.
+///
+/// Only successful values are retained. Values are borrowed references:
+/// eviction, invalidation, and scope closure never dispose them. Cache state
+/// and lookup coordination stay within the isolate where it was acquired.
 final class Cache<K, A, E> {
   Cache._({
     required this.capacity,
@@ -61,7 +67,9 @@ final class Cache<K, A, E> {
   ///
   /// [capacity] and [concurrency] must both be positive. Lookups for the same
   /// key share one execution, and cancelling one caller does not cancel work
-  /// still awaited by other callers.
+  /// still awaited by other callers. Expiry durations must be non-negative.
+  /// A thrown value-dependent expiry callback or negative returned duration is
+  /// reported as a defect to the lookup or set operation that evaluates it.
   static Effect<Cache<K, A, E>, Never> make<K, A, E>({
     required int capacity,
     required int concurrency,
@@ -123,6 +131,18 @@ final class Cache<K, A, E> {
     final ready = _readyEntry(key, touch: true);
     if (ready != null) return Future.value(Succeeded(ready.value));
 
+    final generation = _generations[key] ?? 0;
+    final loadKey = (key, generation);
+    final load = _loads[loadKey] ?? _startLoad(key, generation);
+    return _awaitLoad(load, caller);
+  });
+
+  /// Loads [key] again while leaving an unexpired value readable.
+  ///
+  /// Concurrent refreshes and a current-generation miss share one load. A
+  /// failed refresh leaves the previous unexpired value and deadline intact.
+  Effect<A, E> refresh(K key) => EffectAccess.create((caller) {
+    _ensureOpen();
     final generation = _generations[key] ?? 0;
     final loadKey = (key, generation);
     final load = _loads[loadKey] ?? _startLoad(key, generation);

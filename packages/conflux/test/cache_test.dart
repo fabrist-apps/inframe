@@ -682,6 +682,234 @@ void main() {
       expect(first.closed, isFalse);
       expect(second.closed, isFalse);
     });
+
+    test('should share refresh while keeping an unexpired value readable', () async {
+      final refreshStarted = Completer<void>();
+      final refreshGate = Completer<int>();
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (_) => Effect.defer(() {
+          lookups += 1;
+          if (lookups == 1) return Effect.succeed<int, String>(1);
+          return Effect.tryFuture<int, String>(
+            () {
+              refreshStarted.complete();
+              return refreshGate.future;
+            },
+            onError: (error, _) => '$error',
+          );
+        }),
+      );
+      addTearDown(fixture.close);
+      expect(await fixture.cache.get('key').runFuture(), 1);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final first = caller.fork(fixture.cache.refresh('key'));
+      final second = caller.fork(fixture.cache.refresh('key'));
+      await refreshStarted.future;
+
+      expect(await fixture.cache.get('key').runFuture(), 1);
+      final ready = await fixture.cache.getOption('key').runFuture();
+      expect((ready as Some<int>).value, 1);
+      expect(await fixture.cache.containsKey('key').runFuture(), isTrue);
+      expect(fixture.cache.size, 1);
+      expect(fixture.cache.keys, ['key']);
+      expect(fixture.cache.values, [1]);
+      expect(fixture.cache.entries.single.value, 1);
+      final cancelled = await first.interrupt('caller stopped');
+      refreshGate.complete(2);
+
+      expect((cancelled as Failed<int, String>).cause, isA<Interrupted<String>>());
+      expect((await second.join() as Succeeded<int, String>).value, 2);
+      expect(await fixture.cache.get('key').runFuture(), 2);
+      expect(lookups, 2);
+    });
+
+    test('should preserve the prior value and deadline when refresh fails', () async {
+      final clock = FakeClock();
+      final refreshStarted = Completer<void>();
+      final refreshGate = Completer<int>();
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
+        lookup: (_) => Effect.defer(() {
+          lookups += 1;
+          if (lookups == 1) return Effect.succeed<int, String>(1);
+          return Effect.tryFuture<int, String>(
+            () {
+              refreshStarted.complete();
+              return refreshGate.future;
+            },
+            onError: (_, _) => 'refresh failed',
+          );
+        }),
+      );
+      addTearDown(fixture.close);
+      await fixture.cache.get('key').runFuture();
+      clock.advanceMonotonic(const Duration(seconds: 2));
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final refreshing = caller.fork(fixture.cache.refresh('key'));
+      await refreshStarted.future;
+
+      expect(await fixture.cache.get('key').runFuture(), 1);
+      clock.advanceMonotonic(const Duration(seconds: 3));
+      expect(await fixture.cache.getOption('key').runFuture(), isA<None>());
+      refreshGate.completeError(StateError('unavailable'));
+
+      expect(await refreshing.join(), isA<Failed<int, String>>());
+      expect(await fixture.cache.getOption('key').runFuture(), isA<None>());
+    });
+
+    test('should begin a fresh expiry period after successful refresh', () async {
+      final clock = FakeClock();
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
+        lookup: (_) => Effect.sync(() => ++lookups),
+      );
+      addTearDown(fixture.close);
+      await fixture.cache.get('key').runFuture();
+      clock.advanceMonotonic(const Duration(seconds: 4));
+
+      expect(await fixture.cache.refresh('key').runFuture(), 2);
+      clock.advanceMonotonic(const Duration(seconds: 4));
+      final ready = await fixture.cache.getOption('key').runFuture();
+      expect((ready as Some<int>).value, 2);
+      clock.advanceMonotonic(const Duration(seconds: 1));
+      expect(await fixture.cache.getOption('key').runFuture(), isA<None>());
+    });
+
+    test('should not let refresh overwrite an intervening set', () async {
+      final refreshStarted = Completer<void>();
+      final refreshGate = Completer<int>();
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (_) => Effect.defer(() {
+          lookups += 1;
+          if (lookups == 1) return Effect.succeed<int, String>(1);
+          return Effect.tryFuture<int, String>(
+            () {
+              refreshStarted.complete();
+              return refreshGate.future;
+            },
+            onError: (error, _) => '$error',
+          );
+        }),
+      );
+      addTearDown(fixture.close);
+      await fixture.cache.get('key').runFuture();
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final refreshing = caller.fork(fixture.cache.refresh('key'));
+      await refreshStarted.future;
+
+      await fixture.cache.set('key', 9).runFuture();
+      refreshGate.complete(2);
+
+      expect((await refreshing.join() as Succeeded<int, String>).value, 2);
+      expect(await fixture.cache.get('key').runFuture(), 9);
+    });
+
+    test('should join a current miss when refreshing an absent key', () async {
+      final started = Completer<void>();
+      final gate = Completer<int>();
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (_) => Effect.tryFuture<int, String>(
+          () {
+            lookups += 1;
+            started.complete();
+            return gate.future;
+          },
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final get = caller.fork(fixture.cache.get('key'));
+      await started.future;
+      final refresh = caller.fork(fixture.cache.refresh('key'));
+      gate.complete(4);
+
+      expect((await get.join() as Succeeded<int, String>).value, 4);
+      expect((await refresh.join() as Succeeded<int, String>).value, 4);
+      expect(lookups, 1);
+    });
+
+    test('should interrupt refresh when its owning scope closes', () async {
+      final refreshStarted = Completer<void>();
+      final refreshGate = Completer<int>();
+      var lookups = 0;
+      var cancelled = false;
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (_) => Effect.defer(() {
+          lookups += 1;
+          if (lookups == 1) return Effect.succeed<int, String>(1);
+          return Effect.tryFuture<int, String>(
+            () {
+              refreshStarted.complete();
+              return refreshGate.future;
+            },
+            onError: (error, _) => '$error',
+            onCancel: () => cancelled = true,
+          );
+        }),
+      );
+      await fixture.cache.get('key').runFuture();
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final refreshing = caller.fork(fixture.cache.refresh('key'));
+      await refreshStarted.future;
+
+      await fixture.close();
+
+      expect(cancelled, isTrue);
+      expect((await refreshing.join() as Failed<int, String>).cause, isA<Interrupted<String>>());
+    });
+
+    test('should apply concurrency and LRU rules to refresh', () async {
+      final firstRefresh = Completer<int>();
+      final secondRefresh = Completer<int>();
+      final lookups = <String, int>{};
+      final startedRefreshes = <String>[];
+      final fixture = await _CacheFixture.start<int>(
+        capacity: 2,
+        concurrency: 1,
+        lookup: (key) => Effect.defer(() {
+          final count = lookups.update(key, (value) => value + 1, ifAbsent: () => 1);
+          if (count == 1) return Effect.succeed(key.codeUnitAt(0));
+          startedRefreshes.add(key);
+          return Effect.tryFuture<int, String>(
+            () => key == 'a' ? firstRefresh.future : secondRefresh.future,
+            onError: (error, _) => '$error',
+          );
+        }),
+      );
+      addTearDown(fixture.close);
+      await fixture.cache.get('a').runFuture();
+      await fixture.cache.get('b').runFuture();
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final refreshA = caller.fork(fixture.cache.refresh('a'));
+      final refreshB = caller.fork(fixture.cache.refresh('b'));
+      await _flushMicrotasks();
+      expect(startedRefreshes, ['a']);
+
+      firstRefresh.complete(1);
+      await refreshA.join();
+      await _flushMicrotasks();
+      expect(startedRefreshes, ['a', 'b']);
+      secondRefresh.complete(2);
+      await refreshB.join();
+      await fixture.cache.get('c').runFuture();
+
+      expect(fixture.cache.keys, ['b', 'c']);
+      expect(lookups, {'a': 2, 'b': 2, 'c': 1});
+    });
   });
 }
 
