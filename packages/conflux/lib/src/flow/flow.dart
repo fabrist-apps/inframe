@@ -9,6 +9,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart'
     show EffectCancellation, EffectExecution, ScopeAccess, ScopeClosed;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
+import 'package:conflux/src/flow/batching.dart';
 import 'package:conflux/src/flow/combination.dart';
 import 'package:conflux/src/flow/concurrent.dart';
 import 'package:conflux/src/flow/coordination_adapter.dart';
@@ -397,6 +398,49 @@ final class Flow<A, E> {
       onOverflow: onOverflow,
     );
     return Flow._(shared);
+  }
+
+  /// Collects consecutive values into immutable batches of [count].
+  ///
+  /// [count] must be positive. Normal completion flushes a non-empty partial
+  /// batch, while failure discards it and preserves the complete failure cause.
+  Flow<List<A>, E> bufferCount(int count) {
+    if (count <= 0) {
+      throw ArgumentError.value(count, 'count', 'Must be positive.');
+    }
+    return Flow._(() => BatchingFlowSource.openCount(open, count));
+  }
+
+  /// Collects values until [duration] elapses or [maxSize] is reached.
+  ///
+  /// The timer starts with the first value in each batch and uses the runtime
+  /// Clock. [maxSize] and [capacity] must be positive; [capacity] independently
+  /// bounds source read-ahead while the downstream consumer is slow. Normal
+  /// completion flushes a partial batch, while failure discards it.
+  Flow<List<A>, E> bufferTime(
+    Duration duration, {
+    required int maxSize,
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    if (duration.isNegative) {
+      throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
+    }
+    if (maxSize <= 0) {
+      throw ArgumentError.value(maxSize, 'maxSize', 'Must be positive.');
+    }
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => BatchingFlowSource.openTime(
+        open,
+        duration: duration,
+        maxSize: maxSize,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
   }
 
   /// Runs source acquisition and every pull with [context].
