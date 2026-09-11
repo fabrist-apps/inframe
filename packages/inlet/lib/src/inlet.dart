@@ -35,6 +35,12 @@ typedef ErrorHandler = FutureOr<Response> Function(
 /// Observes an unexpected runtime failure.
 typedef ErrorReporter = void Function(Object error, StackTrace stackTrace);
 
+/// Runs application work for the lifetime of an upgraded WebSocket session.
+typedef WebSocketCallback = FutureOr<void> Function(WebSocket socket);
+
+/// Selects one of the subprotocols offered by a WebSocket client.
+typedef WebSocketProtocolSelector = FutureOr<String?> Function(List<String> offered);
+
 /// An application that dispatches registered routes in process or over HTTP.
 final class Inlet extends Router {
   /// Creates an editable application.
@@ -155,8 +161,17 @@ final class Inlet extends Router {
         stackTrace,
       );
     }
+    var finalizedResponse = response;
+    if (request.method == 'HEAD') {
+      if (resolution case _MatchedRoute(isHeadFallback: true) when response.isWebSocketUpgrade) {
+        await response.close();
+        finalizedResponse = _headWebSocketRejected();
+      } else {
+        finalizedResponse = response._withoutBody();
+      }
+    }
     return _DispatchResult(
-      request.method == 'HEAD' ? response._withoutBody() : response,
+      finalizedResponse,
       dispatch.context,
       dispatch.request,
     );
@@ -200,6 +215,11 @@ final class Inlet extends Router {
     }
   }
 }
+
+Response _headWebSocketRejected() => Response.empty(
+  status: HttpStatus.methodNotAllowed,
+  headers: const Headers.empty().set(HttpHeaders.allowHeader, 'GET'),
+);
 
 final class _DispatchResult {
   const _DispatchResult(this.response, this.context, this.request);
