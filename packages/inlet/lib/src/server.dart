@@ -292,10 +292,16 @@ final class _ServerAdapter {
         if (!response._body.isUntouched) {
           throw StateError('The WebSocket response has already been closed.');
         }
+        final offeredProtocols = _parseWebSocketProtocols(incoming.headers);
+        final selectedProtocol = await _selectWebSocketProtocol(
+          webSocket.selectProtocol,
+          offeredProtocols,
+        );
         _prepareWebSocketTarget(target, response.headers);
 
         final upgrading = WebSocketTransformer.upgrade(
           incoming,
+          protocolSelector: selectedProtocol == null ? null : (_) => selectedProtocol,
           compression: webSocket.compression,
           maxPayloadLength: webSocket.maxFrameBytes,
         );
@@ -414,6 +420,31 @@ final class _ServerAdapter {
     }
   }
 
+  Future<String?> _selectWebSocketProtocol(
+    WebSocketProtocolSelector? selector,
+    List<String> offeredProtocols,
+  ) async {
+    if (selector == null) {
+      return null;
+    }
+
+    late final String? selectedProtocol;
+    try {
+      selectedProtocol = await selector(offeredProtocols);
+    } on WebSocketException catch (error, stackTrace) {
+      Error.throwWithStackTrace(
+        _WebSocketHandshakeRejected(error.message),
+        stackTrace,
+      );
+    }
+    if (selectedProtocol != null && !offeredProtocols.contains(selectedProtocol)) {
+      throw StateError(
+        'Selected WebSocket protocol "$selectedProtocol" was not offered.',
+      );
+    }
+    return selectedProtocol;
+  }
+
   Future<void> _closeWebSocket(WebSocket socket, int code) async {
     if (socket.readyState != WebSocket.open) {
       return;
@@ -513,6 +544,55 @@ final class _DeliveryFailure implements Exception {
 
 final class _WebSocketHandshakeRejected extends WebSocketException {
   const _WebSocketHandshakeRejected(super.message);
+}
+
+List<String> _parseWebSocketProtocols(HttpHeaders headers) {
+  final values = headers['sec-websocket-protocol'];
+  if (values == null) {
+    return const [];
+  }
+
+  final protocols = <String>[];
+  for (final value in values) {
+    for (final rawProtocol in value.split(',')) {
+      final protocol = rawProtocol.trim();
+      if (!_isWebSocketProtocolToken(protocol)) {
+        throw const _WebSocketHandshakeRejected(
+          'Invalid Sec-WebSocket-Protocol header.',
+        );
+      }
+      protocols.add(protocol);
+    }
+  }
+  return List.unmodifiable(protocols);
+}
+
+bool _isWebSocketProtocolToken(String value) {
+  if (value.isEmpty) {
+    return false;
+  }
+  const separators = <int>{
+    0x28,
+    0x29,
+    0x3c,
+    0x3e,
+    0x40,
+    0x2c,
+    0x3b,
+    0x3a,
+    0x5c,
+    0x22,
+    0x2f,
+    0x5b,
+    0x5d,
+    0x3f,
+    0x3d,
+    0x7b,
+    0x7d,
+  };
+  return value.codeUnits.every(
+    (unit) => unit > 0x20 && unit < 0x7f && !separators.contains(unit),
+  );
 }
 
 final class _HttpRequestBody extends Stream<List<int>> {

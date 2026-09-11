@@ -278,6 +278,251 @@ void main() {
       expect(recoveredError, isA<HttpException>());
       expect(reports, [same(recoveredError)]);
     });
+
+    test('should call an asynchronous selector once with immutable empty offers', () async {
+      var selectorCalls = 0;
+      var sessionCalls = 0;
+      final application = Inlet()
+        ..get('/chat', (_, _) {
+          return Response.webSocket(
+            selectProtocol: (offered) async {
+              selectorCalls++;
+              expect(offered, isEmpty);
+              expect(() => offered.add('chat.v1'), throwsUnsupportedError);
+              await Future<void>.delayed(Duration.zero);
+              return null;
+            },
+            onConnect: (_) => sessionCalls++,
+          );
+        });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+
+      final socket = await WebSocket.connect(
+        'ws://${server.address.address}:${server.port}/chat',
+      );
+      await socket.drain<void>().timeout(_testTimeout);
+
+      expect(socket.protocol, isNull);
+      expect(selectorCalls, 1);
+      expect(sessionCalls, 1);
+    });
+
+    test('should negotiate one offered subprotocol from the ordered list', () async {
+      List<String>? receivedOffers;
+      final application = Inlet()
+        ..get('/chat', (_, _) {
+          return Response.webSocket(
+            selectProtocol: (offered) {
+              receivedOffers = offered;
+              return 'chat.v1';
+            },
+            onConnect: (_) {},
+          );
+        });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+
+      final socket = await WebSocket.connect(
+        'ws://${server.address.address}:${server.port}/chat',
+        protocols: ['chat.v2', 'chat.v1', 'other'],
+      );
+      await socket.drain<void>().timeout(_testTimeout);
+
+      expect(receivedOffers, ['chat.v2', 'chat.v1', 'other']);
+      expect(socket.protocol, 'chat.v1');
+    });
+
+    test('should upgrade with no subprotocol after a null selection', () async {
+      final application = Inlet()
+        ..get('/chat', (_, _) {
+          return Response.webSocket(
+            selectProtocol: (_) => null,
+            onConnect: (_) {},
+          );
+        })
+        ..get('/without-selector', (_, _) {
+          return Response.webSocket(onConnect: (_) {});
+        });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+
+      final socket = await WebSocket.connect(
+        'ws://${server.address.address}:${server.port}/chat',
+        protocols: ['chat.v1'],
+      );
+      await socket.drain<void>().timeout(_testTimeout);
+
+      expect(socket.protocol, isNull);
+
+      final withoutSelector = await WebSocket.connect(
+        'ws://${server.address.address}:${server.port}/without-selector',
+        protocols: ['chat.v1'],
+      );
+      await withoutSelector.drain<void>().timeout(_testTimeout);
+      expect(withoutSelector.protocol, isNull);
+    });
+
+    test('should reject empty and invalid offered protocol tokens', () async {
+      var selectorCalls = 0;
+      var sessionCalls = 0;
+      final application = Inlet()
+        ..get('/chat', (_, _) {
+          return Response.webSocket(
+            selectProtocol: (_) {
+              selectorCalls++;
+              return null;
+            },
+            onConnect: (_) => sessionCalls++,
+          );
+        });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+
+      for (final offered in [
+        ['chat.v1,,chat.v2'],
+        ['chat.v1, bad protocol'],
+        ['chat.v1', ''],
+      ]) {
+        final response = await _handshake(
+          server,
+          '/chat',
+          protocolHeaders: offered,
+        );
+        expect(response.statusCode, HttpStatus.badRequest);
+      }
+      expect(selectorCalls, 0);
+      expect(sessionCalls, 0);
+    });
+
+    test('should reject explicit and unoffered selector results', () async {
+      for (final explicitRejection in [true, false]) {
+        final reports = <Object>[];
+        var sessionCalls = 0;
+        final application =
+            Inlet(
+              onReportError: (error, _) => reports.add(error),
+            )..get('/chat', (_, _) {
+              return Response.webSocket(
+                selectProtocol: (_) {
+                  if (explicitRejection) {
+                    throw const WebSocketException('chat.v1 is required');
+                  }
+                  return 'unoffered';
+                },
+                onConnect: (_) => sessionCalls++,
+              );
+            });
+        final server = await application.serve(port: 0);
+        addTearDown(() => server.close(force: true));
+
+        final response = await _handshake(
+          server,
+          '/chat',
+          protocolHeaders: ['chat.v1'],
+        );
+
+        expect(
+          response.statusCode,
+          explicitRejection ? HttpStatus.badRequest : HttpStatus.internalServerError,
+        );
+        expect(sessionCalls, 0);
+        expect(reports, explicitRejection ? isEmpty : [isA<StateError>()]);
+      }
+    });
+
+    test('should recover unexpected selector failure with captured request context', () async {
+      final failure = StateError('selector failed');
+      final reports = <Object>[];
+      var sessionCalls = 0;
+      final application =
+          Inlet(
+            onError: (_, request, error, _) {
+              expect(request.uri.path, '/chat');
+              expect(error, same(failure));
+              return Response.empty(status: HttpStatus.badGateway);
+            },
+            onReportError: (error, _) => reports.add(error),
+          )..get('/chat', (_, _) {
+            return Response.webSocket(
+              selectProtocol: (_) => throw failure,
+              onConnect: (_) => sessionCalls++,
+            );
+          });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+
+      final response = await _handshake(
+        server,
+        '/chat',
+        protocolHeaders: ['chat.v1'],
+      );
+
+      expect(response.statusCode, HttpStatus.badGateway);
+      expect(reports, [same(failure)]);
+      expect(sessionCalls, 0);
+    });
+
+    test('should let the error hook customize an explicit selector rejection', () async {
+      final reports = <Object>[];
+      var sessionCalls = 0;
+      final application =
+          Inlet(
+            onError: (_, _, error, _) {
+              expect(error, isA<WebSocketException>());
+              return Response.empty(status: HttpStatus.forbidden);
+            },
+            onReportError: (error, _) => reports.add(error),
+          )..get('/chat', (_, _) {
+            return Response.webSocket(
+              selectProtocol: (_) {
+                throw const WebSocketException('chat.v1 is required');
+              },
+              onConnect: (_) => sessionCalls++,
+            );
+          });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+
+      final response = await _handshake(
+        server,
+        '/chat',
+        protocolHeaders: ['chat.v2'],
+      );
+
+      expect(response.statusCode, HttpStatus.forbidden);
+      expect(reports, isEmpty);
+      expect(sessionCalls, 0);
+    });
+
+    test('should fall back to 500 when selector recovery fails', () async {
+      final selectorFailure = StateError('selector failed');
+      final hookFailure = StateError('hook failed');
+      final reports = <Object>[];
+      var sessionCalls = 0;
+      final application =
+          Inlet(
+            onError: (_, _, _, _) => throw hookFailure,
+            onReportError: (error, _) => reports.add(error),
+          )..get('/chat', (_, _) {
+            return Response.webSocket(
+              selectProtocol: (_) => throw selectorFailure,
+              onConnect: (_) => sessionCalls++,
+            );
+          });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+
+      final response = await _handshake(
+        server,
+        '/chat',
+        protocolHeaders: ['chat.v1'],
+      );
+
+      expect(response.statusCode, HttpStatus.internalServerError);
+      expect(reports, [same(selectorFailure), same(hookFailure)]);
+      expect(sessionCalls, 0);
+    });
   });
 }
 
@@ -307,6 +552,7 @@ Future<_Handshake> _handshake(
   String path, {
   bool offerCompression = false,
   String? extensionHeader,
+  List<String>? protocolHeaders,
 }) async {
   final client = HttpClient();
   final request = await client.get(server.address.address, server.port, path);
@@ -321,11 +567,17 @@ Future<_Handshake> _handshake(
       extensionHeader ?? 'permessage-deflate; client_max_window_bits',
     );
   }
+  if (protocolHeaders != null) {
+    for (final value in protocolHeaders) {
+      request.headers.add('sec-websocket-protocol', value);
+    }
+  }
   final response = await request.close();
   final headers = <String, String?>{
     'x-application': response.headers.value('x-application'),
     HttpHeaders.contentTypeHeader: response.headers.value(HttpHeaders.contentTypeHeader),
     'sec-websocket-extensions': response.headers.value('sec-websocket-extensions'),
+    'sec-websocket-protocol': response.headers.value('sec-websocket-protocol'),
   };
   if (response.statusCode == HttpStatus.switchingProtocols) {
     final socket = await response.detachSocket();
