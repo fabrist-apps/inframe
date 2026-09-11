@@ -4,6 +4,8 @@ import 'package:conflux/conflux.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/fake_clock.dart';
+
 void main() {
   group('Cache', () {
     test('should share a successful lookup and retain its value', () async {
@@ -269,6 +271,7 @@ void main() {
         final exit = await Cache.make<String, int, String>(
           capacity: configuration.capacity,
           concurrency: configuration.concurrency,
+          expiry: CacheExpiry.fixed(const Duration(minutes: 1)),
           lookup: (_) => Effect.succeed(1),
         ).runFutureExit();
 
@@ -293,6 +296,189 @@ void main() {
 
       expect(values['a']!.closed, isFalse);
     });
+
+    test('should start fixed expiry when a lookup succeeds', () async {
+      final clock = FakeClock();
+      final lookupStarted = Completer<void>();
+      final lookupGate = Completer<int>();
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
+        lookup: (_) => Effect.tryFuture<int, String>(
+          () {
+            lookupStarted.complete();
+            return lookupGate.future;
+          },
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final loading = caller.fork(fixture.cache.get('key'));
+      await lookupStarted.future;
+
+      clock.advanceMonotonic(const Duration(seconds: 10));
+      lookupGate.complete(42);
+      await loading.join();
+      clock.advanceMonotonic(const Duration(seconds: 4));
+      expect(await fixture.cache.getOption('key').runFuture(), isA<Some<int>>());
+
+      clock.advanceMonotonic(const Duration(seconds: 1));
+      expect(await fixture.cache.getOption('key').runFuture(), isA<None>());
+    });
+
+    test('should inspect pending and nullable values without loading or waiting', () async {
+      final lookupStarted = Completer<void>();
+      final lookupGate = Completer<int?>();
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int?>(
+        lookup: (_) => Effect.tryFuture<int?, String>(
+          () {
+            lookups += 1;
+            lookupStarted.complete();
+            return lookupGate.future;
+          },
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final loading = caller.fork(fixture.cache.get('key'));
+      await lookupStarted.future;
+
+      expect(await fixture.cache.getOption('key').runFuture(), isA<None>());
+      expect(await fixture.cache.containsKey('key').runFuture(), isFalse);
+      expect(lookups, 1);
+
+      lookupGate.complete(null);
+      await loading.join();
+      final ready = await fixture.cache.getOption('key').runFuture();
+      expect(ready, isA<Some<int?>>());
+      expect((ready as Some<int?>).value, isNull);
+      expect(await fixture.cache.containsKey('key').runFuture(), isTrue);
+      expect(lookups, 1);
+    });
+
+    test('should apply value-dependent expiry at the exact boundary', () async {
+      final clock = FakeClock();
+      final expiryInputs = <(String, int)>[];
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        expiry: CacheExpiry.byValue((key, value) {
+          expiryInputs.add((key, value));
+          return Duration(seconds: value);
+        }),
+        lookup: (_) => Effect.succeed(3),
+      );
+      addTearDown(fixture.close);
+
+      await fixture.cache.get('key').runFuture();
+      clock.advanceMonotonic(const Duration(seconds: 2));
+      expect(await fixture.cache.containsKey('key').runFuture(), isTrue);
+
+      clock.advanceMonotonic(const Duration(seconds: 1));
+      expect(await fixture.cache.containsKey('key').runFuture(), isFalse);
+      expect(expiryInputs, [('key', 3)]);
+    });
+
+    test('should use its captured monotonic Clock for ready observations', () async {
+      final ownerClock = FakeClock();
+      final callerClock = FakeClock();
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: ownerClock,
+        expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
+        lookup: (_) => Effect.succeed(42),
+      );
+      addTearDown(fixture.close);
+      await fixture.cache.get('key').runFuture();
+      ownerClock.adjustWall(const Duration(days: 30));
+      callerClock.advanceMonotonic(const Duration(days: 30));
+      final caller = Runtime(clock: callerClock);
+      addTearDown(caller.close);
+
+      final ready = await caller.run(fixture.cache.getOption('key'));
+      expect((ready as Succeeded<Option<int>, Never>).value, isA<Some<int>>());
+      ownerClock.advanceMonotonic(const Duration(seconds: 5));
+      final expired = await caller.run(fixture.cache.getOption('key'));
+      expect((expired as Succeeded<Option<int>, Never>).value, isA<None>());
+    });
+
+    test('should reload an expired successful value', () async {
+      final clock = FakeClock();
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        expiry: CacheExpiry.fixed(const Duration(seconds: 1)),
+        lookup: (_) => Effect.sync(() => ++lookups),
+      );
+      addTearDown(fixture.close);
+
+      expect(await fixture.cache.get('key').runFuture(), 1);
+      clock.advanceMonotonic(const Duration(seconds: 1));
+      expect(await fixture.cache.get('key').runFuture(), 2);
+    });
+
+    test('should snapshot ready entries without pending or expired values', () async {
+      final clock = FakeClock();
+      final pending = Completer<int>();
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
+        lookup: (key) => Effect.defer(() {
+          lookups += 1;
+          return key == 'pending'
+              ? Effect.tryFuture<int, String>(
+                  () => pending.future,
+                  onError: (error, _) => '$error',
+                )
+              : Effect.succeed(key.codeUnitAt(0));
+        }),
+      );
+      addTearDown(fixture.close);
+
+      await fixture.cache.get('a').runFuture();
+      await fixture.cache.get('b').runFuture();
+      final caller = Runtime();
+      addTearDown(caller.close);
+      caller.fork(fixture.cache.get('pending'));
+      await _flushMicrotasks();
+
+      expect(fixture.cache.size, 2);
+      expect(fixture.cache.keys, ['a', 'b']);
+      expect(fixture.cache.values, [97, 98]);
+      expect(
+        fixture.cache.entries.map((entry) => (entry.key, entry.value)),
+        [('a', 97), ('b', 98)],
+      );
+      expect(() => fixture.cache.keys.add('c'), throwsUnsupportedError);
+      expect(lookups, 3);
+
+      clock.advanceMonotonic(const Duration(seconds: 5));
+      expect(fixture.cache.size, 0);
+      expect(fixture.cache.keys, isEmpty);
+      expect(lookups, 3);
+    });
+
+    test('should reject ready observations after scope closure', () async {
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (_) => Effect.succeed(42),
+      );
+      await fixture.cache.get('key').runFuture();
+      await fixture.close();
+
+      final optionExit = await fixture.cache.getOption('key').runFutureExit();
+      final membershipExit = await fixture.cache.containsKey('key').runFutureExit();
+
+      expect((optionExit as Failed<Option<int>, Never>).cause, isA<Defect<Never>>());
+      expect((membershipExit as Failed<bool, Never>).cause, isA<Defect<Never>>());
+      expect(() => fixture.cache.size, throwsStateError);
+      expect(() => fixture.cache.keys, throwsStateError);
+      expect(() => fixture.cache.values, throwsStateError);
+      expect(() => fixture.cache.entries, throwsStateError);
+    });
   });
 }
 
@@ -305,10 +491,12 @@ final class _CacheFixture<A> {
   static Future<_CacheFixture<A>> start<A>({
     required Effect<A, String> Function(String key) lookup,
     Context? ownerContext,
+    Clock? ownerClock,
+    CacheExpiry<String, A>? expiry,
     int capacity = 16,
     int concurrency = 4,
   }) async {
-    final owner = Runtime(context: ownerContext);
+    final owner = Runtime(context: ownerContext, clock: ownerClock);
     final created = Completer<Cache<String, A, String>>();
     final keepScopeOpen = Completer<void>();
     owner.fork(
@@ -317,6 +505,7 @@ final class _CacheFixture<A> {
           Cache.make<String, A, String>(
             capacity: capacity,
             concurrency: concurrency,
+            expiry: expiry ?? CacheExpiry.fixed(const Duration(days: 36500)),
             lookup: lookup,
           ),
         );

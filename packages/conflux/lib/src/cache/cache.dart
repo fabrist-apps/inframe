@@ -1,20 +1,58 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:conflux/option.dart';
 import 'package:conflux/src/effect/cause.dart';
 import 'package:conflux/src/effect/effect.dart';
 import 'package:conflux/src/effect/execution.dart';
 import 'package:conflux/src/effect/exit.dart';
 
+/// Selects how long successful Cache values remain ready.
+sealed class CacheExpiry<K, A> {
+  const CacheExpiry._();
+
+  /// Uses one [duration] for every successful value.
+  static CacheExpiry<K, A> fixed<K, A>(Duration duration) {
+    _requireNonNegativeExpiry(duration);
+    return _FixedCacheExpiry(duration);
+  }
+
+  /// Computes each successful value's lifetime from its key and value.
+  static CacheExpiry<K, A> byValue<K, A>(
+    Duration Function(K key, A value) expiry,
+  ) => _ValueCacheExpiry(expiry);
+
+  Duration _durationFor(K key, A value);
+}
+
+final class _FixedCacheExpiry<K, A> extends CacheExpiry<K, A> {
+  const _FixedCacheExpiry(this.duration) : super._();
+
+  final Duration duration;
+
+  @override
+  Duration _durationFor(K key, A value) => duration;
+}
+
+final class _ValueCacheExpiry<K, A> extends CacheExpiry<K, A> {
+  const _ValueCacheExpiry(this.expiry) : super._();
+
+  final Duration Function(K key, A value) expiry;
+
+  @override
+  Duration _durationFor(K key, A value) => expiry(key, value);
+}
+
 /// A scoped loading cache that retains successful lookup results.
 ///
 /// Acquire a Cache inside the Effect scope that should own its lookup work.
 /// The Cache captures that scope's Context and Clock, so later callers cannot
-/// change lookup dependencies by running [get] with a different Context.
+/// change lookup dependencies or expiry by running operations elsewhere.
 final class Cache<K, A, E> {
   Cache._({
     required this.capacity,
     required this.concurrency,
+    required this._expiry,
     required this._lookup,
     required this._ownerExecution,
   });
@@ -27,6 +65,7 @@ final class Cache<K, A, E> {
   static Effect<Cache<K, A, E>, Never> make<K, A, E>({
     required int capacity,
     required int concurrency,
+    required CacheExpiry<K, A> expiry,
     required Effect<A, E> Function(K key) lookup,
   }) => EffectAccess.create((execution) async {
     if (capacity <= 0) {
@@ -45,6 +84,7 @@ final class Cache<K, A, E> {
     final cache = Cache<K, A, E>._(
       capacity: capacity,
       concurrency: concurrency,
+      expiry: expiry,
       lookup: lookup,
       ownerExecution: ownerExecution,
     );
@@ -67,9 +107,10 @@ final class Cache<K, A, E> {
   /// The maximum number of lookups this Cache may run concurrently.
   final int concurrency;
 
+  final CacheExpiry<K, A> _expiry;
   final Effect<A, E> Function(K key) _lookup;
   final EffectExecution _ownerExecution;
-  final LinkedHashMap<K, A> _values = LinkedHashMap();
+  final LinkedHashMap<K, _CacheEntry<A>> _entries = LinkedHashMap();
   final Map<K, int> _generations = {};
   final Map<(K, int), _CacheLoad<K, A, E>> _loads = {};
   final ListQueue<_CacheLoad<K, A, E>> _pendingLoads = ListQueue();
@@ -79,15 +120,57 @@ final class Cache<K, A, E> {
   /// Returns a retained success, joins a current load, or starts the lookup.
   Effect<A, E> get(K key) => EffectAccess.create((caller) {
     _ensureOpen();
-    if (_values.containsKey(key)) {
-      return Future.value(Succeeded(_touch(key)));
-    }
+    final ready = _readyEntry(key, touch: true);
+    if (ready != null) return Future.value(Succeeded(ready.value));
 
     final generation = _generations[key] ?? 0;
     final loadKey = (key, generation);
     final load = _loads[loadKey] ?? _startLoad(key, generation);
     return _awaitLoad(load, caller);
   });
+
+  /// Inspects a ready value without starting or awaiting a lookup.
+  Effect<Option<A>, Never> getOption(K key) => EffectAccess.create((_) async {
+    _ensureOpen();
+    final entry = _readyEntry(key, touch: true);
+    return Succeeded(_optionFromEntry(entry));
+  });
+
+  /// Reports ready unexpired membership without starting a lookup.
+  Effect<bool, Never> containsKey(K key) => EffectAccess.create((_) async {
+    _ensureOpen();
+    return Succeeded(_readyEntry(key, touch: false) != null);
+  });
+
+  /// The number of ready unexpired entries.
+  int get size {
+    _ensureOpen();
+    _removeExpiredEntries();
+    return _entries.length;
+  }
+
+  /// A snapshot of ready unexpired keys in LRU order.
+  List<K> get keys {
+    _ensureOpen();
+    _removeExpiredEntries();
+    return List.unmodifiable(_entries.keys);
+  }
+
+  /// A snapshot of ready unexpired values in LRU order.
+  List<A> get values {
+    _ensureOpen();
+    _removeExpiredEntries();
+    return List.unmodifiable(_entries.values.map((entry) => entry.value));
+  }
+
+  /// A snapshot of ready unexpired key/value pairs in LRU order.
+  List<MapEntry<K, A>> get entries {
+    _ensureOpen();
+    _removeExpiredEntries();
+    return List.unmodifiable(
+      _entries.entries.map((entry) => MapEntry(entry.key, entry.value.value)),
+    );
+  }
 
   _CacheLoad<K, A, E> _startLoad(K key, int generation) {
     final loadKey = (key, generation);
@@ -113,12 +196,18 @@ final class Cache<K, A, E> {
         _activeLoads -= 1;
         final loadKey = (load.key, load.generation);
         if (identical(_loads[loadKey], load)) _loads.remove(loadKey);
-        if (exit case Succeeded<A, E>(:final value)) {
-          if (!_isClosed && (_generations[load.key] ?? 0) == load.generation) {
-            _retain(load.key, value);
+
+        var delivered = exit;
+        try {
+          if (exit case Succeeded<A, E>(:final value)) {
+            if (!_isClosed && (_generations[load.key] ?? 0) == load.generation) {
+              _retain(load.key, value);
+            }
           }
+        } on Object catch (error, stackTrace) {
+          delivered = Failed(Defect(error, stackTrace));
         }
-        load.complete(exit);
+        load.complete(delivered);
         _drainPendingLoads();
       }),
     );
@@ -152,18 +241,37 @@ final class Cache<K, A, E> {
     return completion.future;
   }
 
-  A _touch(K key) {
-    final value = _values.remove(key) as A;
-    _values[key] = value;
-    return value;
+  void _retain(K key, A value) {
+    final duration = _expiry._durationFor(key, value);
+    _requireNonNegativeExpiry(duration);
+    final entry = _CacheEntry(
+      value,
+      _ownerExecution.clock.monotonic() + duration,
+    );
+    _entries.remove(key);
+    _entries[key] = entry;
+    while (_entries.length > capacity) {
+      _entries.remove(_entries.keys.first);
+    }
   }
 
-  void _retain(K key, A value) {
-    _values.remove(key);
-    _values[key] = value;
-    while (_values.length > capacity) {
-      _values.remove(_values.keys.first);
+  _CacheEntry<A>? _readyEntry(K key, {required bool touch}) {
+    final entry = _entries[key];
+    if (entry == null) return null;
+    if (_ownerExecution.clock.monotonic() >= entry.expiresAt) {
+      _entries.remove(key);
+      return null;
     }
+    if (touch) {
+      _entries.remove(key);
+      _entries[key] = entry;
+    }
+    return entry;
+  }
+
+  void _removeExpiredEntries() {
+    final now = _ownerExecution.clock.monotonic();
+    _entries.removeWhere((_, entry) => now >= entry.expiresAt);
   }
 
   void _drainPendingLoads() {
@@ -192,10 +300,17 @@ final class Cache<K, A, E> {
     for (final load in _loads.values) {
       load.complete(const Failed(Interrupted(ScopeClosed())));
     }
-    _values.clear();
+    _entries.clear();
     _loads.clear();
     _pendingLoads.clear();
   }
+}
+
+final class _CacheEntry<A> {
+  const _CacheEntry(this.value, this.expiresAt);
+
+  final A value;
+  final Duration expiresAt;
 }
 
 final class _CacheLoad<K, A, E> {
@@ -210,4 +325,14 @@ final class _CacheLoad<K, A, E> {
   void complete(Exit<A, E> exit) {
     if (!_completion.isCompleted) _completion.complete(exit);
   }
+}
+
+void _requireNonNegativeExpiry(Duration duration) {
+  if (duration.isNegative) {
+    throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
+  }
+}
+
+Option<A> _optionFromEntry<A>(_CacheEntry<A>? entry) {
+  return entry == null ? const None() : Some<A>(entry.value);
 }

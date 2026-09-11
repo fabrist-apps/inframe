@@ -8,6 +8,7 @@ void main() {
       final cache = Cache.make<String, int, String>(
         capacity: 4,
         concurrency: 2,
+        expiry: CacheExpiry.fixed(const Duration(minutes: 1)),
         lookup: (key) => Effect.succeed(key.length),
       );
 
