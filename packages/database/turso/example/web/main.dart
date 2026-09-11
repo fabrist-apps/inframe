@@ -229,16 +229,11 @@ Future<void> _verifyVectorFunctions(TursoDatabase database) async {
 }
 
 Future<void> _writePersistentData() async {
-  var stage = 'open';
-  var opened = false;
-  late TursoDatabase database;
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
   try {
-    database = await TursoDatabase.open(
-      TursoLocation.browser(_databaseName),
-      web: _bridge,
-    );
-    opened = true;
-    stage = 'capabilities';
     _expect(!database.capabilities.fts, 'Web FTS must remain unavailable.');
     _expect(
       database.capabilities.vectorFunctions,
@@ -246,14 +241,12 @@ Future<void> _writePersistentData() async {
     );
     _expect(!database.capabilities.vectorIndexes, 'Unverified vector indexes were advertised.');
     await _verifyVectorFunctions(database);
-    stage = 'schema';
     await database.execute(
       'CREATE TABLE IF NOT EXISTS values_table ( '
       'minimum INTEGER, maximum INTEGER, title TEXT, payload BLOB)',
     );
     await database.execute('DELETE FROM values_table');
 
-    stage = 'insert';
     final blob = Uint8List.fromList([1, 2, 3]);
     final inserted = database.query(
       'INSERT INTO values_table VALUES (:minimum, :maximum, :title, :payload) '
@@ -270,7 +263,6 @@ Future<void> _writePersistentData() async {
     _expect(row.getBigInt('minimum') == BigInt.parse('-9223372036854775808'), 'Minimum changed.');
     _expect(row.getBigInt('maximum') == BigInt.parse('9223372036854775807'), 'Maximum changed.');
 
-    stage = 'update';
     final update = await database.execute(
       'UPDATE values_table SET title = :title WHERE maximum = :maximum RETURNING title',
       namedParameters: {
@@ -280,7 +272,6 @@ Future<void> _writePersistentData() async {
     );
     _expect(update.rowsAffected == BigInt.one, 'execute returned the wrong affected-row count.');
 
-    stage = 'invalid inputs';
     await _expectFailure<ArgumentError>(() => database.query('SELECT 1; SELECT 2'));
     await _expectFailure<ArgumentError>(() => database.query('SELECT ?'));
     await _expectFailure<ArgumentError>(
@@ -302,13 +293,11 @@ Future<void> _writePersistentData() async {
         namedParameters: const {':value': 1},
       ),
     );
-    stage = 'repeated binding';
     final repeated = await database.query(
       'SELECT :value + :value AS total',
       namedParameters: const {':value': 2},
     );
     _expect(repeated.rows.single.getInt('total') == 4, 'Repeated binding failed.');
-    stage = 'blob binding';
     final blobFirst = await database.query(
       'SELECT ? AS payload',
       parameters: [
@@ -319,16 +308,8 @@ Future<void> _writePersistentData() async {
       _listEquals(blobFirst.rows.single.getBlob('payload'), const [1, 2, 3]),
       'A first positional BLOB parameter changed.',
     );
-  } on Object catch (error, stackTrace) {
-    Error.throwWithStackTrace(StateError('Persistent-data $stage failed: $error'), stackTrace);
   } finally {
-    if (opened) {
-      try {
-        await database.close();
-      } on Object catch (error) {
-        throw StateError('Persistent-data close failed: $error');
-      }
-    }
+    await database.close();
   }
 }
 
@@ -512,6 +493,24 @@ Future<void> _verifyBoundPersistentAttachments() async {
       'DETACH DATABASE :alias',
       namedParameters: const {':alias': 'named_auxiliary'},
     );
+
+    await database.execute(
+      'ATTACH DATABASE ? AS ?',
+      parameters: const [_boundAttachmentName, 'MiXeD_Auxiliary'],
+    );
+    await database.execute(
+      'DETACH DATABASE ?',
+      parameters: const ['MiXeD_Auxiliary'],
+    );
+    await database.execute(
+      'ATTACH DATABASE ? AS mixed_reopened',
+      parameters: const [_boundAttachmentName],
+    );
+    _expect(
+      (await database.query('SELECT id FROM mixed_reopened.items')).rows.single.getInt('id') == 3,
+      'A bound mixed-case alias did not detach with its supplied spelling.',
+    );
+    await database.execute('DETACH DATABASE mixed_reopened');
 
     await database.transaction((tx) async {
       await tx.execute(

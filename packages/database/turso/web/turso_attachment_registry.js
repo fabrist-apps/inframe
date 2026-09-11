@@ -55,7 +55,10 @@ export class AttachmentRegistry {
     }
 
     const owners = this.owners.get(filename);
-    if (owners !== undefined && (owners.size > 1 || !owners.has(alias))) {
+    if (owners === undefined || !owners.has(alias)) {
+      throw new Error(`Missing Turso attachment ownership for alias ${alias}.`);
+    }
+    if (owners.size > 1) {
       owners.delete(alias);
       this.schemas.delete(alias);
       return;

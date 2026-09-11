@@ -9,6 +9,7 @@ import {
   registerFileAtWorker,
   runWithSynchronousIo,
   unregisterFileAtWorker,
+  workerFailureFor,
 } from '@tursodatabase/database-wasm-common';
 
 function ioWorker() {
@@ -26,12 +27,23 @@ function unregisterFile(path) {
   return unregisterFileAtWorker(ioWorker(), path);
 }
 
+function workerFailure() {
+  return workerFailureFor(ioWorker());
+}
+
 class Database extends UpstreamDatabase {
-  async close() {
-    const path = this.name;
-    const persistent = !this.memory && path != null;
+  constructor(path, options) {
+    super(path, options);
+    this.storagePath = path === ':memory:' ? null : path;
+  }
+
+  closeEngine() {
     this.db.close();
-    if (!persistent) return;
+  }
+
+  async releaseFiles() {
+    const path = this.storagePath;
+    if (path === null) return;
 
     const results = await Promise.allSettled([
       unregisterFile(path),
@@ -43,6 +55,11 @@ class Database extends UpstreamDatabase {
     if (failures.length !== 0) {
       throw new AggregateError(failures, `The Turso files for ${path} could not be released.`);
     }
+  }
+
+  async close() {
+    this.closeEngine();
+    await this.releaseFiles();
   }
 }
 
@@ -61,4 +78,5 @@ export {
   registerFile,
   runWithSynchronousIo,
   unregisterFile,
+  workerFailure,
 };

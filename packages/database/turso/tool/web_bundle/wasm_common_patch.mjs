@@ -154,11 +154,20 @@ export function isWorkerUnavailable(error) {
   return error?.tursoWorkerPoisoned === true;
 }
 
+export function workerFailureFor(worker) {
+  return workerState(worker).poison;
+}
+
 function synchronousWorkerRequest(worker, operation, payload) {
   const state = workerState(worker);
   if (state.poison !== null) return -1;
   const signal = new Int32Array(new SharedArrayBuffer(8));
-  worker.postMessage({ __turso_sync__: operation, ...payload, signal: signal.buffer });
+  try {
+    worker.postMessage({ __turso_sync__: operation, ...payload, signal: signal.buffer });
+  } catch (error) {
+    poisonWorker(state, error);
+    return -1;
+  }
   const waitResult = Atomics.wait(signal, 0, 0, 30_000);
   if (waitResult === 'timed-out') {
     poisonWorker(
@@ -174,9 +183,11 @@ export async function runWithSynchronousIo(action) {
   synchronousIoDepth += 1;
   let result;
   let failure;
+  let failed = false;
   try {
     result = await action();
   } catch (error) {
+    failed = true;
     failure = error;
   } finally {
     synchronousIoDepth -= 1;
@@ -185,7 +196,7 @@ export async function runWithSynchronousIo(action) {
     .map((worker) => workerState(worker).poison)
     .find((error) => error !== null);
   if (poisoned !== undefined) throw poisoned;
-  if (failure !== undefined) throw failure;
+  if (failed) throw failure;
   return result;
 }
 
@@ -300,7 +311,7 @@ export function setupWebWorker() {
 }
 
 function respondToMutation(previous, request, action) {
-  const result = previous.then(action, action);
+  const result = previous.then(action);
   result.then(
     (value) => self.postMessage({ __turso__: true, id: request.id, result: value }),
     (error) =>

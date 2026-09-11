@@ -69,6 +69,7 @@ async function open({ path, persistent, encryption }) {
     registerFile,
     runWithSynchronousIo,
     unregisterFile,
+    workerFailure,
   } = await upstreamModule;
   const options = {
     experimental: encryption === null ? ['attach'] : ['attach', 'encryption'],
@@ -84,6 +85,7 @@ async function open({ path, persistent, encryption }) {
       registerFile,
       runWithSynchronousIo,
       unregisterFile,
+      workerFailure,
     };
     attachmentRegistry = new AttachmentRegistry({
       mainDatabasePath,
@@ -218,10 +220,22 @@ async function runStatement(sql, parameters, action) {
         ? await requireFileRegistration().runWithSynchronousIo(() => action(statement))
         : await action(statement);
   } catch (error) {
+    if (opfsWorkerFailed()) {
+      await retireAfterUncertainOutcome(
+        pendingAttachment,
+        'The Turso OPFS worker failed; the statement outcome is uncertain.',
+      );
+    }
     await closeStatementAfterFailure(
       statement,
       pendingAttachment,
       sanitizeError(error, sensitiveAttachmentValues),
+    );
+  }
+  if (opfsWorkerFailed()) {
+    await retireAfterUncertainOutcome(
+      pendingAttachment,
+      'The Turso OPFS worker failed; the statement outcome is uncertain.',
     );
   }
   try {
@@ -281,9 +295,7 @@ async function prepareAttachment(inspection, parameters) {
       return null;
     case 'attach': {
       const filename = resolvedArgument(inspection.first, parameters, 'ATTACH filename');
-      const alias = canonicalAlias(
-        resolvedArgument(inspection.second, parameters, 'ATTACH alias'),
-      );
+      const alias = resolvedArgument(inspection.second, parameters, 'ATTACH alias');
       if (filename === ':memory:') return { kind: 'attach', alias, filename: null, acquired: false };
       if (mainDatabasePath === null) {
         throw new UnsupportedError(
@@ -311,7 +323,7 @@ async function prepareAttachment(inspection, parameters) {
     case 'detach':
       return {
         kind: 'detach',
-        alias: canonicalAlias(resolvedArgument(inspection.first, parameters, 'DETACH alias')),
+        alias: resolvedArgument(inspection.first, parameters, 'DETACH alias'),
       };
     default:
       throw new IntegrationError(`Unknown SQL inspection kind: ${inspection.kind}.`);
@@ -492,15 +504,6 @@ function sanitizeError(error, values) {
   return sanitized;
 }
 
-function canonicalAlias(alias) {
-  let normalized = '';
-  for (const character of alias) {
-    const code = character.charCodeAt(0);
-    normalized += code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : character;
-  }
-  return normalized;
-}
-
 async function completeAttachment(pending) {
   if (pending === null || pending === undefined) return;
   if (pending.kind === 'detach') {
@@ -522,15 +525,20 @@ async function shutdownDatabase(additionalFilenames = []) {
   let closeError;
   let releaseError;
   try {
-    await owned?.close();
+    owned?.closeEngine();
   } catch (error) {
     closeError = error;
   }
   if (closeError === undefined) {
-    try {
-      await registry?.releaseAll(additionalFilenames);
-    } catch (error) {
-      releaseError = error;
+    const releases = await Promise.allSettled([
+      owned?.releaseFiles(),
+      registry?.releaseAll(additionalFilenames),
+    ]);
+    const failures = releases
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason);
+    if (failures.length !== 0) {
+      releaseError = new AggregateError(failures, 'The Turso OPFS files could not be released.');
     }
   }
   mainDatabasePath = undefined;
@@ -558,6 +566,10 @@ function requireFileRegistration() {
     throw new IntegrationError('The Turso file registration bridge is unavailable.');
   }
   return fileRegistration;
+}
+
+function opfsWorkerFailed() {
+  return fileRegistration !== undefined && fileRegistration.workerFailure() !== null;
 }
 
 function registerAttachmentFile(path) {

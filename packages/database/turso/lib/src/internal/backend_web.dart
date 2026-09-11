@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:js_interop';
-import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 
 import 'package:turso/src/internal/backend.dart';
@@ -137,13 +136,10 @@ final class _WebBackend implements TursoBackend {
     }
   }
 
-  void _handleWorkerFailure(web.Event event) {
+  void _handleWorkerFailure(web.Event _) {
     if (_workerFailure != null) return;
-    final message = (event as JSObject).getProperty<JSString?>('message'.toJS)?.toDart ?? '';
-    final detail = message.isEmpty ? '' : ' $message';
-    _workerFailure = TursoPlatformException(
-      'The Turso browser worker stopped unexpectedly;$detail '
-      'an interrupted write may have committed.',
+    _workerFailure = const TursoPlatformException(
+      'The Turso browser worker stopped unexpectedly; an interrupted write may have committed.',
     );
     unawaited(retire());
   }

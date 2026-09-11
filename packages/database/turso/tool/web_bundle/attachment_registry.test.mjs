@@ -73,13 +73,13 @@ test('multiple aliases and the main database never double-register', async () =>
   const registry = registryWith({ calls, mainDatabasePath: 'main.db' });
   assert.equal(await registry.acquire('main.db'), false);
   assert.equal(await registry.acquire('shared.db'), true);
-  registry.rememberAttachment({ alias: 'first', filename: 'shared.db' });
+  registry.rememberAttachment({ alias: 'MiXeD', filename: 'shared.db' });
   assert.equal(await registry.acquire('shared.db'), false);
-  registry.rememberAttachment({ alias: 'second', filename: 'shared.db' });
+  registry.rememberAttachment({ alias: 'mixed', filename: 'shared.db' });
 
-  await registry.releaseAlias('first');
+  await registry.releaseAlias('MiXeD');
   assert.equal(calls.filter(([kind]) => kind === 'unregister').length, 0);
-  await registry.releaseAlias('second');
+  await registry.releaseAlias('mixed');
   assert.deepEqual(calls, [
     ['register', 'shared.db'],
     ['register', 'shared.db-wal'],
