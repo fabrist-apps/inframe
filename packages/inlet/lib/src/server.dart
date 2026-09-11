@@ -191,7 +191,7 @@ final class _ServerAdapter {
       dispatch = await _dispatch(request);
       response = dispatch.response;
       await _deliver(
-        incoming.response,
+        incoming,
         response,
         input,
         isHead: dispatch.request.method == 'HEAD',
@@ -207,9 +207,13 @@ final class _ServerAdapter {
           failure.error,
           failure.stackTrace,
         );
+        if (response.isWebSocketUpgrade) {
+          await _cleanUp(response.close);
+          response = Response.empty(status: HttpStatus.internalServerError);
+        }
         try {
           await _deliver(
-            incoming.response,
+            incoming,
             response,
             input,
             isHead: dispatch.request.method == 'HEAD',
@@ -266,16 +270,45 @@ final class _ServerAdapter {
   }
 
   Future<void> _deliver(
-    HttpResponse target,
+    HttpRequest incoming,
     Response response,
     _HttpRequestBody input, {
     required bool isHead,
     bool resetTarget = false,
   }) async {
+    final target = incoming.response;
     var committed = false;
     Socket? detachedSocket;
     _DetachedSseResponse? detachedResponse;
     try {
+      if (response._delivery case final _WebSocketDelivery webSocket) {
+        if (incoming.method != 'GET' ||
+            isHead ||
+            !WebSocketTransformer.isUpgradeRequest(incoming)) {
+          throw const _WebSocketHandshakeRejected(
+            'Invalid WebSocket upgrade request.',
+          );
+        }
+        if (!response._body.isUntouched) {
+          throw StateError('The WebSocket response has already been closed.');
+        }
+        _prepareWebSocketTarget(target, response.headers);
+
+        final upgrading = WebSocketTransformer.upgrade(
+          incoming,
+          compression: webSocket.compression,
+          maxPayloadLength: webSocket.maxFrameBytes,
+        );
+        committed = true;
+        final socket = await upgrading;
+
+        // The WebSocket owns the detached transport before the obsolete HTTP
+        // request subscription is cancelled.
+        await input.finish();
+        await _runWebSocketSession(socket, webSocket);
+        return;
+      }
+
       final suppressBody = response._suppressBody || isHead;
       if (!suppressBody && !response._body.isUntouched) {
         throw StateError('The response body has already been consumed or closed.');
@@ -356,6 +389,39 @@ final class _ServerAdapter {
         ownedResponse.abort().ignore();
       }
       throw _DeliveryFailure(error, stackTrace, committed: committed);
+    }
+  }
+
+  void _prepareWebSocketTarget(HttpResponse target, Headers headers) {
+    target.bufferOutput = false;
+    for (final MapEntry(key: name, value: values) in headers.toMap().entries) {
+      for (final value in values) {
+        target.headers.add(name, value);
+      }
+    }
+  }
+
+  Future<void> _runWebSocketSession(
+    WebSocket socket,
+    _WebSocketDelivery delivery,
+  ) async {
+    try {
+      await delivery.onConnect(socket);
+      await _closeWebSocket(socket, WebSocketStatus.normalClosure);
+    } on Object catch (error, stackTrace) {
+      _report(error, stackTrace);
+      await _closeWebSocket(socket, WebSocketStatus.internalServerError);
+    }
+  }
+
+  Future<void> _closeWebSocket(WebSocket socket, int code) async {
+    if (socket.readyState != WebSocket.open) {
+      return;
+    }
+    try {
+      await socket.close(code);
+    } on Object catch (error, stackTrace) {
+      _report(error, stackTrace);
     }
   }
 
@@ -443,6 +509,10 @@ final class _DeliveryFailure implements Exception {
   final Object error;
   final StackTrace stackTrace;
   final bool committed;
+}
+
+final class _WebSocketHandshakeRejected extends WebSocketException {
+  const _WebSocketHandshakeRejected(super.message);
 }
 
 final class _HttpRequestBody extends Stream<List<int>> {

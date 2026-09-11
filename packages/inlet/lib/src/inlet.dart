@@ -243,6 +243,7 @@ Handler _methodNotAllowed(List<String> allowedMethods) =>
     );
 
 Response _defaultErrorResponse(Object error) => switch (error) {
+  _WebSocketHandshakeRejected() => Response.empty(status: HttpStatus.badRequest),
   MalformedBodyException() => Response.empty(status: HttpStatus.badRequest),
   BodyLimitExceededException() => Response.empty(
     status: HttpStatus.requestEntityTooLarge,
@@ -251,6 +252,8 @@ Response _defaultErrorResponse(Object error) => switch (error) {
 };
 
 bool _isUnexpected(Object error) =>
-    error is! MalformedBodyException && error is! BodyLimitExceededException;
+    error is! _WebSocketHandshakeRejected &&
+    error is! MalformedBodyException &&
+    error is! BodyLimitExceededException;
 
 bool _wasReported(Object error) => error is _ContinuationStateError && error.wasReported;
