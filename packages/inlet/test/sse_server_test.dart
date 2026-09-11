@@ -71,6 +71,46 @@ void main() {
       expect(response.headers.value(HttpHeaders.transferEncodingHeader), isNull);
       expect(subscriptions, 0);
     });
+
+    test('should deliver JSON events and comments over HTTP', () async {
+      final application = Inlet()
+        ..get(
+          '/events',
+          (_, _) => Response.sse(
+            Stream.fromIterable([
+              SseEvent.json(
+                {'title': 'Ready'},
+                event: 'document',
+                id: 'event-1',
+              ),
+              SseEvent.comment('keep-alive'),
+            ]),
+          ),
+        );
+      final server = await application.serve(port: 0);
+      final client = HttpClient();
+      addTearDown(() async {
+        client.close(force: true);
+        await server.close(force: true);
+      });
+
+      final request = await client.get(
+        server.address.address,
+        server.port,
+        '/events',
+      );
+      final response = await request.close();
+
+      expect(
+        await utf8.decodeStream(response),
+        'event: document\n'
+        'id: event-1\n'
+        'data: {"title":"Ready"}\n'
+        '\n'
+        ': keep-alive\n'
+        '\n',
+      );
+    });
   });
 }
 
