@@ -87,6 +87,27 @@ Durations must be non-negative. Conflux passes their microsecond value to the
 configured `Clock` without rounding; that Clock and its platform timer determine
 effective precision.
 
+`Schedule` values are reusable policy descriptions; every `retry`, `repeat`,
+or `schedule` execution creates a fresh driver. `retry` feeds expected errors
+to its driver, `repeat` runs immediately and feeds successful values, and
+`schedule` asks the driver before the first execution using `None`:
+
+```dart
+var attempts = 0;
+final loaded = Effect.defer<int, String>(() {
+  attempts += 1;
+  return attempts < 3 ? Effect.fail('try again') : Effect.succeed(42);
+}).retry(Schedule.recurs(3));
+
+final value = await loaded.runFuture();
+```
+
+`recurs(n)` permits `n` continuing decisions, so retry and repeat can execute
+once initially plus `n` additional times. `Effect.schedule` can execute at most
+`n` times because it consults the policy first. A failed schedule step uses its
+expected-error channel and ends the operation; it is distinct from
+`ScheduleStop`.
+
 `Queue.bounded` acquires an in-memory FIFO Queue whose lifetime belongs to the
 current Effect scope. A full Queue applies lossless backpressure until a take
 releases capacity. Shutdown is immediate and interrupts pending data operations

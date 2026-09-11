@@ -814,6 +814,11 @@ extension EffectCleanup<A, E> on Effect<A, E> {
 
 /// Uses Effect internals across the runtime's normal libraries.
 abstract final class EffectAccess {
+  /// Creates an Effect for another Conflux subsystem using runtime execution.
+  static Effect<A, E> create<A, E>(
+    Future<Exit<A, E>> Function(EffectExecution execution) run,
+  ) => Effect._(run);
+
   /// Evaluates [effect] inside [execution].
   static Future<Exit<A, E>> evaluate<A, E>(
     Effect<A, E> effect,

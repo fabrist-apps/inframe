@@ -7,3 +7,4 @@ export 'option.dart';
 export 'pubsub.dart';
 export 'queue.dart';
 export 'result.dart';
+export 'schedule.dart';

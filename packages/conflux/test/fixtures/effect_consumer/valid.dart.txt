@@ -29,6 +29,17 @@ Future<void> main() async {
   if (widenedExit is! Succeeded<int, _BaseError>) {
     throw StateError('Expected widened recovery to succeed.');
   }
+
+  final Schedule<_BaseError, int, Never> retries = Schedule.recurs(1);
+  final Effect<int, _BaseError> retried = widened.retry(retries);
+  final Schedule<int, int, _BaseError> mappedPolicy =
+      Schedule<int, int, _SpecificError>.fromDriver(
+        () => ScheduleDriver(
+          (_) => Effect.fail(const _SpecificError()),
+        ),
+      ).mapError<_BaseError>((error) => error);
+  await Runtime().run(retried);
+  await Runtime().run(mappedPolicy.driver().step(0));
 }
 
 sealed class _BaseError {
