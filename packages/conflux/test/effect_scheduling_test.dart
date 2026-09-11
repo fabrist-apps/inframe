@@ -31,7 +31,7 @@ void main() {
       expect(attempts, 4);
     });
 
-    test('should repeat immediately and return the stopping output', () async {
+    test('should repeat immediately with a fresh driver on each run', () async {
       var executions = 0;
       final effect = Effect.sync(() => ++executions).repeat(
         Schedule.recurs(3),
@@ -41,6 +41,8 @@ void main() {
 
       expect((exit as Succeeded<int, Never>).value, 3);
       expect(executions, 4);
+      expect(await effect.runFuture(), 3);
+      expect(executions, 8);
     });
 
     test('should schedule only after the first continuing decision', () async {
@@ -194,16 +196,6 @@ void main() {
 
       expect(exit, isA<Succeeded<int, String>>());
       expect(attempts, 2);
-    });
-
-    test('should create fresh driver state for each execution', () async {
-      final effect = Effect.succeed<int, Never>(1).repeat(Schedule.recurs(1));
-
-      final first = await effect.runFuture();
-      final second = await effect.runFuture();
-
-      expect(first, 1);
-      expect(second, 1);
     });
 
     test('should cancel a pending schedule wait without another attempt', () async {

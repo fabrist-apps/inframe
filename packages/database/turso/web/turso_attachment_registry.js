@@ -11,6 +11,14 @@ export class AttachmentRegistry {
   async acquire(filename) {
     if (filename === this.mainDatabasePath || this.owners.has(filename)) return false;
 
+    // Reusing a WAL as a database (or a database as another WAL) would let a
+    // failed ATTACH unregister an access handle that its existing owner needs.
+    for (const owned of [this.mainDatabasePath, ...this.owners.keys()]) {
+      if (owned !== null && (filename === `${owned}-wal` || `${filename}-wal` === owned)) {
+        throw new Error('The attachment database and WAL overlap files already owned by this connection.');
+      }
+    }
+
     await this.registerFile(filename);
     try {
       await this.registerFile(`${filename}-wal`);

@@ -45,16 +45,17 @@ engine, and then releases attachment registrations. An uncertain execution, fina
 protocol outcome retires the connection before cleanup, so queued and future operations fail.
 
 Persistent attachments from an in-memory browser main are rejected before acquiring OPFS handles.
-Browser attachment names cannot contain a path separator or NUL. A competing browser worker or tab
-that owns the same OPFS file causes an explicit open failure; the bridge does not steal the handle or
+Browser attachment names cannot contain a path separator or NUL. An attachment database and its
+`-wal` file must not overlap another database/WAL pair owned by the same connection. A competing
+browser worker or tab that owns the same OPFS file causes an explicit open failure; the bridge does not steal the handle or
 fall back to memory. Re-run the installer whenever these assets change.
 
 ## Provenance
 
 | Asset | Source | SHA-256 |
 | --- | --- | --- |
-| `turso_attachment_registry.js` | Package-owned retryable alias and registration ownership state | `1b52c4f7ceeda6a0c7857b45d07388db075766ec8056b057126114a82a93e4c6` |
-| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `10652f04abb38e9dc0b9206b5c12bee1401a6d8c5fab6ebdcac172b2cd930469` |
+| `turso_attachment_registry.js` | Package-owned retryable alias and registration ownership state | `4572d1a01b09d9a6402bc8e3862630898da9af6baf282e2afb1e921de5374a14` |
+| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `819d31bc2fa9063676a0e7f32b72b621372b7bdd3532d414eda5dbe8118515db` |
 | `turso_sql_guard.wasm` | `tool/sql_guard`, using `turso_parser` at `342dfbe267ebdb9141c434c499ce31e10bb46f27` | `53befd5b351189a382af748f7148525d39ed0681d636d4664c8d1775dae66297` |
 
 The npm tarball integrity is

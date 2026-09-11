@@ -70,13 +70,13 @@ JsonPatchOperation _operationFromJson(Object? json, int index) {
   final path = JsonPointer.parse(_requiredWireString(operation, 'path', index));
   switch (operationName) {
     case 'add':
-      return JsonAdd(path, _requiredWireValue(operation, 'value', index));
+      return JsonAdd._frozen(path, _requiredWireValue(operation, 'value', index));
     case 'remove':
       return JsonRemove(path);
     case 'replace':
-      return JsonReplace(path, _requiredWireValue(operation, 'value', index));
+      return JsonReplace._frozen(path, _requiredWireValue(operation, 'value', index));
     case 'test':
-      return JsonTest(path, _requiredWireValue(operation, 'value', index));
+      return JsonTest._frozen(path, _requiredWireValue(operation, 'value', index));
     case 'move':
       return JsonMove(
         from: JsonPointer.parse(_requiredWireString(operation, 'from', index)),

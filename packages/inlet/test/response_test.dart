@@ -90,23 +90,31 @@ void main() {
       expect(explicitResponse.headers['content-type'], 'application/example');
     });
 
-    test('should validate status bytes and transport-owned headers', () {
+    test('should validate status and bytes', () {
       expect(() => Response.empty(status: 199), throwsArgumentError);
       expect(() => Response.empty(status: 600), throwsArgumentError);
       expect(() => Response.bytes([-1]), throwsArgumentError);
-      expect(
-        () => Response.text(
-          'value',
-          headers: Headers.from({
-            HttpHeaders.contentLengthHeader: ['5'],
-          }),
-        ),
-        throwsArgumentError,
-      );
       expect(Response.empty().statusCode, HttpStatus.noContent);
       expect(Response.text('value').statusCode, HttpStatus.ok);
       expect(Response.empty().isWebSocketUpgrade, isFalse);
       expect(Response.sse(const Stream.empty()).isWebSocketUpgrade, isFalse);
+    });
+
+    test('should reject transport-owned response headers', () {
+      for (final name in [
+        HttpHeaders.contentLengthHeader,
+        HttpHeaders.transferEncodingHeader,
+        HttpHeaders.connectionHeader,
+        'keep-alive',
+        'proxy-connection',
+        HttpHeaders.trailerHeader,
+        HttpHeaders.upgradeHeader,
+      ]) {
+        expect(
+          () => Response.empty(headers: const Headers.empty().set(name, 'value')),
+          throwsArgumentError,
+        );
+      }
     });
   });
 }

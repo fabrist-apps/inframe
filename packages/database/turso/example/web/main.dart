@@ -644,6 +644,16 @@ Future<void> _verifyAttachmentOwnershipFailures() async {
     await database.execute('INSERT INTO first_owner.items VALUES (7)');
     await database.execute("ATTACH DATABASE '$_sharedAttachmentName' AS second_owner");
 
+    for (final filename in ['$_ownershipMainName-wal', '$_sharedAttachmentName-wal']) {
+      await _expectFailure<TursoDatabaseException>(
+        () => database.execute('ATTACH DATABASE ? AS wal_collision', parameters: [filename]),
+      );
+    }
+    await database.execute('INSERT INTO main_items VALUES (6)');
+    await database.execute('DELETE FROM main_items WHERE value = 6');
+    await database.execute('INSERT INTO first_owner.items VALUES (8)');
+    await database.execute('DELETE FROM first_owner.items WHERE value = 8');
+
     final duplicateAlias = await _captureFailure(
       () => database.execute("ATTACH DATABASE '$_failedAttachmentName' AS first_owner"),
       label: 'duplicate alias',

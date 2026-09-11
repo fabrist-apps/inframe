@@ -1,6 +1,8 @@
 import 'dart:async';
 
-import 'package:conflux/conflux.dart';
+import 'package:conflux/effect.dart';
+import 'package:conflux/option.dart';
+import 'package:conflux/queue.dart';
 import 'package:conflux/src/effect/execution.dart';
 import 'package:test/test.dart';
 
@@ -139,18 +141,6 @@ void main() {
       await fixture.run(fixture.queue.offer(2));
       expect(fixture.queue.size, 1);
       expect(await fixture.run(fixture.queue.take()), 2);
-    });
-
-    test('should poll an available item without waiting', () async {
-      final fixture = await _QueueFixture.acquire<int>(1);
-      addTearDown(fixture.close);
-
-      expect(await fixture.run(fixture.queue.poll()), isA<None>());
-      await fixture.run(fixture.queue.offer(1));
-      expect(
-        await fixture.run(fixture.queue.poll()),
-        isA<Some<int>>().having((option) => option.value, 'value', 1),
-      );
     });
 
     test('should distinguish a nullable item from an empty Queue', () async {

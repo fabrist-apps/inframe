@@ -16,7 +16,7 @@ final class _JsonDiffer {
   JsonPatch run() {
     if (identical(before, JsonAbsent.instance)) {
       if (!identical(after, JsonAbsent.instance)) {
-        operations.add(JsonAdd(JsonPointer.root, after));
+        operations.add(JsonAdd._frozen(JsonPointer.root, after));
       }
       return JsonPatch(operations);
     }
@@ -38,7 +38,7 @@ final class _JsonDiffer {
       _diffArray(source, target, path);
       return;
     }
-    if (!_jsonEquals(source, target)) operations.add(JsonReplace(path, target));
+    if (!_jsonEquals(source, target)) operations.add(JsonReplace._frozen(path, target));
   }
 
   void _diffObject(
@@ -56,104 +56,53 @@ final class _JsonDiffer {
     }
     for (final entry in target.entries) {
       if (!source.containsKey(entry.key)) {
-        operations.add(JsonAdd(path.child(entry.key), entry.value));
+        operations.add(JsonAdd._frozen(path.child(entry.key), entry.value));
       }
     }
   }
 
   void _diffArray(List<Object?> source, List<Object?> target, JsonPointer path) {
-    if (budget.exhausted) {
-      _diffArrayGap(source, 0, source.length, target, 0, target.length, path, 0);
-      return;
-    }
-
     // Prefix and suffix matches remain valid if speculative alignment later
     // exhausts the shared budget.
     var prefixLength = 0;
-    while (prefixLength < source.length && prefixLength < target.length) {
+    while (!budget.exhausted && prefixLength < source.length && prefixLength < target.length) {
       final equality = _speculativeEquals(source[prefixLength], target[prefixLength], budget);
-      if (equality == _SpeculativeEquality.exhausted) {
-        _diffArrayGap(
-          source,
-          prefixLength,
-          source.length,
-          target,
-          prefixLength,
-          target.length,
-          path,
-          prefixLength,
-        );
-        return;
-      }
-      if (equality == _SpeculativeEquality.different) break;
+      if (equality != _SpeculativeEquality.equal) break;
       prefixLength++;
     }
 
     var sourceEnd = source.length;
     var targetEnd = target.length;
-    while (sourceEnd > prefixLength && targetEnd > prefixLength) {
+    while (!budget.exhausted && sourceEnd > prefixLength && targetEnd > prefixLength) {
       final equality = _speculativeEquals(source[sourceEnd - 1], target[targetEnd - 1], budget);
-      if (equality == _SpeculativeEquality.exhausted) {
-        _diffArrayGap(
-          source,
-          prefixLength,
-          sourceEnd,
-          target,
-          prefixLength,
-          targetEnd,
-          path,
-          prefixLength,
-        );
-        return;
-      }
-      if (equality == _SpeculativeEquality.different) break;
+      if (equality != _SpeculativeEquality.equal) break;
       sourceEnd--;
       targetEnd--;
     }
 
     final sourceLength = sourceEnd - prefixLength;
     final targetLength = targetEnd - prefixLength;
-    if (sourceLength == 0 || targetLength == 0 || !_tableFits(sourceLength, targetLength)) {
-      _diffArrayGap(
+    List<({int source, int target})>? matches;
+    if (!budget.exhausted &&
+        sourceLength > 0 &&
+        targetLength > 0 &&
+        _tableFits(sourceLength, targetLength)) {
+      matches = _alignArray(
         source,
         prefixLength,
         sourceEnd,
         target,
         prefixLength,
         targetEnd,
-        path,
-        prefixLength,
+        budget,
       );
-      return;
     }
 
-    final matches = _alignArray(
-      source,
-      prefixLength,
-      sourceEnd,
-      target,
-      prefixLength,
-      targetEnd,
-      budget,
-    );
-    if (matches == null) {
-      _diffArrayGap(
-        source,
-        prefixLength,
-        sourceEnd,
-        target,
-        prefixLength,
-        targetEnd,
-        path,
-        prefixLength,
-      );
-      return;
-    }
-
+    // Without alignment anchors, the remaining range is one positional gap.
     var sourceCursor = prefixLength;
     var targetCursor = prefixLength;
     var liveIndex = prefixLength;
-    for (final match in matches) {
+    for (final match in matches ?? const <({int source, int target})>[]) {
       liveIndex = _diffArrayGap(
         source,
         sourceCursor,
@@ -206,7 +155,7 @@ final class _JsonDiffer {
       operations.add(JsonRemove(path.child('$nextIndex')));
     }
     for (var offset = pairedLength; offset < targetLength; offset++) {
-      operations.add(JsonAdd(path.child('$nextIndex'), target[targetStart + offset]));
+      operations.add(JsonAdd._frozen(path.child('$nextIndex'), target[targetStart + offset]));
       nextIndex++;
     }
     return nextIndex;

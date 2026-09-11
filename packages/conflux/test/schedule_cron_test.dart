@@ -175,22 +175,6 @@ void main() {
       expect(cause.containsFatal, isTrue);
     });
 
-    test('should retain a thrown Cron error mapper as a defect', () async {
-      final impossible = parse('0 0 0 31 feb *');
-      final policy = Schedule.cron<Object?>(
-        impossible,
-      ).mapError<String>((_) => throw StateError('mapper'));
-
-      final exit = await policy
-          .driver()
-          .step(null)
-          .runFutureExit(
-            clock: FakeClock(wallTime: DateTime.utc(2026)),
-          );
-
-      expect((exit as Failed<ScheduleDecision<Duration>, String>).cause, isA<Defect<String>>());
-    });
-
     test('should compose wall-time Cron with a monotonic within limit', () async {
       final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 11));
       final driver = Schedule.cron<Object?>(

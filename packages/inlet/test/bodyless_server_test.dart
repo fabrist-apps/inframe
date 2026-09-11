@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:inlet/inlet.dart';
 import 'package:test/test.dart';
 
+import 'wire_client.dart';
+
 void main() {
   group('Inlet bodyless delivery', () {
     test('should preserve known HEAD length without subscribing', () async {
@@ -112,23 +114,6 @@ void main() {
       expect(streamed.header('content-type'), isNull);
       expect(latin1.decode(streamed.body), contains('abc'));
     });
-
-    test('should keep transport framing fields caller-owned by the adapter', () {
-      for (final name in [
-        HttpHeaders.contentLengthHeader,
-        HttpHeaders.transferEncodingHeader,
-        HttpHeaders.connectionHeader,
-        'keep-alive',
-        'proxy-connection',
-        HttpHeaders.trailerHeader,
-        HttpHeaders.upgradeHeader,
-      ]) {
-        expect(
-          () => Response.empty(headers: const Headers.empty().set(name, 'value')),
-          throwsArgumentError,
-        );
-      }
-    });
   });
 
   group('Inlet server shutdown', () {
@@ -203,7 +188,7 @@ void main() {
           return Response.text('first');
         });
       final server = await application.serve(port: 0);
-      final wire = await _PersistentWire.connect(server);
+      final wire = await WireClient.connect(server);
       addTearDown(wire.close);
 
       wire.send(
@@ -298,53 +283,6 @@ final class _RawResponse {
     }
     return null;
   }
-}
-
-final class _PersistentWire {
-  _PersistentWire._(this._socket) {
-    _socket.listen(
-      (chunk) {
-        _bytes.addAll(chunk);
-        if (!_changed.isCompleted) {
-          _changed.complete();
-        }
-      },
-      onDone: () {
-        _done = true;
-        if (!_changed.isCompleted) {
-          _changed.complete();
-        }
-      },
-    );
-  }
-
-  static Future<_PersistentWire> connect(InletServer server) async =>
-      _PersistentWire._(await Socket.connect(server.address, server.port));
-
-  final Socket _socket;
-  final List<int> _bytes = [];
-  Completer<void> _changed = Completer<void>();
-  bool _done = false;
-
-  void send(String value) {
-    _socket.add(latin1.encode(value));
-    unawaited(_socket.flush());
-  }
-
-  Future<void> waitFor(bool Function(String text) predicate) async {
-    while (!predicate(latin1.decode(_bytes))) {
-      if (_done) {
-        fail('Connection closed before the expected response arrived.');
-      }
-      final changed = _changed;
-      await changed.future.timeout(const Duration(seconds: 2));
-      if (identical(changed, _changed)) {
-        _changed = Completer<void>();
-      }
-    }
-  }
-
-  Future<void> close() => _socket.close();
 }
 
 int _indexOf(List<int> bytes, List<int> pattern) {

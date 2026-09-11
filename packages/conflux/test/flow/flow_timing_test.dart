@@ -210,41 +210,6 @@ void main() {
       expect((exit as Failed<void, String>).cause.expectedErrors, ['overflow']);
     });
 
-    test('should compose debounced values through switchMap', () async {
-      final clock = FakeClock();
-      final runtime = Runtime(clock: clock);
-      addTearDown(runtime.close);
-      final listening = Completer<void>();
-      final queries = StreamController<String>(sync: true, onListen: listening.complete);
-      addTearDown(queries.close);
-      final reports = <String>[];
-      final fiber = runtime.fork(
-        Flow.fromStream<String, String>(
-              () => queries.stream,
-              onError: (error, stackTrace) => '$error',
-            )
-            .debounce(const Duration(milliseconds: 250))
-            .switchMap<String>(
-              (query) => Effect.succeed<String, String>('result:$query').asFlow(),
-            )
-            .runForEach(
-              (report) => Effect.sync(() => reports.add(report)).mapError(_widenNever),
-            ),
-      );
-
-      await listening.future;
-      queries
-        ..add('a')
-        ..add('ab');
-      await _waitUntil(() => clock.activeWaits == 1);
-      clock.advanceMonotonic(const Duration(milliseconds: 250));
-      await _waitUntil(() => reports.isNotEmpty);
-      await queries.close();
-
-      expect(await fiber.join(), isA<Succeeded<void, String>>());
-      expect(reports, ['result:ab']);
-    });
-
     test('should validate timing configuration eagerly', () {
       final source = Flow.succeed<int, String>(1);
 

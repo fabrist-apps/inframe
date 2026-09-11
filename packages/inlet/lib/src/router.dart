@@ -3,11 +3,9 @@ part of 'inlet.dart';
 /// An editable collection of route and middleware registrations.
 class Router {
   /// Creates an editable router.
-  Router() : this._(strict: true);
+  Router() : this._(true);
 
-  // The public parameter name stays `strict`; `_strict` is an internal state detail.
-  // ignore: prefer_initializing_formals
-  Router._({required bool strict}) : _strict = strict;
+  Router._(this._strict);
 
   final bool _strict;
   final List<_RouteRegistration> _registrations = [];
@@ -84,7 +82,7 @@ class Router {
         handler: child.handler,
         middleware: List.unmodifiable([...childScope, ...child.middleware]),
       );
-      _ensureNoConflict(registration, [..._registrations, ...mounted]);
+      _ensureNoConflict(registration, _registrations.followedBy(mounted));
       mounted.add(registration);
     }
     _registrations.addAll(mounted);
@@ -181,7 +179,6 @@ final class _RoutePattern {
       if (rawSegment.startsWith(':')) {
         _addCapture(
           rawSegment: rawSegment,
-          prefix: ':',
           captureNames: captureNames,
           segments: segments,
           segment: const _ParameterSegment(),
@@ -195,7 +192,6 @@ final class _RoutePattern {
         }
         _addCapture(
           rawSegment: rawSegment,
-          prefix: '*',
           captureNames: captureNames,
           segments: segments,
           segment: const _WildcardSegment(),
@@ -465,7 +461,6 @@ final class _MethodNotAllowed extends _RouteResolution {
 
 void _addCapture({
   required String rawSegment,
-  required String prefix,
   required List<String> captureNames,
   required List<_PatternSegment> segments,
   required _PatternSegment segment,
@@ -473,7 +468,7 @@ void _addCapture({
 }) {
   final name = rawSegment.substring(1);
   final validName = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(name);
-  if (rawSegment != '$prefix$name' || !validName || captureNames.contains(name)) {
+  if (!validName || captureNames.contains(name)) {
     throw ArgumentError.value(path, 'path', 'contains an invalid or repeated capture name');
   }
   captureNames.add(name);

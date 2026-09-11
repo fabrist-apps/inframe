@@ -266,8 +266,7 @@ final class _ManagedTransaction implements TursoTransaction {
     String sql, {
     List<Object?> parameters = const [],
     Map<String, Object?> namedParameters = const {},
-  }) => Future<TursoQueryResult>.sync(() {
-    _ensureAccepting();
+  }) => _submit(() {
     validateSql(sql);
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
@@ -281,8 +280,7 @@ final class _ManagedTransaction implements TursoTransaction {
     String sql, {
     List<Object?> parameters = const [],
     Map<String, Object?> namedParameters = const {},
-  }) => Future<TursoExecuteResult>.sync(() {
-    _ensureAccepting();
+  }) => _submit(() {
     validateSql(sql);
     final snapshot = snapshotParameters(parameters, namedParameters);
     return _enqueue(() async {
@@ -290,6 +288,22 @@ final class _ManagedTransaction implements TursoTransaction {
       return TursoExecuteResult(rowsAffected: rowsAffected);
     });
   });
+
+  Future<T> _submit<T>(Future<T> Function() prepare) {
+    final submitted = Future<T>.sync(() {
+      _ensureAccepting();
+      try {
+        return prepare();
+      } on Object catch (error, stackTrace) {
+        // Validation is part of an accepted operation, even before it is queued.
+        _firstFailure ??= _OperationFailure(error, stackTrace);
+        rethrow;
+      }
+    });
+    // The transaction reports accepted failures even when the caller ignores them.
+    unawaited(submitted.then<void>((_) {}, onError: (_, _) {}));
+    return submitted;
+  }
 
   Future<T> _enqueue<T>(Future<T> Function() operation) {
     final completer = Completer<T>();
@@ -307,7 +321,6 @@ final class _ManagedTransaction implements TursoTransaction {
         completer.completeError(error, stackTrace);
       }
     });
-    unawaited(completer.future.then<void>((_) {}, onError: (_, _) {}));
     return completer.future;
   }
 

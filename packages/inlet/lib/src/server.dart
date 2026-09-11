@@ -283,8 +283,6 @@ final class _ServerAdapter {
   }) async {
     final target = incoming.response;
     var committed = false;
-    Socket? detachedSocket;
-    _DetachedSseResponse? detachedResponse;
     try {
       if (response._delivery case final _WebSocketDelivery webSocket) {
         if (incoming.method != 'GET' ||
@@ -302,6 +300,7 @@ final class _ServerAdapter {
           webSocket.selectProtocol,
           offeredProtocols,
         );
+        _validateWebSocketExtensions(incoming.headers, webSocket.compression);
         _prepareWebSocketTarget(target, response.headers);
 
         final upgrading = WebSocketTransformer.upgrade(
@@ -361,23 +360,7 @@ final class _ServerAdapter {
           ..headers.chunkedTransferEncoding = false;
         final detach = target.detachSocket();
         committed = true;
-        detachedSocket = await detach;
-        final events = StreamIterator(response.body);
-        detachedResponse = _DetachedSseResponse(detachedSocket, events);
-        if (!_ownDetachedResponse(detachedResponse)) {
-          detachedResponse = null;
-          detachedSocket = null;
-          return;
-        }
-        await detachedSocket.flush();
-        while (await events.moveNext()) {
-          detachedSocket.add(events.current);
-          await detachedSocket.flush();
-        }
-        await detachedSocket.close();
-        _detachedResponses.remove(detachedResponse);
-        detachedResponse = null;
-        detachedSocket = null;
+        await _deliverSse(await detach, response.body);
         return;
       }
       if (knownLength != null) {
@@ -388,14 +371,17 @@ final class _ServerAdapter {
       await delivery;
       await target.close();
     } on Object catch (error, stackTrace) {
-      final ownedResponse = detachedResponse;
-      if (ownedResponse == null) {
-        detachedSocket?.destroy();
-      } else {
-        _detachedResponses.remove(ownedResponse);
-        ownedResponse.abort().ignore();
-      }
       throw _DeliveryFailure(error, stackTrace, committed: committed);
+    }
+  }
+
+  Future<void> _deliverSse(Socket socket, Stream<List<int>> body) async {
+    final response = _DetachedSseResponse(socket, body);
+    if (!_ownDetachedResponse(response)) return;
+    try {
+      await response.deliver();
+    } finally {
+      _detachedResponses.remove(response);
     }
   }
 
@@ -461,6 +447,22 @@ final class _ServerAdapter {
     }
   }
 
+  void _validateWebSocketExtensions(HttpHeaders headers, CompressionOptions compression) {
+    // With a selected protocol Dart defers extension negotiation until after
+    // upgrade() returns. Validate its throwing preflight here, while an ordinary
+    // recovery response is still possible; transport failures must stay committed.
+    final extension = HeaderValue.parse(
+      headers.value('sec-websocket-extensions') ?? '',
+      valueSeparator: ',',
+    );
+    if (compression.enabled && extension.value == 'permessage-deflate') {
+      final windowBits = extension.parameters['server_max_window_bits'];
+      if (windowBits != null && windowBits.length >= 2 && windowBits.startsWith('0')) {
+        throw ArgumentError('Illegal 0 padding on value.');
+      }
+    }
+  }
+
   bool _ownDetachedResponse(_DetachedSseResponse response) {
     if (_forceClosing) {
       response.abort().ignore();
@@ -520,18 +522,33 @@ final class _ServerAdapter {
 }
 
 final class _DetachedSseResponse {
-  _DetachedSseResponse(this.socket, this.events);
+  _DetachedSseResponse(this._socket, Stream<List<int>> body) : _events = StreamIterator(body);
 
-  final Socket socket;
-  final StreamIterator<List<int>> events;
+  final Socket _socket;
+  final StreamIterator<List<int>> _events;
+
+  Future<void> deliver() async {
+    try {
+      // StreamIterator stays unsubscribed until moveNext, after headers flush.
+      await _socket.flush();
+      while (await _events.moveNext()) {
+        _socket.add(_events.current);
+        await _socket.flush();
+      }
+      await _socket.close();
+    } on Object {
+      abort().ignore();
+      rethrow;
+    }
+  }
 
   Future<void>? _abortFuture;
 
   Future<void> abort() => _abortFuture ??= _abort();
 
   Future<void> _abort() async {
-    socket.destroy();
-    await events.cancel();
+    _socket.destroy();
+    await _events.cancel();
   }
 }
 
@@ -561,7 +578,7 @@ List<String> _parseWebSocketProtocols(HttpHeaders headers) {
   for (final value in values) {
     for (final rawProtocol in value.split(',')) {
       final protocol = rawProtocol.trim();
-      if (!_isWebSocketProtocolToken(protocol)) {
+      if (!isHttpToken(protocol)) {
         throw const _WebSocketHandshakeRejected(
           'Invalid Sec-WebSocket-Protocol header.',
         );
@@ -570,34 +587,6 @@ List<String> _parseWebSocketProtocols(HttpHeaders headers) {
     }
   }
   return List.unmodifiable(protocols);
-}
-
-bool _isWebSocketProtocolToken(String value) {
-  if (value.isEmpty) {
-    return false;
-  }
-  const separators = <int>{
-    0x28,
-    0x29,
-    0x3c,
-    0x3e,
-    0x40,
-    0x2c,
-    0x3b,
-    0x3a,
-    0x5c,
-    0x22,
-    0x2f,
-    0x5b,
-    0x5d,
-    0x3f,
-    0x3d,
-    0x7b,
-    0x7d,
-  };
-  return value.codeUnits.every(
-    (unit) => unit > 0x20 && unit < 0x7f && !separators.contains(unit),
-  );
 }
 
 final class _HttpRequestBody extends Stream<List<int>> {

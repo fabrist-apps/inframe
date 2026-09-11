@@ -5,6 +5,27 @@ import 'package:test/test.dart';
 
 void main() {
   group('Effect collection', () {
+    test('should yield so event-loop cancellation can stop immediate work', () async {
+      var started = 0;
+      final runtime = Runtime();
+      final fiber = runtime.fork(
+        Effect.forEach<int, int, Never>(
+          List.generate(10000, (index) => index),
+          (index) => Effect.sync(() {
+            started += 1;
+            return index;
+          }),
+        ),
+      );
+      Timer.run(() => unawaited(fiber.interrupt('stop')));
+
+      final exit = await fiber.join();
+
+      expect(exit, isA<Failed<List<int>, Never>>());
+      expect(started, lessThan(10000));
+      await runtime.close();
+    });
+
     test('should run sequentially by default and preserve input order', () async {
       final events = <String>[];
       final effect = Effect.forEach<int, int, Never>([1, 2, 3], (value) {
@@ -22,21 +43,21 @@ void main() {
       expect(() => values.add(4), throwsUnsupportedError);
     });
 
-    test('should keep active work within the configured bound', () async {
+    test('should bound active work and collect nullable values in source order', () async {
       var active = 0;
       var maximumActive = 0;
       final gates = List.generate(4, (_) => Completer<void>());
       final started = List.generate(4, (_) => Completer<void>());
-      final effect = Effect.forEach<int, int, String>(
+      final effect = Effect.forEach<int, int?, String>(
         [0, 1, 2, 3],
-        (index) => Effect.tryFuture<int, String>(
+        (index) => Effect.tryFuture<int?, String>(
           () async {
             active += 1;
             maximumActive = active > maximumActive ? active : maximumActive;
             started[index].complete();
             await gates[index].future;
             active -= 1;
-            return index;
+            return index == 1 ? null : index;
           },
           onError: (error, _) => '$error',
         ),
@@ -53,8 +74,8 @@ void main() {
       gates[2].complete();
       gates[3].complete();
 
-      final values = (await fiber.join() as Succeeded<List<int>, String>).value;
-      expect(values, [0, 1, 2, 3]);
+      final values = (await fiber.join() as Succeeded<List<int?>, String>).value;
+      expect(values, [0, null, 2, 3]);
       expect(maximumActive, 2);
     });
 

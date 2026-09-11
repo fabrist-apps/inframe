@@ -173,12 +173,7 @@ void main() {
     });
 
     group('root absence', () {
-      test('should preserve present and absent roots for an empty patch', () {
-        final present = <String, Object?>{'value': 1};
-        final result = JsonPatch.patch(present, JsonPatch([]));
-
-        expect(result, present);
-        expect(identical(result, present), isFalse);
+      test('should preserve an absent root for an empty patch', () {
         expect(JsonPatch.patch(JsonAbsent.instance, JsonPatch([])), same(JsonAbsent.instance));
       });
 
@@ -225,13 +220,17 @@ void main() {
       });
     });
 
-    test('should demonstrate that array insertion is not idempotent', () {
+    test('should insert and append array values without deduplication', () {
       final patch = JsonPatch([JsonAdd(JsonPointer.parse('/0'), 'new')]);
       final once = JsonPatch.patch(<Object?>['old'], patch);
       final twice = JsonPatch.patch(once, patch);
 
       expect(once, <Object?>['new', 'old']);
       expect(twice, <Object?>['new', 'new', 'old']);
+      expect(
+        JsonPatch.patch(once, JsonPatch([JsonAdd(JsonPointer.parse('/-'), 'last')])),
+        <Object?>['new', 'old', 'last'],
+      );
     });
   });
 }

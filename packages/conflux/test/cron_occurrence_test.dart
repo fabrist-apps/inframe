@@ -14,6 +14,35 @@ void main() {
   }
 
   group('Cron occurrences', () {
+    test('should find occurrences when a rollback crosses midnight', () {
+      final gooseBay = tz.getLocation('America/Goose_Bay');
+      final lateEvening = parse('0 30 23 * * *', gooseBay);
+      final midnight = parse('0 0 0 * * *', gooseBay);
+
+      // At 03:01 UTC, October 25 00:01 rolls back to October 24 23:01.
+      expect(
+        lateEvening.next(DateTime.utc(1987, 10, 25, 3)).getOrNull(),
+        DateTime.utc(1987, 10, 25, 3, 30),
+      );
+      expect(
+        midnight.previous(DateTime.utc(1987, 10, 25, 3, 30)).getOrNull(),
+        DateTime.utc(1987, 10, 25, 3),
+      );
+    });
+
+    test('should order overlapping calendar dates by their actual instants', () {
+      final cron = parse('0 0,30 0,23 * * *', tz.getLocation('America/Goose_Bay'));
+
+      expect(
+        cron.next(DateTime.utc(1987, 10, 25, 2, 59)).getOrNull(),
+        DateTime.utc(1987, 10, 25, 3),
+      );
+      expect(
+        cron.previous(DateTime.utc(1987, 10, 25, 4, 1)).getOrNull(),
+        DateTime.utc(1987, 10, 25, 4),
+      );
+    });
+
     test('should find strict next and previous occurrences', () {
       final cron = parse('0 */15 * * * *', utc);
       final input = DateTime.utc(2026, 9, 11, 10, 30);

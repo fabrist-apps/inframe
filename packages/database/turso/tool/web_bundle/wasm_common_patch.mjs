@@ -25,7 +25,6 @@ function workerState(worker) {
     state = {
       paths: new Map(),
       handles: new Map(),
-      sizes: new Map(),
       pending: new Map(),
       mutationTail: Promise.resolve(),
       poison: null,
@@ -71,7 +70,6 @@ export async function registerFileAtWorker(worker, path) {
   }
   files.paths.set(path, registration.handle);
   files.handles.set(registration.handle, path);
-  files.sizes.set(registration.handle, registration.size);
 }
 
 export async function unregisterFileAtWorker(worker, path) {
@@ -81,7 +79,6 @@ export async function unregisterFileAtWorker(worker, path) {
   files.paths.delete(path);
   if (handle !== undefined) {
     files.handles.delete(handle);
-    files.sizes.delete(handle);
   }
 }
 
@@ -408,25 +405,16 @@ export async function setupMainThread(wasmFile, factory) {
           len: length,
           offset,
         });
-      imports.write = (handle, pointer, length, offset) => {
-        const result = synchronousWorkerRequest(worker, 'write', {
+      imports.write = (handle, pointer, length, offset) =>
+        synchronousWorkerRequest(worker, 'write', {
           handle,
           ptr: pointer,
           len: length,
           offset,
         });
-        if (result >= 0) {
-          const files = workerState(worker);
-          files.sizes.set(handle, Math.max(files.sizes.get(handle) ?? 0, offset + result));
-        }
-        return result;
-      };
       imports.sync = (handle) => synchronousWorkerRequest(worker, 'sync', { handle });
-      imports.truncate = (handle, length) => {
-        const result = synchronousWorkerRequest(worker, 'truncate', { handle, len: length });
-        if (result >= 0) workerState(worker).sizes.set(handle, length);
-        return result;
-      };
+      imports.truncate = (handle, length) =>
+        synchronousWorkerRequest(worker, 'truncate', { handle, len: length });
       imports.size = (handle) => synchronousWorkerRequest(worker, 'size', { handle });
       imports.read_async = (handle, pointer, length, offset, completion) => {
         workerRequest(worker, 'read_async', { handle, ptr: pointer, len: length, offset }).then(
@@ -436,13 +424,7 @@ export async function setupMainThread(wasmFile, factory) {
       };
       imports.write_async = (handle, pointer, length, offset, completion) => {
         workerRequest(worker, 'write_async', { handle, ptr: pointer, len: length, offset }).then(
-          (result) => {
-            if (result >= 0) {
-              const files = workerState(worker);
-              files.sizes.set(handle, Math.max(files.sizes.get(handle) ?? 0, offset + result));
-            }
-            completeOpfs(completion, result);
-          },
+          (result) => completeOpfs(completion, result),
           () => completeOpfs(completion, -1),
         );
       };
@@ -454,10 +436,7 @@ export async function setupMainThread(wasmFile, factory) {
       };
       imports.truncate_async = (handle, length, completion) => {
         workerRequest(worker, 'truncate_async', { handle, len: length }).then(
-          (result) => {
-            if (result >= 0) workerState(worker).sizes.set(handle, length);
-            completeOpfs(completion, result);
-          },
+          (result) => completeOpfs(completion, result),
           () => completeOpfs(completion, -1),
         );
       };

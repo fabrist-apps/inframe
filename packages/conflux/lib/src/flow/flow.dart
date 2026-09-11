@@ -187,13 +187,16 @@ final class Flow<A, E> {
           cancellation,
           stopParentCancellation,
         );
-        final registered = ScopeAccess.addFinalizer(
+        final unregister = ScopeAccess.registerFinalizer(
           parent.scope,
           cursor._closeEffect,
           parent.context,
           parent.clock,
         );
-        if (registered) return Succeeded(cursor);
+        if (unregister != null) {
+          cursor._unregister = unregister;
+          return Succeeded(cursor);
+        }
 
         final cleanup = await cursor._close(
           interrupt: true,
@@ -723,6 +726,7 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
   final void Function() _stopParentCancellation;
   Future<Exit<Option<A>, E>>? _activePull;
   Future<Cause<Never>?>? _closing;
+  void Function()? _unregister;
   var _cleanupReported = false;
   var _closed = false;
 
@@ -810,6 +814,11 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
       _ => null,
     };
     final scopeFailure = await _execution.scope.close();
+    // Keep parent ownership until cleanup has finished, including concurrent
+    // parent shutdown, then release the completed cursor from its parent scope.
+    final unregister = _unregister;
+    _unregister = null;
+    unregister?.call();
     return CauseGroup.sequential([?hookFailure, ?scopeFailure]);
   }
 }
@@ -1229,25 +1238,7 @@ final class _TakeCursor<A, E> implements FlowSourceCursor<A, E> {
 /// Safe expected-error widening for Flows that cannot fail as expected.
 extension FlowNeverError<A> on Flow<A, Never> {
   /// Widens the uninhabited expected-error channel to [E].
-  Flow<A, E> widenError<E>() => Flow._(
-    () => open().mapError<E>(_widenNever).map(_WidenErrorCursor<A, E>.new),
-  );
-}
-
-final class _WidenErrorCursor<A, E> implements FlowSourceCursor<A, E> {
-  _WidenErrorCursor(this._upstream);
-
-  final FlowSourceCursor<A, Never> _upstream;
-
-  @override
-  Effect<Option<A>, E> next() => EffectAccess.create((execution) async {
-    return switch (await EffectAccess.evaluate(_upstream.next(), execution)) {
-      Succeeded<Option<A>, Never>(:final value) => Succeeded(value),
-      Failed<Option<A>, Never>(:final cause) => Failed(
-        cause.mapExpected<E>(_widenNever),
-      ),
-    };
-  });
+  Flow<A, E> widenError<E>() => mapError<E>(_widenNever);
 }
 
 /// Uses Flow internals from integration libraries without reversing dependencies.

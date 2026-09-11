@@ -7,7 +7,7 @@ void main() {
       expect(JsonPatch.fromJson(<Object?>[]).isEmpty, isTrue);
     });
 
-    test('should round-trip ordered operations and preserve explicit null', () {
+    test('should snapshot ordered wire operations and preserve explicit null', () {
       final wire = <Object?>[
         <String, Object?>{'op': 'add', 'path': '/a', 'value': null, 'ignored': true},
         <String, Object?>{
@@ -20,6 +20,8 @@ void main() {
       ];
 
       final patch = JsonPatch.fromJson(wire);
+      ((wire[1]! as Map<String, Object?>)['value']! as List<Object?>).clear();
+      wire.clear();
 
       expect(patch.operations, <Matcher>[
         isA<JsonAdd>().having((operation) => operation.value, 'value', isNull),

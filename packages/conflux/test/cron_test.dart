@@ -10,6 +10,17 @@ void main() {
   final newYork = tz.getLocation('America/New_York');
 
   group('Cron', () {
+    test('should keep large positive steps within field bounds', () {
+      const step = '9223372036854775807';
+      final cron = (Cron.parse('2/$step 0 0 */$step * *', utc) as Success<Cron, CronError>).value;
+
+      expect(cron.seconds, {2});
+      expect(cron.days, {1});
+      final reparsed = (Cron.parse(cron.format(), utc) as Success<Cron, CronError>).value;
+      expect(reparsed.seconds, cron.seconds);
+      expect(reparsed.days, cron.days);
+    });
+
     test('should parse five fields with second zero', () {
       final result = Cron.parse('*/15 9-17 * jan,mar mon-fri', utc);
       final cron = (result as Success<Cron, CronError>).value;

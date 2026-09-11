@@ -8,6 +8,7 @@ import 'package:conflux/src/effect/cause.dart' show CauseRuntimeOperations;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show EffectExecution, ScopeAccess;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
+import 'package:conflux/src/flow/protocol.dart';
 
 /// The action a Flow operation takes when its owned buffer is full.
 enum FlowOverflowPolicy {
@@ -58,7 +59,7 @@ void validateFlowBuffer<E>(
 ///
 /// One producer wait may retain one value while backpressured. Closing interrupts
 /// every pending producer and consumer registration.
-final class FlowMailbox<A, E> {
+final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   /// Creates an open mailbox with already validated configuration.
   FlowMailbox(this.capacity, this.overflow, this._onOverflow);
 
@@ -94,6 +95,9 @@ final class FlowMailbox<A, E> {
       ),
     };
   });
+
+  @override
+  Effect<Option<A>, E> next() => take();
 
   /// Takes one value, retained terminal failure, or normal completion.
   Effect<Option<A>, E> take() => EffectAccess.create((execution) async {

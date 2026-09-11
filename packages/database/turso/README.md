@@ -124,7 +124,8 @@ Native parent directories must already exist. `':memory:'` creates an in-memory 
 native and web. A persistent browser main accepts a single OPFS filename and alias as direct SQL
 arguments or positional and named parameters. Bound aliases retain the supplied spelling, so use a
 stable lowercase alias when later statements refer to it. Computed attachment arguments are
-unsupported. A browser memory main supports memory attachments only.
+unsupported. An attachment database and its `-wal` file must not overlap another database/WAL pair
+owned by the same connection. A browser memory main supports memory attachments only.
 
 Browser filenames may also use a lowercase `file:` URI with one percent-encoded filename, optional
 `mode=rwc`, and paired `cipher` and `hexkey` options:

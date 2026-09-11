@@ -5,6 +5,29 @@ import 'package:test/test.dart';
 
 void main() {
   group('Effect race', () {
+    test('should keep completion order after an earlier same-turn failure', () async {
+      final gates = List.generate(4, (_) => Completer<int>());
+      final starts = List.generate(4, (_) => Completer<void>());
+      final running = Effect.race<int, int>([
+        for (var index = 0; index < gates.length; index += 1)
+          Effect.tryFuture<int, int>(
+            () {
+              starts[index].complete();
+              return gates[index].future;
+            },
+            onError: (_, _) => index,
+          ),
+      ]).runFuture();
+      await Future.wait(starts.map((start) => start.future));
+
+      gates[0].completeError(StateError('first failed'));
+      gates[3].complete(3);
+      gates[2].complete(2);
+      gates[1].complete(1);
+
+      expect(await running, 3);
+    });
+
     test('should wait for a success after an earlier expected failure', () async {
       final success = Completer<int>();
       final effect = Effect.race<int, String>([

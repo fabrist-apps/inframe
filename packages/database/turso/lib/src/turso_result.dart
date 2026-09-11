@@ -1,5 +1,6 @@
-import 'dart:collection';
 import 'dart:typed_data';
+
+import 'package:turso/src/internal/parameters.dart' show portableSafeInteger;
 
 /// Metadata for one ordered result column.
 final class TursoColumn {
@@ -55,8 +56,7 @@ final class TursoRow {
   /// Returns a SQL INTEGER within Dart's portable safe-integer range.
   int getInt(String name) {
     final value = getBigInt(name);
-    const safeLimit = 9007199254740991;
-    if (value < BigInt.from(-safeLimit) || value > BigInt.from(safeLimit)) {
+    if (value < BigInt.from(-portableSafeInteger) || value > BigInt.from(portableSafeInteger)) {
       throw RangeError('Column "$name" is outside the portable safe-integer range: $value.');
     }
     return value.toInt();
@@ -89,8 +89,8 @@ final class TursoQueryResult {
   TursoQueryResult({
     required List<TursoColumn> columns,
     required List<TursoRow> rows,
-  }) : columns = UnmodifiableListView(List<TursoColumn>.of(columns)),
-       rows = UnmodifiableListView(List<TursoRow>.of(rows));
+  }) : columns = List<TursoColumn>.unmodifiable(columns),
+       rows = List<TursoRow>.unmodifiable(rows);
 
   /// Ordered output columns.
   final List<TursoColumn> columns;

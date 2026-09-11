@@ -171,7 +171,7 @@ final class Response {
   /// Creates a metadata view sharing this response's body owner.
   Response withHeaders(Headers headers) {
     final validatedHeaders = switch (_delivery) {
-      _OrdinaryDelivery() => _validatedResponseHeaders(headers),
+      _OrdinaryDelivery() => _validateResponseHeaders(headers),
       _SseDelivery() => _sseHeaders(headers),
       _WebSocketDelivery() => _webSocketHeaders(headers),
     };
@@ -267,7 +267,7 @@ void _validateStatus(int status) {
 bool _statusSuppressesBody(int status) =>
     status == HttpStatus.noContent || status == HttpStatus.resetContent || status == 304;
 
-void _validateResponseHeaders(Headers headers) {
+Headers _validateResponseHeaders(Headers headers) {
   const forbidden = <String>{
     HttpHeaders.contentLengthHeader,
     HttpHeaders.transferEncodingHeader,
@@ -282,10 +282,6 @@ void _validateResponseHeaders(Headers headers) {
       throw ArgumentError.value(name, 'headers', 'is owned by the HTTP adapter');
     }
   }
-}
-
-Headers _validatedResponseHeaders(Headers headers) {
-  _validateResponseHeaders(headers);
   return headers;
 }
 
