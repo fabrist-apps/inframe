@@ -1,5 +1,5 @@
 name: inlet
-description: In-process and HTTP routing with buffered and streamed bodies.
+description: In-process and HTTP routing with buffered, streamed, and server-sent event bodies.
 version: 0.1.0
 publish_to: none
 resolution: workspace

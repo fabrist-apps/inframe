@@ -1,8 +1,14 @@
 part of 'inlet.dart';
 
-/// An event or comment delivered by [Response.sse].
+/// One immutable event-stream frame delivered by [Response.sse].
+///
+/// Event data is encoded as UTF-8 when this value is created. Line endings in
+/// data are normalized to LF and each line becomes one `data:` field.
 final class SseEvent {
   /// Creates a text event with optional event-stream metadata.
+  ///
+  /// [event] and [id] may be empty, but must not contain CR, LF, or NUL.
+  /// [retry] must be nonnegative and contain a whole number of milliseconds.
   SseEvent({
     required String data,
     String? event,
@@ -16,6 +22,9 @@ final class SseEvent {
        );
 
   /// Creates a text event from an immediate JSON snapshot of [data].
+  ///
+  /// Later mutation of [data] does not change this event. JSON encoding errors
+  /// are thrown during construction.
   factory SseEvent.json(
     Object? data, {
     String? event,
@@ -29,6 +38,8 @@ final class SseEvent {
   );
 
   /// Creates a single-line event-stream comment.
+  ///
+  /// [value] may be empty, but must not contain CR or LF.
   SseEvent.comment(String value) : _encoded = _encodeComment(value);
 
   final List<int> _encoded;

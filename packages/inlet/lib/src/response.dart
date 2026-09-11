@@ -12,7 +12,7 @@ final class ResponseBodyLimitExceededException implements Exception {
   String toString() => 'ResponseBodyLimitExceededException: Body exceeds $maxBytes bytes.';
 }
 
-/// An ordinary buffered or streamed response.
+/// A buffered, streamed, or server-sent event response.
 final class Response {
   Response._({
     required this.statusCode,
@@ -73,7 +73,16 @@ final class Response {
     body: _Body(value),
   );
 
-  /// Creates a lazy server-sent event response.
+  /// Creates a lazy server-sent event response with fixed HTTP metadata.
+  ///
+  /// The response always uses status 200 and
+  /// `text/event-stream; charset=utf-8`. It adds `cache-control: no-cache`
+  /// when [headers] contains no cache policy. The event source is subscribed
+  /// only when a consumer reads the body; HEAD never subscribes.
+  ///
+  /// In process, each event is one complete body chunk. HTTP delivery commits
+  /// headers before subscription and awaits one socket flush per event. Closing
+  /// or cancelling delivery requests cancellation of the event source.
   factory Response.sse(
     Stream<SseEvent> events, {
     Headers headers = const Headers.empty(),
