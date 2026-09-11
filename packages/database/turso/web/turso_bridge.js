@@ -295,7 +295,9 @@ async function prepareAttachment(inspection, parameters) {
       return null;
     case 'attach': {
       const filename = resolvedArgument(inspection.first, parameters, 'ATTACH filename');
-      const alias = resolvedArgument(inspection.second, parameters, 'ATTACH alias');
+      const alias = normalizedAlias(
+        resolvedArgument(inspection.second, parameters, 'ATTACH alias'),
+      );
       if (filename === ':memory:') return { kind: 'attach', alias, filename: null, acquired: false };
       if (mainDatabasePath === null) {
         throw new UnsupportedError(
@@ -323,11 +325,15 @@ async function prepareAttachment(inspection, parameters) {
     case 'detach':
       return {
         kind: 'detach',
-        alias: resolvedArgument(inspection.first, parameters, 'DETACH alias'),
+        alias: normalizedAlias(resolvedArgument(inspection.first, parameters, 'DETACH alias')),
       };
     default:
       throw new IntegrationError(`Unknown SQL inspection kind: ${inspection.kind}.`);
   }
+}
+
+function normalizedAlias(alias) {
+  return alias.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
 function resolvedArgument(argument, parameters, label) {

@@ -5,6 +5,7 @@ export class AttachmentRegistry {
     this.unregisterFile = unregisterFile;
     this.schemas = new Map();
     this.owners = new Map();
+    this.pendingReleases = new Set();
   }
 
   async acquire(filename) {
@@ -70,17 +71,29 @@ export class AttachmentRegistry {
   }
 
   async releaseAll(additionalFilenames = []) {
-    const filenames = new Set([...this.owners.keys(), ...additionalFilenames]);
+    const filenames = new Set([
+      ...this.owners.keys(),
+      ...this.pendingReleases,
+      ...additionalFilenames,
+    ]);
     const failures = [];
+    const unreleased = new Set();
     for (const filename of filenames) {
       try {
         await this.releaseFiles(filename);
+        this.pendingReleases.delete(filename);
       } catch (error) {
         failures.push(error);
+        unreleased.add(filename);
+        this.pendingReleases.add(filename);
       }
     }
-    this.schemas.clear();
-    this.owners.clear();
+    for (const [alias, filename] of this.schemas) {
+      if (!unreleased.has(filename)) this.schemas.delete(alias);
+    }
+    for (const filename of this.owners.keys()) {
+      if (!unreleased.has(filename)) this.owners.delete(filename);
+    }
     if (failures.length !== 0) {
       throw new AggregateError(failures, 'One or more Turso attachment files could not be released.');
     }

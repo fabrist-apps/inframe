@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+import {
+  OpfsDirectory,
+  assertOpfsDirectoryCompatibility,
+  respondToAsyncOperation,
+} from './wasm_common_patch.mjs';
+
 const source = await readFile(new URL('../../web/turso_attachment_registry.js', import.meta.url));
 const { AttachmentRegistry, AttachmentRegistryError } = await import(
   `data:text/javascript;base64,${source.toString('base64')}`
@@ -89,12 +95,15 @@ test('multiple aliases and the main database never double-register', async () =>
 });
 
 test('releaseAll attempts every owned and uncertain filename', async () => {
+  let fail = true;
   const calls = [];
   const registry = registryWith({
     calls,
     unregisterFile: async (path) => {
       calls.push(['unregister', path]);
-      if (path === 'first.db') throw new Error('first failed');
+      if (fail && (path === 'first.db' || path === 'uncertain.db')) {
+        throw new Error(`${path} failed`);
+      }
     },
   });
   registry.rememberAttachment({ alias: 'first', filename: 'first.db' });
@@ -111,6 +120,45 @@ test('releaseAll attempts every owned and uncertain filename', async () => {
       'uncertain.db-wal',
       'uncertain.db',
     ],
+  );
+
+  fail = false;
+  calls.length = 0;
+  await registry.releaseAll();
+  assert.deepEqual(
+    calls.map(([, path]) => path),
+    ['first.db-wal', 'first.db', 'uncertain.db-wal', 'uncertain.db'],
+  );
+});
+
+test('async worker operations report failures immediately', () => {
+  const replies = [];
+  respondToAsyncOperation(
+    { id: 'request-1' },
+    () => {
+      throw new Error('read failed');
+    },
+    (reply) => replies.push(reply),
+  );
+  assert.deepEqual(replies, [
+    {
+      __turso__: true,
+      id: 'request-1',
+      error: { message: 'read failed' },
+    },
+  ]);
+});
+
+test('the pinned OPFS directory exposes the fields used by registration', () => {
+  assert.doesNotThrow(() => assertOpfsDirectoryCompatibility(new OpfsDirectory()));
+  assert.throws(
+    () =>
+      assertOpfsDirectoryCompatibility({
+        fileByPath: new Map(),
+        fileByHandle: new Map(),
+        fileHandleNo: undefined,
+      }),
+    /incompatible/,
   );
 });
 

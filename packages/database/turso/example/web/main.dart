@@ -587,7 +587,8 @@ Future<void> _verifyEncryptedPersistentAttachment() async {
     await database.execute('DETACH DATABASE encrypted_auxiliary');
 
     await database.execute(
-      "ATTACH DATABASE 'file:turso-dart-web-uri%20attached.db?mode=rwc' AS uri_auxiliary",
+      "ATTACH DATABASE 'file:${Uri.encodeComponent(_uriAttachmentName)}?mode=rwc' "
+      'AS uri_auxiliary',
     );
     await database.execute('CREATE TABLE IF NOT EXISTS uri_auxiliary.items (id INTEGER)');
     await database.execute('DELETE FROM uri_auxiliary.items');
@@ -720,11 +721,15 @@ Future<void> _verifyAttachmentOwnershipFailures() async {
     TursoLocation.browser(_ownershipMainName),
     web: _bridge,
   );
-  await draining.execute("ATTACH DATABASE '$_sharedAttachmentName' AS close_owner");
-  final accepted = draining.execute('INSERT INTO close_owner.items VALUES (9)');
-  final closed = draining.close();
-  await accepted;
-  await closed;
+  try {
+    await draining.execute("ATTACH DATABASE '$_sharedAttachmentName' AS close_owner");
+    final accepted = draining.execute('INSERT INTO close_owner.items VALUES (9)');
+    final closed = draining.close();
+    await accepted;
+    await closed;
+  } finally {
+    await draining.close();
+  }
 
   final afterClose = await TursoDatabase.open(
     TursoLocation.browser(_sharedAttachmentName),
@@ -794,10 +799,13 @@ Future<void> _verifyAttachmentBoundaryFailures() async {
     TursoLocation.browser(_contentionMainName),
     web: _faultBridge('attachment-wal-registration'),
   );
-  await _expectFailure<TursoDatabaseException>(
-    () => registrationFailure.execute("ATTACH DATABASE '$_failedAttachmentName' AS failed"),
-  );
-  await registrationFailure.close();
+  try {
+    await _expectFailure<TursoDatabaseException>(
+      () => registrationFailure.execute("ATTACH DATABASE '$_failedAttachmentName' AS failed"),
+    );
+  } finally {
+    await registrationFailure.close();
+  }
 
   final afterFailure = await TursoDatabase.open(
     TursoLocation.browser(_failedAttachmentName),
@@ -816,13 +824,16 @@ Future<void> _verifyAttachmentBoundaryFailures() async {
     TursoLocation.browser(_uncertainMainName),
     web: _faultBridge('attach-finalization'),
   );
-  final interrupted = _expectFailure<TursoPlatformException>(
-    () => uncertain.execute("ATTACH DATABASE '$_uncertainAttachmentName' AS uncertain"),
-  );
-  final queued = _expectFailure<TursoPlatformException>(() => uncertain.query('SELECT 1'));
-  await Future.wait([interrupted, queued]);
-  await _expectFailure<TursoPlatformException>(() => uncertain.query('SELECT 2'));
-  await uncertain.close();
+  try {
+    final interrupted = _expectFailure<TursoPlatformException>(
+      () => uncertain.execute("ATTACH DATABASE '$_uncertainAttachmentName' AS uncertain"),
+    );
+    final queued = _expectFailure<TursoPlatformException>(() => uncertain.query('SELECT 1'));
+    await Future.wait([interrupted, queued]);
+    await _expectFailure<TursoPlatformException>(() => uncertain.query('SELECT 2'));
+  } finally {
+    await uncertain.close();
+  }
 
   final recovered = await TursoDatabase.open(
     TursoLocation.browser(_uncertainMainName),
@@ -840,23 +851,26 @@ Future<void> _verifyAttachmentBoundaryFailures() async {
     TursoLocation.browser(_uncertainMainName),
     web: _bridge,
   );
-  await rollbackFailure.execute(
-    "ATTACH DATABASE '$_uncertainAttachmentName' AS rollback_owner",
-  );
-  final transactionFailure = await _captureFailure(
-    () => rollbackFailure.transaction(
-      (tx) => tx.execute('DETACH DATABASE missing_rollback_owner'),
-    ),
-    label: 'transaction rollback failure',
-  );
-  _expect(
-    transactionFailure is TursoTransactionException &&
-        transactionFailure.primaryError is TursoDatabaseException &&
-        transactionFailure.rollbackError is TursoDatabaseException,
-    'Rollback failure did not preserve both database errors: $transactionFailure',
-  );
-  await _expectFailure<TursoPlatformException>(() => rollbackFailure.query('SELECT 1'));
-  await rollbackFailure.close();
+  try {
+    await rollbackFailure.execute(
+      "ATTACH DATABASE '$_uncertainAttachmentName' AS rollback_owner",
+    );
+    final transactionFailure = await _captureFailure(
+      () => rollbackFailure.transaction(
+        (tx) => tx.execute('DETACH DATABASE missing_rollback_owner'),
+      ),
+      label: 'transaction rollback failure',
+    );
+    _expect(
+      transactionFailure is TursoTransactionException &&
+          transactionFailure.primaryError is TursoDatabaseException &&
+          transactionFailure.rollbackError is TursoDatabaseException,
+      'Rollback failure did not preserve both database errors: $transactionFailure',
+    );
+    await _expectFailure<TursoPlatformException>(() => rollbackFailure.query('SELECT 1'));
+  } finally {
+    await rollbackFailure.close();
+  }
 }
 
 TursoWebOptions _faultBridge(String fault) => TursoWebOptions(

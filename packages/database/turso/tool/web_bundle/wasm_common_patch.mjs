@@ -204,6 +204,7 @@ export async function runWithSynchronousIo(action) {
 // lets the main WASM instance resolve files that the same worker already owns.
 export function setupWebWorker() {
   const opfs = new OpfsDirectory();
+  assertOpfsDirectoryCompatibility(opfs);
   let memory = null;
   let mutationTail = Promise.resolve();
   const handler = new MessageHandler({
@@ -278,36 +279,52 @@ export function setupWebWorker() {
       );
       return;
     }
-    if (event.data.__turso__ === 'read_async') {
-      const result = opfs.read(
-        event.data.handle,
-        new Uint8Array(memory.buffer, event.data.ptr >>> 0, event.data.len),
-        event.data.offset,
-      );
-      self.postMessage({ __turso__: true, id: event.data.id, result });
-      return;
-    }
-    if (event.data.__turso__ === 'write_async') {
-      const result = opfs.write(
-        event.data.handle,
-        new Uint8Array(memory.buffer, event.data.ptr >>> 0, event.data.len),
-        event.data.offset,
-      );
-      self.postMessage({ __turso__: true, id: event.data.id, result });
-      return;
-    }
-    if (event.data.__turso__ === 'sync_async') {
-      const result = opfs.sync(event.data.handle);
-      self.postMessage({ __turso__: true, id: event.data.id, result });
-      return;
-    }
-    if (event.data.__turso__ === 'truncate_async') {
-      const result = opfs.truncate(event.data.handle, event.data.len);
-      self.postMessage({ __turso__: true, id: event.data.id, result });
+    const asyncOperations = {
+      read_async: () =>
+        opfs.read(
+          event.data.handle,
+          new Uint8Array(memory.buffer, event.data.ptr >>> 0, event.data.len),
+          event.data.offset,
+        ),
+      write_async: () =>
+        opfs.write(
+          event.data.handle,
+          new Uint8Array(memory.buffer, event.data.ptr >>> 0, event.data.len),
+          event.data.offset,
+        ),
+      sync_async: () => opfs.sync(event.data.handle),
+      truncate_async: () => opfs.truncate(event.data.handle, event.data.len),
+    };
+    const asyncOperation = asyncOperations[event.data.__turso__];
+    if (asyncOperation !== undefined) {
+      respondToAsyncOperation(event.data, asyncOperation, (reply) => self.postMessage(reply));
       return;
     }
     handler.handle(event);
   };
+}
+
+export function respondToAsyncOperation(request, action, postMessage) {
+  try {
+    postMessage({ __turso__: true, id: request.id, result: action() });
+  } catch (error) {
+    postMessage({
+      __turso__: true,
+      id: request.id,
+      error: { message: error instanceof Error ? error.message : String(error) },
+    });
+  }
+}
+
+export function assertOpfsDirectoryCompatibility(opfs) {
+  if (
+    !(opfs.fileByPath instanceof Map) ||
+    !(opfs.fileByHandle instanceof Map) ||
+    !Number.isSafeInteger(opfs.fileHandleNo) ||
+    opfs.fileHandleNo < 0
+  ) {
+    throw new Error('The pinned Turso OPFS directory implementation is incompatible.');
+  }
 }
 
 function respondToMutation(previous, request, action) {

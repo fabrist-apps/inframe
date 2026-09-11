@@ -76,10 +76,11 @@ fully buffered, so applications must bound queries whose result size can grow.
 
 ## V1 boundaries
 
-The package uses unchanged upstream Turso and does not patch encryption or storage behavior. Native
-temporary query files can bypass page encryption with upstream's file-based temporary storage, and
-`VACUUM INTO` can produce a plaintext destination. The package does not force `temp_store`, rewrite
-SQL, or block exports.
+The package uses the unchanged upstream Turso engine and bindings. Its browser bundle wraps the
+pinned JavaScript storage glue to register attachment files, without changing encryption or storage
+behavior. Native temporary query files can bypass page encryption with upstream's file-based
+temporary storage, and `VACUUM INTO` can produce a plaintext destination. The package does not force
+`temp_store`, rewrite SQL, or block exports.
 
 Cloud sync, watch queries, migrations, ORM integration, SQL builders, code generation, public
 prepared statements, streaming results, execution timeouts, cancellation, publication, a standalone
