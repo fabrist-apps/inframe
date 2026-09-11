@@ -27,7 +27,9 @@ final class TursoDatabase {
   /// hosting, schema creation, and encryption-key storage. A requested
   /// [encryption] configuration fails explicitly when the backend rejects it;
   /// opening never retries as plaintext. Browser and memory locations on web
-  /// require version-matched [web] options.
+  /// require version-matched [web] options. ATTACH and DETACH are available
+  /// through [query] and [execute]. The caller enables foreign-key enforcement
+  /// with `PRAGMA foreign_keys=ON` on each connection when needed.
   static Future<TursoDatabase> open(
     TursoLocation location, {
     TursoEncryption? encryption,

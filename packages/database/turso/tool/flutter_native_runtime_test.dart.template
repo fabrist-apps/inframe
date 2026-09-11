@@ -66,6 +66,8 @@ void main() {
       expect((await second.query('SELECT 7 AS value')).rows.single.getInt('value'), 7);
     });
 
+    testWidgets('should attach persistent and memory databases', (_) => _verifyAttachments());
+
     testWidgets('should enforce binding and result contracts', (_) => _verifyBindingsAndResults());
     testWidgets('should enforce transaction and lifecycle contracts', (_) => _verifyTransactions());
     for (final cipher in TursoCipher.values) {
@@ -152,6 +154,63 @@ Future<void> _verifyBindingsAndResults() async {
   }
 }
 
+Future<void> _verifyAttachments() async {
+  final directory = Directory.systemTemp.createTempSync('turso-attachments-');
+  final mainPath = '${directory.path}/main.turso';
+  final attachedPath = '${directory.path}/attached.turso';
+  try {
+    final database = await TursoDatabase.open(TursoLocation.file(mainPath));
+    expect(
+      (await database.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys'),
+      0,
+    );
+    await database.execute(
+      'ATTACH DATABASE ? AS auxiliary',
+      parameters: [attachedPath],
+    );
+    await database.execute('PRAGMA foreign_keys=ON');
+    await database.execute('CREATE TABLE auxiliary.parents (id INTEGER PRIMARY KEY)');
+    await database.execute(
+      'CREATE TABLE auxiliary.children ('
+      'id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents(id))',
+    );
+    await database.execute('INSERT INTO auxiliary.parents VALUES (1)');
+    await database.execute('INSERT INTO auxiliary.children VALUES (1, 1)');
+    await expectLater(
+      database.execute('INSERT INTO auxiliary.children VALUES (2, 99)'),
+      throwsA(isA<TursoDatabaseException>()),
+    );
+    expect(
+      (await database.query(
+        'SELECT children.id AS id FROM auxiliary.children '
+        'JOIN auxiliary.parents ON parents.id = children.parent_id',
+      )).rows.single.getInt('id'),
+      1,
+    );
+    await database.execute('DETACH DATABASE auxiliary');
+    await database.execute(
+      'ATTACH DATABASE ? AS auxiliary',
+      parameters: [attachedPath],
+    );
+    expect(
+      (await database.query('SELECT id FROM auxiliary.children')).rows.single.getInt('id'),
+      1,
+    );
+    await database.execute('DETACH DATABASE auxiliary');
+    await database.execute("ATTACH DATABASE ':memory:' AS scratch");
+    await database.execute('CREATE TABLE scratch.items (id INTEGER PRIMARY KEY)');
+    await database.execute('INSERT INTO scratch.items VALUES (7)');
+    expect((await database.query('SELECT id FROM scratch.items')).rows.single.getInt('id'), 7);
+    await database.close();
+
+    final attached = await TursoDatabase.open(TursoLocation.file(attachedPath));
+    expect((await attached.query('SELECT id FROM children')).rows.single.getInt('id'), 1);
+    await attached.close();
+  } finally {
+    directory.deleteSync(recursive: true);
+  }
+}
+
 Future<void> _verifyTransactions() async {
   final database = await TursoDatabase.open(TursoLocation.memory());
   final other = await TursoDatabase.open(TursoLocation.memory());
@@ -218,8 +277,7 @@ Future<void> _verifyEncryptedFeatures(TursoCipher cipher) async {
   }
 }
 
-Uint8List _encryptionKey() =>
-    Uint8List.fromList(List<int>.generate(32, (index) => index + 1));
+Uint8List _encryptionKey() => Uint8List.fromList(List<int>.generate(32, (index) => index + 1));
 
 Future<void> _runEncryptedFeatures(Directory directory, TursoCipher cipher) async {
   final location = TursoLocation.file('${directory.path}/database.turso');
@@ -229,6 +287,11 @@ Future<void> _runEncryptedFeatures(Directory directory, TursoCipher cipher) asyn
   expect(database.capabilities.fts, isTrue);
   expect(database.capabilities.vectorFunctions, isTrue);
   expect(database.capabilities.vectorIndexes, isFalse);
+  await database.execute("ATTACH DATABASE ':memory:' AS auxiliary");
+  await database.execute('CREATE TABLE auxiliary.items (id INTEGER PRIMARY KEY)');
+  await database.execute('INSERT INTO auxiliary.items VALUES (1)');
+  expect((await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id'), 1);
+  await database.execute('DETACH DATABASE auxiliary');
   await database.execute('CREATE TABLE documents (id INTEGER PRIMARY KEY, body TEXT)');
   await database.execute('CREATE INDEX documents_fts ON documents USING fts (body)');
   await database.execute(
