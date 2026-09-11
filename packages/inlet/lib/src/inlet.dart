@@ -13,6 +13,7 @@ part 'request.dart';
 part 'response.dart';
 part 'router.dart';
 part 'server.dart';
+part 'sse_event.dart';
 
 /// A request handler.
 typedef Handler = FutureOr<Response> Function(Context context, Request request);

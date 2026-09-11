@@ -262,6 +262,7 @@ final class _ServerAdapter {
     bool resetTarget = false,
   }) async {
     var committed = false;
+    Socket? detachedSocket;
     try {
       final suppressBody = response._suppressBody || isHead;
       if (!suppressBody && !response._body.isUntouched) {
@@ -302,6 +303,22 @@ final class _ServerAdapter {
         await close;
         return;
       }
+      if (response._delivery is _SseDelivery) {
+        target
+          ..persistentConnection = false
+          ..headers.chunkedTransferEncoding = false;
+        final detach = target.detachSocket();
+        committed = true;
+        detachedSocket = await detach;
+        await detachedSocket.flush();
+        await for (final event in response.body) {
+          detachedSocket.add(event);
+          await detachedSocket.flush();
+        }
+        await detachedSocket.close();
+        detachedSocket = null;
+        return;
+      }
       if (knownLength != null) {
         target.contentLength = knownLength;
       }
@@ -310,6 +327,7 @@ final class _ServerAdapter {
       await delivery;
       await target.close();
     } on Object catch (error, stackTrace) {
+      detachedSocket?.destroy();
       throw _DeliveryFailure(error, stackTrace, committed: committed);
     }
   }
