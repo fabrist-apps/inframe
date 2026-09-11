@@ -37,6 +37,9 @@ jobs:
           channel: stable
       - name: Install Linux Flutter dependencies
         run: |
+          sudo find /etc/apt -maxdepth 2 -type f \
+            \( -name '*.list' -o -name '*.sources' \) \
+            -exec sed -i -E 's|http://([a-z.]*ubuntu.com)|https://\1|g' {} +
           for attempt in 1 2 3; do
             if sudo apt-get \
                 -o Acquire::Retries=2 \
