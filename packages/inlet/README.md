@@ -1,6 +1,6 @@
 # Inlet
 
-Inlet routes the same Dart handler in process or through an HTTP/TLS listener. It provides immutable request metadata, scoped middleware, bounded body buffering, and lazy byte streams without application-level retries or automatic compression.
+Inlet routes the same Dart handler in process or through an HTTP/TLS listener. It provides immutable request metadata, scoped middleware, bounded body buffering, lazy byte streams, and server-sent events without application-level retries or automatic compression.
 
 ## JSON endpoint
 
@@ -51,6 +51,35 @@ try {
 
 `serve` defaults to `127.0.0.1:8080`. `serveSecure` accepts a `SecurityContext` and defaults to `127.0.0.1:8443`. Both accept an explicit address, port, backlog, shared binding, and nullable keep-alive idle timeout. A normal close stops admission and leaves active connections to finish. Its future marks the listener admission boundary, not completion of application handlers. A later `close(force: true)` closes that listener's active connections. Repeated calls return the first close future.
 
+## Server-sent events
+
+Return `Response.sse` from a route to deliver typed events and comments:
+
+```dart
+Stream<SseEvent> documentUpdates() async* {
+  yield SseEvent.json(
+    {'title': 'Ready'},
+    event: 'document',
+    id: 'event-1',
+  );
+  await Future<void>.delayed(const Duration(seconds: 15));
+  yield SseEvent.comment('keep-alive');
+}
+
+final app = Inlet()
+  ..get('/events', (_, _) => Response.sse(documentUpdates()));
+```
+
+`SseEvent` supports text data, immediate JSON snapshots, event names, IDs, whole-millisecond retry delays, and single-line comments. Data line endings are normalized to LF and empty data lines and IDs remain explicit in the wire format. Event names and IDs reject CR, LF, and NUL. Comments reject CR and LF.
+
+An SSE response always has status 200 and `text/event-stream; charset=utf-8`. It adds `cache-control: no-cache` only when the supplied headers contain no cache policy. SSE rejects content encoding and caller-owned framing headers. `withHeaders` restores the canonical SSE headers and keeps the same delivery policy and source owner.
+
+In-process delivery emits one complete encoded event or comment per body chunk. The usual response buffering limit and raw-versus-buffered exclusivity still apply. Over HTTP, Inlet flushes headers before subscribing, then writes and flushes one complete event before requesting the next one. A successful socket flush cannot guarantee that a proxy or browser has already delivered the event.
+
+The event producer owns heartbeat timing, replay and `Last-Event-ID` handling, event limits, resources, and any slow-consumer policy beyond transport backpressure. Inlet adds no replay store, output queue, automatic heartbeat, compression, or cancellation deadline. Pause, resume, cancellation, disconnects observed by Dart, and source failures propagate through the event subscription. Cleanup still depends on the producer cooperating with cancellation; Inlet cannot interrupt an arbitrary pending future.
+
+HEAD returns the SSE headers without subscribing to the source. Closing an untouched response also avoids subscription. Return an ordinary `Response.empty()` with status 204 when an EventSource client should stop reconnecting.
+
 ## Routes and middleware
 
 Literal segments take precedence over `:parameters`, then final `*wildcards`. Strict routing distinguishes a trailing slash; create `Inlet(strict: false)` to ignore one trailing slash. Mount a prepared child router with `route`:
@@ -91,7 +120,7 @@ Malformed UTF-8 or JSON maps to an empty 400 response. A selected request limit 
 
 ## Public API
 
-`package:inlet/inlet.dart` exposes `Inlet`, `Router`, `Request`, `Response`, `Headers`, `ConnectionInfo`, `InletServer`, the handler and middleware callback types, and the request/response body-limit exceptions. Server-sent events and WebSockets are not part of this core API.
+`package:inlet/inlet.dart` exposes `Inlet`, `Router`, `Request`, `Response`, `SseEvent`, `Headers`, `ConnectionInfo`, `InletServer`, the handler and middleware callback types, and the request/response body-limit exceptions. WebSockets are not part of this API.
 
 ## Run the package
 
@@ -100,6 +129,7 @@ From `packages/inlet` in the repository workspace:
 ```sh
 dart run example/inlet_example.dart
 dart run example/stream_transfers.dart
+dart run example/live_events.dart
 dart test
 dart analyze --fatal-infos
 ```

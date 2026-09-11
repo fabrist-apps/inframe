@@ -12,12 +12,12 @@ final class ResponseBodyLimitExceededException implements Exception {
   String toString() => 'ResponseBodyLimitExceededException: Body exceeds $maxBytes bytes.';
 }
 
-/// An ordinary buffered or streamed response.
+/// A buffered, streamed, or server-sent event response.
 final class Response {
   Response._({
     required this.statusCode,
     required this.headers,
-    required this._body,
+    required this._delivery,
     this._suppressBody = false,
   });
 
@@ -73,13 +73,32 @@ final class Response {
     body: _Body(value),
   );
 
+  /// Creates a lazy server-sent event response with fixed HTTP metadata.
+  ///
+  /// The response always uses status 200 and
+  /// `text/event-stream; charset=utf-8`. It adds `cache-control: no-cache`
+  /// when [headers] contains no cache policy. The event source is subscribed
+  /// only when a consumer reads the body; HEAD never subscribes.
+  ///
+  /// In process, each event is one complete body chunk. HTTP delivery commits
+  /// headers before subscription and awaits one socket flush per event. Closing
+  /// or cancelling delivery requests cancellation of the event source.
+  factory Response.sse(
+    Stream<SseEvent> events, {
+    Headers headers = const Headers.empty(),
+  }) => Response._(
+    statusCode: HttpStatus.ok,
+    headers: _sseHeaders(headers),
+    delivery: _SseDelivery(_Body(events.map((event) => event._encoded))),
+  );
+
   factory Response._create({required int status, required Headers headers, required _Body body}) {
     _validateStatus(status);
     _validateResponseHeaders(headers);
     return Response._(
       statusCode: status,
       headers: headers,
-      body: body,
+      delivery: _OrdinaryDelivery(body),
       suppressBody: _statusSuppressesBody(status),
     );
   }
@@ -90,26 +109,36 @@ final class Response {
   /// Application response headers.
   final Headers headers;
 
-  final _Body _body;
+  final _ResponseDelivery _delivery;
   final bool _suppressBody;
+
+  _Body get _body => _delivery.body;
 
   /// The body stream, claimed when it is first listened to.
   Stream<List<int>> get body => _suppressBody ? const Stream.empty() : _body.stream;
 
   /// Creates a metadata view sharing this response's body owner.
   Response withHeaders(Headers headers) {
-    _validateResponseHeaders(headers);
+    final validatedHeaders = switch (_delivery) {
+      _OrdinaryDelivery() => _validatedResponseHeaders(headers),
+      _SseDelivery() => _sseHeaders(headers),
+    };
     return Response._(
       statusCode: statusCode,
-      headers: headers,
-      body: _body,
+      headers: validatedHeaders,
+      delivery: _delivery,
       suppressBody: _suppressBody,
     );
   }
 
   Response _withoutBody() => _suppressBody
       ? this
-      : Response._(statusCode: statusCode, headers: headers, body: _body, suppressBody: true);
+      : Response._(
+          statusCode: statusCode,
+          headers: headers,
+          delivery: _delivery,
+          suppressBody: true,
+        );
 
   /// Buffers the body once and returns a private byte copy.
   Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
@@ -134,6 +163,20 @@ final class Response {
 
   /// Releases body resources without subscribing to an untouched source.
   Future<void> close() => _body.close();
+}
+
+sealed class _ResponseDelivery {
+  const _ResponseDelivery(this.body);
+
+  final _Body body;
+}
+
+final class _OrdinaryDelivery extends _ResponseDelivery {
+  const _OrdinaryDelivery(super.body);
+}
+
+final class _SseDelivery extends _ResponseDelivery {
+  const _SseDelivery(super.body);
 }
 
 Headers _withDefaultContentType(Headers headers, String? contentType) {
@@ -167,4 +210,28 @@ void _validateResponseHeaders(Headers headers) {
       throw ArgumentError.value(name, 'headers', 'is owned by the HTTP adapter');
     }
   }
+}
+
+Headers _validatedResponseHeaders(Headers headers) {
+  _validateResponseHeaders(headers);
+  return headers;
+}
+
+Headers _sseHeaders(Headers headers) {
+  _validateResponseHeaders(headers);
+  if (headers.contains(HttpHeaders.contentEncodingHeader)) {
+    throw ArgumentError.value(
+      HttpHeaders.contentEncodingHeader,
+      'headers',
+      'is not supported for server-sent events',
+    );
+  }
+  var result = headers.set(
+    HttpHeaders.contentTypeHeader,
+    'text/event-stream; charset=utf-8',
+  );
+  if (!result.contains(HttpHeaders.cacheControlHeader)) {
+    result = result.set(HttpHeaders.cacheControlHeader, 'no-cache');
+  }
+  return result;
 }
