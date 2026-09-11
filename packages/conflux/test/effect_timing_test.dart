@@ -7,6 +7,43 @@ import 'support/fake_clock.dart';
 
 void main() {
   group('Effect timing', () {
+    test('should release a failed clock wait before returning its defect', () async {
+      final clock = _FailingClock();
+
+      final exit = await Effect.sleep(Duration.zero).runFutureExit(clock: clock);
+
+      expect((exit as Failed<void, Never>).cause, isA<Defect<Never>>());
+      expect(clock.wait.cancellations, 1);
+    });
+
+    test('should await failed wait cleanup and preserve both defects', () async {
+      final cleanupStarted = Completer<void>();
+      final cleanupGate = Completer<void>();
+      final cleanupError = StateError('cleanup failed');
+      final clock = _FailingClock(
+        onCancel: () async {
+          cleanupStarted.complete();
+          await cleanupGate.future;
+          throw cleanupError;
+        },
+      );
+      var finished = false;
+      final running = Effect.sleep(Duration.zero).runFutureExit(clock: clock);
+      unawaited(running.then((_) => finished = true));
+
+      await cleanupStarted.future;
+      await Future<void>.delayed(Duration.zero);
+      expect(finished, isFalse);
+      cleanupGate.complete();
+      final exit = await running;
+
+      final cause = (exit as Failed<void, Never>).cause as Sequential<Never>;
+      expect(cause.causes, hasLength(2));
+      expect((cause.causes.first as Defect<Never>).error, same(clock.wait.error));
+      expect((cause.causes.last as Defect<Never>).error, same(cleanupError));
+      expect(clock.wait.cancellations, 1);
+    });
+
     test('should lazily sleep and remove its wait when interrupted', () async {
       final clock = FakeClock();
       final runtime = Runtime(clock: clock);
@@ -209,4 +246,36 @@ void main() {
       );
     });
   });
+}
+
+final class _FailingClock implements Clock {
+  _FailingClock({Future<void> Function()? onCancel}) : wait = _FailingWait(onCancel);
+
+  final _FailingWait wait;
+
+  @override
+  DateTime wallTime() => DateTime.utc(2026);
+
+  @override
+  Duration monotonic() => Duration.zero;
+
+  @override
+  CancellableWait sleep(Duration duration) => wait;
+}
+
+final class _FailingWait implements CancellableWait {
+  _FailingWait(this.onCancel);
+
+  final Future<void> Function()? onCancel;
+  final error = StateError('wait failed');
+  int cancellations = 0;
+
+  @override
+  Future<void> get completed => Future<void>.error(error);
+
+  @override
+  Future<void> cancel() async {
+    cancellations += 1;
+    await onCancel?.call();
+  }
 }

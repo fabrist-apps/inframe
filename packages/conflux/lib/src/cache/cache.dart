@@ -101,12 +101,12 @@ final class Cache<K, A, E> {
   final Effect<A, E> Function(K key) _lookup;
   final EffectExecution _ownerExecution;
 
-  // Ready entries are ordered from least to most recently used. A load stays
-  // in _loads from admission through completion, including while queued. Its
-  // captured generation is the only authority to publish a successful value.
+  // Ready entries are ordered from least to most recently used. Only the load
+  // registered in _currentLoads may retain a result. Invalidated loads remain
+  // in _loads until completion so their existing waiters still receive it.
   final LinkedHashMap<K, _CacheEntry<A>> _entries = LinkedHashMap();
-  final Map<K, int> _generations = {};
-  final Map<(K, int), _CacheLoad<K, A, E>> _loads = {};
+  final Map<K, _CacheLoad<K, A, E>> _currentLoads = {};
+  final Set<_CacheLoad<K, A, E>> _loads = {};
   final ListQueue<_CacheLoad<K, A, E>> _pendingLoads = ListQueue();
   var _activeLoads = 0;
   var _closed = false;
@@ -133,7 +133,7 @@ final class Cache<K, A, E> {
   Effect<Option<A>, Never> getOption(K key) => EffectAccess.create((_) async {
     _ensureOpen();
     final entry = _readyEntry(key, touch: true);
-    return Succeeded(_optionFromEntry(entry));
+    return Succeeded(entry == null ? const None() : Some(entry.value));
   });
 
   /// Reports ready unexpired membership without starting a lookup.
@@ -145,7 +145,7 @@ final class Cache<K, A, E> {
   /// Replaces [key] with a successful [value] under a new generation.
   Effect<void, Never> set(K key, A value) => EffectAccess.create((_) async {
     _ensureOpen();
-    _advanceGeneration(key);
+    _invalidate(key);
     _retain(key, value);
     return const Succeeded(null);
   });
@@ -153,18 +153,15 @@ final class Cache<K, A, E> {
   /// Removes [key] and prevents older loads from repopulating it.
   Effect<void, Never> invalidate(K key) => EffectAccess.create((_) async {
     _ensureOpen();
-    _advanceGeneration(key);
+    _invalidate(key);
     return const Succeeded(null);
   });
 
   /// Removes every ready value and invalidates every known pending generation.
   Effect<void, Never> invalidateAll() => EffectAccess.create((_) async {
     _ensureOpen();
-    <K>{
-      ..._generations.keys,
-      ..._entries.keys,
-      ..._loads.values.map((load) => load.key),
-    }.forEach(_advanceGeneration);
+    _entries.clear();
+    _currentLoads.clear();
     return const Succeeded(null);
   });
 
@@ -178,7 +175,7 @@ final class Cache<K, A, E> {
         .where((entry) => predicate(entry.key, entry.value.value))
         .map((entry) => entry.key)
         .toList()
-        .forEach(_advanceGeneration);
+        .forEach(_invalidate);
     return const Succeeded(null);
   });
 
@@ -213,14 +210,13 @@ final class Cache<K, A, E> {
   }
 
   _CacheLoad<K, A, E> _currentLoad(K key) {
-    final generation = _generations[key] ?? 0;
-    return _loads[(key, generation)] ?? _startLoad(key, generation);
+    return _currentLoads[key] ?? _startLoad(key);
   }
 
-  _CacheLoad<K, A, E> _startLoad(K key, int generation) {
-    final loadKey = (key, generation);
-    final load = _CacheLoad<K, A, E>(key, generation);
-    _loads[loadKey] = load;
+  _CacheLoad<K, A, E> _startLoad(K key) {
+    final load = _CacheLoad<K, A, E>(key);
+    _currentLoads[key] = load;
+    _loads.add(load);
     if (_activeLoads < concurrency) {
       _runLoad(load);
     } else {
@@ -239,20 +235,20 @@ final class Cache<K, A, E> {
     unawaited(
       fiber.join().then((exit) {
         _activeLoads -= 1;
-        final loadKey = (load.key, load.generation);
-        if (identical(_loads[loadKey], load)) _loads.remove(loadKey);
+        _loads.remove(load);
+        final isCurrent = identical(_currentLoads[load.key], load);
+        if (isCurrent) _currentLoads.remove(load.key);
 
         var delivered = exit;
         try {
           if (exit case Succeeded<A, E>(:final value)) {
-            if (!_isClosed && (_generations[load.key] ?? 0) == load.generation) {
+            if (!_isClosed && isCurrent) {
               _retain(load.key, value);
             }
           }
         } on Object catch (error, stackTrace) {
           delivered = Failed(Defect(error, stackTrace));
         }
-        _pruneGeneration(load.key);
         load.complete(delivered);
         _drainPendingLoads();
       }),
@@ -321,20 +317,10 @@ final class Cache<K, A, E> {
     _entries.removeWhere((_, entry) => now >= entry.expiresAt);
   }
 
-  void _advanceGeneration(K key) {
-    if (_hasLoad(key)) {
-      _generations[key] = (_generations[key] ?? 0) + 1;
-    } else {
-      _generations.remove(key);
-    }
+  void _invalidate(K key) {
+    _currentLoads.remove(key);
     _entries.remove(key);
   }
-
-  void _pruneGeneration(K key) {
-    if (!_hasLoad(key)) _generations.remove(key);
-  }
-
-  bool _hasLoad(K key) => _loads.values.any((load) => load.key == key);
 
   void _drainPendingLoads() {
     if (_isClosed) {
@@ -359,11 +345,11 @@ final class Cache<K, A, E> {
   void _close() {
     if (_closed) return;
     _closed = true;
-    for (final load in _loads.values) {
+    for (final load in _loads) {
       load.complete(const Failed(Interrupted(ScopeClosed())));
     }
     _entries.clear();
-    _generations.clear();
+    _currentLoads.clear();
     _loads.clear();
     _pendingLoads.clear();
   }
@@ -377,10 +363,9 @@ final class _CacheEntry<A> {
 }
 
 final class _CacheLoad<K, A, E> {
-  _CacheLoad(this.key, this.generation);
+  _CacheLoad(this.key);
 
   final K key;
-  final int generation;
   final Completer<Exit<A, E>> _completion = Completer();
 
   Future<Exit<A, E>> get exit => _completion.future;
@@ -394,8 +379,4 @@ void _requireNonNegativeExpiry(Duration duration) {
   if (duration.isNegative) {
     throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
   }
-}
-
-Option<A> _optionFromEntry<A>(_CacheEntry<A>? entry) {
-  return entry == null ? const None() : Some<A>(entry.value);
 }

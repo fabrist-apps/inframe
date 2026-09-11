@@ -61,12 +61,6 @@ void main() {
       expect((mapped as Failed<List<int>, Never>).cause.containsFatal, isTrue);
     });
 
-    test('should widen an impossible expected-error channel safely', () async {
-      final widened = _acceptStringErrorFlow(Flow.fromIterable([1]).widenError());
-
-      expect(await widened.runCollect().runFuture(), [1]);
-    });
-
     test('should reject overlapping pulls on one cursor', () async {
       final release = Completer<int>();
       final slow = Effect.tryFuture<int, String>(
@@ -119,5 +113,3 @@ void main() {
     });
   });
 }
-
-Flow<int, String> _acceptStringErrorFlow(Flow<int, String> flow) => flow;

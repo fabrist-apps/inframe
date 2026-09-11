@@ -119,7 +119,7 @@ abstract final class FlowSchedulingSource {
         }
       }),
     );
-    return Succeeded(_ScheduledCursor(output));
+    return Succeeded(output);
   });
 
   static Effect<void, E> _debounce<A, E>(
@@ -179,15 +179,6 @@ abstract final class FlowSchedulingSource {
       }
     }
   });
-}
-
-final class _ScheduledCursor<A, E> implements FlowSourceCursor<A, E> {
-  const _ScheduledCursor(this._output);
-
-  final FlowMailbox<A, E> _output;
-
-  @override
-  Effect<Option<A>, E> next() => _output.take();
 }
 
 final class _Stamped<A> {

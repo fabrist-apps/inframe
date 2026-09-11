@@ -25,7 +25,7 @@ abstract final class ConcurrentFlowSource {
       return const Failed(Interrupted(ScopeClosed()));
     }
     coordinator.startSources(sources);
-    return Succeeded(_ConcurrentCursor(mailbox));
+    return Succeeded(mailbox);
   });
 
   /// Maps outer values to at most [concurrency] active inner cursors.
@@ -44,7 +44,7 @@ abstract final class ConcurrentFlowSource {
       return const Failed(Interrupted(ScopeClosed()));
     }
     coordinator.startMappedSource(upstream, transform, gate);
-    return Succeeded(_ConcurrentCursor(mailbox));
+    return Succeeded(mailbox);
   });
 
   /// Replaces an active inner cursor after its cleanup completes.
@@ -114,7 +114,7 @@ abstract final class ConcurrentFlowSource {
       return const Failed(Interrupted(ScopeClosed()));
     }
     coordinator.start();
-    return Succeeded(_ConcurrentCursor(mailbox));
+    return Succeeded(mailbox);
   });
 
   static bool _registerCleanup<A, E>(
@@ -147,8 +147,7 @@ final class _MergeCoordinator<A, E> {
 
   final FlowMailbox<A, E> _mailbox;
   final EffectExecution _execution;
-  final Map<int, Fiber<void, E>> _fibers = {};
-  final Map<int, _PumpKind> _kinds = {};
+  final Map<int, ({Fiber<void, E> fiber, _PumpKind kind})> _pumps = {};
   var _nextId = 0;
   var _remainingSources = 0;
   var _activeInners = 0;
@@ -206,14 +205,12 @@ final class _MergeCoordinator<A, E> {
       pumpFlow(open, emit),
       _execution,
     );
-    _fibers[id] = fiber;
-    _kinds[id] = kind;
+    _pumps[id] = (fiber: fiber, kind: kind);
     unawaited(fiber.exit.then((exit) => _finished(id, exit)));
   }
 
   Future<void> _finished(int id, Exit<void, E> exit) async {
-    _fibers.remove(id);
-    final kind = _kinds.remove(id);
+    final kind = _pumps.remove(id)?.kind;
     if (kind == _PumpKind.inner) {
       _activeInners -= 1;
       _gate?.release();
@@ -246,7 +243,7 @@ final class _MergeCoordinator<A, E> {
   Future<void> _fail(Cause<E> original) async {
     if (_terminalizing || _closed) return;
     _terminalizing = true;
-    final siblings = List<Fiber<void, E>>.of(_fibers.values);
+    final siblings = _pumps.values.map((pump) => pump.fiber).toList();
     final exits = await Future.wait(
       siblings.map((fiber) => fiber.interrupt(const ConcurrentFlowFailed())),
     );
@@ -259,15 +256,6 @@ final class _MergeCoordinator<A, E> {
 }
 
 enum _PumpKind { source, outer, inner }
-
-final class _ConcurrentCursor<A, E> implements FlowSourceCursor<A, E> {
-  const _ConcurrentCursor(this._mailbox);
-
-  final FlowMailbox<A, E> _mailbox;
-
-  @override
-  Effect<Option<A>, E> next() => _mailbox.take();
-}
 
 final class _SwitchCoordinator<Outer, A, E> {
   _SwitchCoordinator(

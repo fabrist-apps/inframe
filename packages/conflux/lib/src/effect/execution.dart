@@ -145,19 +145,20 @@ final class Scope {
   var _closed = false;
   Future<Cause<Never>?>? _closing;
   final _children = <OwnedEffect>{};
-  final _finalizers = <_RegisteredFinalizer>[];
+  final _finalizers = <_RegisteredFinalizer>{};
 
   /// Whether this scope has stopped accepting work.
   bool get isClosed => _closed;
 
-  bool _addFinalizer(
+  void Function()? _registerFinalizer(
     Effect<void, Never> effect,
     Context context,
     Clock clock,
   ) {
-    if (_closed) return false;
-    _finalizers.add(_RegisteredFinalizer(effect, context, clock));
-    return true;
+    if (_closed) return null;
+    final finalizer = _RegisteredFinalizer(effect, context, clock);
+    _finalizers.add(finalizer);
+    return () => _finalizers.remove(finalizer);
   }
 
   Fiber<A, E> _fork<A, E>(Effect<A, E> effect, EffectExecution parent) {
@@ -225,7 +226,10 @@ final class Scope {
     );
     failures.addAll(childFailures.whereType<Cause<Never>>());
 
-    for (final finalizer in _finalizers.reversed) {
+    // Finalizers may unregister themselves or another already released resource.
+    // Remove each registration before running it, preserving reverse order.
+    for (final finalizer in _finalizers.toList().reversed) {
+      if (!_finalizers.remove(finalizer)) continue;
       final exit = await EffectExecution.runProtected(
         finalizer.effect,
         finalizer.context,
@@ -248,7 +252,17 @@ abstract final class ScopeAccess {
     Effect<void, Never> effect,
     Context context,
     Clock clock,
-  ) => scope._addFinalizer(effect, context, clock);
+  ) => scope._registerFinalizer(effect, context, clock) != null;
+
+  /// Registers cleanup and returns an idempotent callback that unregisters it.
+  ///
+  /// Returns null when [scope] has already stopped accepting finalizers.
+  static void Function()? registerFinalizer(
+    Scope scope,
+    Effect<void, Never> effect,
+    Context context,
+    Clock clock,
+  ) => scope._registerFinalizer(effect, context, clock);
 
   /// Starts [effect] as a child owned by [scope].
   static Fiber<A, E> fork<A, E>(

@@ -198,14 +198,24 @@ final class Cron {
     } on Object {
       return const Failure(CronError('The input instant is outside the supported date range.'));
     }
-    var date = DateTime.utc(localBoundary.year, localBoundary.month, localBoundary.day);
+    if (localBoundary.year < _minimumYear || localBoundary.year > _maximumYear) {
+      return const Failure(CronError('The search reached the supported date range.'));
+    }
     final boundaryMicros = instant.toUtc().microsecondsSinceEpoch;
     final offsets = location.zones.isEmpty
         ? const [Duration.zero]
         : SplayTreeSet<Duration>.of(location.zones.map((zone) => zone.offset)).toList();
+    // A rollback can revisit the previous calendar date. Start with every date
+    // that could contain an eligible instant under any offset in this location.
+    final wallBoundary = instant.toUtc().add(forward ? offsets.first : offsets.last);
+    var date = DateTime.utc(wallBoundary.year, wallBoundary.month, wallBoundary.day);
+    if (forward && date.year < _minimumYear) date = DateTime.utc(_minimumYear);
+    if (!forward && date.year > _maximumYear) date = DateTime.utc(_maximumYear, 12, 31);
+    DateTime? best;
 
     for (var iteration = 0; iteration < _searchBudget; iteration += 1) {
       if (date.year < _minimumYear || date.year > _maximumYear) {
+        if (best != null) return Success(best);
         return const Failure(CronError('The search reached the supported date range.'));
       }
       if (_matchesDate(date)) {
@@ -215,9 +225,20 @@ final class Cron {
           offsets: offsets,
           forward: forward,
         );
-        if (found != null) return Success(found);
+        if (found != null &&
+            (best == null || (forward ? found.isBefore(best) : found.isAfter(best)))) {
+          best = found;
+        }
       }
       date = date.add(Duration(days: forward ? 1 : -1));
+      // Calendar-date order is not necessarily instant order across a rollback.
+      // Return only once no candidate on this or a later searched date can win.
+      final dateLimit = forward
+          ? date.subtract(offsets.last)
+          : date.add(const Duration(days: 1)).subtract(offsets.first);
+      if (best != null && (forward ? !dateLimit.isBefore(best) : !dateLimit.isAfter(best))) {
+        return Success(best);
+      }
     }
     return const Failure(
       CronError('The search exhausted its 10,000 candidate-iteration budget.'),
@@ -405,7 +426,7 @@ _CronField _parseField(String source, _FieldSpec spec) {
         throw _InvalidCron(spec.name, 'Range start must not exceed its end in "$base".');
       }
     }
-    for (var value = start; value <= end; value += step) {
+    for (final value in _range(start, end, step: step)) {
       values.add(_normalize(value, spec));
     }
   }
@@ -431,7 +452,7 @@ String _canonicalFieldText(String token, Set<int> values, _FieldSpec spec) {
   final separator = wildcard.indexOf('/');
   final step = separator == -1 ? 1 : int.parse(wildcard.substring(separator + 1));
   final wildcardValues = <int>{
-    for (var value = spec.minimum; value <= spec.maximum; value += step) _normalize(value, spec),
+    for (final value in _range(spec.minimum, spec.maximum, step: step)) _normalize(value, spec),
   };
   final extras = values.where((value) => !wildcardValues.contains(value));
   final prefix = step == 1 ? '*' : '*/$step';
@@ -461,9 +482,11 @@ int _normalize(int value, _FieldSpec spec) {
   return identical(spec, _weekdaySpec) && value == 7 ? 0 : value;
 }
 
-Iterable<int> _range(int start, int end) sync* {
-  for (var value = start; value <= end; value += 1) {
+Iterable<int> _range(int start, int end, {int step = 1}) sync* {
+  for (var value = start; value <= end; value += step) {
     yield value;
+    // Stop before addition so an oversized step cannot overflow the integer.
+    if (step > end - value) return;
   }
 }
 

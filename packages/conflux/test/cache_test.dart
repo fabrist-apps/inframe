@@ -1,6 +1,8 @@
 import 'dart:async';
 
-import 'package:conflux/conflux.dart';
+import 'package:conflux/cache.dart';
+import 'package:conflux/effect.dart';
+import 'package:conflux/option.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
@@ -97,34 +99,6 @@ void main() {
 
       expect((cancelledExit as Failed<int, String>).cause, isA<Interrupted<String>>());
       expect((await remaining.join() as Succeeded<int, String>).value, 42);
-    });
-
-    test('should interrupt loads and reject use after its scope closes', () async {
-      final lookupStarted = Completer<void>();
-      final pendingLookup = Completer<int>();
-      var lookupCancelled = false;
-      final fixture = await _CacheFixture.start(
-        lookup: (_) => Effect.tryFuture<int, String>(
-          () {
-            lookupStarted.complete();
-            return pendingLookup.future;
-          },
-          onError: (error, _) => '$error',
-          onCancel: () => lookupCancelled = true,
-        ),
-      );
-      final caller = Runtime();
-      addTearDown(caller.close);
-      final waiting = caller.fork(fixture.cache.get('key'));
-      await lookupStarted.future;
-
-      await fixture.close();
-      final waitingExit = await waiting.join();
-      final closedExit = await caller.run(fixture.cache.get('other'));
-
-      expect(lookupCancelled, isTrue);
-      expect((waitingExit as Failed<int, String>).cause, isA<Interrupted<String>>());
-      expect((closedExit as Failed<int, String>).cause, isA<Defect<String>>());
     });
 
     test('should bound active lookups independently across keys', () async {
@@ -272,6 +246,7 @@ void main() {
       final activeStarted = Completer<void>();
       final activeGate = Completer<int>();
       final started = <String>[];
+      var lookupCancelled = false;
       final fixture = await _CacheFixture.start(
         concurrency: 1,
         lookup: (key) => Effect.tryFuture<int, String>(
@@ -281,6 +256,7 @@ void main() {
             return activeGate.future;
           },
           onError: (error, _) => '$error',
+          onCancel: () => lookupCancelled = true,
         ),
       );
       final caller = Runtime();
@@ -292,8 +268,11 @@ void main() {
       await fixture.close();
 
       expect(started, ['a']);
+      expect(lookupCancelled, isTrue);
       expect((await active.join() as Failed<int, String>).cause, isA<Interrupted<String>>());
       expect((await queued.join() as Failed<int, String>).cause, isA<Interrupted<String>>());
+      final closedExit = await caller.run(fixture.cache.get('other'));
+      expect((closedExit as Failed<int, String>).cause, isA<Defect<String>>());
     });
 
     test('should reject non-positive capacity and concurrency at acquisition', () async {
@@ -565,6 +544,37 @@ void main() {
       expect((await oldWaiter.join() as Succeeded<int, String>).value, 1);
       expect(await fixture.cache.get('key').runFuture(), 2);
       expect(lookups, 2);
+    });
+
+    test('should keep sharing the current lookup after an older lookup finishes', () async {
+      final gates = [Completer<int>(), Completer<int>()];
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (_) => Effect.tryFuture<int, String>(
+          () => gates[lookups++].future,
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final oldWaiter = caller.fork(fixture.cache.get('key'));
+      await _flushMicrotasks();
+      await fixture.cache.invalidate('key').runFuture();
+      final currentWaiter = caller.fork(fixture.cache.get('key'));
+      await _flushMicrotasks();
+
+      gates[0].complete(1);
+      expect((await oldWaiter.join() as Succeeded<int, String>).value, 1);
+      expect(await fixture.cache.getOption('key').runFuture(), isA<None>());
+      final joinedWaiter = caller.fork(fixture.cache.get('key'));
+      await _flushMicrotasks();
+      expect(lookups, 2);
+
+      gates[1].complete(2);
+      expect((await currentWaiter.join() as Succeeded<int, String>).value, 2);
+      expect((await joinedWaiter.join() as Succeeded<int, String>).value, 2);
+      expect(await fixture.cache.get('key').runFuture(), 2);
     });
 
     test('should invalidate ready and pending generations together', () async {

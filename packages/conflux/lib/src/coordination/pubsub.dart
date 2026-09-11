@@ -58,7 +58,7 @@ final class PubSub<A> {
   }
 
   final int _capacity;
-  final LinkedHashSet<_PubSubSubscriptionState<A>> _subscriptions = LinkedHashSet();
+  final LinkedHashSet<PubSubSubscription<A>> _subscriptions = LinkedHashSet();
   final ListQueue<_PendingPublication<A>> _publications = ListQueue();
   final ListQueue<CoordinationWaiter<void>> _shutdownWaiters = ListQueue();
   var _isShutdown = false;
@@ -79,7 +79,7 @@ final class PubSub<A> {
           waiter.interrupt(const PubSubShutdown());
           return;
         }
-        final targets = List<_PubSubSubscriptionState<A>>.unmodifiable(
+        final targets = List<PubSubSubscription<A>>.unmodifiable(
           _subscriptions,
         );
         if (targets.isEmpty) {
@@ -138,31 +138,29 @@ final class PubSub<A> {
   });
 
   PubSubSubscription<A> _createSubscription() {
-    final state = _PubSubSubscriptionState(this);
-    _subscriptions.add(state);
-    return PubSubSubscription._(state);
+    final subscription = PubSubSubscription._(this);
+    _subscriptions.add(subscription);
+    return subscription;
   }
 
-  void _unsubscribe(_PubSubSubscriptionState<A> subscription) {
-    if (!subscription.isActive) return;
+  void _unsubscribe(PubSubSubscription<A> subscription) {
+    if (!subscription._isActive) return;
     _subscriptions.remove(subscription);
-    subscription.close(const PubSubSubscriptionClosed());
+    subscription._close(const PubSubSubscriptionClosed());
     _drainPublications();
   }
-
-  void _onCapacityAvailable() => _drainPublications();
 
   void _drainPublications() {
     while (!_isShutdown && _publications.isNotEmpty) {
       final publication = _publications.first;
       final activeTargets = publication.targets
-          .where((target) => target.isActive)
+          .where((target) => target._isActive)
           .toList(growable: false);
-      if (activeTargets.any((target) => !target.hasCapacity)) return;
+      if (activeTargets.any((target) => !target._hasCapacity)) return;
 
       _publications.removeFirst();
       for (final target in activeTargets) {
-        target.enqueue(publication.item);
+        target._enqueue(publication.item);
       }
       publication.waiter.succeed(null);
     }
@@ -174,10 +172,10 @@ final class PubSub<A> {
     while (_publications.isNotEmpty) {
       _publications.removeFirst().waiter.interrupt(const PubSubShutdown());
     }
-    final subscriptions = List<_PubSubSubscriptionState<A>>.of(_subscriptions);
+    final subscriptions = List<PubSubSubscription<A>>.of(_subscriptions);
     _subscriptions.clear();
     for (final subscription in subscriptions) {
-      subscription.close(const PubSubShutdown());
+      subscription._close(const PubSubShutdown());
     }
     while (_shutdownWaiters.isNotEmpty) {
       _shutdownWaiters.removeFirst().succeed(null);
@@ -191,40 +189,20 @@ final class PubSub<A> {
 
 /// A scoped subscription receiving publications in their common order.
 final class PubSubSubscription<A> {
-  const PubSubSubscription._(this._state);
+  PubSubSubscription._(this._owner);
 
-  final _PubSubSubscriptionState<A> _state;
-
-  /// Lazily waits for and removes the next publication.
-  ///
-  /// Cancellation removes a pending read without consuming a later value.
-  Effect<A, Never> take() => _state.take();
-
-  /// Lazily removes at most [limit] currently available publications.
-  ///
-  /// This never waits for more values and returns an immutable FIFO list. Zero
-  /// returns an empty list. A negative limit becomes an [ArgumentError] defect
-  /// when the Effect runs.
-  Effect<List<A>, Never> takeUpTo(int limit) => _state.takeUpTo(limit);
-
-  /// Lazily ends this subscription and releases its retained capacity.
-  ///
-  /// Repeated unsubscription is harmless and does not affect other subscribers.
-  Effect<void, Never> unsubscribe() => Effect.sync(() => _state.owner._unsubscribe(_state));
-}
-
-final class _PubSubSubscriptionState<A> {
-  _PubSubSubscriptionState(this.owner);
-
-  final PubSub<A> owner;
+  final PubSub<A> _owner;
   final ListQueue<A> _items = ListQueue();
   final ListQueue<CoordinationWaiter<A>> _takers = ListQueue();
   Object? _closedReason;
 
-  bool get isActive => _closedReason == null;
+  bool get _isActive => _closedReason == null;
 
-  bool get hasCapacity => _items.length < owner._capacity;
+  bool get _hasCapacity => _items.length < _owner._capacity;
 
+  /// Lazily waits for and removes the next publication.
+  ///
+  /// Cancellation removes a pending read without consuming a later value.
   Effect<A, Never> take() => Effect.defer(() {
     final taker = CoordinationWaiter<A>();
     return taker.awaitValue(
@@ -236,7 +214,7 @@ final class _PubSubSubscriptionState<A> {
         }
         if (_items.isNotEmpty) {
           taker.succeed(_items.removeFirst());
-          owner._onCapacityAvailable();
+          _owner._drainPublications();
           return;
         }
         _takers.addLast(taker);
@@ -245,6 +223,11 @@ final class _PubSubSubscriptionState<A> {
     );
   });
 
+  /// Lazily removes at most [limit] currently available publications.
+  ///
+  /// This never waits for more values and returns an immutable FIFO list. Zero
+  /// returns an empty list. A negative limit becomes an [ArgumentError] defect
+  /// when the Effect runs.
   Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer(() {
     final closedReason = _closedReason;
     if (closedReason != null) return _interrupted(closedReason);
@@ -258,12 +241,17 @@ final class _PubSubSubscriptionState<A> {
     final items = <A>[
       for (var index = 0; index < count; index += 1) _items.removeFirst(),
     ];
-    owner._onCapacityAvailable();
+    _owner._drainPublications();
     return Effect.succeed(List.unmodifiable(items));
   });
 
-  void enqueue(A item) {
-    if (!isActive) return;
+  /// Lazily ends this subscription and releases its retained capacity.
+  ///
+  /// Repeated unsubscription is harmless and does not affect other subscribers.
+  Effect<void, Never> unsubscribe() => Effect.sync(() => _owner._unsubscribe(this));
+
+  void _enqueue(A item) {
+    if (!_isActive) return;
     if (_takers.isNotEmpty) {
       _takers.removeFirst().succeed(item);
       return;
@@ -271,8 +259,8 @@ final class _PubSubSubscriptionState<A> {
     _items.addLast(item);
   }
 
-  void close(Object reason) {
-    if (!isActive) return;
+  void _close(Object reason) {
+    if (!_isActive) return;
     _closedReason = reason;
     _items.clear();
     while (_takers.isNotEmpty) {
@@ -289,6 +277,6 @@ final class _PendingPublication<A> {
   _PendingPublication(this.item, this.targets, this.waiter);
 
   final A item;
-  final List<_PubSubSubscriptionState<A>> targets;
+  final List<PubSubSubscription<A>> targets;
   final CoordinationWaiter<void> waiter;
 }

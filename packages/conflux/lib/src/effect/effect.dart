@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:conflux/non_empty_list.dart';
 import 'package:conflux/option.dart';
@@ -63,67 +64,34 @@ final class Effect<A, E> {
       final wait = execution.clock.sleep(duration);
       final completed = Completer<Exit<void, Never>>();
       var settled = false;
-      late final void Function() stopListening;
+      void Function()? stopListening;
 
-      Future<void> cancel(Object? reason) async {
+      Future<void> finish(Exit<void, Never> exit) async {
         if (settled) return;
         settled = true;
-        stopListening();
+        stopListening?.call();
         try {
           await wait.cancel();
+          completed.complete(exit);
         } on Object catch (error, stackTrace) {
-          completed.complete(
-            Failed(
-              Sequential<Never>([
-                Interrupted<Never>(reason),
-                Defect<Never>(error, stackTrace),
-              ]),
-            ),
-          );
-          return;
+          completed.complete(exit.appendCleanup(Defect(error, stackTrace)));
         }
-        completed.complete(Failed(Interrupted<Never>(reason)));
       }
 
-      if (execution.cancellation.isCancelled) {
-        final reason = execution.cancellation.reason;
-        try {
-          await wait.cancel();
-        } on Object catch (error, stackTrace) {
-          return Failed(
-            Sequential<Never>([
-              Interrupted<Never>(reason),
-              Defect<Never>(error, stackTrace),
-            ]),
-          );
-        }
-        return Failed(Interrupted(reason));
-      }
       stopListening = execution.cancellation.listen(
-        (reason) => unawaited(cancel(reason)),
+        (reason) => unawaited(finish(Failed(Interrupted(reason)))),
       );
-      if (!settled) {
+      // Even cancellation during Clock.sleep must observe a late wait failure.
+      try {
         unawaited(
           wait.completed.then<void>(
-            (_) async {
-              if (settled) return;
-              settled = true;
-              stopListening();
-              try {
-                await wait.cancel();
-                completed.complete(const Succeeded(null));
-              } on Object catch (error, stackTrace) {
-                completed.complete(Failed(Defect(error, stackTrace)));
-              }
-            },
-            onError: (Object error, StackTrace stackTrace) {
-              if (settled) return;
-              settled = true;
-              stopListening();
-              completed.complete(Failed(Defect(error, stackTrace)));
-            },
+            (_) => finish(const Succeeded(null)),
+            onError: (Object error, StackTrace stackTrace) =>
+                finish(Failed(Defect(error, stackTrace))),
           ),
         );
+      } on Object catch (error, stackTrace) {
+        unawaited(finish(Failed(Defect(error, stackTrace))));
       }
       return completed.future;
     });
@@ -465,25 +433,70 @@ final class _TimeoutCancelled {
   String toString() => 'Effect timeout cancelled';
 }
 
-sealed class _ValueSlot<A> {
-  const _ValueSlot();
-}
-
-final class _EmptySlot<A> extends _ValueSlot<A> {
-  const _EmptySlot();
-}
-
-final class _FilledSlot<A> extends _ValueSlot<A> {
-  const _FilledSlot(this.value);
-
-  final A value;
-}
-
 final class _IndexedExit<A, E> {
   const _IndexedExit(this.index, this.exit);
 
   final int index;
   final Exit<A, E> exit;
+}
+
+/// Owns active branches and observes each completion once.
+///
+/// Completions are delivered in arrival order. Results and cleanup failures
+/// retain source order separately, so an earlier failure cannot reorder winners.
+final class _EffectBranches<A, E> {
+  _EffectBranches(this.execution);
+
+  final EffectExecution execution;
+  final _active = <int, Fiber<A, E>>{};
+  final _ready = Queue<_IndexedExit<A, E>>();
+  Completer<_IndexedExit<A, E>>? _waiting;
+
+  int get length => _active.length;
+  bool get isNotEmpty => _active.isNotEmpty;
+
+  void start(int index, Effect<A, E> effect) {
+    final fiber = ScopeAccess.fork(execution.scope, effect, execution);
+    _active[index] = fiber;
+    unawaited(
+      fiber.join().then((exit) {
+        final waiting = _waiting;
+        if (waiting == null) {
+          _ready.add(_IndexedExit(index, exit));
+        } else {
+          _waiting = null;
+          waiting.complete(_IndexedExit(index, exit));
+        }
+      }),
+    );
+  }
+
+  Future<_IndexedExit<A, E>> next() async {
+    // Branch executions have separate counters; the coordinator must also
+    // yield while processing a long sequence of immediately completed work.
+    final boundary = execution.schedulingBoundary();
+    if (boundary != null) await boundary;
+    final _IndexedExit<A, E> completed;
+    if (_ready.isNotEmpty) {
+      completed = _ready.removeFirst();
+    } else {
+      final waiting = Completer<_IndexedExit<A, E>>();
+      _waiting = waiting;
+      completed = await waiting.future;
+    }
+    _active.remove(completed.index);
+    return completed;
+  }
+
+  Future<Cause<Never>?> interrupt(Object reason) async {
+    // Future.wait preserves the source order of the insertion-ordered map.
+    final exits = await Future.wait(
+      _active.values.map((fiber) => fiber.interrupt(reason)),
+    );
+    _active.clear();
+    _ready.clear();
+    return CauseGroup.parallel(exits.map(_defectsFrom).whereType<Cause<Never>>());
+  }
 }
 
 abstract final class _EffectCollection {
@@ -494,60 +507,35 @@ abstract final class _EffectCollection {
   ) async {
     if (effects.isEmpty) return Succeeded(List.unmodifiable(const []));
 
-    final slots = List<_ValueSlot<A>>.filled(
-      effects.length,
-      const _EmptySlot(),
-    );
-    final active = <int, Fiber<A, E>>{};
+    final slots = List<Option<A>>.filled(effects.length, const None());
+    final branches = _EffectBranches<A, E>(execution);
     var nextIndex = 0;
 
     void startNext() {
       final index = nextIndex++;
-      active[index] = ScopeAccess.fork(execution.scope, effects[index], execution);
+      branches.start(index, effects[index]);
     }
 
-    while (nextIndex < effects.length && active.length < concurrency) {
+    while (nextIndex < effects.length && branches.length < concurrency) {
       startNext();
     }
 
-    while (active.isNotEmpty) {
-      final completed = await Future.any(
-        active.entries.map((entry) async {
-          return _IndexedExit(entry.key, await entry.value.join());
-        }),
-      );
-      active.remove(completed.index);
-
+    while (branches.isNotEmpty) {
+      final completed = await branches.next();
       switch (completed.exit) {
         case Succeeded<A, E>(:final value):
-          slots[completed.index] = _FilledSlot(value);
+          slots[completed.index] = Some(value);
           if (nextIndex < effects.length) startNext();
         case Failed<A, E>(:final cause):
-          final cleanupFailures = <MapEntry<int, Cause<Never>>>[];
-          await Future.wait(
-            active.entries.map((entry) async {
-              final loser = await entry.value.interrupt(const _CollectionStopped());
-              if (loser case Failed<A, E>(:final cause)) {
-                final cleanup = cause.defectsOnly;
-                if (cleanup != null) {
-                  cleanupFailures.add(MapEntry(entry.key, cleanup));
-                }
-              }
-            }),
-          );
-          cleanupFailures.sort((left, right) => left.key.compareTo(right.key));
-          if (cleanupFailures.isEmpty) return Failed(cause);
-          final concurrentCleanup = CauseGroup.parallel(
-            cleanupFailures.map((entry) => entry.value),
-          )!;
-          return Failed(Sequential([cause, concurrentCleanup]));
+          final cleanup = await branches.interrupt(const _CollectionStopped());
+          return Failed<List<A>, E>(cause).appendCleanup(cleanup);
       }
     }
 
     final values = slots.map((slot) {
       return switch (slot) {
-        _FilledSlot<A>(:final value) => value,
-        _EmptySlot<A>() => throw StateError('Collection completed without a value.'),
+        Some<A>(:final value) => value,
+        None() => throw StateError('Collection completed without a value.'),
       };
     });
     return Succeeded(List.unmodifiable(values));
@@ -566,43 +554,20 @@ abstract final class _EffectRace {
     List<Effect<A, E>> effects,
     EffectExecution execution,
   ) async {
-    final active = <int, Fiber<A, E>>{
-      for (var index = 0; index < effects.length; index += 1)
-        index: ScopeAccess.fork(execution.scope, effects[index], execution),
-    };
+    final branches = _EffectBranches<A, E>(execution);
+    for (var index = 0; index < effects.length; index += 1) {
+      branches.start(index, effects[index]);
+    }
     final failures = List<Cause<E>?>.filled(effects.length, null);
 
-    while (active.isNotEmpty) {
-      final completed = await Future.any(
-        active.entries.map((entry) async {
-          return _IndexedExit(entry.key, await entry.value.join());
-        }),
-      );
-      active.remove(completed.index);
-
+    while (branches.isNotEmpty) {
+      final completed = await branches.next();
       switch (completed.exit) {
         case Failed<A, E>(:final cause):
           failures[completed.index] = cause;
         case Succeeded<A, E>(:final value):
-          final cleanupFailures = <MapEntry<int, Cause<Never>>>[];
-          await Future.wait(
-            active.entries.map((entry) async {
-              final loser = await entry.value.interrupt(const _RaceLost());
-              if (loser case Failed<A, E>(:final cause)) {
-                final cleanup = cause.defectsOnly;
-                if (cleanup != null) {
-                  cleanupFailures.add(MapEntry(entry.key, cleanup));
-                }
-              }
-            }),
-          );
-          if (cleanupFailures.isEmpty) return Succeeded(value);
-          cleanupFailures.sort((left, right) => left.key.compareTo(right.key));
-          return Failed(
-            CauseGroup.parallel(
-              cleanupFailures.map((entry) => entry.value),
-            )!,
-          );
+          final cleanup = await branches.interrupt(const _RaceLost());
+          return Succeeded<A, E>(value).appendCleanup(cleanup);
       }
     }
 

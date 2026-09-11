@@ -39,7 +39,7 @@ abstract final class CombinationFlowSource {
       return const Failed(Interrupted(ScopeClosed()));
     }
     coordinator.start(sourceList);
-    return Succeeded(_CombinationCursor(mailbox));
+    return Succeeded(mailbox);
   });
 
   /// Opens primary and secondary events for trigger-based combination.
@@ -61,7 +61,7 @@ abstract final class CombinationFlowSource {
       return const Failed(Interrupted(ScopeClosed()));
     }
     coordinator.start(primary, secondary);
-    return Succeeded(_CombinationCursor(mailbox));
+    return Succeeded(mailbox);
   });
 }
 
@@ -156,15 +156,6 @@ Future<Cause<E>?> _interruptZipPulls<E>(
         .whereType<Cause<Never>>()
         .map((cause) => cause.mapExpected<E>(_widenNever)),
   );
-}
-
-final class _CombinationCursor<A, E> implements FlowSourceCursor<A, E> {
-  const _CombinationCursor(this._mailbox);
-
-  final FlowMailbox<A, E> _mailbox;
-
-  @override
-  Effect<Option<A>, E> next() => _mailbox.take();
 }
 
 final class _CombineLatestCoordinator<A, E> {

@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:conflux/conflux.dart';
+import 'package:conflux/effect.dart';
+import 'package:conflux/pubsub.dart';
 import 'package:conflux/src/effect/execution.dart';
 import 'package:test/test.dart';
 
