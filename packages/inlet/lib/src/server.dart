@@ -21,7 +21,10 @@ final class InletServer {
   Future<void>? _closeFuture;
   bool _forced = false;
 
-  /// Stops request admission, optionally closing active connections.
+  /// Stops request admission, optionally closing active HTTP connections.
+  ///
+  /// Upgraded WebSockets are detached from the listener. This method neither
+  /// closes them nor waits for their session callbacks.
   Future<void> close({bool force = false}) {
     _adapter.beginClosing(force: force);
     if (force && !_forced) {
@@ -191,7 +194,7 @@ final class _ServerAdapter {
       dispatch = await _dispatch(request);
       response = dispatch.response;
       await _deliver(
-        incoming.response,
+        incoming,
         response,
         input,
         isHead: dispatch.request.method == 'HEAD',
@@ -207,9 +210,13 @@ final class _ServerAdapter {
           failure.error,
           failure.stackTrace,
         );
+        if (response.isWebSocketUpgrade) {
+          await _cleanUp(response.close);
+          response = Response.empty(status: HttpStatus.internalServerError);
+        }
         try {
           await _deliver(
-            incoming.response,
+            incoming,
             response,
             input,
             isHead: dispatch.request.method == 'HEAD',
@@ -238,7 +245,9 @@ final class _ServerAdapter {
         await _cleanUp(response.close);
       }
       await _cleanUp(request.close);
-      await _cleanUp(input.finish);
+      if (!input.isFinishStarted) {
+        await _cleanUp(input.finish);
+      }
     }
   }
 
@@ -266,27 +275,58 @@ final class _ServerAdapter {
   }
 
   Future<void> _deliver(
-    HttpResponse target,
+    HttpRequest incoming,
     Response response,
     _HttpRequestBody input, {
     required bool isHead,
     bool resetTarget = false,
   }) async {
+    final target = incoming.response;
     var committed = false;
     Socket? detachedSocket;
     _DetachedSseResponse? detachedResponse;
     try {
+      if (response._delivery case final _WebSocketDelivery webSocket) {
+        if (incoming.method != 'GET' ||
+            isHead ||
+            !WebSocketTransformer.isUpgradeRequest(incoming)) {
+          throw const _WebSocketHandshakeRejected(
+            'Invalid WebSocket upgrade request.',
+          );
+        }
+        if (!response._body.isUntouched) {
+          throw StateError('The WebSocket response has already been closed.');
+        }
+        final offeredProtocols = _parseWebSocketProtocols(incoming.headers);
+        final selectedProtocol = await _selectWebSocketProtocol(
+          webSocket.selectProtocol,
+          offeredProtocols,
+        );
+        _prepareWebSocketTarget(target, response.headers);
+
+        final upgrading = WebSocketTransformer.upgrade(
+          incoming,
+          protocolSelector: selectedProtocol == null ? null : (_) => selectedProtocol,
+          compression: webSocket.compression,
+          maxPayloadLength: webSocket.maxFrameBytes,
+        );
+        committed = true;
+        final socket = await upgrading;
+
+        // The WebSocket owns the detached transport before the obsolete HTTP
+        // request subscription is cancelled.
+        await _cleanUp(input.finish);
+        await _runWebSocketSession(socket, webSocket);
+        return;
+      }
+
       final suppressBody = response._suppressBody || isHead;
       if (!suppressBody && !response._body.isUntouched) {
         throw StateError('The response body has already been consumed or closed.');
       }
       _prepareTarget(target, input, reset: resetTarget);
       target.statusCode = response.statusCode;
-      for (final MapEntry(key: name, value: values) in response.headers.toMap().entries) {
-        for (final value in values) {
-          target.headers.add(name, value);
-        }
-      }
+      _applyResponseHeaders(target, response.headers);
       final knownLength = response._body.knownLength;
       if (response.statusCode == HttpStatus.noContent ||
           response.statusCode == HttpStatus.notModified) {
@@ -356,6 +396,68 @@ final class _ServerAdapter {
         ownedResponse.abort().ignore();
       }
       throw _DeliveryFailure(error, stackTrace, committed: committed);
+    }
+  }
+
+  void _prepareWebSocketTarget(HttpResponse target, Headers headers) {
+    target.bufferOutput = false;
+    _applyResponseHeaders(target, headers);
+  }
+
+  void _applyResponseHeaders(HttpResponse target, Headers headers) {
+    for (final MapEntry(key: name, value: values) in headers.toMap().entries) {
+      for (final value in values) {
+        target.headers.add(name, value);
+      }
+    }
+  }
+
+  Future<void> _runWebSocketSession(
+    WebSocket socket,
+    _WebSocketDelivery delivery,
+  ) async {
+    try {
+      await delivery.onConnect(socket);
+      await _closeWebSocket(socket, WebSocketStatus.normalClosure);
+    } on Object catch (error, stackTrace) {
+      _report(error, stackTrace);
+      await _closeWebSocket(socket, WebSocketStatus.internalServerError);
+    }
+  }
+
+  Future<String?> _selectWebSocketProtocol(
+    WebSocketProtocolSelector? selector,
+    List<String> offeredProtocols,
+  ) async {
+    if (selector == null) {
+      return null;
+    }
+
+    late final String? selectedProtocol;
+    try {
+      selectedProtocol = await selector(offeredProtocols);
+    } on WebSocketException catch (error, stackTrace) {
+      Error.throwWithStackTrace(
+        _WebSocketHandshakeRejected(error.message),
+        stackTrace,
+      );
+    }
+    if (selectedProtocol != null && !offeredProtocols.contains(selectedProtocol)) {
+      throw StateError(
+        'Selected WebSocket protocol "$selectedProtocol" was not offered.',
+      );
+    }
+    return selectedProtocol;
+  }
+
+  Future<void> _closeWebSocket(WebSocket socket, int code) async {
+    if (socket.readyState != WebSocket.open) {
+      return;
+    }
+    try {
+      await socket.close(code);
+    } on Object catch (error, stackTrace) {
+      _report(error, stackTrace);
     }
   }
 
@@ -445,6 +547,59 @@ final class _DeliveryFailure implements Exception {
   final bool committed;
 }
 
+final class _WebSocketHandshakeRejected extends WebSocketException {
+  const _WebSocketHandshakeRejected(super.message);
+}
+
+List<String> _parseWebSocketProtocols(HttpHeaders headers) {
+  final values = headers['sec-websocket-protocol'];
+  if (values == null) {
+    return const [];
+  }
+
+  final protocols = <String>[];
+  for (final value in values) {
+    for (final rawProtocol in value.split(',')) {
+      final protocol = rawProtocol.trim();
+      if (!_isWebSocketProtocolToken(protocol)) {
+        throw const _WebSocketHandshakeRejected(
+          'Invalid Sec-WebSocket-Protocol header.',
+        );
+      }
+      protocols.add(protocol);
+    }
+  }
+  return List.unmodifiable(protocols);
+}
+
+bool _isWebSocketProtocolToken(String value) {
+  if (value.isEmpty) {
+    return false;
+  }
+  const separators = <int>{
+    0x28,
+    0x29,
+    0x3c,
+    0x3e,
+    0x40,
+    0x2c,
+    0x3b,
+    0x3a,
+    0x5c,
+    0x22,
+    0x2f,
+    0x5b,
+    0x5d,
+    0x3f,
+    0x3d,
+    0x7b,
+    0x7d,
+  };
+  return value.codeUnits.every(
+    (unit) => unit > 0x20 && unit < 0x7f && !separators.contains(unit),
+  );
+}
+
 final class _HttpRequestBody extends Stream<List<int>> {
   _HttpRequestBody(HttpRequest request) {
     try {
@@ -478,6 +633,8 @@ final class _HttpRequestBody extends Stream<List<int>> {
   Future<void>? _finishFuture;
 
   bool get isComplete => _completeCleanly;
+
+  bool get isFinishStarted => _finishFuture != null;
 
   void pause() {
     if (!_completeCleanly) {
