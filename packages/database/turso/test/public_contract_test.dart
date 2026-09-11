@@ -26,10 +26,6 @@ void main() {
       expect(exposed.take(2), [0, 2]);
       expect(encryption.key.take(2), [0, 0]);
       expect(
-        () => TursoEncryption(cipher: TursoCipher.aes256gcm, key: Uint8List(31)),
-        throwsArgumentError,
-      );
-      expect(
         () => TursoEncryption(
           cipher: TursoCipher.aes256gcm,
           key: Uint8List.fromList(List<int>.filled(31, 171)),

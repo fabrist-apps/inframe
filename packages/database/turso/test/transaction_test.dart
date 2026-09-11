@@ -8,6 +8,29 @@ import 'package:turso/turso.dart';
 
 void main() {
   group('TursoDatabase transactions', () {
+    for (final query in [false, true]) {
+      test('should roll back caught ${query ? 'query' : 'execute'} validation failures', () async {
+        final database = await TursoDatabase.open(TursoLocation.memory());
+        addTearDown(database.close);
+        await database.execute('CREATE TABLE events (value INTEGER)');
+
+        await expectLater(
+          database.transaction((tx) async {
+            await tx.execute('INSERT INTO events VALUES (1)');
+            await expectLater(
+              query
+                  ? tx.query('SELECT ?', parameters: [true])
+                  : tx.execute('INSERT INTO events VALUES (?)', parameters: [true]),
+              throwsArgumentError,
+            );
+          }),
+          throwsArgumentError,
+        );
+
+        expect((await database.query('SELECT * FROM events')).rows, isEmpty);
+      });
+    }
+
     test('should isolate root work and return only after commit', () async {
       final database = await TursoDatabase.open(TursoLocation.memory());
       addTearDown(database.close);
@@ -131,15 +154,22 @@ void main() {
       addTearDown(database.close);
       await database.execute('CREATE TABLE events (value TEXT)');
 
-      await expectLater(
-        database.transaction((tx) async {
-          unawaited(tx.execute('INSERT INTO missing_table VALUES (1)'));
-        }),
-        throwsA(isA<TursoException>()),
-      );
+      for (final invalidParameters in [false, true]) {
+        await expectLater(
+          database.transaction((tx) async {
+            await tx.execute("INSERT INTO events VALUES ('must roll back')");
+            unawaited(
+              invalidParameters
+                  ? tx.execute('INSERT INTO events VALUES (?)', parameters: [true])
+                  : tx.execute('INSERT INTO missing_table VALUES (1)'),
+            );
+          }),
+          invalidParameters ? throwsArgumentError : throwsA(isA<TursoException>()),
+        );
 
-      final count = await database.query('SELECT count(*) AS count FROM events');
-      expect(count.rows.single.getInt('count'), 0);
+        final count = await database.query('SELECT count(*) AS count FROM events');
+        expect(count.rows.single.getInt('count'), 0);
+      }
     });
   });
 }

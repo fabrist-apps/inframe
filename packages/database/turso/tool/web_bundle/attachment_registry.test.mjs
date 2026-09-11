@@ -94,6 +94,26 @@ test('multiple aliases and the main database never double-register', async () =>
   ]);
 });
 
+test('attachment files cannot overlap an owned database or WAL', async () => {
+  for (const mainDatabasePath of ['main.db', 'main.db-wal']) {
+    const calls = [];
+    const registry = registryWith({ calls, mainDatabasePath });
+    const collision = mainDatabasePath === 'main.db' ? 'main.db-wal' : 'main.db';
+    await assert.rejects(() => registry.acquire(collision), /overlap/);
+    assert.deepEqual(calls, []);
+  }
+
+  for (const owned of ['attached.db', 'attached.db-wal']) {
+    const calls = [];
+    const registry = registryWith({ calls });
+    registry.rememberAttachment({ alias: 'owner', filename: owned });
+    const collision = owned === 'attached.db' ? 'attached.db-wal' : 'attached.db';
+    await assert.rejects(() => registry.acquire(collision), /overlap/);
+    assert.deepEqual(calls, []);
+    assert.equal(await registry.acquire(owned), false);
+  }
+});
+
 test('releaseAll attempts every owned and uncertain filename', async () => {
   let fail = true;
   const calls = [];

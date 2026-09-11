@@ -538,11 +538,11 @@ let mE = class {
   }
 };
 async function pI(B, Q, i, o) {
-  const k = async (M) => {
-    const C = B.executor(M);
+  const k = async (h) => {
+    const E = B.executor(h);
     try {
       for (; ; ) {
-        const [U, a] = C.stepSync();
+        const [U, a] = E.stepSync();
         if (U === sA) {
           await Q();
           continue;
@@ -555,30 +555,30 @@ async function pI(B, Q, i, o) {
           break;
       }
     } finally {
-      C.reset();
+      E.reset();
     }
-  }, { mode: R, raw: N } = OE(o), c = R != null && !B.inTransaction(), p = i.map((M, C) => {
-    if (typeof M == "string" || M.args === void 0)
-      return M;
+  }, { mode: R, raw: N } = OE(o), c = R != null && !B.inTransaction(), p = i.map((h, E) => {
+    if (typeof h == "string" || h.args === void 0)
+      return h;
     try {
-      const U = Array.isArray(M.args) ? M.args.map(kI) : Object.fromEntries(Object.entries(M.args).map(([a, H]) => [a, kI(H)]));
-      return { sql: M.sql, args: U };
+      const U = Array.isArray(h.args) ? h.args.map(kI) : Object.fromEntries(Object.entries(h.args).map(([a, H]) => [a, kI(H)]));
+      return { sql: h.sql, args: U };
     } catch (U) {
-      throw GI(C, U);
+      throw GI(E, U);
     }
   });
   if (c)
-    for (let M = 0; M < p.length; M++) {
-      const C = p[M], U = typeof C == "string" ? C : C.sql, a = rE(U);
+    for (let h = 0; h < p.length; h++) {
+      const E = p[h], U = typeof E == "string" ? E : E.sql, a = rE(U);
       if (a !== void 0 && bE.has(a))
-        throw GI(M, new Error(`${a} is not allowed in an atomic batch`));
+        throw GI(h, new Error(`${a} is not allowed in an atomic batch`));
     }
   c && await k(`BEGIN ${nE(R)}`);
-  const t = [], X = async (M) => {
-    const C = typeof M == "string" ? M : M.sql, U = typeof M == "string" ? void 0 : M.args;
+  const t = [], X = async (h) => {
+    const E = typeof h == "string" ? h : h.sql, U = typeof h == "string" ? void 0 : h.args;
     let a;
     try {
-      a = B.prepare(C);
+      a = B.prepare(E);
     } catch (H) {
       throw hQ(H);
     }
@@ -612,28 +612,28 @@ async function pI(B, Q, i, o) {
     }
   };
   try {
-    for (let M = 0; M < p.length; M++)
+    for (let h = 0; h < p.length; h++)
       try {
-        t.push(await X(p[M]));
-      } catch (C) {
-        if (C instanceof Error) {
-          const U = C;
-          U.batchIndex = M, U.batchResults = [
+        t.push(await X(p[h]));
+      } catch (E) {
+        if (E instanceof Error) {
+          const U = E;
+          U.batchIndex = h, U.batchResults = [
             ...t.map((a) => a),
             ...Array(p.length - t.length).fill(null)
           ];
         }
-        throw C;
+        throw E;
       }
     c && await k("COMMIT");
-  } catch (M) {
+  } catch (h) {
     if (c)
       try {
         await k("ROLLBACK");
-      } catch (C) {
-        throw jE(M, C);
+      } catch (E) {
+        throw jE(h, E);
       }
-    throw M;
+    throw h;
   }
   return t;
 }
@@ -1059,7 +1059,7 @@ function _E(B) {
   var Q, i, o = new Int32Array(B), k = Atomics.load(o, 0);
   if (k <= 1)
     return null;
-  var R = Atomics.load(o, 1), N = Atomics.load(o, 2), c = Atomics.load(o, 3), p = new Uint8Array(B), t = p.slice(16, 16 + R), X = p.slice(16 + R, 16 + R + N), M = p.slice(16 + R + N, 16 + R + N + c), C = new TextDecoder().decode(t), U = new TextDecoder().decode(X), a = new TextDecoder().decode(M), H = (Q = globalThis[C]) !== null && Q !== void 0 ? Q : C === "RuntimeError" && (i = eI.RuntimeError) !== null && i !== void 0 ? i : Error, K = new H(U);
+  var R = Atomics.load(o, 1), N = Atomics.load(o, 2), c = Atomics.load(o, 3), p = new Uint8Array(B), t = p.slice(16, 16 + R), X = p.slice(16 + R, 16 + R + N), h = p.slice(16 + R + N, 16 + R + N + c), E = new TextDecoder().decode(t), U = new TextDecoder().decode(X), a = new TextDecoder().decode(h), H = (Q = globalThis[E]) !== null && Q !== void 0 ? Q : E === "RuntimeError" && (i = eI.RuntimeError) !== null && i !== void 0 ? i : Error, K = new H(U);
   return Object.defineProperty(K, "stack", {
     value: a,
     writable: !0,
@@ -1166,33 +1166,33 @@ var CQ = 0, fI = /* @__PURE__ */ (function() {
       return Q.whenLoaded;
     var k = this.printErr, R = this._beforeLoad, N = this;
     return Q.whenLoaded = new Promise(function(c, p) {
-      var t = function(M) {
-        var C = "worker sent an error!";
-        if (Q.__emnapi_tid !== void 0 && (C = "worker (tid = " + Q.__emnapi_tid + ") sent an error!"), "message" in M) {
-          if (k(C + " " + M.message), M.message.indexOf("RuntimeError") !== -1 || M.message.indexOf("unreachable") !== -1)
+      var t = function(h) {
+        var E = "worker sent an error!";
+        if (Q.__emnapi_tid !== void 0 && (E = "worker (tid = " + Q.__emnapi_tid + ") sent an error!"), "message" in h) {
+          if (k(E + " " + h.message), h.message.indexOf("RuntimeError") !== -1 || h.message.indexOf("unreachable") !== -1)
             try {
               N.terminateAllThreads();
             } catch {
             }
         } else
-          k(C);
-        throw p(M), M;
-      }, X = function(M) {
-        if (M.__emnapi__) {
-          var C = M.__emnapi__.type, U = M.__emnapi__.payload;
-          C === "loaded" ? (Q.loaded = !0, YA && !Q.__emnapi_tid && Q.unref(), c(Q)) : C === "cleanup-thread" && U.tid in o.pthreads && o.cleanThread(Q, U.tid);
+          k(E);
+        throw p(h), h;
+      }, X = function(h) {
+        if (h.__emnapi__) {
+          var E = h.__emnapi__.type, U = h.__emnapi__.payload;
+          E === "loaded" ? (Q.loaded = !0, YA && !Q.__emnapi_tid && Q.unref(), c(Q)) : E === "cleanup-thread" && U.tid in o.pthreads && o.cleanThread(Q, U.tid);
         }
       };
-      Q.onmessage = function(M) {
-        X(M.data), o.fireMessageEvent(Q, M);
-      }, Q.onerror = t, YA && (Q.on("message", function(M) {
-        var C, U;
-        (U = (C = Q).onmessage) === null || U === void 0 || U.call(C, {
-          data: M
+      Q.onmessage = function(h) {
+        X(h.data), o.fireMessageEvent(Q, h);
+      }, Q.onerror = t, YA && (Q.on("message", function(h) {
+        var E, U;
+        (U = (E = Q).onmessage) === null || U === void 0 || U.call(E, {
+          data: h
         });
-      }), Q.on("error", function(M) {
-        var C, U;
-        (U = (C = Q).onerror) === null || U === void 0 || U.call(C, M);
+      }), Q.on("error", function(h) {
+        var E, U;
+        (U = (E = Q).onerror) === null || U === void 0 || U.call(E, h);
       }), Q.on("detachedExit", function() {
       })), typeof R == "function" && R(Q);
       try {
@@ -1201,8 +1201,8 @@ var CQ = 0, fI = /* @__PURE__ */ (function() {
           wasmMemory: o.wasmMemory,
           sab: i
         }));
-      } catch (M) {
-        throw dI(o.wasmMemory), M;
+      } catch (h) {
+        throw dI(o.wasmMemory), h;
       }
     }), Q.whenLoaded;
   }, B.prototype.allocateUnusedWorker = function() {
@@ -1286,22 +1286,22 @@ function UI(B, Q) {
       "preventExtensions",
       "set",
       "setPrototypeOf"
-    ], X = {}, M = function(U) {
+    ], X = {}, h = function(U) {
       var a = t[U];
       X[a] = function() {
         var H = Array.prototype.slice.call(arguments, 1);
         return H.unshift(p), Reflect[a].apply(Reflect, H);
       };
-    }, C = 0; C < t.length; C++)
-      M(C);
+    }, E = 0; E < t.length; E++)
+      h(E);
     return X;
   }, k = o(i), R = function() {
   }, N = function() {
     return 0;
   };
   k.get = function(p, t, X) {
-    var M;
-    return t === "memory" ? (M = typeof Q == "function" ? Q() : Q) !== null && M !== void 0 ? M : Reflect.get(i, t, X) : t === "_initialize" ? t in i ? R : void 0 : t === "_start" ? t in i ? N : void 0 : Reflect.get(i, t, X);
+    var h;
+    return t === "memory" ? (h = typeof Q == "function" ? Q() : Q) !== null && h !== void 0 ? h : Reflect.get(i, t, X) : t === "_initialize" ? t in i ? R : void 0 : t === "_start" ? t in i ? N : void 0 : Reflect.get(i, t, X);
   }, k.has = function(p, t) {
     return t === "memory" ? !0 : Reflect.has(i, t);
   };
@@ -1330,19 +1330,19 @@ var xI = /* @__PURE__ */ new WeakMap(), gD = /* @__PURE__ */ (function() {
     this.postMessage = R;
     var N = !!Q.wasm64, c = function(t) {
       if (t.data.__emnapi__) {
-        var X = t.data.__emnapi__.type, M = t.data.__emnapi__.payload;
-        X === "spawn-thread" ? p(M.startArg, M.errorOrTid) : X === "terminate-all-threads" && i.terminateAllThreads();
+        var X = t.data.__emnapi__.type, h = t.data.__emnapi__.payload;
+        X === "spawn-thread" ? p(h.startArg, h.errorOrTid) : X === "terminate-all-threads" && i.terminateAllThreads();
       }
     }, p = function(t, X) {
-      var M, C = 6, U = X !== void 0;
+      var h, E = 6, U = X !== void 0;
       try {
         dI(i.wasmMemory);
       } catch (z) {
-        if ((M = i.PThread) === null || M === void 0 || M.printErr(z.stack), U) {
+        if ((h = i.PThread) === null || h === void 0 || h.printErr(z.stack), U) {
           var a = new Int32Array(i.wasmMemory.buffer, X, 2);
-          return Atomics.store(a, 0, 1), Atomics.store(a, 1, C), Atomics.notify(a, 1), 1;
+          return Atomics.store(a, 0, 1), Atomics.store(a, 1, E), Atomics.notify(a, 1), 1;
         } else
-          return -C;
+          return -E;
       }
       if (!U) {
         var H = i.wasmInstance.exports.malloc;
@@ -1392,7 +1392,7 @@ var xI = /* @__PURE__ */ new WeakMap(), gD = /* @__PURE__ */ (function() {
           }
         }
       } catch (z) {
-        return Atomics.store(s, 0, 1), Atomics.store(s, 1, C), Atomics.notify(s, 1), n?.printErr(z.stack), U ? 1 : (y(X), -C);
+        return Atomics.store(s, 0, 1), Atomics.store(s, 1, E), Atomics.notify(s, 1), n?.printErr(z.stack), U ? 1 : (y(X), -E);
       }
       return Atomics.store(s, 0, 0), Atomics.store(s, 1, W), Atomics.notify(s, 1), n.runningWorkers.push(V), d || V.whenLoaded.catch(function(z) {
         throw delete V.whenLoaded, n.cleanThread(V, W, !0), z;
@@ -1490,7 +1490,7 @@ function cA(B, Q) {
   }
   B.prototype = Q === null ? Object.create(Q) : (i.prototype = Q.prototype, new i());
 }
-var JA = typeof WebAssembly < "u" ? WebAssembly : typeof WXWebAssembly < "u" ? WXWebAssembly : void 0;
+var hA = typeof WebAssembly < "u" ? WebAssembly : typeof WXWebAssembly < "u" ? WXWebAssembly : void 0;
 function ED(B) {
   if (B && typeof B != "object")
     throw new TypeError("imports must be an object or undefined");
@@ -1509,24 +1509,24 @@ function mA(B, Q) {
   } catch {
   }
   if (B instanceof ArrayBuffer || ArrayBuffer.isView(B))
-    return JA.instantiate(B, Q);
-  if (B instanceof JA.Module)
-    return JA.instantiate(B, Q).then(function(k) {
+    return hA.instantiate(B, Q);
+  if (B instanceof hA.Module)
+    return hA.instantiate(B, Q).then(function(k) {
       return { instance: k, module: B };
     });
   if (typeof Response < "u" && B instanceof Response)
     return B.arrayBuffer().then(function(k) {
-      return JA.instantiate(k, Q);
+      return hA.instantiate(k, Q);
     });
   var o = typeof B == "string";
   if (o || typeof URL < "u" && B instanceof URL) {
     if (o && typeof wx < "u" && typeof __wxConfig < "u")
-      return JA.instantiate(B, Q);
+      return hA.instantiate(B, Q);
     if (typeof fetch != "function")
       throw new TypeError("wasm source can not be a string or URL in this environment");
-    if (typeof JA.instantiateStreaming == "function")
+    if (typeof hA.instantiateStreaming == "function")
       try {
-        return JA.instantiateStreaming(fetch(B), Q).catch(function() {
+        return hA.instantiateStreaming(fetch(B), Q).catch(function() {
           return mA(fetch(B), Q);
         });
       } catch {
@@ -1541,9 +1541,9 @@ function DD(B) {
   var Q = (function() {
     var i = typeof process == "object" && process !== null && typeof process.versions == "object" && process.versions !== null && typeof process.versions.node == "string", o = !!B.childThread, k = typeof B.waitThreadStart == "number" ? B.waitThreadStart : !!B.waitThreadStart, R, N, c, p, t;
     function X(A) {
-      throw typeof JA.RuntimeError == "function" ? new JA.RuntimeError(A) : Error(A);
+      throw typeof hA.RuntimeError == "function" ? new hA.RuntimeError(A) : Error(A);
     }
-    var M = {
+    var h = {
       imports: {
         env: {},
         napi: {},
@@ -1559,61 +1559,61 @@ function DD(B) {
       waitThreadStart: k,
       PThread: void 0,
       init: function(A) {
-        if (M.loaded)
-          return M.exports;
+        if (h.loaded)
+          return h.exports;
         if (!A)
           throw new TypeError("Invalid napi init options");
         var w = A.instance;
         if (!w?.exports)
           throw new TypeError("Invalid wasm instance");
         R = w;
-        var g = w.exports, I = A.module, E = A.memory || g.memory, D = A.table || g.__indirect_function_table;
-        if (!(I instanceof JA.Module))
+        var g = w.exports, I = A.module, C = A.memory || g.memory, D = A.table || g.__indirect_function_table;
+        if (!(I instanceof hA.Module))
           throw new TypeError("Invalid wasm module");
-        if (!(E instanceof JA.Memory))
+        if (!(C instanceof hA.Memory))
           throw new TypeError("Invalid wasm memory");
-        if (!(D instanceof JA.Table))
+        if (!(D instanceof hA.Table))
           throw new TypeError("Invalid wasm table");
-        if (N = E, c = D, typeof g.malloc != "function")
+        if (N = C, c = D, typeof g.malloc != "function")
           throw new TypeError("malloc is not exported");
         if (typeof g.free != "function")
           throw new TypeError("free is not exported");
-        if (p = g.malloc, t = g.free, !M.childThread) {
+        if (p = g.malloc, t = g.free, !h.childThread) {
           var F = 8, G = w.exports.node_api_module_get_api_version_v1;
           typeof G == "function" && (F = G());
-          var h = M.envObject || (M.envObject = C.createEnv(M.filename, F, function(S) {
+          var M = h.envObject || (h.envObject = E.createEnv(h.filename, F, function(S) {
             return c.get(S);
           }, function(S) {
             return c.get(S);
-          }, X, U)), J = C.openScope(h);
+          }, X, U)), J = E.openScope(M);
           try {
-            h.callIntoModule(function(S) {
-              var Y = M.exports, x = J.add(Y), Z = w.exports.napi_register_wasm_v1, b = Z(S.id, x.id);
-              M.exports = b ? C.handleStore.get(b).value : Y;
+            M.callIntoModule(function(S) {
+              var Y = h.exports, x = J.add(Y), Z = w.exports.napi_register_wasm_v1, b = Z(S.id, x.id);
+              h.exports = b ? E.handleStore.get(b).value : Y;
             });
           } catch (S) {
             if (S !== "unwind")
               throw S;
           } finally {
-            C.closeScope(h, J);
+            E.closeScope(M, J);
           }
-          return M.loaded = !0, delete M.envObject, M.exports;
+          return h.loaded = !0, delete h.envObject, h.exports;
         }
       }
-    }, C, U, a = void 0, H;
+    }, E, U, a = void 0, H;
     if (o) {
-      C = B?.context;
+      E = B?.context;
       var y = typeof B.postMessage == "function" ? B.postMessage : typeof postMessage == "function" ? postMessage : void 0;
       if (typeof y != "function")
         throw new TypeError("No postMessage found");
-      M.postMessage = y;
+      h.postMessage = y;
     } else {
       var K = B.context;
       if (typeof K != "object" || K === null)
         throw new TypeError("Invalid `options.context`. Use `import { getDefaultContext } from '@emnapi/runtime'`");
-      C = K;
+      E = K;
     }
-    if (typeof B.filename == "string" && (M.filename = B.filename), typeof B.onCreateWorker == "function" && (a = B.onCreateWorker), typeof B.print == "function" ? B.print : console.log.bind(console), typeof B.printErr == "function" ? H = B.printErr : H = console.warn.bind(console), "nodeBinding" in B) {
+    if (typeof B.filename == "string" && (h.filename = B.filename), typeof B.onCreateWorker == "function" && (a = B.onCreateWorker), typeof B.print == "function" ? B.print : console.log.bind(console), typeof B.printErr == "function" ? H = B.printErr : H = console.warn.bind(console), "nodeBinding" in B) {
       var s = B.nodeBinding;
       if (typeof s != "object" || s === null)
         throw new TypeError("Invalid `options.nodeBinding`. Use @emnapi/node-binding package");
@@ -1629,17 +1629,17 @@ function DD(B) {
     function d() {
       return Math.abs(f);
     }
-    M.imports.env._emnapi_async_work_pool_size = d;
+    h.imports.env._emnapi_async_work_pool_size = d;
     function T(A) {
       if (!A)
         return !1;
       if (A._emnapiSendListener)
         return !0;
       var w = function(I) {
-        var E = i ? I : I.data, D = E.__emnapi__;
+        var C = i ? I : I.data, D = C.__emnapi__;
         if (D && D.type === "async-send")
           if (o) {
-            var F = M.postMessage;
+            var F = h.postMessage;
             F({ __emnapi__: D });
           } else {
             var G = D.payload.callback;
@@ -1650,7 +1650,7 @@ function DD(B) {
       };
       return A._emnapiSendListener = { handler: w, dispose: g }, i ? A.on("message", w) : A.addEventListener("message", w, !1), !0;
     }
-    M.emnapi.addSendListener = T;
+    h.emnapi.addSendListener = T;
     var V = new fI(o ? {
       printErr: H,
       childThread: !0
@@ -1662,27 +1662,27 @@ function DD(B) {
       reuseWorker: B.reuseWorker,
       onCreateWorker: a
     });
-    M.PThread = V;
+    h.PThread = V;
     function W(A, w, g, I) {
-      var E = C.envStore.get(A);
-      return E.setLastError(w, g, I);
+      var C = E.envStore.get(A);
+      return C.setLastError(w, g, I);
     }
     function n(A) {
-      var w = C.envStore.get(A);
+      var w = E.envStore.get(A);
       return w.clearLastError();
     }
     function l(A, w, g) {
       var I = typeof process == "object" && process !== null && typeof process.versions == "object" && process.versions !== null && typeof process.versions.node == "string" ? process.versions.node.split(".").map(function(D) {
         return Number(D);
-      }) : [0, 0, 0], E = new DataView(N.buffer);
-      E.setUint32(A, I[0], !0), E.setUint32(w, I[1], !0), E.setUint32(g, I[2], !0);
+      }) : [0, 0, 0], C = new DataView(N.buffer);
+      C.setUint32(A, I[0], !0), C.setUint32(w, I[1], !0), C.setUint32(g, I[2], !0);
     }
     function v() {
     }
     function z() {
     }
     function _(A, w) {
-      C.feature.setImmediate(function() {
+      E.feature.setImmediate(function() {
         c.get(A)(w);
       });
     }
@@ -1691,26 +1691,26 @@ function DD(B) {
         c.get(A)(w);
       });
     }
-    function NA(A, w, g, I, E) {
-      var D = C.envStore.get(w), F = C.openScope(D);
+    function NA(A, w, g, I, C) {
+      var D = E.envStore.get(w), F = E.openScope(D);
       try {
         D.callbackIntoModule(!!A, function() {
           c.get(g)(w, I);
         });
       } catch (G) {
-        throw C.closeScope(D, F), E && C.closeScope(D), G;
+        throw E.closeScope(D, F), C && E.closeScope(D), G;
       }
-      C.closeScope(D, F);
+      E.closeScope(D, F);
     }
-    function RA(A, w, g, I, E) {
-      var D = C.envStore.get(w);
-      D.callFinalizerInternal(A, g, I, E);
+    function RA(A, w, g, I, C) {
+      var D = E.envStore.get(w);
+      D.callFinalizerInternal(A, g, I, C);
     }
     function OA() {
-      C.increaseWaitingRequestCounter();
+      E.increaseWaitingRequestCounter();
     }
     function rA() {
-      C.decreaseWaitingRequestCounter();
+      E.decreaseWaitingRequestCounter();
     }
     function HA() {
       return o ? 0 : 1;
@@ -1728,14 +1728,14 @@ function DD(B) {
       var g, I = [
         w >>> 0,
         (g = w, +Math.abs(g) >= 1 ? g > 0 ? (Math.min(+Math.floor(g / 4294967296), 4294967295) | 0) >>> 0 : ~~+Math.ceil((g - +(~~g >>> 0)) / 4294967296) >>> 0 : 0)
-      ], E = new DataView(N.buffer);
-      E.setInt32(A, I[0], !0), E.setInt32(A + 4, I[1], !0);
+      ], C = new DataView(N.buffer);
+      C.setInt32(A, I[0], !0), C.setInt32(A + 4, I[1], !0);
     }
     function ig() {
-      return C.openScope().id;
+      return E.openScope().id;
     }
     function Fg(A) {
-      return C.closeScope();
+      return E.closeScope();
     }
     var og = /* @__PURE__ */ Object.freeze({
       __proto__: null,
@@ -1759,8 +1759,8 @@ function DD(B) {
       napi_set_last_error: W
     });
     function AI(A) {
-      var w = new DataView(N.buffer), g = 20, I = w.getInt32(A + g, !0), E = V.pthreads[I];
-      return E;
+      var w = new DataView(N.buffer), g = 20, I = w.getInt32(A + g, !0), C = V.pthreads[I];
+      return C;
     }
     function Gg(A) {
       if (!o) {
@@ -1770,7 +1770,7 @@ function DD(B) {
     }
     function kg(A, w, g) {
       if (o) {
-        var I = M.postMessage;
+        var I = h.postMessage;
         I({
           __emnapi__: {
             type: "async-send",
@@ -1802,22 +1802,22 @@ function DD(B) {
       });
     }
     function Ug(A, w) {
-      for (var g = [], I = new DataView(N.buffer), E = function(F) {
-        var G = I.getUint32(A + F * 4, !0), h = AI(G);
+      for (var g = [], I = new DataView(N.buffer), C = function(F) {
+        var G = I.getUint32(A + F * 4, !0), M = AI(G);
         g.push(new Promise(function(J) {
           var S = function(Y) {
             var x = i ? Y : Y.data, Z = x.__emnapi__;
-            Z && Z.type === "async-thread-ready" && (J(), h && typeof h.unref == "function" && h.unref(), i ? h.off("message", S) : h.removeEventListener("message", S));
+            Z && Z.type === "async-thread-ready" && (J(), M && typeof M.unref == "function" && M.unref(), i ? M.off("message", S) : M.removeEventListener("message", S));
           };
-          i ? h.on("message", S) : h.addEventListener("message", S);
+          i ? M.on("message", S) : M.addEventListener("message", S);
         }));
       }, D = 0; D < w; D++)
-        E(D);
+        C(D);
       Promise.all(g).then(QI);
     }
     function Mg() {
       if (o) {
-        var A = M.postMessage;
+        var A = h.postMessage;
         A({
           __emnapi__: {
             type: "async-thread-ready",
@@ -1837,25 +1837,25 @@ function DD(B) {
     function Jg(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (!g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = Number(w);
-      if (E < 0)
+      var C = Number(w);
+      if (C < 0)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = N.buffer.byteLength, F = D + E;
+      var D = N.buffer.byteLength, F = D + C;
       if (F = F + (65536 - F % 65536) % 65536, N.grow(F - D + 65535 >> 16) === -1)
         return I.setLastError(
           9
           /* napi_status.napi_generic_failure */
         );
-      if (C.feature.supportBigInt) {
+      if (E.feature.supportBigInt) {
         var G = new DataView(N.buffer);
         G.setBigInt64(g, BigInt(N.buffer.byteLength), !0);
       } else
@@ -1884,11 +1884,11 @@ function DD(B) {
         };
         IA.idGen = A, IA.values = [void 0], IA.queued = /* @__PURE__ */ new Set(), IA.pending = [];
       },
-      create: function(A, w, g, I, E, D) {
+      create: function(A, w, g, I, C, D) {
         var F = 0, G = 0;
         if (U) {
-          var h = U.node.emitAsyncInit(w, g, -1);
-          F = h.asyncId, G = h.triggerAsyncId;
+          var M = U.node.emitAsyncInit(w, g, -1);
+          F = M.asyncId, G = M.triggerAsyncId;
         }
         var J = IA.idGen.generate();
         return IA.values[J] = {
@@ -1899,20 +1899,20 @@ function DD(B) {
           triggerAsyncId: G,
           status: 0,
           execute: I,
-          complete: E,
+          complete: C,
           data: D
         }, J;
       },
       callComplete: function(A, w) {
-        var g = A.complete, I = A.env, E = A.data, D = function() {
+        var g = A.complete, I = A.env, C = A.data, D = function() {
           if (g) {
-            var F = C.envStore.get(I), G = C.openScope(F);
+            var F = E.envStore.get(I), G = E.openScope(F);
             try {
               F.callbackIntoModule(!0, function() {
-                c.get(g)(I, w, E);
+                c.get(g)(I, w, C);
               });
             } finally {
-              C.closeScope(F, G);
+              E.closeScope(F, G);
             }
           }
         };
@@ -1929,9 +1929,9 @@ function DD(B) {
             return;
           }
           IA.queued.add(A);
-          var g = w.env, I = w.data, E = w.execute;
-          w.status = 2, C.feature.setImmediate(function() {
-            if (c.get(E)(g, I), IA.queued.delete(A), w.status = 3, C.feature.setImmediate(function() {
+          var g = w.env, I = w.data, C = w.execute;
+          w.status = 2, E.feature.setImmediate(function() {
+            if (c.get(C)(g, I), IA.queued.delete(A), w.status = 3, E.feature.setImmediate(function() {
               IA.callComplete(
                 w,
                 0
@@ -1948,7 +1948,7 @@ function DD(B) {
         var w = IA.pending.indexOf(A);
         if (w !== -1) {
           var g = IA.values[A];
-          return g && g.status === 1 ? (g.status = 4, IA.pending.splice(w, 1), C.feature.setImmediate(function() {
+          return g && g.status === 1 ? (g.status = 4, IA.pending.splice(w, 1), E.feature.setImmediate(function() {
             IA.callComplete(
               g,
               11
@@ -1968,10 +1968,10 @@ function DD(B) {
     };
     function KQ(A, w, g, I) {
       if (U) {
-        var E = C.handleStore.get(A).value, D = C.handleStore.get(w).value, F = U.node.emitAsyncInit(E, D, g), G = F.asyncId, h = F.triggerAsyncId;
+        var C = E.handleStore.get(A).value, D = E.handleStore.get(w).value, F = U.node.emitAsyncInit(C, D, g), G = F.asyncId, M = F.triggerAsyncId;
         if (I) {
           var J = new DataView(N.buffer);
-          J.setFloat64(I, G, !0), J.setFloat64(I + 8, h, !0);
+          J.setFloat64(I, G, !0), J.setFloat64(I + 8, M, !0);
         }
       }
     }
@@ -1981,21 +1981,21 @@ function DD(B) {
         triggerAsyncId: w
       });
     }
-    function Rg(A, w, g, I, E, D, F, G) {
-      var h = 0, J;
+    function Rg(A, w, g, I, C, D, F, G) {
+      var M = 0, J;
       if (U) {
-        var S = C.handleStore.get(w).value, Y = C.handleStore.get(g).value;
-        E = E >>> 0;
-        for (var x = Array(E), Z = new DataView(N.buffer); h < E; h++) {
-          var b = Z.getUint32(I + h * 4, !0);
-          x[h] = C.handleStore.get(b).value;
+        var S = E.handleStore.get(w).value, Y = E.handleStore.get(g).value;
+        C = C >>> 0;
+        for (var x = Array(C), Z = new DataView(N.buffer); M < C; M++) {
+          var b = Z.getUint32(I + M * 4, !0);
+          x[M] = E.handleStore.get(b).value;
         }
         var j = U.node.makeCallback(S, Y, x, {
           asyncId: D,
           triggerAsyncId: F
         });
         if (G) {
-          var u = C.envStore.get(A);
+          var u = E.envStore.get(A);
           J = u.ensureHandleId(j), Z.setUint32(G, J, !0);
         }
       }
@@ -2004,19 +2004,19 @@ function DD(B) {
       if (!U)
         return 9;
       var I;
-      A && (I = Object(C.handleStore.get(A).value));
-      var E = C.handleStore.get(w).value, D = U.napi.asyncInit(I, E);
+      A && (I = Object(E.handleStore.get(A).value));
+      var C = E.handleStore.get(w).value, D = U.napi.asyncInit(I, C);
       if (D.status !== 0)
         return D.status;
       var F = D.value;
       F >= BigInt(-1) * (BigInt(1) << BigInt(63)) && F < BigInt(1) << BigInt(63) || (F = F & (BigInt(1) << BigInt(64)) - BigInt(1), F >= BigInt(1) << BigInt(63) && (F = F - (BigInt(1) << BigInt(64))));
-      var G = Number(F & BigInt(4294967295)), h = Number(F >> BigInt(32)), J = new DataView(N.buffer);
-      return J.setInt32(g, G, !0), J.setInt32(g + 4, h, !0), 0;
+      var G = Number(F & BigInt(4294967295)), M = Number(F >> BigInt(32)), J = new DataView(N.buffer);
+      return J.setInt32(g, G, !0), J.setInt32(g + 4, M, !0), 0;
     }
     function Kg(A) {
       if (!U)
         return 9;
-      var w = new DataView(N.buffer), g = w.getInt32(A, !0), I = w.getInt32(A + 4, !0), E = BigInt(g >>> 0) | BigInt(I) << BigInt(32), D = U.napi.asyncDestroy(E);
+      var w = new DataView(N.buffer), g = w.getInt32(A, !0), I = w.getInt32(A + 4, !0), C = BigInt(g >>> 0) | BigInt(I) << BigInt(32), D = U.napi.asyncDestroy(C);
       return D.status !== 0 ? D.status : 0;
     }
     function Yg(A, w, g, I) {
@@ -2025,11 +2025,11 @@ function DD(B) {
     function cg(A, w) {
       throw new Error("napi_close_callback_scope has not been implemented yet");
     }
-    function Sg(A, w, g, I, E, D, F) {
-      var G = 0, h;
+    function Sg(A, w, g, I, C, D, F) {
+      var G = 0, M;
       if (!A)
         return 1;
-      var J = C.envStore.get(A);
+      var J = E.envStore.get(A);
       if (J.checkGCAccess(), !J.tryCatch.isEmpty())
         return J.setLastError(
           10
@@ -2047,27 +2047,27 @@ function DD(B) {
             9
             /* napi_status.napi_generic_failure */
           );
-        if (!g || E > 0 && !D)
+        if (!g || C > 0 && !D)
           return J.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var S = Object(C.handleStore.get(g).value), Y = C.handleStore.get(I).value;
+        var S = Object(E.handleStore.get(g).value), Y = E.handleStore.get(I).value;
         if (typeof Y != "function")
           return J.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         var x = new DataView(N.buffer), Z = x.getInt32(w, !0), b = x.getInt32(w + 4, !0), j = BigInt(Z >>> 0) | BigInt(b) << BigInt(32);
-        E = E >>> 0;
-        for (var u = Array(E); G < E; G++) {
+        C = C >>> 0;
+        for (var u = Array(C); G < C; G++) {
           var gA = x.getUint32(D + G * 4, !0);
-          u[G] = C.handleStore.get(gA).value;
+          u[G] = E.handleStore.get(gA).value;
         }
         var DA = U.napi.makeCallback(j, S, Y, u);
         if (DA.error)
           throw DA.error;
-        return DA.status !== 0 ? J.setLastError(DA.status) : (F && (h = J.ensureHandleId(DA.value), x.setUint32(F, h, !0)), J.getReturnStatus());
+        return DA.status !== 0 ? J.setLastError(DA.status) : (F && (M = J.ensureHandleId(DA.value), x.setUint32(F, M, !0)), J.getReturnStatus());
       } catch (AA) {
         return J.tryCatch.setError(AA), J.setLastError(
           10
@@ -2076,7 +2076,7 @@ function DD(B) {
       }
     }
     function yg(A) {
-      var w = C.envStore.get(A);
+      var w = E.envStore.get(A);
       w.checkGCAccess();
     }
     var Lg = /* @__PURE__ */ Object.freeze({
@@ -2148,7 +2148,7 @@ function DD(B) {
         if (A._emnapiTSFNListener)
           return !0;
         var w = function(I) {
-          var E = i ? I : I.data, D = E.__emnapi__;
+          var C = i ? I : I.data, D = C.__emnapi__;
           if (D) {
             var F = D.type, G = D.payload;
             F === "tsfn-send" && L.dispatch(G.tsfn);
@@ -2167,24 +2167,24 @@ function DD(B) {
         w && t(w);
       },
       pushQueue: function(A, w) {
-        var g = L.loadSizeTypeValue(A + L.offset.queue, !1), I = L.loadSizeTypeValue(g, !1), E = L.loadSizeTypeValue(g + 4, !1), D = 8, F = p(D);
+        var g = L.loadSizeTypeValue(A + L.offset.queue, !1), I = L.loadSizeTypeValue(g, !1), C = L.loadSizeTypeValue(g + 4, !1), D = 8, F = p(D);
         if (!F)
           throw new Error("OOM");
-        L.storeSizeTypeValue(F, w, !1), L.storeSizeTypeValue(F + 4, 0, !1), I === 0 && E === 0 ? (L.storeSizeTypeValue(g, F, !1), L.storeSizeTypeValue(g + 4, F, !1)) : (L.storeSizeTypeValue(E + 4, F, !1), L.storeSizeTypeValue(g + 4, F, !1)), L.addQueueSize(A);
+        L.storeSizeTypeValue(F, w, !1), L.storeSizeTypeValue(F + 4, 0, !1), I === 0 && C === 0 ? (L.storeSizeTypeValue(g, F, !1), L.storeSizeTypeValue(g + 4, F, !1)) : (L.storeSizeTypeValue(C + 4, F, !1), L.storeSizeTypeValue(g + 4, F, !1)), L.addQueueSize(A);
       },
       shiftQueue: function(A) {
         var w = L.loadSizeTypeValue(A + L.offset.queue, !1), g = L.loadSizeTypeValue(w, !1);
         if (g === 0)
           return 0;
-        var I = g, E = L.loadSizeTypeValue(g + 4, !1);
-        L.storeSizeTypeValue(w, E, !1), E === 0 && L.storeSizeTypeValue(w + 4, 0, !1), L.storeSizeTypeValue(I + 4, 0, !1);
+        var I = g, C = L.loadSizeTypeValue(g + 4, !1);
+        L.storeSizeTypeValue(w, C, !1), C === 0 && L.storeSizeTypeValue(w + 4, 0, !1), L.storeSizeTypeValue(I + 4, 0, !1);
         var D = L.loadSizeTypeValue(I, !1);
         return t(I), L.subQueueSize(A), D;
       },
       push: function(A, w, g) {
-        var I = L.getMutex(A), E = L.getCond(A), D = function() {
-          var G = L.getQueueSize(A), h = L.getMaxQueueSize(A), J = L.getIsClosing(A);
-          return G >= h && h > 0 && !J;
+        var I = L.getMutex(A), C = L.getCond(A), D = function() {
+          var G = L.getQueueSize(A), M = L.getMaxQueueSize(A), J = L.getIsClosing(A);
+          return G >= M && M > 0 && !J;
         }, F = typeof window < "u" && typeof document < "u" && !i;
         return I.execute(function() {
           for (; D(); ) {
@@ -2192,7 +2192,7 @@ function DD(B) {
               return 15;
             if (F)
               return 21;
-            E.wait();
+            C.wait();
           }
           return L.getIsClosing(A) ? L.getThreadCount(A) === 0 ? 1 : (L.subThreadCount(A), 16) : (L.pushQueue(A, w), L.send(A), 0);
         });
@@ -2200,19 +2200,19 @@ function DD(B) {
       getMutex: function(A) {
         var w = A + L.offset.mutex, g = {
           lock: function() {
-            var I = typeof window < "u" && typeof document < "u" && !i, E = new Int32Array(N.buffer, w, 1);
+            var I = typeof window < "u" && typeof document < "u" && !i, C = new Int32Array(N.buffer, w, 1);
             if (I)
               for (; ; ) {
-                var D = Atomics.compareExchange(E, 0, 0, 1);
+                var D = Atomics.compareExchange(C, 0, 0, 1);
                 if (D === 0)
                   return;
               }
             else
               for (; ; ) {
-                var D = Atomics.compareExchange(E, 0, 0, 1);
+                var D = Atomics.compareExchange(C, 0, 0, 1);
                 if (D === 0)
                   return;
-                Atomics.wait(E, 0, 1);
+                Atomics.wait(C, 0, 1);
               }
           },
           /* lockAsync () {
@@ -2231,8 +2231,8 @@ function DD(B) {
             })
           }, */
           unlock: function() {
-            var I = new Int32Array(N.buffer, w, 1), E = Atomics.compareExchange(I, 0, 1, 0);
-            if (E !== 1)
+            var I = new Int32Array(N.buffer, w, 1), C = Atomics.compareExchange(I, 0, 1, 0);
+            if (C !== 1)
               throw new Error("Tried to unlock while not holding the mutex");
             Atomics.notify(I, 0, 1);
           },
@@ -2261,8 +2261,8 @@ function DD(B) {
       getCond: function(A) {
         var w = A + L.offset.cond, g = L.getMutex(A), I = {
           wait: function() {
-            var E = new Int32Array(N.buffer, w, 1), D = Atomics.load(E, 0);
-            g.unlock(), Atomics.wait(E, 0, D), g.lock();
+            var C = new Int32Array(N.buffer, w, 1), D = Atomics.load(C, 0);
+            g.unlock(), Atomics.wait(C, 0, D), g.lock();
           },
           /* waitAsync () {
             const i32a = new Int32Array(wasmMemory.buffer, index, 1)
@@ -2276,8 +2276,8 @@ function DD(B) {
             }
           }, */
           signal: function() {
-            var E = new Int32Array(N.buffer, w, 1);
-            Atomics.add(E, 0, 1), Atomics.notify(E, 0, 1);
+            var C = new Int32Array(N.buffer, w, 1);
+            Atomics.add(C, 0, 1), Atomics.notify(C, 0, 1);
           }
         };
         return I;
@@ -2359,14 +2359,14 @@ function DD(B) {
       },
       destroy: function(A) {
         L.destroyQueue(A);
-        var w = L.getEnv(A), g = C.envStore.get(w), I = L.getRef(A);
-        I && C.refStore.get(I).dispose(), C.removeCleanupHook(g, L.cleanup, A), g.unref();
-        var E = A + L.offset.async_ref >> 2, D = new Int32Array(N.buffer);
-        Atomics.load(D, E) && (Atomics.store(D, E, 0), C.decreaseWaitingRequestCounter());
+        var w = L.getEnv(A), g = E.envStore.get(w), I = L.getRef(A);
+        I && E.refStore.get(I).dispose(), E.removeCleanupHook(g, L.cleanup, A), g.unref();
+        var C = A + L.offset.async_ref >> 2, D = new Int32Array(N.buffer);
+        Atomics.load(D, C) && (Atomics.store(D, C, 0), E.decreaseWaitingRequestCounter());
         var F = L.getResource(A);
-        if (C.refStore.get(F).dispose(), U) {
-          var G = new DataView(N.buffer), h = G.getFloat64(A + L.offset.async_id, !0), J = G.getFloat64(A + L.offset.trigger_async_id, !0);
-          YQ(h, J);
+        if (E.refStore.get(F).dispose(), U) {
+          var G = new DataView(N.buffer), M = G.getFloat64(A + L.offset.async_id, !0), J = G.getFloat64(A + L.offset.trigger_async_id, !0);
+          YQ(M, J);
         }
         t(A);
       },
@@ -2376,15 +2376,15 @@ function DD(B) {
         L.destroy(A);
       },
       finalize: function(A) {
-        var w = L.getEnv(A), g = C.envStore.get(w);
-        C.openScope(g);
-        var I = L.getFinalizeCb(A), E = L.getFinalizeData(A), D = L.getContext(A), F = function() {
-          g.callFinalizerInternal(0, I, E, D);
+        var w = L.getEnv(A), g = E.envStore.get(w);
+        E.openScope(g);
+        var I = L.getFinalizeCb(A), C = L.getFinalizeData(A), D = L.getContext(A), F = function() {
+          g.callFinalizerInternal(0, I, C, D);
         };
         try {
           if (I)
             if (U) {
-              var G = L.getResource(A), h = C.refStore.get(G).get(), J = C.handleStore.get(h).value, S = new DataView(N.buffer), Y = S.getFloat64(A + L.offset.async_id, !0), x = S.getFloat64(A + L.offset.trigger_async_id, !0);
+              var G = L.getResource(A), M = E.refStore.get(G).get(), J = E.handleStore.get(M).value, S = new DataView(N.buffer), Y = S.getFloat64(A + L.offset.async_id, !0), x = S.getFloat64(A + L.offset.trigger_async_id, !0);
               U.node.makeCallback(J, F, [], {
                 asyncId: Y,
                 triggerAsyncId: x
@@ -2393,30 +2393,30 @@ function DD(B) {
               F();
           L.emptyQueueAndDelete(A);
         } finally {
-          C.closeScope(g);
+          E.closeScope(g);
         }
       },
       cleanup: function(A) {
         L.closeHandlesAndMaybeDelete(A, 1);
       },
       closeHandlesAndMaybeDelete: function(A, w) {
-        var g = L.getEnv(A), I = C.envStore.get(g);
-        C.openScope(I);
+        var g = L.getEnv(A), I = E.envStore.get(g);
+        E.openScope(I);
         try {
           if (w && L.getMutex(A).execute(function() {
             L.setIsClosing(A, 1), L.getMaxQueueSize(A) > 0 && L.getCond(A).signal();
           }), L.getHandlesClosing(A))
             return;
-          L.setHandlesClosing(A, 1), C.feature.setImmediate(function() {
+          L.setHandlesClosing(A, 1), E.feature.setImmediate(function() {
             L.finalize(A);
           });
         } finally {
-          C.closeScope(I);
+          E.closeScope(I);
         }
       },
       dispatchOne: function(A) {
-        var w = 0, g = !1, I = !1, E = L.getMutex(A), D = L.getCond(A);
-        if (E.execute(function() {
+        var w = 0, g = !1, I = !1, C = L.getMutex(A), D = L.getCond(A);
+        if (C.execute(function() {
           if (L.getIsClosing(A))
             L.closeHandlesAndMaybeDelete(A, 0);
           else {
@@ -2429,38 +2429,38 @@ function DD(B) {
             Z === 0 ? L.getThreadCount(A) === 0 && (L.setIsClosing(A, 1), L.getMaxQueueSize(A) > 0 && D.signal(), L.closeHandlesAndMaybeDelete(A, 0)) : I = !0;
           }
         }), g) {
-          var F = L.getEnv(A), G = C.envStore.get(F);
-          C.openScope(G);
-          var h = function() {
+          var F = L.getEnv(A), G = E.envStore.get(F);
+          E.openScope(G);
+          var M = function() {
             G.callbackIntoModule(!1, function() {
-              var Z = L.getCallJSCb(A), b = L.getRef(A), j = b ? C.refStore.get(b).get() : 0;
+              var Z = L.getCallJSCb(A), b = L.getRef(A), j = b ? E.refStore.get(b).get() : 0;
               if (Z) {
                 var u = L.getContext(A);
                 c.get(Z)(F, j, u, w);
               } else {
-                var gA = j ? C.handleStore.get(j).value : null;
+                var gA = j ? E.handleStore.get(j).value : null;
                 typeof gA == "function" && gA();
               }
             });
           };
           try {
             if (U) {
-              var J = L.getResource(A), S = C.refStore.get(J).get(), Y = C.handleStore.get(S).value, x = new DataView(N.buffer);
-              U.node.makeCallback(Y, h, [], {
+              var J = L.getResource(A), S = E.refStore.get(J).get(), Y = E.handleStore.get(S).value, x = new DataView(N.buffer);
+              U.node.makeCallback(Y, M, [], {
                 asyncId: x.getFloat64(A + L.offset.async_id, !0),
                 triggerAsyncId: x.getFloat64(A + L.offset.trigger_async_id, !0)
               });
             } else
-              h();
+              M();
           } finally {
-            C.closeScope(G);
+            E.closeScope(G);
           }
         }
         return I;
       },
       dispatch: function(A) {
-        for (var w = !0, g = 1e3, I = new Uint32Array(N.buffer), E = A + L.offset.dispatch_state >> 2; w && --g !== 0; )
-          Atomics.store(I, E, 1), w = L.dispatchOne(A), Atomics.exchange(I, E, 0) !== 1 && (w = !0);
+        for (var w = !0, g = 1e3, I = new Uint32Array(N.buffer), C = A + L.offset.dispatch_state >> 2; w && --g !== 0; )
+          Atomics.store(I, C, 1), w = L.dispatchOne(A), Atomics.exchange(I, C, 0) !== 1 && (w = !0);
         w && L.send(A);
       },
       send: function(A) {
@@ -2472,29 +2472,29 @@ function DD(B) {
               tsfn: A
             }
           }
-        }) : C.feature.setImmediate(function() {
+        }) : E.feature.setImmediate(function() {
           L.dispatch(A);
         }));
       }
     };
-    function sg(A, w, g, I, E, D, F, G, h, J, S) {
+    function sg(A, w, g, I, C, D, F, G, M, J, S) {
       if (!A)
         return 1;
-      var Y = C.envStore.get(A);
-      if (Y.checkGCAccess(), !I || (E = E >>> 0, D = D >>> 0, D === 0) || !S)
+      var Y = E.envStore.get(A);
+      if (Y.checkGCAccess(), !I || (C = C >>> 0, D = D >>> 0, D === 0) || !S)
         return Y.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       var x = 0;
       if (w) {
-        var Z = C.handleStore.get(w).value;
+        var Z = E.handleStore.get(w).value;
         if (typeof Z != "function")
           return Y.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        x = C.createReference(
+        x = E.createReference(
           Y,
           w,
           1,
@@ -2508,7 +2508,7 @@ function DD(B) {
         );
       var b;
       if (g) {
-        if (b = C.handleStore.get(g).value, b == null)
+        if (b = E.handleStore.get(g).value, b == null)
           return Y.setLastError(
             2
             /* napi_status.napi_object_expected */
@@ -2516,7 +2516,7 @@ function DD(B) {
         b = Object(b);
       } else
         b = {};
-      var j = Y.ensureHandleId(b), u = C.handleStore.get(I).value;
+      var j = Y.ensureHandleId(b), u = E.handleStore.get(I).value;
       if (typeof u == "symbol")
         return Y.setLastError(
           3
@@ -2530,14 +2530,14 @@ function DD(B) {
           /* napi_status.napi_generic_failure */
         );
       new Uint8Array(N.buffer).subarray(AA, AA + DA).fill(0);
-      var oA = C.createReference(
+      var oA = E.createReference(
         Y,
         j,
         1,
         1
         /* ReferenceOwnership.kUserland */
-      ), MA = oA.id, kA = new DataView(N.buffer);
-      return kA.setUint32(AA, MA, !0), L.initQueue(AA) ? (KQ(j, gA, -1, AA + L.offset.async_id), kA.setUint32(AA + L.offset.thread_count, D, !0), kA.setUint32(AA + L.offset.context, h, !0), kA.setUint32(AA + L.offset.max_queue_size, E, !0), kA.setUint32(AA + L.offset.ref, x, !0), kA.setUint32(AA + L.offset.env, A, !0), kA.setUint32(AA + L.offset.finalize_data, F, !0), kA.setUint32(AA + L.offset.finalize_cb, G, !0), kA.setUint32(AA + L.offset.call_js_cb, J, !0), C.addCleanupHook(Y, L.cleanup, AA), Y.ref(), C.increaseWaitingRequestCounter(), kA.setInt32(AA + L.offset.async_ref, 1, !0), kA.setUint32(S, AA, !0), Y.clearLastError()) : (t(AA), oA.dispose(), Y.setLastError(
+      ), UA = oA.id, kA = new DataView(N.buffer);
+      return kA.setUint32(AA, UA, !0), L.initQueue(AA) ? (KQ(j, gA, -1, AA + L.offset.async_id), kA.setUint32(AA + L.offset.thread_count, D, !0), kA.setUint32(AA + L.offset.context, M, !0), kA.setUint32(AA + L.offset.max_queue_size, C, !0), kA.setUint32(AA + L.offset.ref, x, !0), kA.setUint32(AA + L.offset.env, A, !0), kA.setUint32(AA + L.offset.finalize_data, F, !0), kA.setUint32(AA + L.offset.finalize_cb, G, !0), kA.setUint32(AA + L.offset.call_js_cb, J, !0), E.addCleanupHook(Y, L.cleanup, AA), Y.ref(), E.increaseWaitingRequestCounter(), kA.setInt32(AA + L.offset.async_ref, 1, !0), kA.setUint32(S, AA, !0), Y.clearLastError()) : (t(AA), oA.dispose(), Y.setLastError(
         9
         /* napi_status.napi_generic_failure */
       ));
@@ -2567,8 +2567,8 @@ function DD(B) {
         if (L.getThreadCount(A) === 0)
           return 1;
         if (L.subThreadCount(A), L.getThreadCount(A) === 0 || w === 1) {
-          var E = L.getIsClosing(A);
-          if (!E) {
+          var C = L.getIsClosing(A);
+          if (!C) {
             var D = w === 1 ? 1 : 0;
             L.setIsClosing(A, D), D && L.getMaxQueueSize(A) > 0 && I.signal(), L.send(A);
           }
@@ -2580,13 +2580,13 @@ function DD(B) {
       if (!w)
         return X(), 1;
       var g = w + L.offset.async_ref >> 2, I = new Int32Array(N.buffer);
-      return Atomics.load(I, g) && (Atomics.store(I, g, 0), C.decreaseWaitingRequestCounter()), 0;
+      return Atomics.load(I, g) && (Atomics.store(I, g, 0), E.decreaseWaitingRequestCounter()), 0;
     }
     function fg(A, w) {
       if (!w)
         return X(), 1;
       var g = w + L.offset.async_ref >> 2, I = new Int32Array(N.buffer);
-      return Atomics.load(I, g) || (Atomics.store(I, g, 1), C.increaseWaitingRequestCounter()), 0;
+      return Atomics.load(I, g) || (Atomics.store(I, g, 1), E.increaseWaitingRequestCounter()), 0;
     }
     var O = {
       unusedWorkers: [],
@@ -2619,10 +2619,10 @@ function DD(B) {
         if (A._emnapiAWMTListener)
           return !0;
         var w = function(I) {
-          var E = i ? I : I.data, D = E.__emnapi__;
+          var C = i ? I : I.data, D = C.__emnapi__;
           if (D) {
             var F = D.type, G = D.payload;
-            F === "async-work-complete" ? (C.decreaseWaitingRequestCounter(), O.runningWorkers.splice(O.runningWorkers.indexOf(A), 1), O.unusedWorkers.push(A), O.checkIdleWorker(), O.callComplete(
+            F === "async-work-complete" ? (E.decreaseWaitingRequestCounter(), O.runningWorkers.splice(O.runningWorkers.indexOf(A), 1), O.unusedWorkers.push(A), O.checkIdleWorker(), O.callComplete(
               G.work,
               0
               /* napi_status.napi_ok */
@@ -2646,9 +2646,9 @@ function DD(B) {
         for (var I = 0; I < A; ++I)
           g.push(R.exports.emnapi_async_worker_create());
         try {
-          for (var E = function(F) {
-            var G = a({ type: "async-work", name: "emnapi-async-worker" }), h = V.loadWasmModuleToWorker(G);
-            O.addListener(G), w.push(h.then(function() {
+          for (var C = function(F) {
+            var G = a({ type: "async-work", name: "emnapi-async-worker" }), M = V.loadWasmModuleToWorker(G);
+            O.addListener(G), w.push(M.then(function() {
               typeof G.unref == "function" && G.unref();
             })), O.unusedWorkers.push(G);
             var J = g[F];
@@ -2659,7 +2659,7 @@ function DD(B) {
               }
             });
           }, I = 0; I < A; ++I)
-            E(I);
+            C(I);
         } catch (F) {
           for (var I = 0; I < A; ++I) {
             var D = g[I];
@@ -2698,7 +2698,7 @@ function DD(B) {
       scheduleWork: function(A) {
         var w;
         if (o) {
-          var g = M.postMessage;
+          var g = h.postMessage;
           g({
             __emnapi__: {
               type: "async-work-queue",
@@ -2707,24 +2707,24 @@ function DD(B) {
           });
           return;
         }
-        if (C.increaseWaitingRequestCounter(), O.workQueue.push(A), !((w = O.workerReady) === null || w === void 0) && w.ready)
+        if (E.increaseWaitingRequestCounter(), O.workQueue.push(A), !((w = O.workerReady) === null || w === void 0) && w.ready)
           O.checkIdleWorker();
         else {
-          var I = function(E) {
-            throw C.decreaseWaitingRequestCounter(), E;
+          var I = function(C) {
+            throw E.decreaseWaitingRequestCounter(), C;
           };
           try {
             O.initWorkers(d()).then(function() {
               O.workerReady.ready = !0, O.checkIdleWorker();
             }, I);
-          } catch (E) {
-            I(E);
+          } catch (C) {
+            I(C);
           }
         }
       },
       cancelWork: function(A) {
         if (o) {
-          var w = M.postMessage;
+          var w = h.postMessage;
           return w({
             __emnapi__: {
               type: "async-work-cancel",
@@ -2733,8 +2733,8 @@ function DD(B) {
           }), 0;
         }
         var g = O.workQueue.indexOf(A);
-        return g !== -1 ? (O.workQueue.splice(g, 1), C.feature.setImmediate(function() {
-          C.decreaseWaitingRequestCounter(), O.checkIdleWorker(), O.callComplete(
+        return g !== -1 ? (O.workQueue.splice(g, 1), E.feature.setImmediate(function() {
+          E.decreaseWaitingRequestCounter(), O.checkIdleWorker(), O.callComplete(
             A,
             11
             /* napi_status.napi_cancelled */
@@ -2742,14 +2742,14 @@ function DD(B) {
         }), 0) : 9;
       },
       callComplete: function(A, w) {
-        var g = O.getComplete(A), I = O.getEnv(A), E = O.getData(A), D = C.envStore.get(I), F = C.openScope(D), G = function() {
+        var g = O.getComplete(A), I = O.getEnv(A), C = O.getData(A), D = E.envStore.get(I), F = E.openScope(D), G = function() {
           g && D.callbackIntoModule(!0, function() {
-            c.get(g)(I, w, E);
+            c.get(g)(I, w, C);
           });
         };
         try {
           if (U) {
-            var h = O.getResource(A), J = C.refStore.get(h).get(), S = C.handleStore.get(J).value, Y = new DataView(N.buffer), x = Y.getFloat64(A + O.offset.async_id, !0), Z = Y.getFloat64(A + O.offset.trigger_async_id, !0);
+            var M = O.getResource(A), J = E.refStore.get(M).get(), S = E.handleStore.get(J).value, Y = new DataView(N.buffer), x = Y.getFloat64(A + O.offset.async_id, !0), Z = Y.getFloat64(A + O.offset.trigger_async_id, !0);
             U.node.makeCallback(S, G, [], {
               asyncId: x,
               triggerAsyncId: Z
@@ -2757,37 +2757,37 @@ function DD(B) {
           } else
             G();
         } finally {
-          C.closeScope(D, F);
+          E.closeScope(D, F);
         }
       }
-    }, xg = e ? function(A, w, g, I, E, D, F) {
+    }, xg = e ? function(A, w, g, I, C, D, F) {
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !I || !F)
         return G.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var h;
-      if (w ? h = Object(C.handleStore.get(w).value) : h = {}, !g)
+      var M;
+      if (w ? M = Object(E.handleStore.get(w).value) : M = {}, !g)
         return G.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var J = String(C.handleStore.get(g).value), S = IA.create(A, h, J, I, E, D), Y = new DataView(N.buffer);
+      var J = String(E.handleStore.get(g).value), S = IA.create(A, M, J, I, C, D), Y = new DataView(N.buffer);
       return Y.setUint32(F, S, !0), G.clearLastError();
-    } : function(A, w, g, I, E, D, F) {
+    } : function(A, w, g, I, C, D, F) {
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !I || !F)
         return G.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var h;
-      if (w ? h = Object(C.handleStore.get(w).value) : h = {}, !g)
+      var M;
+      if (w ? M = Object(E.handleStore.get(w).value) : M = {}, !g)
         return G.setLastError(
           1
           /* napi_status.napi_invalid_arg */
@@ -2799,18 +2799,18 @@ function DD(B) {
           /* napi_status.napi_generic_failure */
         );
       new Uint8Array(N.buffer).subarray(S, S + J).fill(0);
-      var Y = G.ensureHandleId(h), x = C.createReference(
+      var Y = G.ensureHandleId(M), x = E.createReference(
         G,
         Y,
         1,
         1
         /* ReferenceOwnership.kUserland */
       ), Z = x.id, b = new DataView(N.buffer);
-      return b.setUint32(S, Z, !0), KQ(Y, g, -1, S + O.offset.async_id), b.setUint32(S + O.offset.env, A, !0), b.setUint32(S + O.offset.execute, I, !0), b.setUint32(S + O.offset.complete, E, !0), b.setUint32(S + O.offset.data, D, !0), b.setUint32(F, S, !0), G.clearLastError();
+      return b.setUint32(S, Z, !0), KQ(Y, g, -1, S + O.offset.async_id), b.setUint32(S + O.offset.env, A, !0), b.setUint32(S + O.offset.execute, I, !0), b.setUint32(S + O.offset.complete, C, !0), b.setUint32(S + O.offset.data, D, !0), b.setUint32(F, S, !0), G.clearLastError();
     }, Vg = e ? function(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       return g.checkGCAccess(), w ? (IA.remove(w), g.clearLastError()) : g.setLastError(
         1
         /* napi_status.napi_invalid_arg */
@@ -2818,22 +2818,22 @@ function DD(B) {
     } : function(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       var I = O.getResource(w);
-      if (C.refStore.get(I).dispose(), U) {
-        var E = new DataView(N.buffer), D = E.getFloat64(w + O.offset.async_id, !0), F = E.getFloat64(w + O.offset.trigger_async_id, !0);
+      if (E.refStore.get(I).dispose(), U) {
+        var C = new DataView(N.buffer), D = C.getFloat64(w + O.offset.async_id, !0), F = C.getFloat64(w + O.offset.trigger_async_id, !0);
         YQ(D, F);
       }
       return t(w), g.clearLastError();
     }, Xg = e ? function(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       return w ? (IA.queue(w), g.clearLastError()) : g.setLastError(
         1
         /* napi_status.napi_invalid_arg */
@@ -2841,7 +2841,7 @@ function DD(B) {
     } : function(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       return w ? (O.scheduleWork(w), g.clearLastError()) : g.setLastError(
         1
         /* napi_status.napi_invalid_arg */
@@ -2849,7 +2849,7 @@ function DD(B) {
     }, Zg = e ? function(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (!w)
         return g.setLastError(
           1
@@ -2860,7 +2860,7 @@ function DD(B) {
     } : function(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (!w)
         return g.setLastError(
           1
@@ -2870,7 +2870,7 @@ function DD(B) {
       return I === 0 ? g.clearLastError() : g.setLastError(I);
     };
     function Wg(A) {
-      if (M.childThread) {
+      if (h.childThread) {
         if (typeof R.exports.emnapi_async_worker_init != "function")
           throw new TypeError("`emnapi_async_worker_init` is not exported, please try to add `--export=emnapi_async_worker_init` to linker flags");
         R.exports.emnapi_async_worker_init(A);
@@ -2881,8 +2881,8 @@ function DD(B) {
       if (o) {
         var w = O.getExecute(A), g = O.getEnv(A), I = O.getData(A);
         c.get(w)(g, I);
-        var E = M.postMessage;
-        E({
+        var C = h.postMessage;
+        C({
           __emnapi__: {
             type: "async-work-complete",
             payload: { work: A }
@@ -2890,7 +2890,7 @@ function DD(B) {
         });
       }
     }
-    M.initWorker = Wg, M.executeAsyncWork = Tg;
+    h.initWorker = Wg, h.executeAsyncWork = Tg;
     var bg = /* @__PURE__ */ Object.freeze({
       __proto__: null,
       napi_cancel_async_work: Zg,
@@ -2928,12 +2928,12 @@ function DD(B) {
         };
         if (A === N.buffer)
           return I;
-        var E = P.isDetachedArrayBuffer(A);
+        var C = P.isDetachedArrayBuffer(A);
         if (P.table.has(A)) {
           var D = P.table.get(A);
-          return E ? (D.address = 0, D) : (w && D.ownership === 0 && D.runtimeAllocated === 1 && new Uint8Array(N.buffer).set(new Uint8Array(A), D.address), D);
+          return C ? (D.address = 0, D) : (w && D.ownership === 0 && D.runtimeAllocated === 1 && new Uint8Array(N.buffer).set(new Uint8Array(A), D.address), D);
         }
-        if (E || A.byteLength === 0 || !w)
+        if (C || A.byteLength === 0 || !w)
           return I;
         var F = p(A.byteLength);
         if (!F)
@@ -2951,47 +2951,47 @@ function DD(B) {
           }), A;
         var w = P.isDetachedArrayBuffer(A.buffer) || typeof SharedArrayBuffer == "function" && A.buffer instanceof SharedArrayBuffer;
         if (w && P.wasmMemoryViewTable.has(A)) {
-          var g = P.wasmMemoryViewTable.get(A), I = g.Ctor, E = void 0, D = C.feature.Buffer;
-          return typeof D == "function" && I === D ? E = D.from(N.buffer, g.address, g.length) : E = new I(N.buffer, g.address, g.length), P.wasmMemoryViewTable.set(E, g), E;
+          var g = P.wasmMemoryViewTable.get(A), I = g.Ctor, C = void 0, D = E.feature.Buffer;
+          return typeof D == "function" && I === D ? C = D.from(N.buffer, g.address, g.length) : C = new I(N.buffer, g.address, g.length), P.wasmMemoryViewTable.set(C, g), C;
         }
         return A;
       },
       getViewPointer: function(A, w) {
         if (A = P.getOrUpdateMemoryView(A), A.buffer === N.buffer) {
           if (P.wasmMemoryViewTable.has(A)) {
-            var g = P.wasmMemoryViewTable.get(A), I = g.address, E = g.ownership, D = g.runtimeAllocated;
-            return { address: I, ownership: E, runtimeAllocated: D, view: A };
+            var g = P.wasmMemoryViewTable.get(A), I = g.address, C = g.ownership, D = g.runtimeAllocated;
+            return { address: I, ownership: C, runtimeAllocated: D, view: A };
           }
           return { address: A.byteOffset, ownership: 1, runtimeAllocated: 0, view: A };
         }
-        var F = P.getArrayBufferPointer(A.buffer, w), G = F.address, h = F.ownership, J = F.runtimeAllocated;
-        return { address: G === 0 ? 0 : G + A.byteOffset, ownership: h, runtimeAllocated: J, view: A };
+        var F = P.getArrayBufferPointer(A.buffer, w), G = F.address, M = F.ownership, J = F.runtimeAllocated;
+        return { address: G === 0 ? 0 : G + A.byteOffset, ownership: M, runtimeAllocated: J, view: A };
       }
     }, $ = {
       utf8Decoder: void 0,
       utf16Decoder: void 0,
       init: function() {
         var A = {
-          decode: function(E) {
-            for (var D = 0, F = Math.min(4096, E.length + 1), G = new Uint16Array(F), h = [], J = 0; ; ) {
-              var S = D < E.length;
+          decode: function(C) {
+            for (var D = 0, F = Math.min(4096, C.length + 1), G = new Uint16Array(F), M = [], J = 0; ; ) {
+              var S = D < C.length;
               if (!S || J >= F - 1) {
                 var Y = G.subarray(0, J), x = Y;
-                if (h.push(String.fromCharCode.apply(null, x)), !S)
-                  return h.join("");
-                E = E.subarray(D), D = 0, J = 0;
+                if (M.push(String.fromCharCode.apply(null, x)), !S)
+                  return M.join("");
+                C = C.subarray(D), D = 0, J = 0;
               }
-              var Z = E[D++];
+              var Z = C[D++];
               if ((Z & 128) === 0)
                 G[J++] = Z;
               else if ((Z & 224) === 192) {
-                var b = E[D++] & 63;
+                var b = C[D++] & 63;
                 G[J++] = (Z & 31) << 6 | b;
               } else if ((Z & 240) === 224) {
-                var b = E[D++] & 63, j = E[D++] & 63;
+                var b = C[D++] & 63, j = C[D++] & 63;
                 G[J++] = (Z & 31) << 12 | b << 6 | j;
               } else if ((Z & 248) === 240) {
-                var b = E[D++] & 63, j = E[D++] & 63, u = E[D++] & 63, gA = (Z & 7) << 18 | b << 12 | j << 6 | u;
+                var b = C[D++] & 63, j = C[D++] & 63, u = C[D++] & 63, gA = (Z & 7) << 18 | b << 12 | j << 6 | u;
                 gA > 65535 && (gA -= 65536, G[J++] = gA >>> 10 & 1023 | 55296, gA = 56320 | gA & 1023), G[J++] = gA;
               }
             }
@@ -2999,12 +2999,12 @@ function DD(B) {
         }, w;
         w = typeof TextDecoder == "function" ? new TextDecoder() : A, $.utf8Decoder = w;
         var g = {
-          decode: function(E) {
-            var D = new Uint16Array(E.buffer, E.byteOffset, E.byteLength / 2);
+          decode: function(C) {
+            var D = new Uint16Array(C.buffer, C.byteOffset, C.byteLength / 2);
             if (D.length <= 4096)
               return String.fromCharCode.apply(null, D);
-            for (var F = [], G = 0, h = 0; G < D.length; G += h)
-              h = Math.min(4096, D.length - G), F.push(String.fromCharCode.apply(null, D.subarray(G, G + h)));
+            for (var F = [], G = 0, M = 0; G < D.length; G += M)
+              M = Math.min(4096, D.length - G), F.push(String.fromCharCode.apply(null, D.subarray(G, G + M)));
             return F.join("");
           }
         }, I;
@@ -3026,19 +3026,19 @@ function DD(B) {
         else
           I = A + (w >>> 0);
         if (w = I - A, w <= 16) {
-          for (var E = A, D = ""; E < I; ) {
-            var F = g[E++];
+          for (var C = A, D = ""; C < I; ) {
+            var F = g[C++];
             if (!(F & 128)) {
               D += String.fromCharCode(F);
               continue;
             }
-            var G = g[E++] & 63;
+            var G = g[C++] & 63;
             if ((F & 224) === 192) {
               D += String.fromCharCode((F & 31) << 6 | G);
               continue;
             }
-            var h = g[E++] & 63;
-            if ((F & 240) === 224 ? F = (F & 15) << 12 | G << 6 | h : F = (F & 7) << 18 | G << 12 | h << 6 | g[E++] & 63, F < 65536)
+            var M = g[C++] & 63;
+            if ((F & 240) === 224 ? F = (F & 15) << 12 | G << 6 | M : F = (F & 7) << 18 | G << 12 | M << 6 | g[C++] & 63, F < 65536)
               D += String.fromCharCode(F);
             else {
               var J = F - 65536;
@@ -3050,34 +3050,34 @@ function DD(B) {
         return $.utf8Decoder.decode(typeof SharedArrayBuffer == "function" && g.buffer instanceof SharedArrayBuffer || Object.prototype.toString.call(g.buffer) === "[object SharedArrayBuffer]" ? g.slice(A, I) : g.subarray(A, I));
       },
       stringToUTF8: function(A, w, g) {
-        var I = new Uint8Array(N.buffer), E = w;
-        if (E >>>= 0, !(g > 0))
+        var I = new Uint8Array(N.buffer), C = w;
+        if (C >>>= 0, !(g > 0))
           return 0;
-        for (var D = E, F = E + g - 1, G = 0; G < A.length; ++G) {
-          var h = A.charCodeAt(G);
-          if (h >= 55296 && h <= 57343) {
+        for (var D = C, F = C + g - 1, G = 0; G < A.length; ++G) {
+          var M = A.charCodeAt(G);
+          if (M >= 55296 && M <= 57343) {
             var J = A.charCodeAt(++G);
-            h = 65536 + ((h & 1023) << 10) | J & 1023;
+            M = 65536 + ((M & 1023) << 10) | J & 1023;
           }
-          if (h <= 127) {
-            if (E >= F)
+          if (M <= 127) {
+            if (C >= F)
               break;
-            I[E++] = h;
-          } else if (h <= 2047) {
-            if (E + 1 >= F)
+            I[C++] = M;
+          } else if (M <= 2047) {
+            if (C + 1 >= F)
               break;
-            I[E++] = 192 | h >> 6, I[E++] = 128 | h & 63;
-          } else if (h <= 65535) {
-            if (E + 2 >= F)
+            I[C++] = 192 | M >> 6, I[C++] = 128 | M & 63;
+          } else if (M <= 65535) {
+            if (C + 2 >= F)
               break;
-            I[E++] = 224 | h >> 12, I[E++] = 128 | h >> 6 & 63, I[E++] = 128 | h & 63;
+            I[C++] = 224 | M >> 12, I[C++] = 128 | M >> 6 & 63, I[C++] = 128 | M & 63;
           } else {
-            if (E + 3 >= F)
+            if (C + 3 >= F)
               break;
-            I[E++] = 240 | h >> 18, I[E++] = 128 | h >> 12 & 63, I[E++] = 128 | h >> 6 & 63, I[E++] = 128 | h & 63;
+            I[C++] = 240 | M >> 18, I[C++] = 128 | M >> 12 & 63, I[C++] = 128 | M >> 6 & 63, I[C++] = 128 | M & 63;
           }
         }
-        return I[E] = 0, E - D;
+        return I[C] = 0, C - D;
       },
       UTF16ToString: function(A, w) {
         if (!A || !w)
@@ -3085,7 +3085,7 @@ function DD(B) {
         A >>>= 0;
         var g = A;
         if (w === -1) {
-          for (var I = g >> 1, E = new Uint16Array(N.buffer); E[I]; )
+          for (var I = g >> 1, C = new Uint16Array(N.buffer); C[I]; )
             ++I;
           g = I << 1;
         } else
@@ -3099,16 +3099,16 @@ function DD(B) {
         if (g === void 0 && (g = 2147483647), g < 2)
           return 0;
         g -= 2;
-        for (var I = w, E = g < A.length * 2 ? g / 2 : A.length, D = new DataView(N.buffer), F = 0; F < E; ++F) {
+        for (var I = w, C = g < A.length * 2 ? g / 2 : A.length, D = new DataView(N.buffer), F = 0; F < C; ++F) {
           var G = A.charCodeAt(F);
           D.setInt16(w, G, !0), w += 2;
         }
         return D.setInt16(w, 0, !0), w - I;
       },
-      newString: function(A, w, g, I, E) {
+      newString: function(A, w, g, I, C) {
         if (!A)
           return 1;
-        var D = C.envStore.get(A);
+        var D = E.envStore.get(A);
         D.checkGCAccess();
         var F = g === -1, G = g >>> 0;
         if (g !== 0 && !w || !I || !(F || G <= 2147483647))
@@ -3116,13 +3116,13 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = E(w, F, G), J = C.addToCurrentScope(h).id, S = new DataView(N.buffer);
+        var M = C(w, F, G), J = E.addToCurrentScope(M).id, S = new DataView(N.buffer);
         return S.setUint32(I, J, !0), D.clearLastError();
       },
-      newExternalString: function(A, w, g, I, E, D, F, G, h) {
+      newExternalString: function(A, w, g, I, C, D, F, G, M) {
         if (!A)
           return 1;
-        var J = C.envStore.get(A);
+        var J = E.envStore.get(A);
         J.checkGCAccess();
         var S = g === -1, Y = g >>> 0;
         if (g !== 0 && !w || !D || !(S || Y <= 2147483647))
@@ -3136,7 +3136,7 @@ function DD(B) {
             var Z = new DataView(N.buffer);
             Z.setInt8(F, 1, !0);
           }
-          I && J.callFinalizer(I, w, E);
+          I && J.callFinalizer(I, w, C);
         }
         return x;
       }
@@ -3144,7 +3144,7 @@ function DD(B) {
     function ng(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -3162,13 +3162,13 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = C.handleStore.get(w);
-        if (!E.isArray())
+        var C = E.handleStore.get(w);
+        if (!C.isArray())
           return I.setLastError(
             8
             /* napi_status.napi_array_expected */
           );
-        var D = E.value.length >>> 0, F = new DataView(N.buffer);
+        var D = C.value.length >>> 0, F = new DataView(N.buffer);
         return F.setUint32(g, D, !0), I.getReturnStatus();
       } catch (G) {
         return I.tryCatch.setError(G), I.setLastError(
@@ -3180,15 +3180,15 @@ function DD(B) {
     function Og(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !w)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !w)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(w);
+      var D = E.handleStore.get(w);
       if (!D.isArrayBuffer() && !P.isSharedArrayBuffer(D.value))
-        return E.setLastError(
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
@@ -3197,12 +3197,12 @@ function DD(B) {
         var G = P.getArrayBufferPointer(D.value, !0).address;
         F.setUint32(g, G, !0);
       }
-      return I && F.setUint32(I, D.value.byteLength, !0), E.clearLastError();
+      return I && F.setUint32(I, D.value.byteLength, !0), C.clearLastError();
     }
     function rg(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -3220,22 +3220,22 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = C.handleStore.get(w).value;
-        if (E == null)
+        var C = E.handleStore.get(w).value;
+        if (C == null)
           throw new TypeError("Cannot convert undefined or null to object");
-        var D = typeof E, F = void 0;
+        var D = typeof C, F = void 0;
         try {
-          F = D === "object" && E !== null || D === "function" ? E : Object(E);
+          F = D === "object" && C !== null || D === "function" ? C : Object(C);
         } catch {
           return I.setLastError(
             2
             /* napi_status.napi_object_expected */
           );
         }
-        var G = C.handleStore.get(g).value;
+        var G = E.handleStore.get(g).value;
         return Object.setPrototypeOf(F, G), I.getReturnStatus();
-      } catch (h) {
-        return I.tryCatch.setError(h), I.setLastError(
+      } catch (M) {
+        return I.tryCatch.setError(M), I.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -3244,7 +3244,7 @@ function DD(B) {
     function jg(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -3262,12 +3262,12 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = C.handleStore.get(w);
-        if (E.value == null)
+        var C = E.handleStore.get(w);
+        if (C.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var D = void 0;
         try {
-          D = E.isObject() || E.isFunction() ? E.value : Object(E.value);
+          D = C.isObject() || C.isFunction() ? C.value : Object(C.value);
         } catch {
           return I.setLastError(
             2
@@ -3276,29 +3276,29 @@ function DD(B) {
         }
         var F = I.ensureHandleId(Object.getPrototypeOf(D)), G = new DataView(N.buffer);
         return G.setUint32(g, F, !0), I.getReturnStatus();
-      } catch (h) {
-        return I.tryCatch.setError(h), I.setLastError(
+      } catch (M) {
+        return I.tryCatch.setError(M), I.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
-    function II(A, w, g, I, E, D, F) {
+    function II(A, w, g, I, C, D, F) {
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !w)
         return G.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var h = C.handleStore.get(w);
-      if (!h.isTypedArray())
+      var M = E.handleStore.get(w);
+      if (!M.isTypedArray())
         return G.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var J = h.value, S = new DataView(N.buffer);
+      var J = M.value, S = new DataView(N.buffer);
       if (g) {
         var Y = void 0;
         if (J instanceof Int8Array)
@@ -3334,10 +3334,10 @@ function DD(B) {
       }
       I && S.setUint32(I, J.length, !0);
       var x;
-      if (E || D) {
-        if (x = J.buffer, E) {
+      if (C || D) {
+        if (x = J.buffer, C) {
           var Z = P.getViewPointer(J, !0).address;
-          S.setUint32(E, Z, !0);
+          S.setUint32(C, Z, !0);
         }
         if (D) {
           var b = G.ensureHandleId(x);
@@ -3349,81 +3349,81 @@ function DD(B) {
     function lg(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !w)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !w)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(w);
-      return D.isBuffer(C.feature.Buffer) ? D.isDataView() ? gI(A, w, I, g, 0, 0) : II(A, w, 0, I, g, 0, 0) : E.setLastError(
+      var D = E.handleStore.get(w);
+      return D.isBuffer(E.feature.Buffer) ? D.isDataView() ? gI(A, w, I, g, 0, 0) : II(A, w, 0, I, g, 0, 0) : C.setLastError(
         1
         /* napi_status.napi_invalid_arg */
       );
     }
-    function gI(A, w, g, I, E, D) {
+    function gI(A, w, g, I, C, D) {
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
+      var F = E.envStore.get(A);
       if (F.checkGCAccess(), !w)
         return F.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var G = C.handleStore.get(w);
+      var G = E.handleStore.get(w);
       if (!G.isDataView())
         return F.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var h = G.value, J = new DataView(N.buffer);
-      g && J.setUint32(g, h.byteLength, !0);
+      var M = G.value, J = new DataView(N.buffer);
+      g && J.setUint32(g, M.byteLength, !0);
       var S;
-      if (I || E) {
-        if (S = h.buffer, I) {
-          var Y = P.getViewPointer(h, !0).address;
+      if (I || C) {
+        if (S = M.buffer, I) {
+          var Y = P.getViewPointer(M, !0).address;
           J.setUint32(I, Y, !0);
         }
-        if (E) {
+        if (C) {
           var x = F.ensureHandleId(S);
-          J.setUint32(E, x, !0);
+          J.setUint32(C, x, !0);
         }
       }
-      return D && J.setUint32(D, h.byteOffset, !0), F.clearLastError();
+      return D && J.setUint32(D, M.byteOffset, !0), F.clearLastError();
     }
     function Pg(A, w, g) {
       var I;
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!w || !g)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var D = C.handleStore.get(w);
+        var D = E.handleStore.get(w);
         if (!D.isDate())
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         I = D.value.valueOf();
         var F = new DataView(N.buffer);
-        return F.setFloat64(g, I, !0), E.getReturnStatus();
+        return F.setFloat64(g, I, !0), C.getReturnStatus();
       } catch (G) {
-        return E.tryCatch.setError(G), E.setLastError(
+        return C.tryCatch.setError(G), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -3432,94 +3432,94 @@ function DD(B) {
     function mg(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w);
-      if (typeof E.value != "boolean")
+      var C = E.handleStore.get(w);
+      if (typeof C.value != "boolean")
         return I.setLastError(
           7
           /* napi_status.napi_boolean_expected */
         );
-      var D = E.value ? 1 : 0, F = new DataView(N.buffer);
+      var D = C.value ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function zg(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w);
-      if (typeof E.value != "number")
+      var C = E.handleStore.get(w);
+      if (typeof C.value != "number")
         return I.setLastError(
           6
           /* napi_status.napi_number_expected */
         );
-      var D = E.value, F = new DataView(N.buffer);
+      var D = C.value, F = new DataView(N.buffer);
       return F.setFloat64(g, D, !0), I.clearLastError();
     }
     function ug(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !C.feature.supportBigInt)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !E.feature.supportBigInt)
+        return C.setLastError(
           9
           /* napi_status.napi_generic_failure */
         );
       if (!w || !g || !I)
-        return E.setLastError(
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(w), F = D.value;
+      var D = E.handleStore.get(w), F = D.value;
       if (typeof F != "bigint")
-        return E.setLastError(
+        return C.setLastError(
           6
           /* napi_status.napi_number_expected */
         );
       var G = new DataView(N.buffer);
       F >= BigInt(-1) * (BigInt(1) << BigInt(63)) && F < BigInt(1) << BigInt(63) ? G.setInt8(I, 1, !0) : (G.setInt8(I, 0, !0), F = F & (BigInt(1) << BigInt(64)) - BigInt(1), F >= BigInt(1) << BigInt(63) && (F = F - (BigInt(1) << BigInt(64))));
-      var h = Number(F & BigInt(4294967295)), J = Number(F >> BigInt(32));
-      return G.setInt32(g, h, !0), G.setInt32(g + 4, J, !0), E.clearLastError();
+      var M = Number(F & BigInt(4294967295)), J = Number(F >> BigInt(32));
+      return G.setInt32(g, M, !0), G.setInt32(g + 4, J, !0), C.clearLastError();
     }
     function vg(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !C.feature.supportBigInt)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !E.feature.supportBigInt)
+        return C.setLastError(
           9
           /* napi_status.napi_generic_failure */
         );
       if (!w || !g || !I)
-        return E.setLastError(
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(w), F = D.value;
+      var D = E.handleStore.get(w), F = D.value;
       if (typeof F != "bigint")
-        return E.setLastError(
+        return C.setLastError(
           6
           /* napi_status.napi_number_expected */
         );
       var G = new DataView(N.buffer);
       F >= BigInt(0) && F < BigInt(1) << BigInt(64) ? G.setInt8(I, 1, !0) : (G.setInt8(I, 0, !0), F = F & (BigInt(1) << BigInt(64)) - BigInt(1));
-      var h = Number(F & BigInt(4294967295)), J = Number(F >> BigInt(32));
-      return G.setUint32(g, h, !0), G.setUint32(g + 4, J, !0), E.clearLastError();
+      var M = Number(F & BigInt(4294967295)), J = Number(F >> BigInt(32));
+      return G.setUint32(g, M, !0), G.setUint32(g + 4, J, !0), C.clearLastError();
     }
-    function _g(A, w, g, I, E) {
+    function _g(A, w, g, I, C) {
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
-      if (D.checkGCAccess(), !C.feature.supportBigInt)
+      var D = E.envStore.get(A);
+      if (D.checkGCAccess(), !E.feature.supportBigInt)
         return D.setLastError(
           9
           /* napi_status.napi_generic_failure */
@@ -3529,18 +3529,18 @@ function DD(B) {
           1
           /* napi_status.napi_invalid_arg */
         );
-      var F = C.handleStore.get(w);
+      var F = E.handleStore.get(w);
       if (!F.isBigInt())
         return D.setLastError(
           17
           /* napi_status.napi_bigint_expected */
         );
-      for (var G = F.value < BigInt(0), h = new DataView(N.buffer), J = h.getUint32(I, !0), S = 0, Y = G ? F.value * BigInt(-1) : F.value; Y !== BigInt(0); )
+      for (var G = F.value < BigInt(0), M = new DataView(N.buffer), J = M.getUint32(I, !0), S = 0, Y = G ? F.value * BigInt(-1) : F.value; Y !== BigInt(0); )
         S++, Y = Y >> BigInt(64);
-      if (Y = G ? F.value * BigInt(-1) : F.value, !g && !E)
-        J = S, h.setUint32(I, J, !0);
+      if (Y = G ? F.value * BigInt(-1) : F.value, !g && !C)
+        J = S, M.setUint32(I, J, !0);
       else {
-        if (!g || !E)
+        if (!g || !C)
           return D.setLastError(
             1
             /* napi_status.napi_invalid_arg */
@@ -3551,79 +3551,79 @@ function DD(B) {
         }
         for (var b = Math.min(J, x.length), j = 0; j < b; j++) {
           var u = Number(x[j] & BigInt(4294967295)), gA = Number(x[j] >> BigInt(32));
-          h.setUint32(E + j * 8, u, !0), h.setUint32(E + (j * 8 + 4), gA, !0);
+          M.setUint32(C + j * 8, u, !0), M.setUint32(C + (j * 8 + 4), gA, !0);
         }
-        h.setInt32(g, G ? 1 : 0, !0), h.setUint32(I, b, !0);
+        M.setInt32(g, G ? 1 : 0, !0), M.setUint32(I, b, !0);
       }
       return D.clearLastError();
     }
     function $g(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w);
-      if (!E.isExternal())
+      var C = E.handleStore.get(w);
+      if (!C.isExternal())
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = E.data(), F = new DataView(N.buffer);
+      var D = C.data(), F = new DataView(N.buffer);
       return F.setUint32(g, D, !0), I.clearLastError();
     }
     function AB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w);
-      if (typeof E.value != "number")
+      var C = E.handleStore.get(w);
+      if (typeof C.value != "number")
         return I.setLastError(
           6
           /* napi_status.napi_number_expected */
         );
-      var D = new Int32Array([E.value])[0], F = new DataView(N.buffer);
+      var D = new Int32Array([C.value])[0], F = new DataView(N.buffer);
       return F.setInt32(g, D, !0), I.clearLastError();
     }
     function QB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w);
-      if (typeof E.value != "number")
+      var C = E.handleStore.get(w);
+      if (typeof C.value != "number")
         return I.setLastError(
           6
           /* napi_status.napi_number_expected */
         );
-      var D = E.value, F = new DataView(N.buffer);
+      var D = C.value, F = new DataView(N.buffer);
       return D === Number.POSITIVE_INFINITY || D === Number.NEGATIVE_INFINITY || isNaN(D) ? (F.setInt32(g, 0, !0), F.setInt32(g + 4, 0, !0)) : D < /* INT64_RANGE_NEGATIVE */
       -9223372036854776e3 ? (F.setInt32(g, 0, !0), F.setInt32(g + 4, 2147483648, !0)) : D >= /* INT64_RANGE_POSITIVE */
       9223372036854776e3 ? (F.setUint32(g, 4294967295, !0), F.setUint32(g + 4, 2147483647, !0)) : HQ(g, Math.trunc(D)), I.clearLastError();
     }
-    function IB(A, w, g, I, E) {
+    function IB(A, w, g, I, C) {
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !w)
         return D.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       I = I >>> 0;
-      var F = C.handleStore.get(w);
+      var F = E.handleStore.get(w);
       if (typeof F.value != "string")
         return D.setLastError(
           3
@@ -3632,31 +3632,31 @@ function DD(B) {
       var G = new DataView(N.buffer);
       if (g)
         if (I !== 0) {
-          for (var h = 0, J = void 0, S = 0; S < I - 1; ++S)
-            J = F.value.charCodeAt(S) & 255, G.setUint8(g + S, J, !0), h++;
-          G.setUint8(g + h, 0, !0), E && G.setUint32(E, h, !0);
-        } else E && G.setUint32(E, 0, !0);
+          for (var M = 0, J = void 0, S = 0; S < I - 1; ++S)
+            J = F.value.charCodeAt(S) & 255, G.setUint8(g + S, J, !0), M++;
+          G.setUint8(g + M, 0, !0), C && G.setUint32(C, M, !0);
+        } else C && G.setUint32(C, 0, !0);
       else {
-        if (!E)
+        if (!C)
           return D.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        G.setUint32(E, F.value.length, !0);
+        G.setUint32(C, F.value.length, !0);
       }
       return D.clearLastError();
     }
-    function gB(A, w, g, I, E) {
+    function gB(A, w, g, I, C) {
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !w)
         return D.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       I = I >>> 0;
-      var F = C.handleStore.get(w);
+      var F = E.handleStore.get(w);
       if (typeof F.value != "string")
         return D.setLastError(
           3
@@ -3666,30 +3666,30 @@ function DD(B) {
       if (g)
         if (I !== 0) {
           var J = $.stringToUTF8(F.value, g, I);
-          E && G.setUint32(E, J, !0);
-        } else E && G.setUint32(E, 0, !0);
+          C && G.setUint32(C, J, !0);
+        } else C && G.setUint32(C, 0, !0);
       else {
-        if (!E)
+        if (!C)
           return D.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = $.lengthBytesUTF8(F.value);
-        G.setUint32(E, h, !0);
+        var M = $.lengthBytesUTF8(F.value);
+        G.setUint32(C, M, !0);
       }
       return D.clearLastError();
     }
-    function BB(A, w, g, I, E) {
+    function BB(A, w, g, I, C) {
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !w)
         return D.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       I = I >>> 0;
-      var F = C.handleStore.get(w);
+      var F = E.handleStore.get(w);
       if (typeof F.value != "string")
         return D.setLastError(
           3
@@ -3698,35 +3698,35 @@ function DD(B) {
       var G = new DataView(N.buffer);
       if (g)
         if (I !== 0) {
-          var h = $.stringToUTF16(F.value, g, I * 2);
-          E && G.setUint32(E, h / 2, !0);
-        } else E && G.setUint32(E, 0, !0);
+          var M = $.stringToUTF16(F.value, g, I * 2);
+          C && G.setUint32(C, M / 2, !0);
+        } else C && G.setUint32(C, 0, !0);
       else {
-        if (!E)
+        if (!C)
           return D.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        G.setUint32(E, F.value.length, !0);
+        G.setUint32(C, F.value.length, !0);
       }
       return D.clearLastError();
     }
     function CB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w);
-      if (typeof E.value != "number")
+      var C = E.handleStore.get(w);
+      if (typeof C.value != "number")
         return I.setLastError(
           6
           /* napi_status.napi_number_expected */
         );
-      var D = new Uint32Array([E.value])[0], F = new DataView(N.buffer);
+      var D = new Uint32Array([C.value])[0], F = new DataView(N.buffer);
       return F.setUint32(g, D, !0), I.clearLastError();
     }
     var EB = /* @__PURE__ */ Object.freeze({
@@ -3755,89 +3755,89 @@ function DD(B) {
     function DB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.addToCurrentScope(w).id, D = new DataView(N.buffer);
-      return D.setUint32(g, E, !0), I.clearLastError();
+      var C = E.addToCurrentScope(w).id, D = new DataView(N.buffer);
+      return D.setUint32(g, C, !0), I.clearLastError();
     }
     function wB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.addToCurrentScope(w >>> 0).id, D = new DataView(N.buffer);
-      return D.setUint32(g, E, !0), I.clearLastError();
+      var C = E.addToCurrentScope(w >>> 0).id, D = new DataView(N.buffer);
+      return D.setUint32(g, C, !0), I.clearLastError();
     }
     function iB(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      E.checkGCAccess();
+      var C = E.envStore.get(A);
+      C.checkGCAccess();
       var D;
       if (!g)
-        return E.setLastError(
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       D = Number(w);
-      var F = C.addToCurrentScope(D).id, G = new DataView(N.buffer);
-      return G.setUint32(g, F, !0), E.clearLastError();
+      var F = E.addToCurrentScope(D).id, G = new DataView(N.buffer);
+      return G.setUint32(g, F, !0), C.clearLastError();
     }
     function FB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.addToCurrentScope(w).id, D = new DataView(N.buffer);
-      return D.setUint32(g, E, !0), I.clearLastError();
+      var C = E.addToCurrentScope(w).id, D = new DataView(N.buffer);
+      return D.setUint32(g, C, !0), I.clearLastError();
     }
     function cQ(A, w, g, I) {
-      return $.newString(A, w, g, I, function(E, D, F) {
-        var G = "", h = 0, J = new DataView(N.buffer);
+      return $.newString(A, w, g, I, function(C, D, F) {
+        var G = "", M = 0, J = new DataView(N.buffer);
         if (D)
           for (; ; ) {
-            var S = J.getUint8(E, !0);
+            var S = J.getUint8(C, !0);
             if (!S)
               break;
-            G += String.fromCharCode(S), E++;
+            G += String.fromCharCode(S), C++;
           }
         else
-          for (; h < F; ) {
-            var S = J.getUint8(E, !0);
+          for (; M < F; ) {
+            var S = J.getUint8(C, !0);
             if (!S)
               break;
-            G += String.fromCharCode(S), h++, E++;
+            G += String.fromCharCode(S), M++, C++;
           }
         return G;
       });
     }
     function SQ(A, w, g, I) {
-      return $.newString(A, w, g, I, function(E) {
-        return $.UTF16ToString(E, g);
+      return $.newString(A, w, g, I, function(C) {
+        return $.UTF16ToString(C, g);
       });
     }
     function BI(A, w, g, I) {
-      return $.newString(A, w, g, I, function(E) {
-        return $.UTF8ToString(E, g);
+      return $.newString(A, w, g, I, function(C) {
+        return $.UTF8ToString(C, g);
       });
     }
-    function oB(A, w, g, I, E, D, F) {
-      return $.newExternalString(A, w, g, I, E, D, F, cQ, void 0);
+    function oB(A, w, g, I, C, D, F) {
+      return $.newExternalString(A, w, g, I, C, D, F, cQ, void 0);
     }
-    function GB(A, w, g, I, E, D, F) {
-      return $.newExternalString(A, w, g, I, E, D, F, SQ, void 0);
+    function GB(A, w, g, I, C, D, F) {
+      return $.newExternalString(A, w, g, I, C, D, F, SQ, void 0);
     }
     function kB(A, w, g, I) {
       return cQ(A, w, g, I);
@@ -3851,46 +3851,46 @@ function DD(B) {
     function MB(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !C.feature.supportBigInt)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !E.feature.supportBigInt)
+        return C.setLastError(
           9
           /* napi_status.napi_generic_failure */
         );
       var D;
       if (!g)
-        return E.setLastError(
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       D = w;
-      var F = C.addToCurrentScope(D).id, G = new DataView(N.buffer);
-      return G.setUint32(g, F, !0), E.clearLastError();
+      var F = E.addToCurrentScope(D).id, G = new DataView(N.buffer);
+      return G.setUint32(g, F, !0), C.clearLastError();
     }
     function hB(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !C.feature.supportBigInt)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !E.feature.supportBigInt)
+        return C.setLastError(
           9
           /* napi_status.napi_generic_failure */
         );
       var D;
       if (!g)
-        return E.setLastError(
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       D = w & (BigInt(1) << BigInt(64)) - BigInt(1);
-      var F = C.addToCurrentScope(D).id, G = new DataView(N.buffer);
-      return G.setUint32(g, F, !0), E.clearLastError();
+      var F = E.addToCurrentScope(D).id, G = new DataView(N.buffer);
+      return G.setUint32(g, F, !0), C.clearLastError();
     }
-    function JB(A, w, g, I, E) {
+    function JB(A, w, g, I, C) {
       var D, F;
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !G.tryCatch.isEmpty())
         return G.setLastError(
           10
@@ -3903,24 +3903,24 @@ function DD(B) {
         );
       G.clearLastError();
       try {
-        if (!C.feature.supportBigInt)
+        if (!E.feature.supportBigInt)
           return G.setLastError(
             9
             /* napi_status.napi_generic_failure */
           );
-        if (!E || (g = g >>> 0, g > 2147483647))
+        if (!C || (g = g >>> 0, g > 2147483647))
           return G.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         if (g > 16384)
           throw new RangeError("Maximum BigInt size exceeded");
-        var h = BigInt(0), J = new DataView(N.buffer);
+        var M = BigInt(0), J = new DataView(N.buffer);
         for (F = 0; F < g; F++) {
           var S = J.getUint32(I + F * 8, !0), Y = J.getUint32(I + (F * 8 + 4), !0), x = BigInt(S) | BigInt(Y) << BigInt(32);
-          h += x << BigInt(64 * F);
+          M += x << BigInt(64 * F);
         }
-        return h *= BigInt(w) % BigInt(2) === BigInt(0) ? BigInt(1) : BigInt(-1), D = C.addToCurrentScope(h).id, J.setUint32(E, D, !0), G.getReturnStatus();
+        return M *= BigInt(w) % BigInt(2) === BigInt(0) ? BigInt(1) : BigInt(-1), D = E.addToCurrentScope(M).id, J.setUint32(C, D, !0), G.getReturnStatus();
       } catch (Z) {
         return G.tryCatch.setError(Z), G.setLastError(
           10
@@ -3946,13 +3946,13 @@ function DD(B) {
       node_api_create_property_key_utf16: UB,
       node_api_create_property_key_utf8: NB
     });
-    function jA(A, w, g, I, E) {
-      var D = !w || !g ? "" : $.UTF8ToString(w, g), F, G = c.get(I), h = function(Y) {
+    function jA(A, w, g, I, C) {
+      var D = !w || !g ? "" : $.UTF8ToString(w, g), F, G = c.get(I), M = function(Y) {
         return G(Y.id, Y.ctx.scopeStore.currentScope.id);
       }, J = function(Y, x) {
         return function() {
           var Z = Y.ctx.openScope(Y), b = Z.callbackInfo;
-          b.data = E, b.args = arguments, b.thiz = this, b.fn = F;
+          b.data = C, b.args = arguments, b.thiz = this, b.fn = F;
           try {
             var j = Y.callIntoModule(x);
             return j ? Y.ctx.handleStore.get(j).value : void 0;
@@ -3962,24 +3962,24 @@ function DD(B) {
         };
       };
       if (D === "")
-        return F = J(A, h), { status: 0, f: F };
+        return F = J(A, M), { status: 0, f: F };
       if (!/^[_$a-zA-Z][_$a-zA-Z0-9]*$/.test(D))
         return { status: 1, f: void 0 };
-      if (C.feature.supportNewFunction) {
-        var S = J(A, h);
+      if (E.feature.supportNewFunction) {
+        var S = J(A, M);
         try {
           F = new Function("_", "return function " + D + '(){"use strict";return _.apply(this,arguments);};')(S);
         } catch {
-          F = J(A, h), C.feature.canSetFunctionName && Object.defineProperty(F, "name", { value: D });
+          F = J(A, M), E.feature.canSetFunctionName && Object.defineProperty(F, "name", { value: D });
         }
       } else
-        F = J(A, h), C.feature.canSetFunctionName && Object.defineProperty(F, "name", { value: D });
+        F = J(A, M), E.feature.canSetFunctionName && Object.defineProperty(F, "name", { value: D });
       return { status: 0, f: F };
     }
-    function yQ(A, w, g, I, E, D, F, G, h) {
-      if (E || D) {
+    function yQ(A, w, g, I, C, D, F, G, M) {
+      if (C || D) {
         var J = void 0, S = void 0;
-        E && (J = jA(A, 0, 0, E, h).f), D && (S = jA(A, 0, 0, D, h).f);
+        C && (J = jA(A, 0, 0, C, M).f), D && (S = jA(A, 0, 0, D, M).f);
         var Y = {
           configurable: (G & 4) !== 0,
           enumerable: (G & 2) !== 0,
@@ -3988,7 +3988,7 @@ function DD(B) {
         };
         Object.defineProperty(w, g, Y);
       } else if (I) {
-        var x = jA(A, 0, 0, I, h).f, Y = {
+        var x = jA(A, 0, 0, I, M).f, Y = {
           configurable: (G & 4) !== 0,
           enumerable: (G & 2) !== 0,
           writable: (G & 1) !== 0,
@@ -4000,23 +4000,23 @@ function DD(B) {
           configurable: (G & 4) !== 0,
           enumerable: (G & 2) !== 0,
           writable: (G & 1) !== 0,
-          value: C.handleStore.get(F).value
+          value: E.handleStore.get(F).value
         };
         Object.defineProperty(w, g, Y);
       }
     }
     function CI(A) {
-      var w = C.handleStore.get(A);
-      return w.isObject() || w.isFunction() ? (typeof P < "u" && ArrayBuffer.isView(w.value) && P.wasmMemoryViewTable.has(w.value) && (w = C.addToCurrentScope(P.wasmMemoryViewTable.get(w.value))), { status: 0, handle: w }) : {
+      var w = E.handleStore.get(A);
+      return w.isObject() || w.isFunction() ? (typeof P < "u" && ArrayBuffer.isView(w.value) && P.wasmMemoryViewTable.has(w.value) && (w = E.addToCurrentScope(P.wasmMemoryViewTable.get(w.value))), { status: 0, handle: w }) : {
         status: 1
         /* napi_status.napi_invalid_arg */
       };
     }
-    function RB(A, w, g, I, E, D) {
+    function RB(A, w, g, I, C, D) {
       var F;
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !G.tryCatch.isEmpty())
         return G.setLastError(
           10
@@ -4029,21 +4029,21 @@ function DD(B) {
         );
       G.clearLastError();
       try {
-        if (!C.feature.supportFinalizer) {
+        if (!E.feature.supportFinalizer) {
           if (I)
-            throw C.createNotSupportWeakRefError("napi_wrap", 'Parameter "finalize_cb" must be 0(NULL)');
+            throw E.createNotSupportWeakRefError("napi_wrap", 'Parameter "finalize_cb" must be 0(NULL)');
           if (D)
-            throw C.createNotSupportWeakRefError("napi_wrap", 'Parameter "result" must be 0(NULL)');
+            throw E.createNotSupportWeakRefError("napi_wrap", 'Parameter "result" must be 0(NULL)');
         }
         if (!w)
           return G.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = CI(w);
-        if (h.status !== 0)
-          return G.setLastError(h.status);
-        var J = h.handle;
+        var M = CI(w);
+        if (M.status !== 0)
+          return G.setLastError(M.status);
+        var J = M.handle;
         if (G.getObjectBinding(J.value).wrapped !== 0)
           return G.setLastError(
             1
@@ -4056,11 +4056,11 @@ function DD(B) {
               1
               /* napi_status.napi_invalid_arg */
             );
-          S = C.createReferenceWithFinalizer(G, J.id, 0, 1, I, g, E), F = S.id;
+          S = E.createReferenceWithFinalizer(G, J.id, 0, 1, I, g, C), F = S.id;
           var Y = new DataView(N.buffer);
           Y.setUint32(D, F, !0);
         } else
-          I ? S = C.createReferenceWithFinalizer(G, J.id, 0, 0, I, g, E) : S = C.createReferenceWithData(G, J.id, 0, 0, g);
+          I ? S = E.createReferenceWithFinalizer(G, J.id, 0, 0, I, g, C) : S = E.createReferenceWithData(G, J.id, 0, 0, g);
         return G.getObjectBinding(J.value).wrapped = S.id, G.getReturnStatus();
       } catch (x) {
         return G.tryCatch.setError(x), G.setLastError(
@@ -4070,10 +4070,10 @@ function DD(B) {
       }
     }
     function EI(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -4091,22 +4091,22 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (!(F.isObject() || F.isFunction()))
           return D.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var G = D.getObjectBinding(F.value), h = G.wrapped, J = C.refStore.get(h);
+        var G = D.getObjectBinding(F.value), M = G.wrapped, J = E.refStore.get(M);
         if (!J)
           return D.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         if (g) {
-          E = J.data();
+          C = J.data();
           var S = new DataView(N.buffer);
-          S.setUint32(g, E, !0);
+          S.setUint32(g, C, !0);
         }
         return I === 1 && (G.wrapped = 0, J.ownership() === 1 ? J.resetFinalizer() : J.dispose()), D.getReturnStatus();
       } catch (Y) {
@@ -4116,11 +4116,11 @@ function DD(B) {
         );
       }
     }
-    function HB(A, w, g, I, E, D, F, G) {
-      var h, J, S;
+    function HB(A, w, g, I, C, D, F, G) {
+      var M, J, S;
       if (!A)
         return 1;
-      var Y = C.envStore.get(A);
+      var Y = E.envStore.get(A);
       if (Y.checkGCAccess(), !Y.tryCatch.isEmpty())
         return Y.setLastError(
           10
@@ -4138,28 +4138,28 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var x = jA(Y, w, g, I, E);
+        var x = jA(Y, w, g, I, C);
         if (x.status !== 0)
           return Y.setLastError(x.status);
         for (var Z = x.f, b = void 0, j = new DataView(N.buffer), u = 0; u < D; u++) {
-          h = F + u * 32;
-          var gA = j.getUint32(h, !0), DA = j.getUint32(h + 4, !0), AA = j.getUint32(h + 8, !0), oA = j.getUint32(h + 12, !0), MA = j.getUint32(h + 16, !0), kA = j.getUint32(h + 20, !0);
-          S = j.getInt32(h + 24, !0);
-          var aA = j.getUint32(h + 28, !0);
+          M = F + u * 32;
+          var gA = j.getUint32(M, !0), DA = j.getUint32(M + 4, !0), AA = j.getUint32(M + 8, !0), oA = j.getUint32(M + 12, !0), UA = j.getUint32(M + 16, !0), kA = j.getUint32(M + 20, !0);
+          S = j.getInt32(M + 24, !0);
+          var JA = j.getUint32(M + 28, !0);
           if (gA)
             b = $.UTF8ToString(gA, -1);
-          else if (!DA || (b = C.handleStore.get(DA).value, typeof b != "string" && typeof b != "symbol"))
+          else if (!DA || (b = E.handleStore.get(DA).value, typeof b != "string" && typeof b != "symbol"))
             return Y.setLastError(
               4
               /* napi_status.napi_name_expected */
             );
           if ((S & 1024) !== 0) {
-            yQ(Y, Z, b, AA, oA, MA, kA, S, aA);
+            yQ(Y, Z, b, AA, oA, UA, kA, S, JA);
             continue;
           }
-          yQ(Y, Z.prototype, b, AA, oA, MA, kA, S, aA);
+          yQ(Y, Z.prototype, b, AA, oA, UA, kA, S, JA);
         }
-        var dA = C.addToCurrentScope(Z);
+        var dA = E.addToCurrentScope(Z);
         return J = dA.id, j.setUint32(G, J, !0), Y.getReturnStatus();
       } catch (tQ) {
         return Y.tryCatch.setError(tQ), Y.setLastError(
@@ -4168,8 +4168,8 @@ function DD(B) {
         );
       }
     }
-    function KB(A, w, g, I, E, D) {
-      return RB(A, w, g, I, E, D);
+    function KB(A, w, g, I, C, D) {
+      return RB(A, w, g, I, C, D);
     }
     function YB(A, w, g) {
       return EI(
@@ -4192,7 +4192,7 @@ function DD(B) {
     function SB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -4210,8 +4210,8 @@ function DD(B) {
             I.tryCatch.hasCaught() ? 10 : 1
             /* napi_status.napi_invalid_arg */
           );
-        var E = C.handleStore.get(w);
-        if (!(E.isObject() || E.isFunction()))
+        var C = E.handleStore.get(w);
+        if (!(C.isObject() || C.isFunction()))
           return I.setLastError(
             I.tryCatch.hasCaught() ? 10 : 2
             /* napi_status.napi_object_expected */
@@ -4221,7 +4221,7 @@ function DD(B) {
             I.tryCatch.hasCaught() ? 10 : 1
             /* napi_status.napi_invalid_arg */
           );
-        var D = I.getObjectBinding(E.value);
+        var D = I.getObjectBinding(C.value);
         if (D.tag !== null)
           return I.setLastError(
             I.tryCatch.hasCaught() ? 10 : 1
@@ -4237,10 +4237,10 @@ function DD(B) {
       }
     }
     function yB(A, w, g, I) {
-      var E = !0;
+      var C = !0;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -4258,7 +4258,7 @@ function DD(B) {
             D.tryCatch.hasCaught() ? 10 : 1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (!(F.isObject() || F.isFunction()))
           return D.setLastError(
             D.tryCatch.hasCaught() ? 10 : 2
@@ -4271,12 +4271,12 @@ function DD(B) {
           );
         var G = D.getObjectBinding(F.value);
         if (G.tag !== null) {
-          var h = G.tag, J = new Uint32Array(N.buffer, g, 4);
-          E = h[0] === J[0] && h[1] === J[1] && h[2] === J[2] && h[3] === J[3];
+          var M = G.tag, J = new Uint32Array(N.buffer, g, 4);
+          C = M[0] === J[0] && M[1] === J[1] && M[2] === J[2] && M[3] === J[3];
         } else
-          E = !1;
+          C = !1;
         var S = new DataView(N.buffer);
-        return S.setInt8(I, E ? 1 : 0, !0), D.getReturnStatus();
+        return S.setInt8(I, C ? 1 : 0, !0), D.getReturnStatus();
       } catch (Y) {
         return D.tryCatch.setError(Y), D.setLastError(
           10
@@ -4284,11 +4284,11 @@ function DD(B) {
         );
       }
     }
-    function LQ(A, w, g, I, E, D) {
+    function LQ(A, w, g, I, C, D) {
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
-      if (F.checkGCAccess(), !C.feature.supportFinalizer)
+      var F = E.envStore.get(A);
+      if (F.checkGCAccess(), !E.feature.supportFinalizer)
         return F.setLastError(
           9
           /* napi_status.napi_generic_failure */
@@ -4301,7 +4301,7 @@ function DD(B) {
       var G = CI(w);
       if (G.status !== 0)
         return F.setLastError(G.status);
-      var h = G.handle, J = D ? 1 : 0, S = C.createReferenceWithFinalizer(F, h.id, 0, J, I, g, E);
+      var M = G.handle, J = D ? 1 : 0, S = E.createReferenceWithFinalizer(F, M.id, 0, J, I, g, C);
       if (D) {
         var Y = S.id, x = new DataView(N.buffer);
         x.setUint32(D, Y, !0);
@@ -4311,8 +4311,8 @@ function DD(B) {
     function LB(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      return E.enqueueFinalizer(C.createTrackedFinalizer(E, w, g, I)), E.clearLastError();
+      var C = E.envStore.get(A);
+      return C.enqueueFinalizer(E.createTrackedFinalizer(C, w, g, I)), C.clearLastError();
     }
     var sB = /* @__PURE__ */ Object.freeze({
       __proto__: null,
@@ -4325,25 +4325,25 @@ function DD(B) {
       napi_wrap: KB,
       node_api_post_finalizer: LB
     });
-    function DI(A, w, g, I, E, D, F) {
+    function DI(A, w, g, I, C, D, F) {
       var G;
       if (!A)
         return 1;
-      var h = C.envStore.get(A);
-      if (h.checkGCAccess(), !h.tryCatch.isEmpty())
-        return h.setLastError(
+      var M = E.envStore.get(A);
+      if (M.checkGCAccess(), !M.tryCatch.isEmpty())
+        return M.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!h.canCallIntoJs())
-        return h.setLastError(
-          h.moduleApiVersion >= 10 ? 23 : 10
+      if (!M.canCallIntoJs())
+        return M.setLastError(
+          M.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      h.clearLastError();
+      M.clearLastError();
       try {
         if (!F)
-          return h.setLastError(
+          return M.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
@@ -4351,8 +4351,8 @@ function DD(B) {
           throw new RangeError("Cannot create a memory view larger than 2147483647 bytes");
         if (g + I > N.buffer.byteLength)
           throw new RangeError("Memory out of range");
-        if (!C.feature.supportFinalizer && E)
-          throw C.createNotSupportWeakRefError("emnapi_create_memory_view", 'Parameter "finalize_cb" must be 0(NULL)');
+        if (!E.feature.supportFinalizer && C)
+          throw E.createNotSupportWeakRefError("emnapi_create_memory_view", 'Parameter "finalize_cb" must be 0(NULL)');
         var J = void 0;
         switch (w) {
           case 0:
@@ -4393,90 +4393,90 @@ function DD(B) {
             break;
           case 11:
             if (typeof Float16Array != "function")
-              return h.setLastError(
+              return M.setLastError(
                 1
                 /* napi_status.napi_invalid_arg */
               );
             J = { Ctor: Float16Array, address: g, length: I >> 1, ownership: 1, runtimeAllocated: 0 };
             break;
           case -2: {
-            if (!C.feature.Buffer)
-              throw C.createNotSupportBufferError("emnapi_create_memory_view", "");
-            J = { Ctor: C.feature.Buffer, address: g, length: I, ownership: 1, runtimeAllocated: 0 };
+            if (!E.feature.Buffer)
+              throw E.createNotSupportBufferError("emnapi_create_memory_view", "");
+            J = { Ctor: E.feature.Buffer, address: g, length: I, ownership: 1, runtimeAllocated: 0 };
             break;
           }
           default:
-            return h.setLastError(
+            return M.setLastError(
               1
               /* napi_status.napi_invalid_arg */
             );
         }
-        var S = J.Ctor, Y = w === -2 ? C.feature.Buffer.from(N.buffer, J.address, J.length) : new S(N.buffer, J.address, J.length), x = C.addToCurrentScope(Y);
-        if (P.wasmMemoryViewTable.set(Y, J), E) {
+        var S = J.Ctor, Y = w === -2 ? E.feature.Buffer.from(N.buffer, J.address, J.length) : new S(N.buffer, J.address, J.length), x = E.addToCurrentScope(Y);
+        if (P.wasmMemoryViewTable.set(Y, J), C) {
           var Z = LQ(
             A,
             x.id,
             g,
-            E,
+            C,
             D,
             /* NULL */
             0
           );
           if (Z === 10) {
-            var b = h.tryCatch.extractException();
-            throw h.clearLastError(), b;
+            var b = M.tryCatch.extractException();
+            throw M.clearLastError(), b;
           } else if (Z !== 0)
-            return h.setLastError(Z);
+            return M.setLastError(Z);
         }
         G = x.id;
         var j = new DataView(N.buffer);
-        return j.setUint32(F, G, !0), h.getReturnStatus();
+        return j.setUint32(F, G, !0), M.getReturnStatus();
       } catch (u) {
-        return h.tryCatch.setError(u), h.setLastError(
+        return M.tryCatch.setError(u), M.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
     function qB() {
-      return C.feature.supportFinalizer ? 1 : 0;
+      return E.feature.supportFinalizer ? 1 : 0;
     }
     function pB() {
-      return C.feature.supportBigInt ? 1 : 0;
+      return E.feature.supportBigInt ? 1 : 0;
     }
     function tB() {
       return U ? 1 : 0;
     }
     function sQ(A, w, g, I) {
       g = g ?? 0, g = g >>> 0;
-      var E;
+      var C;
       if (w instanceof ArrayBuffer || P.isSharedArrayBuffer(w)) {
         var D = P.getArrayBufferPointer(w, !1).address;
         if (!D)
           throw new Error("Unknown ArrayBuffer address");
         if ((typeof I != "number" || I === -1) && (I = w.byteLength - g), I = I >>> 0, I === 0)
           return w;
-        E = new Uint8Array(w, g, I);
+        C = new Uint8Array(w, g, I);
         var F = new Uint8Array(N.buffer);
-        return A ? F.set(E, D) : E.set(F.subarray(D, D + I)), w;
+        return A ? F.set(C, D) : C.set(F.subarray(D, D + I)), w;
       }
       if (ArrayBuffer.isView(w)) {
-        var G = P.getViewPointer(w, !1), h = G.view, D = G.address;
+        var G = P.getViewPointer(w, !1), M = G.view, D = G.address;
         if (!D)
           throw new Error("Unknown ArrayBuffer address");
-        if ((typeof I != "number" || I === -1) && (I = h.byteLength - g), I = I >>> 0, I === 0)
-          return h;
-        E = new Uint8Array(h.buffer, h.byteOffset + g, I);
+        if ((typeof I != "number" || I === -1) && (I = M.byteLength - g), I = I >>> 0, I === 0)
+          return M;
+        C = new Uint8Array(M.buffer, M.byteOffset + g, I);
         var F = new Uint8Array(N.buffer);
-        return A ? F.set(E, D) : E.set(F.subarray(D, D + I)), h;
+        return A ? F.set(C, D) : C.set(F.subarray(D, D + I)), M;
       }
       throw new TypeError("emnapiSyncMemory expect ArrayBuffer or ArrayBufferView as first parameter");
     }
-    function eB(A, w, g, I, E) {
+    function eB(A, w, g, I, C) {
       var D;
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
+      var F = E.envStore.get(A);
       if (F.checkGCAccess(), !F.tryCatch.isEmpty())
         return F.setLastError(
           10
@@ -4494,13 +4494,13 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var G = new DataView(N.buffer), h = G.getUint32(g, !0), J = F.ctx.handleStore.get(h);
+        var G = new DataView(N.buffer), M = G.getUint32(g, !0), J = F.ctx.handleStore.get(M);
         if (!J.isArrayBuffer() && !J.isTypedArray() && !J.isDataView() && !P.isSharedArrayBuffer(J.value))
           return F.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var S = sQ(!!w, J.value, I, E);
+        var S = sQ(!!w, J.value, I, C);
         return J.value !== S && (D = F.ensureHandleId(S), G.setUint32(g, D, !0)), F.getReturnStatus();
       } catch (Y) {
         return F.tryCatch.setError(Y), F.setLastError(
@@ -4513,18 +4513,18 @@ function DD(B) {
       var w = A instanceof ArrayBuffer, g = A instanceof DataView, I = ArrayBuffer.isView(A) && !g;
       if (!w && !I && !g && !P.isSharedArrayBuffer(A))
         throw new TypeError("emnapiGetMemoryAddress expect ArrayBuffer or ArrayBufferView as first parameter");
-      var E;
-      return w ? E = P.getArrayBufferPointer(A, !1) : E = P.getViewPointer(A, !1), {
-        address: E.address,
-        ownership: E.ownership,
-        runtimeAllocated: E.runtimeAllocated
+      var C;
+      return w ? C = P.getArrayBufferPointer(A, !1) : C = P.getViewPointer(A, !1), {
+        address: C.address,
+        ownership: C.ownership,
+        runtimeAllocated: C.runtimeAllocated
       };
     }
-    function dB(A, w, g, I, E) {
-      var D, F, G, h;
+    function dB(A, w, g, I, C) {
+      var D, F, G, M;
       if (!A)
         return 1;
-      var J = C.envStore.get(A);
+      var J = E.envStore.get(A);
       if (J.checkGCAccess(), !J.tryCatch.isEmpty())
         return J.setLastError(
           10
@@ -4537,15 +4537,15 @@ function DD(B) {
         );
       J.clearLastError();
       try {
-        if (!w || !g && !I && !E)
+        if (!w || !g && !I && !C)
           return J.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         var S = J.ctx.handleStore.get(w);
-        h = qQ(S.value), D = h.address;
+        M = qQ(S.value), D = M.address;
         var Y = new DataView(N.buffer);
-        return g && Y.setUint32(g, D, !0), I && (G = h.ownership, Y.setInt32(I, G, !0)), E && (F = h.runtimeAllocated, Y.setInt8(E, F, !0)), J.getReturnStatus();
+        return g && Y.setUint32(g, D, !0), I && (G = M.ownership, Y.setInt32(I, G, !0)), C && (F = M.runtimeAllocated, Y.setInt8(C, F, !0)), J.getReturnStatus();
       } catch (x) {
         return J.tryCatch.setError(x), J.setLastError(
           10
@@ -4556,7 +4556,7 @@ function DD(B) {
     function fB(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (!w)
         return g.setLastError(
           1
@@ -4564,17 +4564,17 @@ function DD(B) {
         );
       var I;
       try {
-        I = C.getRuntimeVersions().version;
+        I = E.getRuntimeVersions().version;
       } catch {
         return g.setLastError(
           9
           /* napi_status.napi_generic_failure */
         );
       }
-      var E = I.split(".").map(function(F) {
+      var C = I.split(".").map(function(F) {
         return Number(F);
       }), D = new DataView(N.buffer);
-      return D.setUint32(w, E[0], !0), D.setUint32(w + 4, E[1], !0), D.setUint32(w + 8, E[2], !0), g.clearLastError();
+      return D.setUint32(w, C[0], !0), D.setUint32(w + 4, C[1], !0), D.setUint32(w + 8, C[2], !0), g.clearLastError();
     }
     var xB = /* @__PURE__ */ Object.freeze({
       __proto__: null,
@@ -4591,42 +4591,42 @@ function DD(B) {
     function VB(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = C.addToCurrentScope([]).id, E = new DataView(N.buffer);
-      return E.setUint32(w, I, !0), g.clearLastError();
+      var I = E.addToCurrentScope([]).id, C = new DataView(N.buffer);
+      return C.setUint32(w, I, !0), g.clearLastError();
     }
     function XB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       w = w >>> 0;
-      var E = C.addToCurrentScope(new Array(w)).id, D = new DataView(N.buffer);
-      return D.setUint32(g, E, !0), I.clearLastError();
+      var C = E.addToCurrentScope(new Array(w)).id, D = new DataView(N.buffer);
+      return D.setUint32(g, C, !0), I.clearLastError();
     }
     function pQ(A, w, g) {
       A = A >>> 0;
       var I = g ? new SharedArrayBuffer(A) : new ArrayBuffer(A);
       if (w) {
-        var E = P.getArrayBufferPointer(I, !0).address, D = new DataView(N.buffer);
-        D.setUint32(w, E, !0);
+        var C = P.getArrayBufferPointer(I, !0).address, D = new DataView(N.buffer);
+        D.setUint32(w, C, !0);
       }
       return I;
     }
     function ZB(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -4645,21 +4645,21 @@ function DD(B) {
             /* napi_status.napi_invalid_arg */
           );
         var F = pQ(w, g, !1);
-        E = C.addToCurrentScope(F).id;
+        C = E.addToCurrentScope(F).id;
         var G = new DataView(N.buffer);
-        return G.setUint32(I, E, !0), D.getReturnStatus();
-      } catch (h) {
-        return D.tryCatch.setError(h), D.setLastError(
+        return G.setUint32(I, C, !0), D.getReturnStatus();
+      } catch (M) {
+        return D.tryCatch.setError(M), D.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
     function WB(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -4678,11 +4678,11 @@ function DD(B) {
             /* napi_status.napi_invalid_arg */
           );
         var F = pQ(w, g, !0);
-        E = C.addToCurrentScope(F).id;
+        C = E.addToCurrentScope(F).id;
         var G = new DataView(N.buffer);
-        return G.setUint32(I, E, !0), D.getReturnStatus();
-      } catch (h) {
-        return D.tryCatch.setError(h), D.setLastError(
+        return G.setUint32(I, C, !0), D.getReturnStatus();
+      } catch (M) {
+        return D.tryCatch.setError(M), D.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -4692,39 +4692,39 @@ function DD(B) {
       var I;
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!g)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        I = C.addToCurrentScope(new Date(w)).id;
+        I = E.addToCurrentScope(new Date(w)).id;
         var D = new DataView(N.buffer);
-        return D.setUint32(g, I, !0), E.getReturnStatus();
+        return D.setUint32(g, I, !0), C.getReturnStatus();
       } catch (F) {
-        return E.tryCatch.setError(F), E.setLastError(
+        return C.tryCatch.setError(F), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
-    function bB(A, w, g, I, E) {
+    function bB(A, w, g, I, C) {
       var D;
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
+      var F = E.envStore.get(A);
       if (F.checkGCAccess(), !F.tryCatch.isEmpty())
         return F.setLastError(
           10
@@ -4737,17 +4737,17 @@ function DD(B) {
         );
       F.clearLastError();
       try {
-        if (!E)
+        if (!C)
           return F.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        if (!C.feature.supportFinalizer && g)
-          throw C.createNotSupportWeakRefError("napi_create_external", 'Parameter "finalize_cb" must be 0(NULL)');
-        var G = C.getCurrentScope().addExternal(w);
-        g && C.createReferenceWithFinalizer(F, G.id, 0, 0, g, w, I), D = G.id;
-        var h = new DataView(N.buffer);
-        return h.setUint32(E, D, !0), F.clearLastError();
+        if (!E.feature.supportFinalizer && g)
+          throw E.createNotSupportWeakRefError("napi_create_external", 'Parameter "finalize_cb" must be 0(NULL)');
+        var G = E.getCurrentScope().addExternal(w);
+        g && E.createReferenceWithFinalizer(F, G.id, 0, 0, g, w, I), D = G.id;
+        var M = new DataView(N.buffer);
+        return M.setUint32(C, D, !0), F.clearLastError();
       } catch (J) {
         return F.tryCatch.setError(J), F.setLastError(
           10
@@ -4755,11 +4755,11 @@ function DD(B) {
         );
       }
     }
-    function nB(A, w, g, I, E, D) {
+    function nB(A, w, g, I, C, D) {
       var F;
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !G.tryCatch.isEmpty())
         return G.setLastError(
           10
@@ -4779,31 +4779,31 @@ function DD(B) {
           );
         if (g = g >>> 0, w || (g = 0), w + g > N.buffer.byteLength)
           throw new RangeError("Memory out of range");
-        if (!C.feature.supportFinalizer && I)
-          throw C.createNotSupportWeakRefError("napi_create_external_arraybuffer", 'Parameter "finalize_cb" must be 0(NULL)');
-        var h = new ArrayBuffer(g);
+        if (!E.feature.supportFinalizer && I)
+          throw E.createNotSupportWeakRefError("napi_create_external_arraybuffer", 'Parameter "finalize_cb" must be 0(NULL)');
+        var M = new ArrayBuffer(g);
         if (g === 0)
           try {
-            var J = C.feature.MessageChannel, S = new J();
-            S.port1.postMessage(h, [h]);
+            var J = E.feature.MessageChannel, S = new J();
+            S.port1.postMessage(M, [M]);
           } catch {
           }
         else {
-          var Y = new Uint8Array(h);
-          Y.set(new Uint8Array(N.buffer).subarray(w, w + g)), P.table.set(h, {
+          var Y = new Uint8Array(M);
+          Y.set(new Uint8Array(N.buffer).subarray(w, w + g)), P.table.set(M, {
             address: w,
             ownership: 1,
             runtimeAllocated: 0
           });
         }
-        var x = C.addToCurrentScope(h);
+        var x = E.addToCurrentScope(M);
         if (I) {
           var Z = LQ(
             A,
             x.id,
             w,
             I,
-            E,
+            C,
             /* NULL */
             0
           );
@@ -4826,33 +4826,33 @@ function DD(B) {
     function OB(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = C.addToCurrentScope({}).id, E = new DataView(N.buffer);
-      return E.setUint32(w, I, !0), g.clearLastError();
+      var I = E.addToCurrentScope({}).id, C = new DataView(N.buffer);
+      return C.setUint32(w, I, !0), g.clearLastError();
     }
-    function rB(A, w, g, I, E, D) {
+    function rB(A, w, g, I, C, D) {
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
-      if (F.checkGCAccess(), !D || (E = E >>> 0, E > 0 && (!g || !I)))
+      var F = E.envStore.get(A);
+      if (F.checkGCAccess(), !D || (C = C >>> 0, C > 0 && (!g || !I)))
         return F.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      for (var G = w ? C.handleStore.get(w).value : null, h = {}, J = new DataView(N.buffer), S = 0; S < E; S++) {
-        var Y = C.handleStore.get(J.getUint32(g + S * 4, !0)).value;
+      for (var G = w ? E.handleStore.get(w).value : null, M = {}, J = new DataView(N.buffer), S = 0; S < C; S++) {
+        var Y = E.handleStore.get(J.getUint32(g + S * 4, !0)).value;
         if (!(typeof Y == "string" || typeof Y == "symbol"))
           return F.setLastError(
             4
             /* napi_status.napi_name_expected */
           );
-        h[Y] = {
-          value: C.handleStore.get(J.getUint32(I + S * 4, !0)).value,
+        M[Y] = {
+          value: E.handleStore.get(J.getUint32(I + S * 4, !0)).value,
           writable: !0,
           enumerable: !0,
           configurable: !0
@@ -4860,46 +4860,46 @@ function DD(B) {
       }
       var x;
       try {
-        x = Object.defineProperties(Object.create(G), h);
+        x = Object.defineProperties(Object.create(G), M);
       } catch {
         return F.setLastError(
           9
           /* napi_status.napi_generic_failure */
         );
       }
-      var Z = C.addToCurrentScope(x).id;
+      var Z = E.addToCurrentScope(x).id;
       return J.setUint32(D, Z, !0), F.clearLastError();
     }
     function jB(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = new DataView(N.buffer);
+      var C = new DataView(N.buffer);
       if (w) {
-        var F = C.handleStore.get(w), G = F.value;
+        var F = E.handleStore.get(w), G = F.value;
         if (typeof G != "string")
           return I.setLastError(
             3
             /* napi_status.napi_string_expected */
           );
-        var h = C.addToCurrentScope(Symbol(G)).id;
-        E.setUint32(g, h, !0);
+        var M = E.addToCurrentScope(Symbol(G)).id;
+        C.setUint32(g, M, !0);
       } else {
-        var D = C.addToCurrentScope(/* @__PURE__ */ Symbol()).id;
-        E.setUint32(g, D, !0);
+        var D = E.addToCurrentScope(/* @__PURE__ */ Symbol()).id;
+        C.setUint32(g, D, !0);
       }
       return I.clearLastError();
     }
-    function lB(A, w, g, I, E, D) {
+    function lB(A, w, g, I, C, D) {
       var F;
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !G.tryCatch.isEmpty())
         return G.setLastError(
           10
@@ -4917,13 +4917,13 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = C.handleStore.get(I);
-        if (!h.isArrayBuffer())
+        var M = E.handleStore.get(I);
+        if (!M.isArrayBuffer())
           return G.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var J = h.value, S = function(Y, x, Z, b, j, u) {
+        var J = M.value, S = function(Y, x, Z, b, j, u) {
           var gA;
           if (j = j >>> 0, u = u >>> 0, Z > 1 && j % Z !== 0) {
             var DA = new RangeError("start offset of ".concat((gA = x.name) !== null && gA !== void 0 ? gA : "", " should be a multiple of ").concat(Z));
@@ -4946,38 +4946,38 @@ function DD(B) {
             length: u,
             ownership: 1,
             runtimeAllocated: 0
-          })), F = C.addToCurrentScope(AA).id;
+          })), F = E.addToCurrentScope(AA).id;
           var oA = new DataView(N.buffer);
           return oA.setUint32(D, F, !0), Y.getReturnStatus();
         };
         switch (w) {
           case 0:
-            return S(G, Int8Array, 1, J, E, g);
+            return S(G, Int8Array, 1, J, C, g);
           case 1:
-            return S(G, Uint8Array, 1, J, E, g);
+            return S(G, Uint8Array, 1, J, C, g);
           case 2:
-            return S(G, Uint8ClampedArray, 1, J, E, g);
+            return S(G, Uint8ClampedArray, 1, J, C, g);
           case 3:
-            return S(G, Int16Array, 2, J, E, g);
+            return S(G, Int16Array, 2, J, C, g);
           case 4:
-            return S(G, Uint16Array, 2, J, E, g);
+            return S(G, Uint16Array, 2, J, C, g);
           case 5:
-            return S(G, Int32Array, 4, J, E, g);
+            return S(G, Int32Array, 4, J, C, g);
           case 6:
-            return S(G, Uint32Array, 4, J, E, g);
+            return S(G, Uint32Array, 4, J, C, g);
           case 7:
-            return S(G, Float32Array, 4, J, E, g);
+            return S(G, Float32Array, 4, J, C, g);
           case 8:
-            return S(G, Float64Array, 8, J, E, g);
+            return S(G, Float64Array, 8, J, C, g);
           case 9:
-            return S(G, BigInt64Array, 8, J, E, g);
+            return S(G, BigInt64Array, 8, J, C, g);
           case 10:
-            return S(G, BigUint64Array, 8, J, E, g);
+            return S(G, BigUint64Array, 8, J, C, g);
           case 11:
             return typeof Float16Array != "function" ? G.setLastError(
               1
               /* napi_status.napi_invalid_arg */
-            ) : S(G, Float16Array, 2, J, E, g);
+            ) : S(G, Float16Array, 2, J, C, g);
           default:
             return G.setLastError(
               1
@@ -4992,10 +4992,10 @@ function DD(B) {
       }
     }
     function PB(A, w, g, I) {
-      var E, D, F;
+      var C, D, F;
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !G.tryCatch.isEmpty())
         return G.setLastError(
           10
@@ -5013,26 +5013,26 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = C.feature.Buffer;
-        if (!h)
-          throw C.createNotSupportBufferError("napi_create_buffer", "");
+        var M = E.feature.Buffer;
+        if (!M)
+          throw E.createNotSupportBufferError("napi_create_buffer", "");
         var J = void 0;
         w = w >>> 0;
         var S = new DataView(N.buffer);
         if (!g || w === 0)
-          J = h.alloc(w), D = C.addToCurrentScope(J).id, S.setUint32(I, D, !0);
+          J = M.alloc(w), D = E.addToCurrentScope(J).id, S.setUint32(I, D, !0);
         else {
           if (F = p(w), !F)
             throw new Error("Out of memory");
           new Uint8Array(N.buffer).subarray(F, F + w).fill(0);
-          var Y = h.from(N.buffer, F, w), x = {
-            Ctor: h,
+          var Y = M.from(N.buffer, F, w), x = {
+            Ctor: M,
             address: F,
             length: w,
             ownership: P.registry ? 0 : 1,
             runtimeAllocated: 1
           };
-          P.wasmMemoryViewTable.set(Y, x), (E = P.registry) === null || E === void 0 || E.register(x, F), D = C.addToCurrentScope(Y).id, S.setUint32(I, D, !0), S.setUint32(g, F, !0);
+          P.wasmMemoryViewTable.set(Y, x), (C = P.registry) === null || C === void 0 || C.register(x, F), D = E.addToCurrentScope(Y).id, S.setUint32(I, D, !0), S.setUint32(g, F, !0);
         }
         return G.getReturnStatus();
       } catch (Z) {
@@ -5042,11 +5042,11 @@ function DD(B) {
         );
       }
     }
-    function mB(A, w, g, I, E) {
+    function mB(A, w, g, I, C) {
       var D;
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
+      var F = E.envStore.get(A);
       if (F.checkGCAccess(), !F.tryCatch.isEmpty())
         return F.setLastError(
           10
@@ -5059,18 +5059,18 @@ function DD(B) {
         );
       F.clearLastError();
       try {
-        if (!E)
+        if (!C)
           return F.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var G = C.feature.Buffer;
+        var G = E.feature.Buffer;
         if (!G)
-          throw C.createNotSupportBufferError("napi_create_buffer_copy", "");
-        var h = pQ(w, I, !1), J = G.from(h);
-        J.set(new Uint8Array(N.buffer).subarray(g, g + w)), D = C.addToCurrentScope(J).id;
+          throw E.createNotSupportBufferError("napi_create_buffer_copy", "");
+        var M = pQ(w, I, !1), J = G.from(M);
+        J.set(new Uint8Array(N.buffer).subarray(g, g + w)), D = E.addToCurrentScope(J).id;
         var S = new DataView(N.buffer);
-        return S.setUint32(E, D, !0), F.getReturnStatus();
+        return S.setUint32(C, D, !0), F.getReturnStatus();
       } catch (Y) {
         return F.tryCatch.setError(Y), F.setLastError(
           10
@@ -5078,14 +5078,14 @@ function DD(B) {
         );
       }
     }
-    function zB(A, w, g, I, E, D) {
-      return DI(A, -2, g, w, I, E, D);
+    function zB(A, w, g, I, C, D) {
+      return DI(A, -2, g, w, I, C, D);
     }
-    function uB(A, w, g, I, E) {
+    function uB(A, w, g, I, C) {
       var D;
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
+      var F = E.envStore.get(A);
       if (F.checkGCAccess(), !F.tryCatch.isEmpty())
         return F.setLastError(
           10
@@ -5098,36 +5098,36 @@ function DD(B) {
         );
       F.clearLastError();
       try {
-        if (!w || !E)
+        if (!w || !C)
           return F.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         g = g >>> 0, I = I >>> 0;
-        var G = C.handleStore.get(w);
+        var G = E.handleStore.get(w);
         if (!G.isArrayBuffer())
           return F.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = G.value;
-        if (I + g > h.byteLength) {
+        var M = G.value;
+        if (I + g > M.byteLength) {
           var J = new RangeError("The byte offset + length is out of range");
           throw J.code = "ERR_OUT_OF_RANGE", J;
         }
-        var S = C.feature.Buffer;
+        var S = E.feature.Buffer;
         if (!S)
-          throw C.createNotSupportBufferError("node_api_create_buffer_from_arraybuffer", "");
-        var Y = S.from(h, g, I);
-        h === N.buffer && (P.wasmMemoryViewTable.has(Y) || P.wasmMemoryViewTable.set(Y, {
+          throw E.createNotSupportBufferError("node_api_create_buffer_from_arraybuffer", "");
+        var Y = S.from(M, g, I);
+        M === N.buffer && (P.wasmMemoryViewTable.has(Y) || P.wasmMemoryViewTable.set(Y, {
           Ctor: S,
           address: g,
           length: I,
           ownership: 1,
           runtimeAllocated: 0
-        })), D = C.addToCurrentScope(Y).id;
+        })), D = E.addToCurrentScope(Y).id;
         var x = new DataView(N.buffer);
-        return x.setUint32(E, D, !0), F.getReturnStatus();
+        return x.setUint32(C, D, !0), F.getReturnStatus();
       } catch (Z) {
         return F.tryCatch.setError(Z), F.setLastError(
           10
@@ -5135,10 +5135,10 @@ function DD(B) {
         );
       }
     }
-    function vB(A, w, g, I, E) {
+    function vB(A, w, g, I, C) {
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -5151,34 +5151,34 @@ function DD(B) {
         );
       D.clearLastError();
       try {
-        if (!g || !E)
+        if (!g || !C)
           return D.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         w = w >>> 0, I = I >>> 0;
-        var F = C.handleStore.get(g).value, G = function(h) {
-          if (w + I > h.byteLength) {
+        var F = E.handleStore.get(g).value, G = function(M) {
+          if (w + I > M.byteLength) {
             var J = new RangeError("byte_offset + byte_length should be less than or equal to the size in bytes of the array passed in");
             throw J.code = "ERR_NAPI_INVALID_DATAVIEW_ARGS", J;
           }
-          var S = new DataView(h, I, w);
-          h === N.buffer && (P.wasmMemoryViewTable.has(S) || P.wasmMemoryViewTable.set(S, {
+          var S = new DataView(M, I, w);
+          M === N.buffer && (P.wasmMemoryViewTable.has(S) || P.wasmMemoryViewTable.set(S, {
             Ctor: DataView,
             address: I,
             length: w,
             ownership: 1,
             runtimeAllocated: 0
           }));
-          var Y = C.addToCurrentScope(S).id, x = new DataView(N.buffer);
-          return x.setUint32(E, Y, !0), D.getReturnStatus();
+          var Y = E.addToCurrentScope(S).id, x = new DataView(N.buffer);
+          return x.setUint32(C, Y, !0), D.getReturnStatus();
         };
         return F instanceof ArrayBuffer || P.isSharedArrayBuffer(F) ? G(F) : D.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      } catch (h) {
-        return D.tryCatch.setError(h), D.setLastError(
+      } catch (M) {
+        return D.tryCatch.setError(M), D.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -5187,20 +5187,20 @@ function DD(B) {
     function _B(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !I)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !I)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
       var D = g === -1, F = g >>> 0;
       if (g !== 0 && !w || !(D || F <= 2147483647))
-        return E.setLastError(
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var G = $.UTF8ToString(w, g), h = C.addToCurrentScope(Symbol.for(G)).id, J = new DataView(N.buffer);
-      return J.setUint32(I, h, !0), E.clearLastError();
+      var G = $.UTF8ToString(w, g), M = E.addToCurrentScope(Symbol.for(G)).id, J = new DataView(N.buffer);
+      return J.setUint32(I, M, !0), C.clearLastError();
     }
     var $B = /* @__PURE__ */ Object.freeze({
       __proto__: null,
@@ -5225,50 +5225,50 @@ function DD(B) {
     function AC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = w === 0 ? 3 : 4, D = new DataView(N.buffer);
-      return D.setUint32(g, E, !0), I.clearLastError();
+      var C = w === 0 ? 3 : 4, D = new DataView(N.buffer);
+      return D.setUint32(g, C, !0), I.clearLastError();
     }
     function QC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = 5, E = new DataView(N.buffer);
-      return E.setUint32(w, I, !0), g.clearLastError();
+      var I = 5, C = new DataView(N.buffer);
+      return C.setUint32(w, I, !0), g.clearLastError();
     }
     function IC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = 2, E = new DataView(N.buffer);
-      return E.setUint32(w, I, !0), g.clearLastError();
+      var I = 2, C = new DataView(N.buffer);
+      return C.setUint32(w, I, !0), g.clearLastError();
     }
     function gC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = 1, E = new DataView(N.buffer);
-      return E.setUint32(w, I, !0), g.clearLastError();
+      var I = 1, C = new DataView(N.buffer);
+      return C.setUint32(w, I, !0), g.clearLastError();
     }
     var BC = /* @__PURE__ */ Object.freeze({
       __proto__: null,
@@ -5280,20 +5280,20 @@ function DD(B) {
     function CC(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      return E.setInstanceData(w, g, I), E.clearLastError();
+      var C = E.envStore.get(A);
+      return C.setInstanceData(w, g, I), C.clearLastError();
     }
     function EC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (!w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = g.getInstanceData(), E = new DataView(N.buffer);
-      return E.setUint32(w, I, !0), g.clearLastError();
+      var I = g.getInstanceData(), C = new DataView(N.buffer);
+      return C.setUint32(w, I, !0), g.clearLastError();
     }
     var DC = /* @__PURE__ */ Object.freeze({
       __proto__: null,
@@ -5301,13 +5301,13 @@ function DD(B) {
       napi_set_instance_data: CC
     });
     function wC(A, w, g, I) {
-      var E = C.envStore.get(A), D = E.lastError, F = D.errorCode, G = D.engineErrorCode >>> 0, h = D.engineReserved, J = new DataView(N.buffer);
-      J.setInt32(w, F, !0), J.setUint32(g, G, !0), J.setUint32(I, h, !0);
+      var C = E.envStore.get(A), D = C.lastError, F = D.errorCode, G = D.engineErrorCode >>> 0, M = D.engineReserved, J = new DataView(N.buffer);
+      J.setInt32(w, F, !0), J.setUint32(g, G, !0), J.setUint32(I, M, !0);
     }
     function iC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !g.tryCatch.isEmpty())
         return g.setLastError(
           10
@@ -5320,7 +5320,7 @@ function DD(B) {
         );
       g.clearLastError();
       try {
-        return w ? (g.tryCatch.setError(C.handleStore.get(w).value), g.clearLastError()) : g.setLastError(
+        return w ? (g.tryCatch.setError(E.handleStore.get(w).value), g.clearLastError()) : g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
@@ -5334,7 +5334,7 @@ function DD(B) {
     function FC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -5352,8 +5352,8 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = new Error($.UTF8ToString(g, -1));
-        return w && (E.code = $.UTF8ToString(w, -1)), I.tryCatch.setError(E), I.clearLastError();
+        var C = new Error($.UTF8ToString(g, -1));
+        return w && (C.code = $.UTF8ToString(w, -1)), I.tryCatch.setError(C), I.clearLastError();
       } catch (D) {
         return I.tryCatch.setError(D), I.setLastError(
           10
@@ -5364,7 +5364,7 @@ function DD(B) {
     function oC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -5382,8 +5382,8 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = new TypeError($.UTF8ToString(g, -1));
-        return w && (E.code = $.UTF8ToString(w, -1)), I.tryCatch.setError(E), I.clearLastError();
+        var C = new TypeError($.UTF8ToString(g, -1));
+        return w && (C.code = $.UTF8ToString(w, -1)), I.tryCatch.setError(C), I.clearLastError();
       } catch (D) {
         return I.tryCatch.setError(D), I.setLastError(
           10
@@ -5394,7 +5394,7 @@ function DD(B) {
     function GC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -5412,8 +5412,8 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = new RangeError($.UTF8ToString(g, -1));
-        return w && (E.code = $.UTF8ToString(w, -1)), I.tryCatch.setError(E), I.clearLastError();
+        var C = new RangeError($.UTF8ToString(g, -1));
+        return w && (C.code = $.UTF8ToString(w, -1)), I.tryCatch.setError(C), I.clearLastError();
       } catch (D) {
         return I.tryCatch.setError(D), I.setLastError(
           10
@@ -5424,7 +5424,7 @@ function DD(B) {
     function kC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -5442,8 +5442,8 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = new SyntaxError($.UTF8ToString(g, -1));
-        return w && (E.code = $.UTF8ToString(w, -1)), I.tryCatch.setError(E), I.clearLastError();
+        var C = new SyntaxError($.UTF8ToString(g, -1));
+        return w && (C.code = $.UTF8ToString(w, -1)), I.tryCatch.setError(C), I.clearLastError();
       } catch (D) {
         return I.tryCatch.setError(D), I.setLastError(
           10
@@ -5454,131 +5454,131 @@ function DD(B) {
     function NC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = g.tryCatch.hasCaught(), E = new DataView(N.buffer);
-      return E.setInt8(w, I ? 1 : 0, !0), g.clearLastError();
+      var I = g.tryCatch.hasCaught(), C = new DataView(N.buffer);
+      return C.setInt8(w, I ? 1 : 0, !0), g.clearLastError();
     }
     function UC(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !g || !I)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !g || !I)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(g).value;
+      var D = E.handleStore.get(g).value;
       if (typeof D != "string")
-        return E.setLastError(
+        return C.setLastError(
           3
           /* napi_status.napi_string_expected */
         );
       var F = new Error(D);
       if (w) {
-        var G = C.handleStore.get(w).value;
+        var G = E.handleStore.get(w).value;
         if (typeof G != "string")
-          return E.setLastError(
+          return C.setLastError(
             3
             /* napi_status.napi_string_expected */
           );
         F.code = G;
       }
-      var h = C.addToCurrentScope(F).id, J = new DataView(N.buffer);
-      return J.setUint32(I, h, !0), E.clearLastError();
+      var M = E.addToCurrentScope(F).id, J = new DataView(N.buffer);
+      return J.setUint32(I, M, !0), C.clearLastError();
     }
     function MC(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !g || !I)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !g || !I)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(g).value;
+      var D = E.handleStore.get(g).value;
       if (typeof D != "string")
-        return E.setLastError(
+        return C.setLastError(
           3
           /* napi_status.napi_string_expected */
         );
       var F = new TypeError(D);
       if (w) {
-        var G = C.handleStore.get(w).value;
+        var G = E.handleStore.get(w).value;
         if (typeof G != "string")
-          return E.setLastError(
+          return C.setLastError(
             3
             /* napi_status.napi_string_expected */
           );
         F.code = G;
       }
-      var h = C.addToCurrentScope(F).id, J = new DataView(N.buffer);
-      return J.setUint32(I, h, !0), E.clearLastError();
+      var M = E.addToCurrentScope(F).id, J = new DataView(N.buffer);
+      return J.setUint32(I, M, !0), C.clearLastError();
     }
     function hC(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !g || !I)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !g || !I)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(g).value;
+      var D = E.handleStore.get(g).value;
       if (typeof D != "string")
-        return E.setLastError(
+        return C.setLastError(
           3
           /* napi_status.napi_string_expected */
         );
       var F = new RangeError(D);
       if (w) {
-        var G = C.handleStore.get(w).value;
+        var G = E.handleStore.get(w).value;
         if (typeof G != "string")
-          return E.setLastError(
+          return C.setLastError(
             3
             /* napi_status.napi_string_expected */
           );
         F.code = G;
       }
-      var h = C.addToCurrentScope(F).id, J = new DataView(N.buffer);
-      return J.setUint32(I, h, !0), E.clearLastError();
+      var M = E.addToCurrentScope(F).id, J = new DataView(N.buffer);
+      return J.setUint32(I, M, !0), C.clearLastError();
     }
     function JC(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !g || !I)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !g || !I)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(g).value;
+      var D = E.handleStore.get(g).value;
       if (typeof D != "string")
-        return E.setLastError(
+        return C.setLastError(
           3
           /* napi_status.napi_string_expected */
         );
       var F = new SyntaxError(D);
       if (w) {
-        var G = C.handleStore.get(w).value;
+        var G = E.handleStore.get(w).value;
         if (typeof G != "string")
-          return E.setLastError(
+          return C.setLastError(
             3
             /* napi_status.napi_string_expected */
           );
         F.code = G;
       }
-      var h = C.addToCurrentScope(F).id, J = new DataView(N.buffer);
-      return J.setUint32(I, h, !0), E.clearLastError();
+      var M = E.addToCurrentScope(F).id, J = new DataView(N.buffer);
+      return J.setUint32(I, M, !0), C.clearLastError();
     }
     function aC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
@@ -5586,20 +5586,20 @@ function DD(B) {
         );
       var I = new DataView(N.buffer);
       if (g.tryCatch.hasCaught()) {
-        var E = g.tryCatch.exception(), D = g.ensureHandleId(E);
+        var C = g.tryCatch.exception(), D = g.ensureHandleId(C);
         I.setUint32(w, D, !0), g.tryCatch.reset();
       } else
         return I.setUint32(w, 1, !0), g.clearLastError();
       return g.clearLastError();
     }
     function RC(A, w, g, I) {
-      var E = $.UTF8ToString(A, w), D = $.UTF8ToString(g, I);
-      U ? U.napi.fatalError(E, D) : X("FATAL ERROR: " + E + " " + D);
+      var C = $.UTF8ToString(A, w), D = $.UTF8ToString(g, I);
+      U ? U.napi.fatalError(C, D) : X("FATAL ERROR: " + C + " " + D);
     }
     function HC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !g.tryCatch.isEmpty())
         return g.setLastError(
           10
@@ -5627,8 +5627,8 @@ function DD(B) {
           );
         }
         return g.clearLastError();
-      } catch (E) {
-        return g.tryCatch.setError(E), g.setLastError(
+      } catch (C) {
+        return g.tryCatch.setError(C), g.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -5651,11 +5651,11 @@ function DD(B) {
       node_api_create_syntax_error: JC,
       node_api_throw_syntax_error: kC
     });
-    function YC(A, w, g, I, E, D) {
+    function YC(A, w, g, I, C, D) {
       var F;
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !G.tryCatch.isEmpty())
         return G.setLastError(
           10
@@ -5673,10 +5673,10 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = jA(G, w, g, I, E);
-        if (h.status !== 0)
-          return G.setLastError(h.status);
-        var J = h.f, S = C.addToCurrentScope(J);
+        var M = jA(G, w, g, I, C);
+        if (M.status !== 0)
+          return G.setLastError(M.status);
+        var J = M.f, S = E.addToCurrentScope(J);
         F = S.id;
         var Y = new DataView(N.buffer);
         return Y.setUint32(D, F, !0), G.getReturnStatus();
@@ -5687,88 +5687,88 @@ function DD(B) {
         );
       }
     }
-    function cC(A, w, g, I, E, D) {
+    function cC(A, w, g, I, C, D) {
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
+      var F = E.envStore.get(A);
       if (!w)
         return F.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var G = C.scopeStore.get(w).callbackInfo, h = new DataView(N.buffer);
+      var G = E.scopeStore.get(w).callbackInfo, M = new DataView(N.buffer);
       if (I) {
         if (!g)
           return F.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        for (var J = h.getUint32(g, !0), S = G.args.length, Y = J < S ? J : S, x = 0; x < Y; x++) {
+        for (var J = M.getUint32(g, !0), S = G.args.length, Y = J < S ? J : S, x = 0; x < Y; x++) {
           var Z = F.ensureHandleId(G.args[x]);
-          h.setUint32(I + x * 4, Z, !0);
+          M.setUint32(I + x * 4, Z, !0);
         }
         if (x < J)
           for (; x < J; x++)
-            h.setUint32(I + x * 4, 1, !0);
+            M.setUint32(I + x * 4, 1, !0);
       }
-      if (g && h.setUint32(g, G.args.length, !0), E) {
+      if (g && M.setUint32(g, G.args.length, !0), C) {
         var b = F.ensureHandleId(G.thiz);
-        h.setUint32(E, b, !0);
+        M.setUint32(C, b, !0);
       }
-      return D && h.setUint32(D, G.data, !0), F.clearLastError();
+      return D && M.setUint32(D, G.data, !0), F.clearLastError();
     }
-    function SC(A, w, g, I, E, D) {
+    function SC(A, w, g, I, C, D) {
       var F = 0, G;
       if (!A)
         return 1;
-      var h = C.envStore.get(A);
-      if (h.checkGCAccess(), !h.tryCatch.isEmpty())
-        return h.setLastError(
+      var M = E.envStore.get(A);
+      if (M.checkGCAccess(), !M.tryCatch.isEmpty())
+        return M.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!h.canCallIntoJs())
-        return h.setLastError(
-          h.moduleApiVersion >= 10 ? 23 : 10
+      if (!M.canCallIntoJs())
+        return M.setLastError(
+          M.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      h.clearLastError();
+      M.clearLastError();
       try {
-        if (!w || (I = I >>> 0, I > 0 && !E))
-          return h.setLastError(
+        if (!w || (I = I >>> 0, I > 0 && !C))
+          return M.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var J = C.handleStore.get(w).value;
+        var J = E.handleStore.get(w).value;
         if (!g)
-          return h.setLastError(
+          return M.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var S = C.handleStore.get(g).value;
+        var S = E.handleStore.get(g).value;
         if (typeof S != "function")
-          return h.setLastError(
+          return M.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         for (var Y = [], x = new DataView(N.buffer); F < I; F++) {
-          var Z = x.getUint32(E + F * 4, !0);
-          Y.push(C.handleStore.get(Z).value);
+          var Z = x.getUint32(C + F * 4, !0);
+          Y.push(E.handleStore.get(Z).value);
         }
         var b = S.apply(J, Y);
-        return D && (G = h.ensureHandleId(b), x.setUint32(D, G, !0)), h.clearLastError();
+        return D && (G = M.ensureHandleId(b), x.setUint32(D, G, !0)), M.clearLastError();
       } catch (j) {
-        return h.tryCatch.setError(j), h.setLastError(
+        return M.tryCatch.setError(j), M.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
-    function yC(A, w, g, I, E) {
+    function yC(A, w, g, I, C) {
       var D, F;
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !G.tryCatch.isEmpty())
         return G.setLastError(
           10
@@ -5781,35 +5781,35 @@ function DD(B) {
         );
       G.clearLastError();
       try {
-        if (!w || (g = g >>> 0, g > 0 && !I) || !E)
+        if (!w || (g = g >>> 0, g > 0 && !I) || !C)
           return G.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = C.handleStore.get(w).value;
-        if (typeof h != "function")
+        var M = E.handleStore.get(w).value;
+        if (typeof M != "function")
           return G.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
         var J = void 0, S = new DataView(N.buffer);
-        if (C.feature.supportReflect) {
+        if (E.feature.supportReflect) {
           var Y = Array(g);
           for (D = 0; D < g; D++) {
             var x = S.getUint32(I + D * 4, !0);
-            Y[D] = C.handleStore.get(x).value;
+            Y[D] = E.handleStore.get(x).value;
           }
-          J = Reflect.construct(h, Y, h);
+          J = Reflect.construct(M, Y, M);
         } else {
           var Z = Array(g + 1);
           for (Z[0] = void 0, D = 0; D < g; D++) {
             var x = S.getUint32(I + D * 4, !0);
-            Z[D + 1] = C.handleStore.get(x).value;
+            Z[D + 1] = E.handleStore.get(x).value;
           }
-          var b = h.bind.apply(h, Z);
+          var b = M.bind.apply(M, Z);
           J = new b();
         }
-        return E && (F = G.ensureHandleId(J), S.setUint32(E, F, !0)), G.getReturnStatus();
+        return C && (F = G.ensureHandleId(J), S.setUint32(C, F, !0)), G.getReturnStatus();
       } catch (j) {
         return G.tryCatch.setError(j), G.setLastError(
           10
@@ -5820,14 +5820,14 @@ function DD(B) {
     function LC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.scopeStore.get(w).callbackInfo, D = E.thiz, F = E.fn, G = D == null || D.constructor == null ? 0 : D instanceof F ? I.ensureHandleId(D.constructor) : 0, h = new DataView(N.buffer);
-      return h.setUint32(g, G, !0), I.clearLastError();
+      var C = E.scopeStore.get(w).callbackInfo, D = C.thiz, F = C.fn, G = D == null || D.constructor == null ? 0 : D instanceof F ? I.ensureHandleId(D.constructor) : 0, M = new DataView(N.buffer);
+      return M.setUint32(g, G, !0), I.clearLastError();
     }
     var sC = /* @__PURE__ */ Object.freeze({
       __proto__: null,
@@ -5840,20 +5840,20 @@ function DD(B) {
     function qC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = C.openScope(g), E = new DataView(N.buffer);
-      return E.setUint32(w, I.id, !0), g.clearLastError();
+      var I = E.openScope(g), C = new DataView(N.buffer);
+      return C.setUint32(w, I.id, !0), g.clearLastError();
     }
     function pC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
-      return g.checkGCAccess(), w ? g.openHandleScopes === 0 ? 13 : (C.closeScope(g), g.clearLastError()) : g.setLastError(
+      var g = E.envStore.get(A);
+      return g.checkGCAccess(), w ? g.openHandleScopes === 0 ? 13 : (E.closeScope(g), g.clearLastError()) : g.setLastError(
         1
         /* napi_status.napi_invalid_arg */
       );
@@ -5861,20 +5861,20 @@ function DD(B) {
     function tC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = C.openScope(g), E = new DataView(N.buffer);
-      return E.setUint32(w, I.id, !0), g.clearLastError();
+      var I = E.openScope(g), C = new DataView(N.buffer);
+      return C.setUint32(w, I.id, !0), g.clearLastError();
     }
     function eC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
-      return g.checkGCAccess(), w ? g.openHandleScopes === 0 ? 13 : (C.closeScope(g), g.clearLastError()) : g.setLastError(
+      var g = E.envStore.get(A);
+      return g.checkGCAccess(), w ? g.openHandleScopes === 0 ? 13 : (E.closeScope(g), g.clearLastError()) : g.setLastError(
         1
         /* napi_status.napi_invalid_arg */
       );
@@ -5882,18 +5882,18 @@ function DD(B) {
     function dC(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !w || !g || !I)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !w || !g || !I)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.scopeStore.get(w);
+      var D = E.scopeStore.get(w);
       if (!D.escapeCalled()) {
-        var F = D.escape(g), G = F ? F.id : 0, h = new DataView(N.buffer);
-        return h.setUint32(I, G, !0), E.clearLastError();
+        var F = D.escape(g), G = F ? F.id : 0, M = new DataView(N.buffer);
+        return M.setUint32(I, G, !0), C.clearLastError();
       }
-      return E.setLastError(
+      return C.setLastError(
         12
         /* napi_status.napi_escape_called_twice */
       );
@@ -5901,32 +5901,32 @@ function DD(B) {
     function fC(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !w || !I)
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !w || !I)
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var D = C.handleStore.get(w);
-      if (E.moduleApiVersion < 10 && !(D.isObject() || D.isFunction() || D.isSymbol()))
-        return E.setLastError(
+      var D = E.handleStore.get(w);
+      if (C.moduleApiVersion < 10 && !(D.isObject() || D.isFunction() || D.isSymbol()))
+        return C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var F = C.createReference(
-        E,
+      var F = E.createReference(
+        C,
         D.id,
         g >>> 0,
         1
         /* ReferenceOwnership.kUserland */
       ), G = new DataView(N.buffer);
-      return G.setUint32(I, F.id, !0), E.clearLastError();
+      return G.setUint32(I, F.id, !0), C.clearLastError();
     }
     function xC(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
-      return w ? (C.refStore.get(w).dispose(), g.clearLastError()) : g.setLastError(
+      var g = E.envStore.get(A);
+      return w ? (E.refStore.get(w).dispose(), g.clearLastError()) : g.setLastError(
         1
         /* napi_status.napi_invalid_arg */
       );
@@ -5934,35 +5934,35 @@ function DD(B) {
     function VC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.refStore.get(w).ref();
+      var C = E.refStore.get(w).ref();
       if (g) {
         var D = new DataView(N.buffer);
-        D.setUint32(g, E, !0);
+        D.setUint32(g, C, !0);
       }
       return I.clearLastError();
     }
     function XC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.refStore.get(w), D = E.refcount();
+      var C = E.refStore.get(w), D = C.refcount();
       if (D === 0)
         return I.setLastError(
           9
           /* napi_status.napi_generic_failure */
         );
-      var F = E.unref();
+      var F = C.unref();
       if (g) {
         var G = new DataView(N.buffer);
         G.setUint32(g, F, !0);
@@ -5972,20 +5972,20 @@ function DD(B) {
     function ZC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.refStore.get(w), D = E.get(I), F = new DataView(N.buffer);
+      var C = E.refStore.get(w), D = C.get(I), F = new DataView(N.buffer);
       return F.setUint32(g, D, !0), I.clearLastError();
     }
     function WC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
-      return w ? (C.addCleanupHook(I, w, g), 0) : I.setLastError(
+      var I = E.envStore.get(A);
+      return w ? (E.addCleanupHook(I, w, g), 0) : I.setLastError(
         1
         /* napi_status.napi_invalid_arg */
       );
@@ -5993,18 +5993,18 @@ function DD(B) {
     function TC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
-      return w ? (C.removeCleanupHook(I, w, g), 0) : I.setLastError(
+      var I = E.envStore.get(A);
+      return w ? (E.removeCleanupHook(I, w, g), 0) : I.setLastError(
         1
         /* napi_status.napi_invalid_arg */
       );
     }
     function bC(A) {
-      var w = C.envStore.get(A);
+      var w = E.envStore.get(A);
       w.ref();
     }
     function nC(A) {
-      var w = C.envStore.get(A);
+      var w = E.envStore.get(A);
       w.unref();
     }
     var OC = /* @__PURE__ */ Object.freeze({
@@ -6025,18 +6025,18 @@ function DD(B) {
       napi_remove_env_cleanup_hook: TC
     });
     function rC(A, w, g) {
-      var I = C.envStore.get(A), E = I.filename;
-      return w ? $.stringToUTF8(E, w, g) : $.lengthBytesUTF8(E);
+      var I = E.envStore.get(A), C = I.filename;
+      return w ? $.stringToUTF8(C, w, g) : $.lengthBytesUTF8(C);
     }
     var jC = /* @__PURE__ */ Object.freeze({
       __proto__: null,
       _emnapi_get_filename: rC
     });
     function lC(A, w, g) {
-      var I, E;
+      var I, C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6054,13 +6054,13 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = new DataView(N.buffer), G = new Promise(function(h, J) {
-          var S = C.createDeferred({ resolve: h, reject: J });
+        var F = new DataView(N.buffer), G = new Promise(function(M, J) {
+          var S = E.createDeferred({ resolve: M, reject: J });
           I = S.id, F.setUint32(w, I, !0);
         });
-        return E = C.addToCurrentScope(G).id, F.setUint32(g, E, !0), D.getReturnStatus();
-      } catch (h) {
-        return D.tryCatch.setError(h), D.setLastError(
+        return C = E.addToCurrentScope(G).id, F.setUint32(g, C, !0), D.getReturnStatus();
+      } catch (M) {
+        return D.tryCatch.setError(M), D.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -6069,7 +6069,7 @@ function DD(B) {
     function PC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -6087,8 +6087,8 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = C.deferredStore.get(w);
-        return E.resolve(C.handleStore.get(g).value), I.getReturnStatus();
+        var C = E.deferredStore.get(w);
+        return C.resolve(E.handleStore.get(g).value), I.getReturnStatus();
       } catch (D) {
         return I.tryCatch.setError(D), I.setLastError(
           10
@@ -6099,7 +6099,7 @@ function DD(B) {
     function mC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -6117,8 +6117,8 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = C.deferredStore.get(w);
-        return E.reject(C.handleStore.get(g).value), I.getReturnStatus();
+        var C = E.deferredStore.get(w);
+        return C.reject(E.handleStore.get(g).value), I.getReturnStatus();
       } catch (D) {
         return I.tryCatch.setError(D), I.setLastError(
           10
@@ -6129,13 +6129,13 @@ function DD(B) {
     function zC(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D = E.isPromise() ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w), D = C.isPromise() ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     var uC = /* @__PURE__ */ Object.freeze({
@@ -6145,11 +6145,11 @@ function DD(B) {
       napi_reject_deferred: mC,
       napi_resolve_deferred: PC
     });
-    function wI(A, w, g, I, E, D) {
+    function wI(A, w, g, I, C, D) {
       var F;
       if (!A)
         return 1;
-      var G = C.envStore.get(A);
+      var G = E.envStore.get(A);
       if (G.checkGCAccess(), !G.tryCatch.isEmpty())
         return G.setLastError(
           10
@@ -6167,19 +6167,19 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var h = C.handleStore.get(w);
-        if (h.value == null)
+        var M = E.handleStore.get(w);
+        if (M.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var J = void 0;
         try {
-          J = h.isObject() || h.isFunction() ? h.value : Object(h.value);
+          J = M.isObject() || M.isFunction() ? M.value : Object(M.value);
         } catch {
           return G.setLastError(
             2
             /* napi_status.napi_object_expected */
           );
         }
-        if (g !== 0 && g !== 1 || E !== 0 && E !== 1)
+        if (g !== 0 && g !== 1 || C !== 0 && C !== 1)
           return G.setLastError(
             1
             /* napi_status.napi_invalid_arg */
@@ -6202,62 +6202,62 @@ function DD(B) {
             break;
           J = Object.getPrototypeOf(J), b = !1;
         } while (J);
-        var u = [], gA = function(aA, dA, tQ, iI) {
-          if (aA.indexOf(dA) === -1) {
+        var u = [], gA = function(JA, dA, tQ, iI) {
+          if (JA.indexOf(dA) === -1) {
             if (iI === 0)
-              aA.push(dA);
+              JA.push(dA);
             else if (iI === 1) {
               var eQ = typeof dA == "number" ? String(dA) : dA;
-              typeof eQ == "string" && tQ & 8 || aA.push(eQ);
+              typeof eQ == "string" && tQ & 8 || JA.push(eQ);
             }
           }
         };
         for (Z = 0; Z < S.length; Z++) {
           var DA = S[Z], AA = DA.name, oA = DA.desc;
           if (I === 0)
-            gA(u, AA, I, E);
+            gA(u, AA, I, C);
           else {
             if (I & 8 && typeof AA == "string" || I & 16 && typeof AA == "symbol")
               continue;
-            var MA = !0;
+            var UA = !0;
             switch (I & 7) {
               case 1: {
-                MA = !!oA.writable;
+                UA = !!oA.writable;
                 break;
               }
               case 2: {
-                MA = !!oA.enumerable;
+                UA = !!oA.enumerable;
                 break;
               }
               case 3: {
-                MA = !!(oA.writable && oA.enumerable);
+                UA = !!(oA.writable && oA.enumerable);
                 break;
               }
               case 4: {
-                MA = !!oA.configurable;
+                UA = !!oA.configurable;
                 break;
               }
               case 5: {
-                MA = !!(oA.configurable && oA.writable);
+                UA = !!(oA.configurable && oA.writable);
                 break;
               }
               case 6: {
-                MA = !!(oA.configurable && oA.enumerable);
+                UA = !!(oA.configurable && oA.enumerable);
                 break;
               }
               case 7: {
-                MA = !!(oA.configurable && oA.enumerable && oA.writable);
+                UA = !!(oA.configurable && oA.enumerable && oA.writable);
                 break;
               }
             }
-            MA && gA(u, AA, I, E);
+            UA && gA(u, AA, I, C);
           }
         }
-        F = C.addToCurrentScope(u).id;
+        F = E.addToCurrentScope(u).id;
         var kA = new DataView(N.buffer);
         return kA.setUint32(D, F, !0), G.getReturnStatus();
-      } catch (aA) {
-        return G.tryCatch.setError(aA), G.setLastError(
+      } catch (JA) {
+        return G.tryCatch.setError(JA), G.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -6269,41 +6269,41 @@ function DD(B) {
     function _C(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!g || !I || !w)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var D = C.handleStore.get(w);
-        return D.isObject() || D.isFunction() ? (D.value[C.handleStore.get(g).value] = C.handleStore.get(I).value, E.getReturnStatus()) : E.setLastError(
+        var D = E.handleStore.get(w);
+        return D.isObject() || D.isFunction() ? (D.value[E.handleStore.get(g).value] = E.handleStore.get(I).value, C.getReturnStatus()) : C.setLastError(
           2
           /* napi_status.napi_object_expected */
         );
       } catch (F) {
-        return E.tryCatch.setError(F), E.setLastError(
+        return C.tryCatch.setError(F), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
     function $C(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6321,7 +6321,7 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (F.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var G = void 0;
@@ -6333,9 +6333,9 @@ function DD(B) {
             /* napi_status.napi_object_expected */
           );
         }
-        E = C.handleStore.get(g).value in G ? 1 : 0;
-        var h = new DataView(N.buffer);
-        return h.setInt8(I, E, !0), D.getReturnStatus();
+        C = E.handleStore.get(g).value in G ? 1 : 0;
+        var M = new DataView(N.buffer);
+        return M.setInt8(I, C, !0), D.getReturnStatus();
       } catch (J) {
         return D.tryCatch.setError(J), D.setLastError(
           10
@@ -6344,10 +6344,10 @@ function DD(B) {
       }
     }
     function AE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6365,7 +6365,7 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (F.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var G = void 0;
@@ -6377,9 +6377,9 @@ function DD(B) {
             /* napi_status.napi_object_expected */
           );
         }
-        E = D.ensureHandleId(G[C.handleStore.get(g).value]);
-        var h = new DataView(N.buffer);
-        return h.setUint32(I, E, !0), D.getReturnStatus();
+        C = D.ensureHandleId(G[E.handleStore.get(g).value]);
+        var M = new DataView(N.buffer);
+        return M.setUint32(I, C, !0), D.getReturnStatus();
       } catch (J) {
         return D.tryCatch.setError(J), D.setLastError(
           10
@@ -6388,10 +6388,10 @@ function DD(B) {
       }
     }
     function QE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6409,24 +6409,24 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (!(F.isObject() || F.isFunction()))
           return D.setLastError(
             2
             /* napi_status.napi_object_expected */
           );
-        var G = C.handleStore.get(g).value;
-        if (C.feature.supportReflect)
-          E = Reflect.deleteProperty(F.value, G);
+        var G = E.handleStore.get(g).value;
+        if (E.feature.supportReflect)
+          C = Reflect.deleteProperty(F.value, G);
         else
           try {
-            E = delete F.value[G];
+            C = delete F.value[G];
           } catch {
-            E = !1;
+            C = !1;
           }
         if (I) {
-          var h = new DataView(N.buffer);
-          h.setInt8(I, E ? 1 : 0, !0);
+          var M = new DataView(N.buffer);
+          M.setInt8(I, C ? 1 : 0, !0);
         }
         return D.getReturnStatus();
       } catch (J) {
@@ -6437,10 +6437,10 @@ function DD(B) {
       }
     }
     function IE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6458,7 +6458,7 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (F.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var G = void 0;
@@ -6470,15 +6470,15 @@ function DD(B) {
             /* napi_status.napi_object_expected */
           );
         }
-        var h = C.handleStore.get(g).value;
-        if (typeof h != "string" && typeof h != "symbol")
+        var M = E.handleStore.get(g).value;
+        if (typeof M != "string" && typeof M != "symbol")
           return D.setLastError(
             4
             /* napi_status.napi_name_expected */
           );
-        E = Object.prototype.hasOwnProperty.call(G, C.handleStore.get(g).value);
+        C = Object.prototype.hasOwnProperty.call(G, E.handleStore.get(g).value);
         var J = new DataView(N.buffer);
-        return J.setInt8(I, E ? 1 : 0, !0), D.getReturnStatus();
+        return J.setInt8(I, C ? 1 : 0, !0), D.getReturnStatus();
       } catch (S) {
         return D.tryCatch.setError(S), D.setLastError(
           10
@@ -6489,44 +6489,44 @@ function DD(B) {
     function gE(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!I || !w)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var D = C.handleStore.get(w);
-        return D.isObject() || D.isFunction() ? g ? (C.handleStore.get(w).value[$.UTF8ToString(g, -1)] = C.handleStore.get(I).value, E.getReturnStatus()) : E.setLastError(
+        var D = E.handleStore.get(w);
+        return D.isObject() || D.isFunction() ? g ? (E.handleStore.get(w).value[$.UTF8ToString(g, -1)] = E.handleStore.get(I).value, C.getReturnStatus()) : C.setLastError(
           1
           /* napi_status.napi_invalid_arg */
-        ) : E.setLastError(
+        ) : C.setLastError(
           2
           /* napi_status.napi_object_expected */
         );
       } catch (F) {
-        return E.tryCatch.setError(F), E.setLastError(
+        return C.tryCatch.setError(F), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
     function BE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6544,7 +6544,7 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (F.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var G = void 0;
@@ -6556,9 +6556,9 @@ function DD(B) {
             /* napi_status.napi_object_expected */
           );
         }
-        E = $.UTF8ToString(g, -1) in G;
-        var h = new DataView(N.buffer);
-        return h.setInt8(I, E ? 1 : 0, !0), D.getReturnStatus();
+        C = $.UTF8ToString(g, -1) in G;
+        var M = new DataView(N.buffer);
+        return M.setInt8(I, C ? 1 : 0, !0), D.getReturnStatus();
       } catch (J) {
         return D.tryCatch.setError(J), D.setLastError(
           10
@@ -6567,10 +6567,10 @@ function DD(B) {
       }
     }
     function CE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6588,7 +6588,7 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (F.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var G = void 0;
@@ -6600,9 +6600,9 @@ function DD(B) {
             /* napi_status.napi_object_expected */
           );
         }
-        E = D.ensureHandleId(G[$.UTF8ToString(g, -1)]);
-        var h = new DataView(N.buffer);
-        return h.setUint32(I, E, !0), D.getReturnStatus();
+        C = D.ensureHandleId(G[$.UTF8ToString(g, -1)]);
+        var M = new DataView(N.buffer);
+        return M.setUint32(I, C, !0), D.getReturnStatus();
       } catch (J) {
         return D.tryCatch.setError(J), D.setLastError(
           10
@@ -6613,41 +6613,41 @@ function DD(B) {
     function EE(A, w, g, I) {
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!I || !w)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var D = C.handleStore.get(w);
-        return D.isObject() || D.isFunction() ? (D.value[g >>> 0] = C.handleStore.get(I).value, E.getReturnStatus()) : E.setLastError(
+        var D = E.handleStore.get(w);
+        return D.isObject() || D.isFunction() ? (D.value[g >>> 0] = E.handleStore.get(I).value, C.getReturnStatus()) : C.setLastError(
           2
           /* napi_status.napi_object_expected */
         );
       } catch (F) {
-        return E.tryCatch.setError(F), E.setLastError(
+        return C.tryCatch.setError(F), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
     function DE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6665,7 +6665,7 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (F.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var G = void 0;
@@ -6677,9 +6677,9 @@ function DD(B) {
             /* napi_status.napi_object_expected */
           );
         }
-        E = g >>> 0 in G ? 1 : 0;
-        var h = new DataView(N.buffer);
-        return h.setInt8(I, E, !0), D.getReturnStatus();
+        C = g >>> 0 in G ? 1 : 0;
+        var M = new DataView(N.buffer);
+        return M.setInt8(I, C, !0), D.getReturnStatus();
       } catch (J) {
         return D.tryCatch.setError(J), D.setLastError(
           10
@@ -6688,10 +6688,10 @@ function DD(B) {
       }
     }
     function wE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6709,7 +6709,7 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (F.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
         var G = void 0;
@@ -6721,9 +6721,9 @@ function DD(B) {
             /* napi_status.napi_object_expected */
           );
         }
-        E = D.ensureHandleId(G[g >>> 0]);
-        var h = new DataView(N.buffer);
-        return h.setUint32(I, E, !0), D.getReturnStatus();
+        C = D.ensureHandleId(G[g >>> 0]);
+        var M = new DataView(N.buffer);
+        return M.setUint32(I, C, !0), D.getReturnStatus();
       } catch (J) {
         return D.tryCatch.setError(J), D.setLastError(
           10
@@ -6732,10 +6732,10 @@ function DD(B) {
       }
     }
     function iE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6753,37 +6753,37 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (!(F.isObject() || F.isFunction()))
           return D.setLastError(
             2
             /* napi_status.napi_object_expected */
           );
-        if (C.feature.supportReflect)
-          E = Reflect.deleteProperty(F.value, g >>> 0);
+        if (E.feature.supportReflect)
+          C = Reflect.deleteProperty(F.value, g >>> 0);
         else
           try {
-            E = delete F.value[g >>> 0];
+            C = delete F.value[g >>> 0];
           } catch {
-            E = !1;
+            C = !1;
           }
         if (I) {
           var G = new DataView(N.buffer);
-          G.setInt8(I, E ? 1 : 0, !0);
+          G.setInt8(I, C ? 1 : 0, !0);
         }
         return D.getReturnStatus();
-      } catch (h) {
-        return D.tryCatch.setError(h), D.setLastError(
+      } catch (M) {
+        return D.tryCatch.setError(M), D.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
     function FE(A, w, g, I) {
-      var E, D;
+      var C, D;
       if (!A)
         return 1;
-      var F = C.envStore.get(A);
+      var F = E.envStore.get(A);
       if (F.checkGCAccess(), !F.tryCatch.isEmpty())
         return F.setLastError(
           10
@@ -6801,25 +6801,25 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var G = C.handleStore.get(w), h = G.value;
+        var G = E.handleStore.get(w), M = G.value;
         if (!(G.isObject() || G.isFunction()))
           return F.setLastError(
             2
             /* napi_status.napi_object_expected */
           );
         for (var J = void 0, S = new DataView(N.buffer), Y = 0; Y < g; Y++) {
-          E = I + Y * 32;
-          var x = S.getUint32(E, !0), Z = S.getUint32(E + 4, !0), b = S.getUint32(E + 8, !0), j = S.getUint32(E + 12, !0), u = S.getUint32(E + 16, !0), gA = S.getUint32(E + 20, !0);
-          D = S.getInt32(E + 24, !0);
-          var DA = S.getUint32(E + 28, !0);
+          C = I + Y * 32;
+          var x = S.getUint32(C, !0), Z = S.getUint32(C + 4, !0), b = S.getUint32(C + 8, !0), j = S.getUint32(C + 12, !0), u = S.getUint32(C + 16, !0), gA = S.getUint32(C + 20, !0);
+          D = S.getInt32(C + 24, !0);
+          var DA = S.getUint32(C + 28, !0);
           if (x)
             J = $.UTF8ToString(x, -1);
-          else if (!Z || (J = C.handleStore.get(Z).value, typeof J != "string" && typeof J != "symbol"))
+          else if (!Z || (J = E.handleStore.get(Z).value, typeof J != "string" && typeof J != "symbol"))
             return F.setLastError(
               4
               /* napi_status.napi_name_expected */
             );
-          yQ(F, h, J, b, j, u, gA, D, DA);
+          yQ(F, M, J, b, j, u, gA, D, DA);
         }
         return F.getReturnStatus();
       } catch (AA) {
@@ -6832,7 +6832,7 @@ function DD(B) {
     function oE(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !g.tryCatch.isEmpty())
         return g.setLastError(
           10
@@ -6850,8 +6850,8 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var I = C.handleStore.get(w), E = I.value;
-        return I.isObject() || I.isFunction() ? (Object.freeze(E), g.getReturnStatus()) : g.setLastError(
+        var I = E.handleStore.get(w), C = I.value;
+        return I.isObject() || I.isFunction() ? (Object.freeze(C), g.getReturnStatus()) : g.setLastError(
           2
           /* napi_status.napi_object_expected */
         );
@@ -6865,7 +6865,7 @@ function DD(B) {
     function GE(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !g.tryCatch.isEmpty())
         return g.setLastError(
           10
@@ -6883,8 +6883,8 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var I = C.handleStore.get(w), E = I.value;
-        return I.isObject() || I.isFunction() ? (Object.seal(E), g.getReturnStatus()) : g.setLastError(
+        var I = E.handleStore.get(w), C = I.value;
+        return I.isObject() || I.isFunction() ? (Object.seal(C), g.getReturnStatus()) : g.setLastError(
           2
           /* napi_status.napi_object_expected */
         );
@@ -6916,10 +6916,10 @@ function DD(B) {
       napi_set_property: _C
     });
     function NE(A, w, g) {
-      var I, E;
+      var I, C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -6937,19 +6937,19 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w);
+        var F = E.handleStore.get(w);
         if (!F.isString())
           return D.setLastError(
             3
             /* napi_status.napi_string_expected */
           );
-        var G = C.handleStore.get(
+        var G = E.handleStore.get(
           5
           /* GlobalHandle.GLOBAL */
-        ).value, h = G.eval(F.value);
-        E = D.ensureHandleId(h);
+        ).value, M = G.eval(F.value);
+        C = D.ensureHandleId(M);
         var J = new DataView(N.buffer);
-        J.setUint32(g, E, !0), I = D.getReturnStatus();
+        J.setUint32(g, C, !0), I = D.getReturnStatus();
       } catch (S) {
         return D.tryCatch.setError(S), D.setLastError(
           10
@@ -6965,32 +6965,32 @@ function DD(B) {
     function ME(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D;
-      if (E.isNumber())
+      var C = E.handleStore.get(w), D;
+      if (C.isNumber())
         D = 3;
-      else if (E.isBigInt())
+      else if (C.isBigInt())
         D = 9;
-      else if (E.isString())
+      else if (C.isString())
         D = 4;
-      else if (E.isFunction())
+      else if (C.isFunction())
         D = 7;
-      else if (E.isExternal())
+      else if (C.isExternal())
         D = 8;
-      else if (E.isObject())
+      else if (C.isObject())
         D = 6;
-      else if (E.isBoolean())
+      else if (C.isBoolean())
         D = 2;
-      else if (E.isUndefined())
+      else if (C.isUndefined())
         D = 0;
-      else if (E.isSymbol())
+      else if (C.isSymbol())
         D = 5;
-      else if (E.isNull())
+      else if (C.isNull())
         D = 1;
       else
         return I.setLastError(
@@ -7004,30 +7004,30 @@ function DD(B) {
       var I;
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!w || !g)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var D = C.handleStore.get(w);
+        var D = E.handleStore.get(w);
         I = D.value ? 4 : 3;
         var F = new DataView(N.buffer);
-        return F.setUint32(g, I, !0), E.getReturnStatus();
+        return F.setUint32(g, I, !0), C.getReturnStatus();
       } catch (G) {
-        return E.tryCatch.setError(G), E.setLastError(
+        return C.tryCatch.setError(G), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -7037,32 +7037,32 @@ function DD(B) {
       var I;
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!w || !g)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var D = C.handleStore.get(w);
+        var D = E.handleStore.get(w);
         if (D.isBigInt())
           throw new TypeError("Cannot convert a BigInt value to a number");
-        I = C.addToCurrentScope(Number(D.value)).id;
+        I = E.addToCurrentScope(Number(D.value)).id;
         var F = new DataView(N.buffer);
-        return F.setUint32(g, I, !0), E.getReturnStatus();
+        return F.setUint32(g, I, !0), C.getReturnStatus();
       } catch (G) {
-        return E.tryCatch.setError(G), E.setLastError(
+        return C.tryCatch.setError(G), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -7072,32 +7072,32 @@ function DD(B) {
       var I;
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!w || !g)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var D = C.handleStore.get(w);
+        var D = E.handleStore.get(w);
         if (D.value == null)
           throw new TypeError("Cannot convert undefined or null to object");
-        I = E.ensureHandleId(Object(D.value));
+        I = C.ensureHandleId(Object(D.value));
         var F = new DataView(N.buffer);
-        return F.setUint32(g, I, !0), E.getReturnStatus();
+        return F.setUint32(g, I, !0), C.getReturnStatus();
       } catch (G) {
-        return E.tryCatch.setError(G), E.setLastError(
+        return C.tryCatch.setError(G), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
@@ -7107,42 +7107,42 @@ function DD(B) {
       var I;
       if (!A)
         return 1;
-      var E = C.envStore.get(A);
-      if (E.checkGCAccess(), !E.tryCatch.isEmpty())
-        return E.setLastError(
+      var C = E.envStore.get(A);
+      if (C.checkGCAccess(), !C.tryCatch.isEmpty())
+        return C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
-      if (!E.canCallIntoJs())
-        return E.setLastError(
-          E.moduleApiVersion >= 10 ? 23 : 10
+      if (!C.canCallIntoJs())
+        return C.setLastError(
+          C.moduleApiVersion >= 10 ? 23 : 10
           /* napi_status.napi_pending_exception */
         );
-      E.clearLastError();
+      C.clearLastError();
       try {
         if (!w || !g)
-          return E.setLastError(
+          return C.setLastError(
             1
             /* napi_status.napi_invalid_arg */
           );
-        var D = C.handleStore.get(w);
+        var D = E.handleStore.get(w);
         if (D.isSymbol())
           throw new TypeError("Cannot convert a Symbol value to a string");
-        I = C.addToCurrentScope(String(D.value)).id;
+        I = E.addToCurrentScope(String(D.value)).id;
         var F = new DataView(N.buffer);
-        return F.setUint32(g, I, !0), E.getReturnStatus();
+        return F.setUint32(g, I, !0), C.getReturnStatus();
       } catch (G) {
-        return E.tryCatch.setError(G), E.setLastError(
+        return C.tryCatch.setError(G), C.setLastError(
           10
           /* napi_status.napi_pending_exception */
         );
       }
     }
     function HE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -7162,14 +7162,14 @@ function DD(B) {
           );
         var F = new DataView(N.buffer);
         F.setInt8(I, 0, !0);
-        var G = C.handleStore.get(g);
+        var G = E.handleStore.get(g);
         if (!G.isFunction())
           return D.setLastError(
             5
             /* napi_status.napi_function_expected */
           );
-        var h = C.handleStore.get(w).value, J = h instanceof G.value;
-        return E = J ? 1 : 0, F.setInt8(I, E, !0), D.getReturnStatus();
+        var M = E.handleStore.get(w).value, J = M instanceof G.value;
+        return C = J ? 1 : 0, F.setInt8(I, C, !0), D.getReturnStatus();
       } catch (S) {
         return D.tryCatch.setError(S), D.setLastError(
           10
@@ -7180,104 +7180,104 @@ function DD(B) {
     function KE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D = E.isArray() ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w), D = C.isArray() ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function YE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D = E.isArrayBuffer() ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w), D = C.isArrayBuffer() ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function cE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D = typeof SharedArrayBuffer == "function" && E.value instanceof SharedArrayBuffer || Object.prototype.toString.call(E.value) === "[object SharedArrayBuffer]" ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w), D = typeof SharedArrayBuffer == "function" && C.value instanceof SharedArrayBuffer || Object.prototype.toString.call(C.value) === "[object SharedArrayBuffer]" ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function SE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D = E.isDate() ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w), D = C.isDate() ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function yE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w).value, D = E instanceof Error ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w).value, D = C instanceof Error ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function LE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D = E.isTypedArray() ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w), D = C.isTypedArray() ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function sE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D = E.isBuffer(C.feature.Buffer) ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w), D = C.isBuffer(E.feature.Buffer) ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function qE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !w || !g)
         return I.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var E = C.handleStore.get(w), D = E.isDataView() ? 1 : 0, F = new DataView(N.buffer);
+      var C = E.handleStore.get(w), D = C.isDataView() ? 1 : 0, F = new DataView(N.buffer);
       return F.setInt8(g, D, !0), I.clearLastError();
     }
     function pE(A, w, g, I) {
-      var E;
+      var C;
       if (!A)
         return 1;
-      var D = C.envStore.get(A);
+      var D = E.envStore.get(A);
       if (D.checkGCAccess(), !D.tryCatch.isEmpty())
         return D.setLastError(
           10
@@ -7295,10 +7295,10 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var F = C.handleStore.get(w).value, G = C.handleStore.get(g).value;
-        E = F === G ? 1 : 0;
-        var h = new DataView(N.buffer);
-        return h.setInt8(I, E, !0), D.getReturnStatus();
+        var F = E.handleStore.get(w).value, G = E.handleStore.get(g).value;
+        C = F === G ? 1 : 0;
+        var M = new DataView(N.buffer);
+        return M.setInt8(I, C, !0), D.getReturnStatus();
       } catch (J) {
         return D.tryCatch.setError(J), D.setLastError(
           10
@@ -7309,13 +7309,13 @@ function DD(B) {
     function tE(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (g.checkGCAccess(), !w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = C.handleStore.get(w).value;
+      var I = E.handleStore.get(w).value;
       if (!(I instanceof ArrayBuffer))
         return typeof SharedArrayBuffer == "function" && I instanceof SharedArrayBuffer ? g.setLastError(
           20
@@ -7325,7 +7325,7 @@ function DD(B) {
           /* napi_status.napi_arraybuffer_expected */
         );
       try {
-        var E = C.feature.MessageChannel, D = new E();
+        var C = E.feature.MessageChannel, D = new C();
         D.port1.postMessage(I, [I]);
       } catch {
         return g.setLastError(
@@ -7338,7 +7338,7 @@ function DD(B) {
     function eE(A, w, g) {
       if (!A)
         return 1;
-      var I = C.envStore.get(A);
+      var I = E.envStore.get(A);
       if (I.checkGCAccess(), !I.tryCatch.isEmpty())
         return I.setLastError(
           10
@@ -7356,10 +7356,10 @@ function DD(B) {
             1
             /* napi_status.napi_invalid_arg */
           );
-        var E = C.handleStore.get(w), D = new DataView(N.buffer);
-        if (E.isArrayBuffer() && E.value.byteLength === 0)
+        var C = E.handleStore.get(w), D = new DataView(N.buffer);
+        if (C.isArrayBuffer() && C.value.byteLength === 0)
           try {
-            new Uint8Array(E.value);
+            new Uint8Array(C.value);
           } catch {
             return D.setInt8(g, 1, !0), I.getReturnStatus();
           }
@@ -7394,27 +7394,27 @@ function DD(B) {
     function fE(A, w) {
       if (!A)
         return 1;
-      var g = C.envStore.get(A);
+      var g = E.envStore.get(A);
       if (!w)
         return g.setLastError(
           1
           /* napi_status.napi_invalid_arg */
         );
-      var I = 10, E = new DataView(N.buffer);
-      return E.setUint32(w, I, !0), g.clearLastError();
+      var I = 10, C = new DataView(N.buffer);
+      return C.setUint32(w, I, !0), g.clearLastError();
     }
     var xE = /* @__PURE__ */ Object.freeze({
       __proto__: null,
       napi_get_version: fE
     });
-    IA.init(), P.init(), $.init(), L.init(), V.init(), M.emnapi.syncMemory = sQ, M.emnapi.getMemoryAddress = qQ;
+    IA.init(), P.init(), $.init(), L.init(), V.init(), h.emnapi.syncMemory = sQ, h.emnapi.getMemoryAddress = qQ;
     function iA(A) {
       for (var w = Object.keys(A), g = 0; g < w.length; ++g) {
         var I = w[g];
-        I.indexOf("$") !== 0 && (I.indexOf("emnapi_") === 0 ? M.imports.emnapi[I] = A[I] : I.indexOf("_emnapi_") === 0 || I === "napi_set_last_error" || I === "napi_clear_last_error" ? M.imports.env[I] = A[I] : M.imports.napi[I] = A[I]);
+        I.indexOf("$") !== 0 && (I.indexOf("emnapi_") === 0 ? h.imports.emnapi[I] = A[I] : I.indexOf("_emnapi_") === 0 || I === "napi_set_last_error" || I === "napi_clear_last_error" ? h.imports.env[I] = A[I] : h.imports.napi[I] = A[I]);
       }
     }
-    return iA(hg), iA(ag), iA(bg), iA(og), iA(EB), iA(aB), iA($B), iA(BC), iA(sB), iA(DC), iA(xB), iA(KC), iA(sC), iA(OC), iA(jC), iA(Lg), iA(uC), iA(kE), iA(UE), iA(dE), iA(xE), M.imports.napi.napi_create_threadsafe_function = sg, M.imports.napi.napi_get_threadsafe_function_context = qg, M.imports.napi.napi_call_threadsafe_function = pg, M.imports.napi.napi_acquire_threadsafe_function = tg, M.imports.napi.napi_release_threadsafe_function = eg, M.imports.napi.napi_unref_threadsafe_function = dg, M.imports.napi.napi_ref_threadsafe_function = fg, M;
+    return iA(hg), iA(ag), iA(bg), iA(og), iA(EB), iA(aB), iA($B), iA(BC), iA(sB), iA(DC), iA(xB), iA(KC), iA(sC), iA(OC), iA(jC), iA(Lg), iA(uC), iA(kE), iA(UE), iA(dE), iA(xE), h.imports.napi.napi_create_threadsafe_function = sg, h.imports.napi.napi_get_threadsafe_function_context = qg, h.imports.napi.napi_call_threadsafe_function = pg, h.imports.napi.napi_acquire_threadsafe_function = tg, h.imports.napi.napi_release_threadsafe_function = eg, h.imports.napi.napi_unref_threadsafe_function = dg, h.imports.napi.napi_ref_threadsafe_function = fg, h;
   })();
   return Q;
 }
@@ -7443,10 +7443,10 @@ function wD(B, Q, i, o) {
     threadManager: c.PThread,
     waitThreadStart: c.waitThreadStart
   }), Object.assign(X, typeof p.getImportObject == "function" ? p.getImportObject() : { wasi_snapshot_preview1: p.wasiImport }), Object.assign(X, t.getImportObject()));
-  var M = o.overwriteImports;
-  if (typeof M == "function") {
-    var C = M(X);
-    typeof C == "object" && C !== null && (X = C);
+  var h = o.overwriteImports;
+  if (typeof h == "function") {
+    var E = h(X);
+    typeof E == "object" && E !== null && (X = E);
   }
   return B(i, X, function(U, a) {
     if (U)
@@ -7896,12 +7896,12 @@ It schedules the call as a new task in the event loop.`);
       if (!k.terminatedOrTerminating()) {
         var N = typeof process == "object" && process !== null, c = N ? !!(process.execArgv && process.execArgv.indexOf("--force-node-api-uncaught-exceptions-policy") !== -1) : !1;
         if (k.moduleApiVersion < 10 && !c && !i) {
-          var p = N && typeof process.emitWarning == "function" ? process.emitWarning : function(t, X, M) {
+          var p = N && typeof process.emitWarning == "function" ? process.emitWarning : function(t, X, h) {
             if (t instanceof Error)
               console.warn(t.toString());
             else {
-              var C = M ? "[".concat(M, "] ") : "";
-              console.warn("".concat(C).concat(X || "Warning", ": ").concat(t));
+              var E = h ? "[".concat(h, "] ") : "";
+              console.warn("".concat(E).concat(X || "Warning", ": ").concat(t));
             }
           };
           p("Uncaught N-API callback exception detected, please run node with option --force-node-api-uncaught-exceptions-policy=true to handle those exceptions properly.", "DeprecationWarning", "DEP0168");
@@ -8345,8 +8345,8 @@ function jD(B) {
     } else if (Q.length === 0)
       R = typeof process < "u" && typeof process.cwd == "function" ? process.cwd() : "";
     else {
-      const M = `=${Q}`, C = typeof process < "u" ? process.env : void 0;
-      R = C && typeof C[M] == "string" ? C[M] : typeof process < "u" && typeof process.cwd == "function" ? process.cwd() : "", (R === void 0 || R.slice(0, 2).toLowerCase() !== Q.toLowerCase() && R.charCodeAt(2) === zI) && (R = `${Q}\\`);
+      const h = `=${Q}`, E = typeof process < "u" ? process.env : void 0;
+      R = E && typeof E[h] == "string" ? E[h] : typeof process < "u" && typeof process.cwd == "function" ? process.cwd() : "", (R === void 0 || R.slice(0, 2).toLowerCase() !== Q.toLowerCase() && R.charCodeAt(2) === zI) && (R = `${Q}\\`);
     }
     const N = R.length;
     let c = 0, p = "", t = !1;
@@ -8355,17 +8355,17 @@ function jD(B) {
       SA(X) && (c = 1, t = !0);
     else if (SA(X))
       if (t = !0, SA(R.charCodeAt(1))) {
-        let M = 2, C = M;
-        for (; M < N && !SA(R.charCodeAt(M)); )
-          M++;
-        if (M < N && M !== C) {
-          const U = R.slice(C, M);
-          for (C = M; M < N && SA(R.charCodeAt(M)); )
-            M++;
-          if (M < N && M !== C) {
-            for (C = M; M < N && !SA(R.charCodeAt(M)); )
-              M++;
-            (M === N || M !== C) && (p = `\\\\${U}\\${R.slice(C, M)}`, c = M);
+        let h = 2, E = h;
+        for (; h < N && !SA(R.charCodeAt(h)); )
+          h++;
+        if (h < N && h !== E) {
+          const U = R.slice(E, h);
+          for (E = h; h < N && SA(R.charCodeAt(h)); )
+            h++;
+          if (h < N && h !== E) {
+            for (E = h; h < N && !SA(R.charCodeAt(h)); )
+              h++;
+            (h === N || h !== E) && (p = `\\\\${U}\\${R.slice(E, h)}`, c = h);
           }
         }
       } else
@@ -8742,16 +8742,16 @@ class Ag {
     var p, t;
     let X = -1;
     if (this.used >= this.size) {
-      const C = this.size * 2;
-      this.fds.length = C, X = this.size, this.size = C;
+      const E = this.size * 2;
+      this.fds.length = E, X = this.size, this.size = E;
     } else
-      for (let C = 0; C < this.size; ++C)
-        if (this.fds[C] == null) {
-          X = C;
+      for (let E = 0; E < this.size; ++E)
+        if (this.fds[E] == null) {
+          X = E;
           break;
         }
-    let M;
-    return i === "<stdout>" ? M = new JI((p = this.print) !== null && p !== void 0 ? p : console.log, X, Q, i, o, k, R, N, c) : i === "<stderr>" ? M = new JI((t = this.printErr) !== null && t !== void 0 ? t : console.error, X, Q, i, o, k, R, N, c) : M = new $I(X, Q, i, o, k, R, N, c), this.fds[X] = M, this.used++, M;
+    let h;
+    return i === "<stdout>" ? h = new JI((p = this.print) !== null && p !== void 0 ? p : console.log, X, Q, i, o, k, R, N, c) : i === "<stderr>" ? h = new JI((t = this.printErr) !== null && t !== void 0 ? t : console.error, X, Q, i, o, k, R, N, c) : h = new $I(X, Q, i, o, k, R, N, c), this.fds[X] = h, this.used++, h;
   }
   get(Q, i, o) {
     if (Q >= this.size)
@@ -9041,7 +9041,7 @@ async function ZQ(B, Q, i, o) {
     }
   return k;
 }
-const hA = /* @__PURE__ */ new TextEncoder(), EA = /* @__PURE__ */ new TextDecoder(), DQ = (BigInt(1) << BigInt(63)) - BigInt(1);
+const MA = /* @__PURE__ */ new TextEncoder(), EA = /* @__PURE__ */ new TextDecoder(), DQ = (BigInt(1) << BigInt(63)) - BigInt(1);
 function cI() {
   const B = window.prompt();
   return B === null ? new Uint8Array() : new TextEncoder().encode(B + `
@@ -9052,57 +9052,57 @@ function wQ(B) {
 }
 class bA {
   constructor(Q, i, o, k, R, N) {
-    this.args_get = BA(this, "args_get", function(M, C) {
-      if (M = Number(M), C = Number(C), M === 0 || C === 0)
+    this.args_get = BA(this, "args_get", function(h, E) {
+      if (h = Number(h), E = Number(E), h === 0 || E === 0)
         return 28;
-      const a = r.get(this).args, H = hA.encode(a.join("\0") + "\0").length, { HEAPU8: K, view: y } = m(this, Math.max(M + a.length * 4, C + H));
+      const a = r.get(this).args, H = MA.encode(a.join("\0") + "\0").length, { HEAPU8: K, view: y } = m(this, Math.max(h + a.length * 4, E + H));
       for (let s = 0; s < a.length; ++s) {
         const f = a[s];
-        y.setInt32(M, C, !0), M += 4;
-        const e = hA.encode(f + "\0");
-        K.set(e, C), C += e.length;
+        y.setInt32(h, E, !0), h += 4;
+        const e = MA.encode(f + "\0");
+        K.set(e, E), E += e.length;
       }
       return 0;
-    }), this.args_sizes_get = BA(this, "args_sizes_get", function(M, C) {
-      if (M = Number(M), C = Number(C), M === 0 || C === 0)
+    }), this.args_sizes_get = BA(this, "args_sizes_get", function(h, E) {
+      if (h = Number(h), E = Number(E), h === 0 || E === 0)
         return 28;
-      const { view: U } = m(this, Math.max(M + 4, C + 4)), H = r.get(this).args;
-      return U.setUint32(M, H.length, !0), U.setUint32(C, hA.encode(H.join("\0") + "\0").length, !0), 0;
-    }), this.environ_get = BA(this, "environ_get", function(M, C) {
-      if (M = Number(M), C = Number(C), M === 0 || C === 0)
+      const { view: U } = m(this, Math.max(h + 4, E + 4)), H = r.get(this).args;
+      return U.setUint32(h, H.length, !0), U.setUint32(E, MA.encode(H.join("\0") + "\0").length, !0), 0;
+    }), this.environ_get = BA(this, "environ_get", function(h, E) {
+      if (h = Number(h), E = Number(E), h === 0 || E === 0)
         return 28;
-      const a = r.get(this).env, H = hA.encode(a.join("\0") + "\0").length, { HEAPU8: K, view: y } = m(this, Math.max(M + a.length * 4, C + H));
+      const a = r.get(this).env, H = MA.encode(a.join("\0") + "\0").length, { HEAPU8: K, view: y } = m(this, Math.max(h + a.length * 4, E + H));
       for (let s = 0; s < a.length; ++s) {
         const f = a[s];
-        y.setInt32(M, C, !0), M += 4;
-        const e = hA.encode(f + "\0");
-        K.set(e, C), C += e.length;
+        y.setInt32(h, E, !0), h += 4;
+        const e = MA.encode(f + "\0");
+        K.set(e, E), E += e.length;
       }
       return 0;
-    }), this.environ_sizes_get = BA(this, "environ_sizes_get", function(M, C) {
-      if (M = Number(M), C = Number(C), M === 0 || C === 0)
+    }), this.environ_sizes_get = BA(this, "environ_sizes_get", function(h, E) {
+      if (h = Number(h), E = Number(E), h === 0 || E === 0)
         return 28;
-      const { view: U } = m(this, Math.max(M + 4, C + 4)), a = r.get(this);
-      return U.setUint32(M, a.env.length, !0), U.setUint32(C, hA.encode(a.env.join("\0") + "\0").length, !0), 0;
-    }), this.clock_res_get = BA(this, "clock_res_get", function(M, C) {
-      if (C = Number(C), C === 0)
+      const { view: U } = m(this, Math.max(h + 4, E + 4)), a = r.get(this);
+      return U.setUint32(h, a.env.length, !0), U.setUint32(E, MA.encode(a.env.join("\0") + "\0").length, !0), 0;
+    }), this.clock_res_get = BA(this, "clock_res_get", function(h, E) {
+      if (E = Number(E), E === 0)
         return 28;
-      const { view: U } = m(this, C + 8);
-      switch (M) {
+      const { view: U } = m(this, E + 8);
+      switch (h) {
         case 0:
-          return U.setBigUint64(C, BigInt(1e6), !0), 0;
+          return U.setBigUint64(E, BigInt(1e6), !0), 0;
         case 1:
         case 2:
         case 3:
-          return U.setBigUint64(C, BigInt(1e3), !0), 0;
+          return U.setBigUint64(E, BigInt(1e3), !0), 0;
         default:
           return 28;
       }
-    }), this.clock_time_get = BA(this, "clock_time_get", function(M, C, U) {
+    }), this.clock_time_get = BA(this, "clock_time_get", function(h, E, U) {
       if (U = Number(U), U === 0)
         return 28;
       const { view: a } = m(this, U + 8);
-      switch (M) {
+      switch (h) {
         case 0:
           return a.setBigUint64(U, BigInt(Date.now()) * BigInt(1e6), !0), 0;
         case 1:
@@ -9114,25 +9114,25 @@ class bA {
         default:
           return 28;
       }
-    }), this.fd_advise = BA(this, "fd_advise", function(M, C, U, a) {
+    }), this.fd_advise = BA(this, "fd_advise", function(h, E, U, a) {
       return 52;
-    }), this.fd_fdstat_get = BA(this, "fd_fdstat_get", function(M, C) {
-      if (C = Number(C), C === 0)
+    }), this.fd_fdstat_get = BA(this, "fd_fdstat_get", function(h, E) {
+      if (E = Number(E), E === 0)
         return 28;
-      const a = r.get(this).fds.get(M, BigInt(0), BigInt(0)), { view: H } = m(this, C + 24);
-      return H.setUint16(C, a.type, !0), H.setUint16(C + 2, 0, !0), H.setBigUint64(C + 8, a.rightsBase, !0), H.setBigUint64(C + 16, a.rightsInheriting, !0), 0;
-    }), this.fd_fdstat_set_flags = BA(this, "fd_fdstat_set_flags", function(M, C) {
+      const a = r.get(this).fds.get(h, BigInt(0), BigInt(0)), { view: H } = m(this, E + 24);
+      return H.setUint16(E, a.type, !0), H.setUint16(E + 2, 0, !0), H.setBigUint64(E + 8, a.rightsBase, !0), H.setBigUint64(E + 16, a.rightsInheriting, !0), 0;
+    }), this.fd_fdstat_set_flags = BA(this, "fd_fdstat_set_flags", function(h, E) {
       return 52;
-    }), this.fd_fdstat_set_rights = BA(this, "fd_fdstat_set_rights", function(M, C, U) {
-      const H = r.get(this).fds.get(M, BigInt(0), BigInt(0));
-      return (C | H.rightsBase) > H.rightsBase || (U | H.rightsInheriting) > H.rightsInheriting ? 76 : (H.rightsBase = C, H.rightsInheriting = U, 0);
-    }), this.fd_prestat_get = BA(this, "fd_prestat_get", function(M, C) {
-      if (C = Number(C), C === 0)
+    }), this.fd_fdstat_set_rights = BA(this, "fd_fdstat_set_rights", function(h, E, U) {
+      const H = r.get(this).fds.get(h, BigInt(0), BigInt(0));
+      return (E | H.rightsBase) > H.rightsBase || (U | H.rightsInheriting) > H.rightsInheriting ? 76 : (H.rightsBase = E, H.rightsInheriting = U, 0);
+    }), this.fd_prestat_get = BA(this, "fd_prestat_get", function(h, E) {
+      if (E = Number(E), E === 0)
         return 28;
       const U = r.get(this);
       let a;
       try {
-        a = U.fds.get(M, BigInt(0), BigInt(0));
+        a = U.fds.get(h, BigInt(0), BigInt(0));
       } catch (K) {
         if (K instanceof GA)
           return K.errno;
@@ -9140,38 +9140,38 @@ class bA {
       }
       if (a.preopen !== 1)
         return 28;
-      const { view: H } = m(this, C + 8);
-      return H.setUint32(C, 0, !0), H.setUint32(C + 4, hA.encode(a.path).length, !0), 0;
-    }), this.fd_prestat_dir_name = BA(this, "fd_prestat_dir_name", function(M, C, U) {
-      if (C = Number(C), U = Number(U), C === 0)
+      const { view: H } = m(this, E + 8);
+      return H.setUint32(E, 0, !0), H.setUint32(E + 4, MA.encode(a.path).length, !0), 0;
+    }), this.fd_prestat_dir_name = BA(this, "fd_prestat_dir_name", function(h, E, U) {
+      if (E = Number(E), U = Number(U), E === 0)
         return 28;
-      const H = r.get(this).fds.get(M, BigInt(0), BigInt(0));
+      const H = r.get(this).fds.get(h, BigInt(0), BigInt(0));
       if (H.preopen !== 1)
         return 8;
-      const K = hA.encode(H.path), y = K.length;
+      const K = MA.encode(H.path), y = K.length;
       if (y > U)
         return 42;
-      const { HEAPU8: s } = m(this, C + y);
-      return s.set(K, C), 0;
-    }), this.fd_seek = BA(this, "fd_seek", function(M, C, U, a) {
+      const { HEAPU8: s } = m(this, E + y);
+      return s.set(K, E), 0;
+    }), this.fd_seek = BA(this, "fd_seek", function(h, E, U, a) {
       if (a = Number(a), a === 0)
         return 28;
-      if (M === 0 || M === 1 || M === 2)
+      if (h === 0 || h === 1 || h === 2)
         return 0;
-      const y = r.get(this).fds.get(M, q.FD_SEEK, BigInt(0)).seek(C, U), { view: s } = m(this, a + 8);
+      const y = r.get(this).fds.get(h, q.FD_SEEK, BigInt(0)).seek(E, U), { view: s } = m(this, a + 8);
       return s.setBigUint64(a, y, !0), 0;
-    }), this.fd_tell = BA(this, "fd_tell", function(M, C) {
-      const a = r.get(this).fds.get(M, q.FD_TELL, BigInt(0)), H = BigInt(a.pos), { view: K } = m(this, Number(C) + 8);
-      return K.setBigUint64(Number(C), H, !0), 0;
-    }), this.poll_oneoff = BA(this, "poll_oneoff", function(M, C, U, a) {
-      if (M = Number(M), C = Number(C), a = Number(a), U = Number(U), U = U >>> 0, M === 0 || C === 0 || U === 0 || a === 0)
+    }), this.fd_tell = BA(this, "fd_tell", function(h, E) {
+      const a = r.get(this).fds.get(h, q.FD_TELL, BigInt(0)), H = BigInt(a.pos), { view: K } = m(this, Number(E) + 8);
+      return K.setBigUint64(Number(E), H, !0), 0;
+    }), this.poll_oneoff = BA(this, "poll_oneoff", function(h, E, U, a) {
+      if (h = Number(h), E = Number(E), a = Number(a), U = Number(U), U = U >>> 0, h === 0 || E === 0 || U === 0 || a === 0)
         return 28;
-      const { view: H } = m(this, Math.max(M + U * 48, C + U * 32, a + 4));
+      const { view: H } = m(this, Math.max(h + U * 48, E + U * 32, a + 4));
       H.setUint32(a, 0, !0);
       let K = 0, y = BigInt(0), s = BigInt(0), f = 0, e = BigInt(0), d;
       const T = Array(U);
       for (K = 0; K < U; K++) {
-        d = M + K * 48;
+        d = h + K * 48;
         const W = H.getBigUint64(d, !0), n = H.getUint8(d + 8), l = H.getUint32(d + 16, !0), v = H.getBigUint64(d + 24, !0), z = H.getBigUint64(d + 32, !0), _ = H.getUint16(d + 40, !0);
         T[K] = {
           userdata: W,
@@ -9210,44 +9210,44 @@ class bA {
         }
       if (V.length > 0) {
         for (K = 0; K < V.length; K++) {
-          const W = V[K], n = C + 32 * K;
+          const W = V[K], n = E + 32 * K;
           H.setBigUint64(n, W.userdata, !0), H.setUint32(n + 8, 52, !0), H.setUint32(n + 12, W.type, !0), H.setBigUint64(n + 16, BigInt(0), !0), H.setUint16(n + 24, 0, !0), H.setUint32(a, 1, !0);
         }
         return H.setUint32(a, V.length, !0), 0;
       }
       if (f) {
         Number(e / BigInt(1e6));
-        const W = C;
+        const W = E;
         H.setBigUint64(W, y, !0), H.setUint32(W + 8, 0, !0), H.setUint32(W + 12, 0, !0), H.setUint32(a, 1, !0);
       }
       return 0;
-    }), this.proc_exit = BA(this, "proc_exit", function(M) {
-      return typeof process == "object" && process !== null && typeof process.exit == "function" && process.exit(M), 0;
-    }), this.proc_raise = BA(this, "proc_raise", function(M) {
+    }), this.proc_exit = BA(this, "proc_exit", function(h) {
+      return typeof process == "object" && process !== null && typeof process.exit == "function" && process.exit(h), 0;
+    }), this.proc_raise = BA(this, "proc_raise", function(h) {
       return 52;
     }), this.sched_yield = BA(this, "sched_yield", function() {
       return 0;
-    }), this.random_get = typeof crypto < "u" && typeof crypto.getRandomValues == "function" ? BA(this, "random_get", function(M, C) {
-      if (M = Number(M), M === 0)
+    }), this.random_get = typeof crypto < "u" && typeof crypto.getRandomValues == "function" ? BA(this, "random_get", function(h, E) {
+      if (h = Number(h), h === 0)
         return 28;
-      C = Number(C);
-      const { HEAPU8: U, view: a } = m(this, M + C);
+      E = Number(E);
+      const { HEAPU8: U, view: a } = m(this, h + E);
       if (typeof SharedArrayBuffer == "function" && U.buffer instanceof SharedArrayBuffer || Object.prototype.toString.call(U.buffer) === "[object SharedArrayBuffer]") {
-        for (let y = M; y < M + C; ++y)
+        for (let y = h; y < h + E; ++y)
           a.setUint8(y, Math.floor(Math.random() * 256));
         return 0;
       }
       let H;
       const K = 65536;
-      for (H = 0; H + K < C; H += K)
-        crypto.getRandomValues(U.subarray(M + H, M + H + K));
-      return crypto.getRandomValues(U.subarray(M + H, M + C)), 0;
-    }) : BA(this, "random_get", function(M, C) {
-      if (M = Number(M), M === 0)
+      for (H = 0; H + K < E; H += K)
+        crypto.getRandomValues(U.subarray(h + H, h + H + K));
+      return crypto.getRandomValues(U.subarray(h + H, h + E)), 0;
+    }) : BA(this, "random_get", function(h, E) {
+      if (h = Number(h), h === 0)
         return 28;
-      C = Number(C);
-      const { view: U } = m(this, M + C);
-      for (let a = M; a < M + C; ++a)
+      E = Number(E);
+      const { view: U } = m(this, h + E);
+      for (let a = h; a < h + E; ++a)
         U.setUint8(a, Math.floor(Math.random() * 256));
       return 0;
     }), this.sock_recv = BA(this, "sock_recv", function() {
@@ -9264,60 +9264,60 @@ class bA {
       env: i
     }), R && Ig.set(this, R);
     const c = this;
-    function p(M, C, U, a, H) {
-      k ? N ? c[M] = N.wrapImportFunction(BA(c, M, U)) : c[M] = Tw(BA(c, M, U), a, H) : c[M] = BA(c, M, C);
+    function p(h, E, U, a, H) {
+      k ? N ? c[h] = N.wrapImportFunction(BA(c, h, U)) : c[h] = Tw(BA(c, h, U), a, H) : c[h] = BA(c, h, E);
     }
-    p("fd_allocate", function(C, U, a) {
-      const H = r.get(this), K = QA(this), y = H.fds.get(C, q.FD_ALLOCATE, BigInt(0));
+    p("fd_allocate", function(E, U, a) {
+      const H = r.get(this), K = QA(this), y = H.fds.get(E, q.FD_ALLOCATE, BigInt(0));
       return K.fstatSync(y.fd, { bigint: !0 }).size < U + a && K.ftruncateSync(y.fd, Number(U + a)), 0;
-    }, async function(C, U, a) {
-      const y = r.get(this).fds.get(C, q.FD_ALLOCATE, BigInt(0)).fd;
+    }, async function(E, U, a) {
+      const y = r.get(this).fds.get(E, q.FD_ALLOCATE, BigInt(0)).fd;
       return (await y.stat({ bigint: !0 })).size < U + a && await y.truncate(Number(U + a)), 0;
-    }, ["i32", "i64", "f64"], ["i32"]), p("fd_close", function(C) {
-      const U = r.get(this), a = U.fds.get(C, BigInt(0), BigInt(0));
-      return QA(this).closeSync(a.fd), U.fds.remove(C), 0;
-    }, async function(C) {
+    }, ["i32", "i64", "f64"], ["i32"]), p("fd_close", function(E) {
+      const U = r.get(this), a = U.fds.get(E, BigInt(0), BigInt(0));
+      return QA(this).closeSync(a.fd), U.fds.remove(E), 0;
+    }, async function(E) {
       const U = r.get(this);
-      return await U.fds.get(C, BigInt(0), BigInt(0)).fd.close(), U.fds.remove(C), 0;
-    }, ["i32"], ["i32"]), p("fd_datasync", function(C) {
-      const a = r.get(this).fds.get(C, q.FD_DATASYNC, BigInt(0));
+      return await U.fds.get(E, BigInt(0), BigInt(0)).fd.close(), U.fds.remove(E), 0;
+    }, ["i32"], ["i32"]), p("fd_datasync", function(E) {
+      const a = r.get(this).fds.get(E, q.FD_DATASYNC, BigInt(0));
       return QA(this).fdatasyncSync(a.fd), 0;
-    }, async function(C) {
-      return await r.get(this).fds.get(C, q.FD_DATASYNC, BigInt(0)).fd.datasync(), 0;
-    }, ["i32"], ["i32"]), p("fd_filestat_get", function(C, U) {
+    }, async function(E) {
+      return await r.get(this).fds.get(E, q.FD_DATASYNC, BigInt(0)).fd.datasync(), 0;
+    }, ["i32"], ["i32"]), p("fd_filestat_get", function(E, U) {
       if (U = Number(U), U === 0)
         return 28;
-      const H = r.get(this).fds.get(C, q.FD_FILESTAT_GET, BigInt(0)), y = QA(this).fstatSync(H.fd, { bigint: !0 }), { view: s } = m(this, U + 64);
+      const H = r.get(this).fds.get(E, q.FD_FILESTAT_GET, BigInt(0)), y = QA(this).fstatSync(H.fd, { bigint: !0 }), { view: s } = m(this, U + 64);
       return EQ(s, U, y), 0;
-    }, async function(C, U) {
+    }, async function(E, U) {
       if (U = Number(U), U === 0)
         return 28;
-      const y = await r.get(this).fds.get(C, q.FD_FILESTAT_GET, BigInt(0)).fd.stat({ bigint: !0 }), { view: s } = m(this, U + 64);
+      const y = await r.get(this).fds.get(E, q.FD_FILESTAT_GET, BigInt(0)).fd.stat({ bigint: !0 }), { view: s } = m(this, U + 64);
       return EQ(s, U, y), 0;
-    }, ["i32", "i32"], ["i32"]), p("fd_filestat_set_size", function(C, U) {
-      const H = r.get(this).fds.get(C, q.FD_FILESTAT_SET_SIZE, BigInt(0));
+    }, ["i32", "i32"], ["i32"]), p("fd_filestat_set_size", function(E, U) {
+      const H = r.get(this).fds.get(E, q.FD_FILESTAT_SET_SIZE, BigInt(0));
       return QA(this).ftruncateSync(H.fd, Number(U)), 0;
-    }, async function(C, U) {
-      return await r.get(this).fds.get(C, q.FD_FILESTAT_SET_SIZE, BigInt(0)).fd.truncate(Number(U)), 0;
+    }, async function(E, U) {
+      return await r.get(this).fds.get(E, q.FD_FILESTAT_SET_SIZE, BigInt(0)).fd.truncate(Number(U)), 0;
     }, ["i32", "i64"], ["i32"]);
-    function t(M, C, U, a) {
-      const K = r.get(this).fds.get(M, q.FD_FILESTAT_SET_TIMES, BigInt(0));
-      return (a & 2) === 2 && (C = BigInt(Date.now() * 1e6)), (a & 8) === 8 && (U = BigInt(Date.now() * 1e6)), { fileDescriptor: K, atim: C, mtim: U };
+    function t(h, E, U, a) {
+      const K = r.get(this).fds.get(h, q.FD_FILESTAT_SET_TIMES, BigInt(0));
+      return (a & 2) === 2 && (E = BigInt(Date.now() * 1e6)), (a & 8) === 8 && (U = BigInt(Date.now() * 1e6)), { fileDescriptor: K, atim: E, mtim: U };
     }
-    p("fd_filestat_set_times", function(C, U, a, H) {
+    p("fd_filestat_set_times", function(E, U, a, H) {
       if (wQ(H))
         return 28;
-      const { fileDescriptor: K, atim: y, mtim: s } = t.call(this, C, U, a, H);
+      const { fileDescriptor: K, atim: y, mtim: s } = t.call(this, E, U, a, H);
       return QA(this).futimesSync(K.fd, Number(y), Number(s)), 0;
-    }, async function(C, U, a, H) {
+    }, async function(E, U, a, H) {
       if (wQ(H))
         return 28;
-      const { fileDescriptor: K, atim: y, mtim: s } = t.call(this, C, U, a, H);
+      const { fileDescriptor: K, atim: y, mtim: s } = t.call(this, E, U, a, H);
       return await K.fd.utimes(Number(y), Number(s)), 0;
-    }, ["i32", "i64", "i64", "i32"], ["i32"]), p("fd_pread", function(C, U, a, H, K) {
+    }, ["i32", "i64", "i64", "i32"], ["i32"]), p("fd_pread", function(E, U, a, H, K) {
       if (U = Number(U), K = Number(K), U === 0 && a || K === 0 || H > DQ)
         return 28;
-      const { HEAPU8: y, view: s } = m(this, Math.max(U + Number(a) * 8, K + 4)), e = r.get(this).fds.get(C, q.FD_READ | q.FD_SEEK, BigInt(0));
+      const { HEAPU8: y, view: s } = m(this, Math.max(U + Number(a) * 8, K + 4)), e = r.get(this).fds.get(E, q.FD_READ | q.FD_SEEK, BigInt(0));
       if (!a)
         return s.setUint32(K, 0, !0), 0;
       let d = 0;
@@ -9336,15 +9336,15 @@ class bA {
       W._isBuffer = !0;
       const l = QA(this).readSync(e.fd, W, 0, W.length, Number(H));
       return V = W ? xA(T, W.subarray(0, l)) : 0, s.setUint32(K, V, !0), 0;
-    }, async function(M, C, U, a, H) {
-      if (C = Number(C), H = Number(H), C === 0 && U || H === 0 || a > DQ)
+    }, async function(h, E, U, a, H) {
+      if (E = Number(E), H = Number(H), E === 0 && U || H === 0 || a > DQ)
         return 28;
-      const { HEAPU8: K, view: y } = m(this, Math.max(C + Number(U) * 8, H + 4)), f = r.get(this).fds.get(M, q.FD_READ | q.FD_SEEK, BigInt(0));
+      const { HEAPU8: K, view: y } = m(this, Math.max(E + Number(U) * 8, H + 4)), f = r.get(this).fds.get(h, q.FD_READ | q.FD_SEEK, BigInt(0));
       if (!U)
         return y.setUint32(H, 0, !0), 0;
       let e = 0;
       const d = Array.from({ length: Number(U) }, (n, l) => {
-        const v = C + l * 8, z = y.getInt32(v, !0), _ = y.getUint32(v + 4, !0);
+        const v = E + l * 8, z = y.getInt32(v, !0), _ = y.getUint32(v + 4, !0);
         return e += _, K.subarray(z, z + _);
       });
       let T = 0;
@@ -9352,10 +9352,10 @@ class bA {
       V._isBuffer = !0;
       const { bytesRead: W } = await f.fd.read(V, 0, V.length, Number(a));
       return T = V ? xA(d, V.subarray(0, W)) : 0, y.setUint32(H, T, !0), 0;
-    }, ["i32", "i32", "i32", "i64", "i32"], ["i32"]), p("fd_pwrite", function(C, U, a, H, K) {
+    }, ["i32", "i32", "i32", "i64", "i32"], ["i32"]), p("fd_pwrite", function(E, U, a, H, K) {
       if (U = Number(U), K = Number(K), U === 0 && a || K === 0 || H > DQ)
         return 28;
-      const { HEAPU8: y, view: s } = m(this, Math.max(U + Number(a) * 8, K + 4)), e = r.get(this).fds.get(C, q.FD_WRITE | q.FD_SEEK, BigInt(0));
+      const { HEAPU8: y, view: s } = m(this, Math.max(U + Number(a) * 8, K + 4)), e = r.get(this).fds.get(E, q.FD_WRITE | q.FD_SEEK, BigInt(0));
       if (!a)
         return s.setUint32(K, 0, !0), 0;
       const d = uA(Array.from({ length: Number(a) }, (W, n) => {
@@ -9363,10 +9363,10 @@ class bA {
         return y.subarray(v, v + z);
       })), V = QA(this).writeSync(e.fd, d, 0, d.length, Number(H));
       return s.setUint32(K, V, !0), 0;
-    }, async function(C, U, a, H, K) {
+    }, async function(E, U, a, H, K) {
       if (U = Number(U), K = Number(K), U === 0 && a || K === 0 || H > DQ)
         return 28;
-      const { HEAPU8: y, view: s } = m(this, Math.max(U + Number(a) * 8, K + 4)), e = r.get(this).fds.get(C, q.FD_WRITE | q.FD_SEEK, BigInt(0));
+      const { HEAPU8: y, view: s } = m(this, Math.max(U + Number(a) * 8, K + 4)), e = r.get(this).fds.get(E, q.FD_WRITE | q.FD_SEEK, BigInt(0));
       if (!a)
         return s.setUint32(K, 0, !0), 0;
       const d = uA(Array.from({ length: Number(a) }, (V, W) => {
@@ -9374,10 +9374,10 @@ class bA {
         return y.subarray(l, l + v);
       })), { bytesWritten: T } = await e.fd.write(d, 0, d.length, Number(H));
       return s.setUint32(K, T, !0), 0;
-    }, ["i32", "i32", "i32", "i64", "i32"], ["i32"]), p("fd_read", function(C, U, a, H) {
+    }, ["i32", "i32", "i32", "i64", "i32"], ["i32"]), p("fd_read", function(E, U, a, H) {
       if (U = Number(U), H = Number(H), U === 0 && a || H === 0)
         return 28;
-      const { HEAPU8: K, view: y } = m(this, Math.max(U + Number(a) * 8, H + 4)), f = r.get(this).fds.get(C, q.FD_READ, BigInt(0));
+      const { HEAPU8: K, view: y } = m(this, Math.max(U + Number(a) * 8, H + 4)), f = r.get(this).fds.get(E, q.FD_READ, BigInt(0));
       if (!a)
         return y.setUint32(H, 0, !0), 0;
       let e = 0;
@@ -9386,7 +9386,7 @@ class bA {
         return e += z, K.subarray(v, v + z);
       });
       let T, V = 0;
-      if (C === 0) {
+      if (E === 0) {
         if (typeof window > "u" || typeof window.prompt != "function")
           return 58;
         T = cI(), V = T ? xA(d, T) : 0;
@@ -9402,10 +9402,10 @@ class bA {
         V = T ? xA(d, T.subarray(0, n)) : 0, f.pos += BigInt(V);
       }
       return y.setUint32(H, V, !0), 0;
-    }, async function(C, U, a, H) {
+    }, async function(E, U, a, H) {
       if (U = Number(U), H = Number(H), U === 0 && a || H === 0)
         return 28;
-      const { HEAPU8: K, view: y } = m(this, Math.max(U + Number(a) * 8, H + 4)), f = r.get(this).fds.get(C, q.FD_READ, BigInt(0));
+      const { HEAPU8: K, view: y } = m(this, Math.max(U + Number(a) * 8, H + 4)), f = r.get(this).fds.get(E, q.FD_READ, BigInt(0));
       if (!a)
         return y.setUint32(H, 0, !0), 0;
       let e = 0;
@@ -9414,7 +9414,7 @@ class bA {
         return e += z, K.subarray(v, v + z);
       });
       let T, V = 0;
-      if (C === 0) {
+      if (E === 0) {
         if (typeof window > "u" || typeof window.prompt != "function")
           return 58;
         T = cI(), V = T ? xA(d, T) : 0;
@@ -9424,13 +9424,13 @@ class bA {
         V = T ? xA(d, T.subarray(0, W)) : 0, f.pos += BigInt(V);
       }
       return y.setUint32(H, V, !0), 0;
-    }, ["i32", "i32", "i32", "i32"], ["i32"]), p("fd_readdir", function(C, U, a, H, K) {
+    }, ["i32", "i32", "i32", "i32"], ["i32"]), p("fd_readdir", function(E, U, a, H, K) {
       if (U = Number(U), a = Number(a), K = Number(K), U === 0 || K === 0)
         return 0;
-      const s = r.get(this).fds.get(C, q.FD_READDIR, BigInt(0)), f = QA(this), e = f.readdirSync(s.realPath, { withFileTypes: !0 }), { HEAPU8: d, view: T } = m(this, Math.max(U + a, K + 4));
+      const s = r.get(this).fds.get(E, q.FD_READDIR, BigInt(0)), f = QA(this), e = f.readdirSync(s.realPath, { withFileTypes: !0 }), { HEAPU8: d, view: T } = m(this, Math.max(U + a, K + 4));
       let V = 0;
       for (let W = Number(H); W < e.length; W++) {
-        const n = hA.encode(e[W].name), l = f.statSync(wA(s.realPath, e[W].name), { bigint: !0 }), v = new Uint8Array(24 + n.byteLength), z = new DataView(v.buffer);
+        const n = MA.encode(e[W].name), l = f.statSync(wA(s.realPath, e[W].name), { bigint: !0 }), v = new Uint8Array(24 + n.byteLength), z = new DataView(v.buffer);
         z.setBigUint64(0, BigInt(W + 1), !0), z.setBigUint64(8, BigInt(l.ino ? l.ino : 0), !0), z.setUint32(16, n.byteLength, !0);
         let _;
         e[W].isFile() ? _ = 4 : e[W].isDirectory() ? _ = 3 : e[W].isSymbolicLink() ? _ = 7 : e[W].isCharacterDevice() ? _ = 2 : e[W].isBlockDevice() ? _ = 1 : e[W].isSocket() ? _ = 6 : _ = 0, z.setUint8(20, _), v.set(n, 24);
@@ -9438,13 +9438,13 @@ class bA {
         d.set(FA, U + V), V += FA.byteLength;
       }
       return T.setUint32(K, V, !0), 0;
-    }, async function(C, U, a, H, K) {
+    }, async function(E, U, a, H, K) {
       if (U = Number(U), a = Number(a), K = Number(K), U === 0 || K === 0)
         return 0;
-      const s = r.get(this).fds.get(C, q.FD_READDIR, BigInt(0)), f = QA(this), e = await f.promises.readdir(s.realPath, { withFileTypes: !0 }), { HEAPU8: d, view: T } = m(this, Math.max(U + a, K + 4));
+      const s = r.get(this).fds.get(E, q.FD_READDIR, BigInt(0)), f = QA(this), e = await f.promises.readdir(s.realPath, { withFileTypes: !0 }), { HEAPU8: d, view: T } = m(this, Math.max(U + a, K + 4));
       let V = 0;
       for (let W = Number(H); W < e.length; W++) {
-        const n = hA.encode(e[W].name), l = await f.promises.stat(wA(s.realPath, e[W].name), { bigint: !0 }), v = new Uint8Array(24 + n.byteLength), z = new DataView(v.buffer);
+        const n = MA.encode(e[W].name), l = await f.promises.stat(wA(s.realPath, e[W].name), { bigint: !0 }), v = new Uint8Array(24 + n.byteLength), z = new DataView(v.buffer);
         z.setBigUint64(0, BigInt(W + 1), !0), z.setBigUint64(8, BigInt(l.ino ? l.ino : 0), !0), z.setUint32(16, n.byteLength, !0);
         let _;
         e[W].isFile() ? _ = 4 : e[W].isDirectory() ? _ = 3 : e[W].isSymbolicLink() ? _ = 7 : e[W].isCharacterDevice() ? _ = 2 : e[W].isBlockDevice() ? _ = 1 : e[W].isSocket() ? _ = 6 : _ = 0, z.setUint8(20, _), v.set(n, 24);
@@ -9452,19 +9452,19 @@ class bA {
         d.set(FA, U + V), V += FA.byteLength;
       }
       return T.setUint32(K, V, !0), 0;
-    }, ["i32", "i32", "i32", "i64", "i32"], ["i32"]), p("fd_renumber", function(C, U) {
-      return r.get(this).fds.renumber(U, C), 0;
-    }, async function(C, U) {
-      return await r.get(this).fds.renumber(U, C), 0;
-    }, ["i32", "i32"], ["i32"]), p("fd_sync", function(C) {
-      const a = r.get(this).fds.get(C, q.FD_SYNC, BigInt(0));
+    }, ["i32", "i32", "i32", "i64", "i32"], ["i32"]), p("fd_renumber", function(E, U) {
+      return r.get(this).fds.renumber(U, E), 0;
+    }, async function(E, U) {
+      return await r.get(this).fds.renumber(U, E), 0;
+    }, ["i32", "i32"], ["i32"]), p("fd_sync", function(E) {
+      const a = r.get(this).fds.get(E, q.FD_SYNC, BigInt(0));
       return QA(this).fsyncSync(a.fd), 0;
-    }, async function(C) {
-      return await r.get(this).fds.get(C, q.FD_SYNC, BigInt(0)).fd.sync(), 0;
-    }, ["i32"], ["i32"]), p("fd_write", function(C, U, a, H) {
+    }, async function(E) {
+      return await r.get(this).fds.get(E, q.FD_SYNC, BigInt(0)).fd.sync(), 0;
+    }, ["i32"], ["i32"]), p("fd_write", function(E, U, a, H) {
       if (U = Number(U), H = Number(H), U === 0 && a || H === 0)
         return 28;
-      const { HEAPU8: K, view: y } = m(this, Math.max(U + Number(a) * 8, H + 4)), f = r.get(this).fds.get(C, q.FD_WRITE, BigInt(0));
+      const { HEAPU8: K, view: y } = m(this, Math.max(U + Number(a) * 8, H + 4)), f = r.get(this).fds.get(E, q.FD_WRITE, BigInt(0));
       if (!a)
         return y.setUint32(H, 0, !0), 0;
       const e = uA(Array.from({ length: Number(a) }, (T, V) => {
@@ -9472,11 +9472,11 @@ class bA {
         return K.subarray(n, n + l);
       }));
       let d;
-      return C === 1 || C === 2 ? d = f.write(e) : (d = QA(this).writeSync(f.fd, e, 0, e.length, Number(f.pos)), f.pos += BigInt(d)), y.setUint32(H, d, !0), 0;
-    }, async function(C, U, a, H) {
+      return E === 1 || E === 2 ? d = f.write(e) : (d = QA(this).writeSync(f.fd, e, 0, e.length, Number(f.pos)), f.pos += BigInt(d)), y.setUint32(H, d, !0), 0;
+    }, async function(E, U, a, H) {
       if (U = Number(U), H = Number(H), U === 0 && a || H === 0)
         return 28;
-      const { HEAPU8: K, view: y } = m(this, Math.max(U + Number(a) * 8, H + 4)), f = r.get(this).fds.get(C, q.FD_WRITE, BigInt(0));
+      const { HEAPU8: K, view: y } = m(this, Math.max(U + Number(a) * 8, H + 4)), f = r.get(this).fds.get(E, q.FD_WRITE, BigInt(0));
       if (!a)
         return y.setUint32(H, 0, !0), 0;
       const e = uA(Array.from({ length: Number(a) }, (T, V) => {
@@ -9484,167 +9484,167 @@ class bA {
         return K.subarray(n, n + l);
       }));
       let d;
-      return C === 1 || C === 2 ? d = f.write(e) : (d = await (await f.fd.write(e, 0, e.length, Number(f.pos))).bytesWritten, f.pos += BigInt(d)), y.setUint32(H, d, !0), 0;
-    }, ["i32", "i32", "i32", "i32"], ["i32"]), p("path_create_directory", function(C, U, a) {
+      return E === 1 || E === 2 ? d = f.write(e) : (d = await (await f.fd.write(e, 0, e.length, Number(f.pos))).bytesWritten, f.pos += BigInt(d)), y.setUint32(H, d, !0), 0;
+    }, ["i32", "i32", "i32", "i32"], ["i32"]), p("path_create_directory", function(E, U, a) {
       if (U = Number(U), a = Number(a), U === 0)
         return 28;
-      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(C, q.PATH_CREATE_DIRECTORY, BigInt(0));
+      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(E, q.PATH_CREATE_DIRECTORY, BigInt(0));
       let s = EA.decode(CA(H, U, U + a));
       return s = wA(y.realPath, s), QA(this).mkdirSync(s), 0;
-    }, async function(C, U, a) {
+    }, async function(E, U, a) {
       if (U = Number(U), a = Number(a), U === 0)
         return 28;
-      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(C, q.PATH_CREATE_DIRECTORY, BigInt(0));
+      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(E, q.PATH_CREATE_DIRECTORY, BigInt(0));
       let s = EA.decode(CA(H, U, U + a));
       return s = wA(y.realPath, s), await QA(this).promises.mkdir(s), 0;
-    }, ["i32", "i32", "i32"], ["i32"]), p("path_filestat_get", function(C, U, a, H, K) {
+    }, ["i32", "i32", "i32"], ["i32"]), p("path_filestat_get", function(E, U, a, H, K) {
       if (a = Number(a), H = Number(H), K = Number(K), a === 0 || K === 0)
         return 28;
-      const { HEAPU8: y, view: s } = m(this, Math.max(a + H, K + 64)), e = r.get(this).fds.get(C, q.PATH_FILESTAT_GET, BigInt(0));
+      const { HEAPU8: y, view: s } = m(this, Math.max(a + H, K + 64)), e = r.get(this).fds.get(E, q.PATH_FILESTAT_GET, BigInt(0));
       let d = EA.decode(CA(y, a, a + H));
       const T = QA(this);
       d = wA(e.realPath, d);
       let V;
       return (U & 1) === 1 ? V = T.statSync(d, { bigint: !0 }) : V = T.lstatSync(d, { bigint: !0 }), EQ(s, K, V), 0;
-    }, async function(C, U, a, H, K) {
+    }, async function(E, U, a, H, K) {
       if (a = Number(a), H = Number(H), K = Number(K), a === 0 || K === 0)
         return 28;
-      const { HEAPU8: y, view: s } = m(this, Math.max(a + H, K + 64)), e = r.get(this).fds.get(C, q.PATH_FILESTAT_GET, BigInt(0));
+      const { HEAPU8: y, view: s } = m(this, Math.max(a + H, K + 64)), e = r.get(this).fds.get(E, q.PATH_FILESTAT_GET, BigInt(0));
       let d = EA.decode(CA(y, a, a + H));
       const T = QA(this);
       d = wA(e.realPath, d);
       let V;
       return (U & 1) === 1 ? V = await T.promises.stat(d, { bigint: !0 }) : V = await T.promises.lstat(d, { bigint: !0 }), EQ(s, K, V), 0;
-    }, ["i32", "i32", "i32", "i32", "i32"], ["i32"]), p("path_filestat_set_times", function(C, U, a, H, K, y, s) {
+    }, ["i32", "i32", "i32", "i32", "i32"], ["i32"]), p("path_filestat_set_times", function(E, U, a, H, K, y, s) {
       if (a = Number(a), H = Number(H), a === 0)
         return 28;
-      const { HEAPU8: f } = m(this, a + H), d = r.get(this).fds.get(C, q.PATH_FILESTAT_SET_TIMES, BigInt(0));
+      const { HEAPU8: f } = m(this, a + H), d = r.get(this).fds.get(E, q.PATH_FILESTAT_SET_TIMES, BigInt(0));
       if (wQ(s))
         return 28;
       const T = QA(this), V = XQ(T, d, EA.decode(CA(f, a, a + H)), U);
       return (s & 2) === 2 && (K = BigInt(Date.now() * 1e6)), (s & 8) === 8 && (y = BigInt(Date.now() * 1e6)), T.utimesSync(V, Number(K), Number(y)), 0;
-    }, async function(C, U, a, H, K, y, s) {
+    }, async function(E, U, a, H, K, y, s) {
       if (a = Number(a), H = Number(H), a === 0)
         return 28;
-      const { HEAPU8: f } = m(this, a + H), d = r.get(this).fds.get(C, q.PATH_FILESTAT_SET_TIMES, BigInt(0));
+      const { HEAPU8: f } = m(this, a + H), d = r.get(this).fds.get(E, q.PATH_FILESTAT_SET_TIMES, BigInt(0));
       if (wQ(s))
         return 28;
       const T = QA(this), V = await ZQ(T, d, EA.decode(CA(f, a, a + H)), U);
       return (s & 2) === 2 && (K = BigInt(Date.now() * 1e6)), (s & 8) === 8 && (y = BigInt(Date.now() * 1e6)), await T.promises.utimes(V, Number(K), Number(y)), 0;
-    }, ["i32", "i32", "i32", "i32", "i64", "i64", "i32"], ["i32"]), p("path_link", function(C, U, a, H, K, y, s) {
+    }, ["i32", "i32", "i32", "i32", "i64", "i64", "i32"], ["i32"]), p("path_link", function(E, U, a, H, K, y, s) {
       if (a = Number(a), H = Number(H), y = Number(y), s = Number(s), a === 0 || y === 0)
         return 28;
       const f = r.get(this);
       let e, d;
-      C === K ? e = d = f.fds.get(C, q.PATH_LINK_SOURCE | q.PATH_LINK_TARGET, BigInt(0)) : (e = f.fds.get(C, q.PATH_LINK_SOURCE, BigInt(0)), d = f.fds.get(K, q.PATH_LINK_TARGET, BigInt(0)));
+      E === K ? e = d = f.fds.get(E, q.PATH_LINK_SOURCE | q.PATH_LINK_TARGET, BigInt(0)) : (e = f.fds.get(E, q.PATH_LINK_SOURCE, BigInt(0)), d = f.fds.get(K, q.PATH_LINK_TARGET, BigInt(0)));
       const { HEAPU8: T } = m(this, Math.max(a + H, y + s)), V = QA(this), W = XQ(V, e, EA.decode(CA(T, a, a + H)), U), n = wA(d.realPath, EA.decode(CA(T, y, y + s)));
       return V.linkSync(W, n), 0;
-    }, async function(C, U, a, H, K, y, s) {
+    }, async function(E, U, a, H, K, y, s) {
       if (a = Number(a), H = Number(H), y = Number(y), s = Number(s), a === 0 || y === 0)
         return 28;
       const f = r.get(this);
       let e, d;
-      C === K ? e = d = f.fds.get(C, q.PATH_LINK_SOURCE | q.PATH_LINK_TARGET, BigInt(0)) : (e = f.fds.get(C, q.PATH_LINK_SOURCE, BigInt(0)), d = f.fds.get(K, q.PATH_LINK_TARGET, BigInt(0)));
+      E === K ? e = d = f.fds.get(E, q.PATH_LINK_SOURCE | q.PATH_LINK_TARGET, BigInt(0)) : (e = f.fds.get(E, q.PATH_LINK_SOURCE, BigInt(0)), d = f.fds.get(K, q.PATH_LINK_TARGET, BigInt(0)));
       const { HEAPU8: T } = m(this, Math.max(a + H, y + s)), V = QA(this), W = await ZQ(V, e, EA.decode(CA(T, a, a + H)), U), n = wA(d.realPath, EA.decode(CA(T, y, y + s)));
       return await V.promises.link(W, n), 0;
     }, ["i32", "i32", "i32", "i32", "i32", "i32", "i32"], ["i32"]);
-    function X(M, C, U, a) {
-      const H = (C & (q.FD_READ | q.FD_READDIR)) !== BigInt(0), K = (C & (q.FD_DATASYNC | q.FD_WRITE | q.FD_ALLOCATE | q.FD_FILESTAT_SET_SIZE)) !== BigInt(0);
-      let y = K ? H ? 2 : 1 : 0, s = q.PATH_OPEN, f = C | U;
-      return (M & 1) !== 0 && (y |= 64, s |= q.PATH_CREATE_FILE), (M & 2) !== 0 && (y |= 65536), (M & 4) !== 0 && (y |= 128), (M & 8) !== 0 && (y |= 512, s |= q.PATH_FILESTAT_SET_SIZE), (a & 1) !== 0 && (y |= 1024), (a & 2) !== 0 && (f |= q.FD_DATASYNC), (a & 4) !== 0 && (y |= 2048), (a & 8) !== 0 && (y |= 1052672, f |= q.FD_SYNC), (a & 16) !== 0 && (y |= 1052672, f |= q.FD_SYNC), K && (y & 1536) === 0 && (f |= q.FD_SEEK), { flags: y, needed_base: s, needed_inheriting: f };
+    function X(h, E, U, a) {
+      const H = (E & (q.FD_READ | q.FD_READDIR)) !== BigInt(0), K = (E & (q.FD_DATASYNC | q.FD_WRITE | q.FD_ALLOCATE | q.FD_FILESTAT_SET_SIZE)) !== BigInt(0);
+      let y = K ? H ? 2 : 1 : 0, s = q.PATH_OPEN, f = E | U;
+      return (h & 1) !== 0 && (y |= 64, s |= q.PATH_CREATE_FILE), (h & 2) !== 0 && (y |= 65536), (h & 4) !== 0 && (y |= 128), (h & 8) !== 0 && (y |= 512, s |= q.PATH_FILESTAT_SET_SIZE), (a & 1) !== 0 && (y |= 1024), (a & 2) !== 0 && (f |= q.FD_DATASYNC), (a & 4) !== 0 && (y |= 2048), (a & 8) !== 0 && (y |= 1052672, f |= q.FD_SYNC), (a & 16) !== 0 && (y |= 1052672, f |= q.FD_SYNC), K && (y & 1536) === 0 && (f |= q.FD_SEEK), { flags: y, needed_base: s, needed_inheriting: f };
     }
-    p("path_open", function(C, U, a, H, K, y, s, f, e) {
+    p("path_open", function(E, U, a, H, K, y, s, f, e) {
       if (a = Number(a), e = Number(e), a === 0 || e === 0)
         return 28;
       H = Number(H), y = BigInt(y), s = BigInt(s);
-      const { flags: d, needed_base: T, needed_inheriting: V } = X(K, y, s, f), W = r.get(this), n = W.fds.get(C, T, V), l = m(this, Math.max(a + H, e + 4)), v = l.HEAPU8, z = EA.decode(CA(v, a, a + H)), _ = QA(this), FA = XQ(_, n, z, U), NA = _.openSync(FA, aI ? RI(d) : d, 438), RA = W.fds.getFileTypeByFd(NA);
+      const { flags: d, needed_base: T, needed_inheriting: V } = X(K, y, s, f), W = r.get(this), n = W.fds.get(E, T, V), l = m(this, Math.max(a + H, e + 4)), v = l.HEAPU8, z = EA.decode(CA(v, a, a + H)), _ = QA(this), FA = XQ(_, n, z, U), NA = _.openSync(FA, aI ? RI(d) : d, 438), RA = W.fds.getFileTypeByFd(NA);
       if (RA !== 3 && ((K & 2) !== 0 || FA.endsWith("/")))
         return 54;
       const { base: OA, inheriting: rA } = _A(W.fds.stdio, NA, d, RA), HA = W.fds.insert(NA, FA, FA, RA, y & OA, s & rA, 0), KA = _.fstatSync(NA, { bigint: !0 });
       return KA.isFile() && (HA.size = KA.size, (d & 1024) !== 0 && (HA.pos = KA.size)), l.view.setInt32(e, HA.id, !0), 0;
-    }, async function(C, U, a, H, K, y, s, f, e) {
+    }, async function(E, U, a, H, K, y, s, f, e) {
       if (a = Number(a), e = Number(e), a === 0 || e === 0)
         return 28;
       H = Number(H), y = BigInt(y), s = BigInt(s);
-      const { flags: d, needed_base: T, needed_inheriting: V } = X(K, y, s, f), W = r.get(this), n = W.fds.get(C, T, V), l = m(this, Math.max(a + H, e + 4)), v = l.HEAPU8, z = EA.decode(CA(v, a, a + H)), _ = QA(this), FA = await ZQ(_, n, z, U), NA = await _.promises.open(FA, aI ? RI(d) : d, 438), RA = await W.fds.getFileTypeByFd(NA);
+      const { flags: d, needed_base: T, needed_inheriting: V } = X(K, y, s, f), W = r.get(this), n = W.fds.get(E, T, V), l = m(this, Math.max(a + H, e + 4)), v = l.HEAPU8, z = EA.decode(CA(v, a, a + H)), _ = QA(this), FA = await ZQ(_, n, z, U), NA = await _.promises.open(FA, aI ? RI(d) : d, 438), RA = await W.fds.getFileTypeByFd(NA);
       if ((K & 2) !== 0 && RA !== 3)
         return 54;
       const { base: OA, inheriting: rA } = _A(W.fds.stdio, NA.fd, d, RA), HA = W.fds.insert(NA, FA, FA, RA, y & OA, s & rA, 0), KA = await NA.stat({ bigint: !0 });
       return KA.isFile() && (HA.size = KA.size, (d & 1024) !== 0 && (HA.pos = KA.size)), l.view.setInt32(e, HA.id, !0), 0;
-    }, ["i32", "i32", "i32", "i32", "i32", "i64", "i64", "i32", "i32"], ["i32"]), p("path_readlink", function(C, U, a, H, K, y) {
+    }, ["i32", "i32", "i32", "i32", "i32", "i64", "i64", "i32", "i32"], ["i32"]), p("path_readlink", function(E, U, a, H, K, y) {
       if (U = Number(U), a = Number(a), H = Number(H), K = Number(K), y = Number(y), U === 0 || H === 0 || y === 0)
         return 28;
-      const { HEAPU8: s, view: f } = m(this, Math.max(U + a, H + K, y + 4)), d = r.get(this).fds.get(C, q.PATH_READLINK, BigInt(0));
+      const { HEAPU8: s, view: f } = m(this, Math.max(U + a, H + K, y + 4)), d = r.get(this).fds.get(E, q.PATH_READLINK, BigInt(0));
       let T = EA.decode(CA(s, U, U + a));
       T = wA(d.realPath, T);
-      const W = QA(this).readlinkSync(T), n = hA.encode(W), l = Math.min(n.length, K);
+      const W = QA(this).readlinkSync(T), n = MA.encode(W), l = Math.min(n.length, K);
       return l >= K ? 42 : (s.set(n.subarray(0, l), H), s[H + l] = 0, f.setUint32(y, l, !0), 0);
-    }, async function(C, U, a, H, K, y) {
+    }, async function(E, U, a, H, K, y) {
       if (U = Number(U), a = Number(a), H = Number(H), K = Number(K), y = Number(y), U === 0 || H === 0 || y === 0)
         return 28;
-      const { HEAPU8: s, view: f } = m(this, Math.max(U + a, H + K, y + 4)), d = r.get(this).fds.get(C, q.PATH_READLINK, BigInt(0));
+      const { HEAPU8: s, view: f } = m(this, Math.max(U + a, H + K, y + 4)), d = r.get(this).fds.get(E, q.PATH_READLINK, BigInt(0));
       let T = EA.decode(CA(s, U, U + a));
       T = wA(d.realPath, T);
-      const W = await QA(this).promises.readlink(T), n = hA.encode(W), l = Math.min(n.length, K);
+      const W = await QA(this).promises.readlink(T), n = MA.encode(W), l = Math.min(n.length, K);
       return l >= K ? 42 : (s.set(n.subarray(0, l), H), s[H + l] = 0, f.setUint32(y, l, !0), 0);
-    }, ["i32", "i32", "i32", "i32", "i32", "i32"], ["i32"]), p("path_remove_directory", function(C, U, a) {
+    }, ["i32", "i32", "i32", "i32", "i32", "i32"], ["i32"]), p("path_remove_directory", function(E, U, a) {
       if (U = Number(U), a = Number(a), U === 0)
         return 28;
-      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(C, q.PATH_REMOVE_DIRECTORY, BigInt(0));
+      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(E, q.PATH_REMOVE_DIRECTORY, BigInt(0));
       let s = EA.decode(CA(H, U, U + a));
       return s = wA(y.realPath, s), QA(this).rmdirSync(s), 0;
-    }, async function(C, U, a) {
+    }, async function(E, U, a) {
       if (U = Number(U), a = Number(a), U === 0)
         return 28;
-      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(C, q.PATH_REMOVE_DIRECTORY, BigInt(0));
+      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(E, q.PATH_REMOVE_DIRECTORY, BigInt(0));
       let s = EA.decode(CA(H, U, U + a));
       return s = wA(y.realPath, s), await QA(this).promises.rmdir(s), 0;
-    }, ["i32", "i32", "i32"], ["i32"]), p("path_rename", function(C, U, a, H, K, y) {
+    }, ["i32", "i32", "i32"], ["i32"]), p("path_rename", function(E, U, a, H, K, y) {
       if (U = Number(U), a = Number(a), K = Number(K), y = Number(y), U === 0 || K === 0)
         return 28;
       const s = r.get(this);
       let f, e;
-      C === H ? f = e = s.fds.get(C, q.PATH_RENAME_SOURCE | q.PATH_RENAME_TARGET, BigInt(0)) : (f = s.fds.get(C, q.PATH_RENAME_SOURCE, BigInt(0)), e = s.fds.get(H, q.PATH_RENAME_TARGET, BigInt(0)));
+      E === H ? f = e = s.fds.get(E, q.PATH_RENAME_SOURCE | q.PATH_RENAME_TARGET, BigInt(0)) : (f = s.fds.get(E, q.PATH_RENAME_SOURCE, BigInt(0)), e = s.fds.get(H, q.PATH_RENAME_TARGET, BigInt(0)));
       const { HEAPU8: d } = m(this, Math.max(U + a, K + y)), T = wA(f.realPath, EA.decode(CA(d, U, U + a))), V = wA(e.realPath, EA.decode(CA(d, K, K + y)));
       return QA(this).renameSync(T, V), 0;
-    }, async function(C, U, a, H, K, y) {
+    }, async function(E, U, a, H, K, y) {
       if (U = Number(U), a = Number(a), K = Number(K), y = Number(y), U === 0 || K === 0)
         return 28;
       const s = r.get(this);
       let f, e;
-      C === H ? f = e = s.fds.get(C, q.PATH_RENAME_SOURCE | q.PATH_RENAME_TARGET, BigInt(0)) : (f = s.fds.get(C, q.PATH_RENAME_SOURCE, BigInt(0)), e = s.fds.get(H, q.PATH_RENAME_TARGET, BigInt(0)));
+      E === H ? f = e = s.fds.get(E, q.PATH_RENAME_SOURCE | q.PATH_RENAME_TARGET, BigInt(0)) : (f = s.fds.get(E, q.PATH_RENAME_SOURCE, BigInt(0)), e = s.fds.get(H, q.PATH_RENAME_TARGET, BigInt(0)));
       const { HEAPU8: d } = m(this, Math.max(U + a, K + y)), T = wA(f.realPath, EA.decode(CA(d, U, U + a))), V = wA(e.realPath, EA.decode(CA(d, K, K + y)));
       return await QA(this).promises.rename(T, V), 0;
-    }, ["i32", "i32", "i32", "i32", "i32", "i32"], ["i32"]), p("path_symlink", function(C, U, a, H, K) {
-      if (C = Number(C), U = Number(U), H = Number(H), K = Number(K), C === 0 || H === 0)
+    }, ["i32", "i32", "i32", "i32", "i32", "i32"], ["i32"]), p("path_symlink", function(E, U, a, H, K) {
+      if (E = Number(E), U = Number(U), H = Number(H), K = Number(K), E === 0 || H === 0)
         return 28;
-      const { HEAPU8: y } = m(this, Math.max(C + U, H + K)), f = r.get(this).fds.get(a, q.PATH_SYMLINK, BigInt(0)), e = EA.decode(CA(y, C, C + U));
+      const { HEAPU8: y } = m(this, Math.max(E + U, H + K)), f = r.get(this).fds.get(a, q.PATH_SYMLINK, BigInt(0)), e = EA.decode(CA(y, E, E + U));
       if (e.length > 0 && e[0] === "/")
         return 63;
       let d = EA.decode(CA(y, H, H + K));
       return d = wA(f.realPath, d), QA(this).symlinkSync(e, d), 0;
-    }, async function(C, U, a, H, K) {
-      if (C = Number(C), U = Number(U), H = Number(H), K = Number(K), C === 0 || H === 0)
+    }, async function(E, U, a, H, K) {
+      if (E = Number(E), U = Number(U), H = Number(H), K = Number(K), E === 0 || H === 0)
         return 28;
-      const { HEAPU8: y } = m(this, Math.max(C + U, H + K)), f = r.get(this).fds.get(a, q.PATH_SYMLINK, BigInt(0)), e = EA.decode(CA(y, C, C + U));
+      const { HEAPU8: y } = m(this, Math.max(E + U, H + K)), f = r.get(this).fds.get(a, q.PATH_SYMLINK, BigInt(0)), e = EA.decode(CA(y, E, E + U));
       let d = EA.decode(CA(y, H, H + K));
       return d = wA(f.realPath, d), await QA(this).promises.symlink(e, d), 0;
-    }, ["i32", "i32", "i32", "i32", "i32"], ["i32"]), p("path_unlink_file", function(C, U, a) {
+    }, ["i32", "i32", "i32", "i32", "i32"], ["i32"]), p("path_unlink_file", function(E, U, a) {
       if (U = Number(U), a = Number(a), U === 0)
         return 28;
-      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(C, q.PATH_UNLINK_FILE, BigInt(0));
+      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(E, q.PATH_UNLINK_FILE, BigInt(0));
       let s = EA.decode(CA(H, U, U + a));
       return s = wA(y.realPath, s), QA(this).unlinkSync(s), 0;
-    }, async function(C, U, a) {
+    }, async function(E, U, a) {
       if (U = Number(U), a = Number(a), U === 0)
         return 28;
-      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(C, q.PATH_UNLINK_FILE, BigInt(0));
+      const { HEAPU8: H } = m(this, U + a), y = r.get(this).fds.get(E, q.PATH_UNLINK_FILE, BigInt(0));
       let s = EA.decode(CA(H, U, U + a));
       return s = wA(y.realPath, s), await QA(this).promises.unlink(s), 0;
-    }, ["i32", "i32", "i32"], ["i32"]), this._setMemory = function(C) {
-      if (!(C instanceof AQ.Memory))
+    }, ["i32", "i32", "i32"], ["i32"]), this._setMemory = function(E) {
+      if (!(E instanceof AQ.Memory))
         throw new TypeError('"instance.exports.memory" property must be a WebAssembly.Memory');
-      Qg.set(c, Zw(C));
+      Qg.set(c, Zw(E));
     };
   }
   static createSync(Q, i, o, k, R, N, c) {
@@ -9659,8 +9659,8 @@ class bA {
     }), t = new bA(Q, i, p, !1, R);
     if (o.length > 0)
       for (let X = 0; X < o.length; ++X) {
-        const M = R.realpathSync(o[X].realPath, "utf8"), C = R.openSync(M, "r", 438);
-        p.insertPreopen(C, o[X].mappedPath, M);
+        const h = R.realpathSync(o[X].realPath, "utf8"), E = R.openSync(h, "r", 438);
+        p.insertPreopen(E, o[X].mappedPath, h);
       }
     return t;
   }
@@ -9674,9 +9674,9 @@ class bA {
       printErr: c
     }), X = new bA(Q, i, t, !0, R, p);
     if (o.length > 0)
-      for (let M = 0; M < o.length; ++M) {
-        const C = o[M], U = await R.promises.realpath(C.realPath), a = await R.promises.open(U, "r", 438);
-        await t.insertPreopen(a, C.mappedPath, U);
+      for (let h = 0; h < o.length; ++h) {
+        const E = o[h], U = await R.promises.realpath(E.realPath), a = await R.promises.open(U, "r", 438);
+        await t.insertPreopen(a, E.mappedPath, U);
       }
     return X;
   }
@@ -9832,8 +9832,8 @@ function aQ(B, Q, i = 3e4) {
   }, c = () => B.removeEventListener("message", N), p = setTimeout(() => {
     R || (R = !0, c(), k(new Error(`[turso:worker] request id=${Q} timed out after ${i}ms`)));
   }, i);
-  return B.addEventListener("message", N), new Promise((X, M) => {
-    o = X, k = M;
+  return B.addEventListener("message", N), new Promise((X, h) => {
+    o = X, k = h;
   });
 }
 function mw(B, Q, i, o, k) {
@@ -9872,12 +9872,11 @@ class _w {
 }
 const Bg = new _w(), SI = /* @__PURE__ */ new WeakMap(), Cg = /* @__PURE__ */ new Set();
 let yI = 0, OQ = 0;
-function UA(B) {
+function aA(B) {
   let Q = SI.get(B);
   return Q === void 0 && (Q = {
     paths: /* @__PURE__ */ new Map(),
     handles: /* @__PURE__ */ new Map(),
-    sizes: /* @__PURE__ */ new Map(),
     pending: /* @__PURE__ */ new Map(),
     mutationTail: Promise.resolve(),
     poison: null
@@ -9897,27 +9896,27 @@ async function rQ(B, Q) {
   const i = await Eg(B, "register", { path: Q });
   if (!Number.isInteger(i?.handle) || i.handle < 0 || !Number.isSafeInteger(i?.size) || i.size < 0) {
     const R = new Error(`The Turso OPFS worker returned an invalid handle for ${Q}.`);
-    throw eA(UA(B), R), R;
+    throw eA(aA(B), R), R;
   }
-  const o = UA(B), k = o.handles.get(i.handle);
+  const o = aA(B), k = o.handles.get(i.handle);
   if (k !== void 0 && k !== Q) {
     const R = new Error(`The Turso OPFS worker reused a live handle for ${Q}.`);
     throw eA(o, R), R;
   }
-  o.paths.set(Q, i.handle), o.handles.set(i.handle, Q), o.sizes.set(i.handle, i.size);
+  o.paths.set(Q, i.handle), o.handles.set(i.handle, Q);
 }
 async function jQ(B, Q) {
   await Eg(B, "unregister", { path: Q });
-  const i = UA(B), o = i.paths.get(Q);
-  i.paths.delete(Q), o !== void 0 && (i.handles.delete(o), i.sizes.delete(o));
+  const i = aA(B), o = i.paths.get(Q);
+  i.paths.delete(Q), o !== void 0 && i.handles.delete(o);
 }
 function Eg(B, Q, i) {
-  const o = UA(B), k = o.mutationTail.then(() => vA(B, Q, i));
+  const o = aA(B), k = o.mutationTail.then(() => vA(B, Q, i));
   return o.mutationTail = k.catch(() => {
   }), k;
 }
 function vA(B, Q, i) {
-  const o = UA(B);
+  const o = aA(B);
   if (o.poison !== null) return Promise.reject(o.poison);
   yI += 1;
   const k = `turso-dart-${yI}`;
@@ -9959,10 +9958,10 @@ function Ni(B) {
   return B?.tursoWorkerPoisoned === !0;
 }
 function gi(B) {
-  return UA(B).poison;
+  return aA(B).poison;
 }
 function PA(B, Q, i) {
-  const o = UA(B);
+  const o = aA(B);
   if (o.poison !== null) return -1;
   const k = new Int32Array(new SharedArrayBuffer(8));
   try {
@@ -9985,14 +9984,14 @@ async function Ui(B) {
   } finally {
     OQ -= 1;
   }
-  const k = [...Cg].map((R) => UA(R).poison).find((R) => R !== null);
+  const k = [...Cg].map((R) => aA(R).poison).find((R) => R !== null);
   if (k !== void 0) throw k;
   if (o) throw i;
   return Q;
 }
 async function Bi(B, Q) {
   const i = Q();
-  UA(i), Cg.add(i);
+  aA(i), Cg.add(i);
   let o = null;
   const k = fD(), R = new jw({ version: "preview1" }), N = new WebAssembly.Memory({
     initial: 4e3,
@@ -10004,58 +10003,40 @@ async function Bi(B, Q) {
     wasi: R,
     onCreateWorker: () => i,
     overwriteImports(t) {
-      const X = Pw(i, (M, C) => {
-        o(M, C);
+      const X = Pw(i, (h, E) => {
+        o(h, E);
       });
-      return X.lookup_file = (M, C) => {
-        const U = $w(N, M, C);
-        return UA(i).paths.get(U) ?? -404;
-      }, X.is_web_worker = () => OQ > 0, X.read = (M, C, U, a) => PA(i, "read", {
-        handle: M,
-        ptr: C,
+      return X.lookup_file = (h, E) => {
+        const U = $w(N, h, E);
+        return aA(i).paths.get(U) ?? -404;
+      }, X.is_web_worker = () => OQ > 0, X.read = (h, E, U, a) => PA(i, "read", {
+        handle: h,
+        ptr: E,
         len: U,
         offset: a
-      }), X.write = (M, C, U, a) => {
-        const H = PA(i, "write", {
-          handle: M,
-          ptr: C,
-          len: U,
-          offset: a
-        });
-        if (H >= 0) {
-          const K = UA(i);
-          K.sizes.set(M, Math.max(K.sizes.get(M) ?? 0, a + H));
-        }
-        return H;
-      }, X.sync = (M) => PA(i, "sync", { handle: M }), X.truncate = (M, C) => {
-        const U = PA(i, "truncate", { handle: M, len: C });
-        return U >= 0 && UA(i).sizes.set(M, C), U;
-      }, X.size = (M) => PA(i, "size", { handle: M }), X.read_async = (M, C, U, a, H) => {
-        vA(i, "read_async", { handle: M, ptr: C, len: U, offset: a }).then(
+      }), X.write = (h, E, U, a) => PA(i, "write", {
+        handle: h,
+        ptr: E,
+        len: U,
+        offset: a
+      }), X.sync = (h) => PA(i, "sync", { handle: h }), X.truncate = (h, E) => PA(i, "truncate", { handle: h, len: E }), X.size = (h) => PA(i, "size", { handle: h }), X.read_async = (h, E, U, a, H) => {
+        vA(i, "read_async", { handle: h, ptr: E, len: U, offset: a }).then(
           (K) => o(H, K),
           () => o(H, -1)
         );
-      }, X.write_async = (M, C, U, a, H) => {
-        vA(i, "write_async", { handle: M, ptr: C, len: U, offset: a }).then(
-          (K) => {
-            if (K >= 0) {
-              const y = UA(i);
-              y.sizes.set(M, Math.max(y.sizes.get(M) ?? 0, a + K));
-            }
-            o(H, K);
-          },
+      }, X.write_async = (h, E, U, a, H) => {
+        vA(i, "write_async", { handle: h, ptr: E, len: U, offset: a }).then(
+          (K) => o(H, K),
           () => o(H, -1)
         );
-      }, X.sync_async = (M, C) => {
-        vA(i, "sync_async", { handle: M }).then(
-          (U) => o(C, U),
-          () => o(C, -1)
+      }, X.sync_async = (h, E) => {
+        vA(i, "sync_async", { handle: h }).then(
+          (U) => o(E, U),
+          () => o(E, -1)
         );
-      }, X.truncate_async = (M, C, U) => {
-        vA(i, "truncate_async", { handle: M, len: C }).then(
-          (a) => {
-            a >= 0 && UA(i).sizes.set(M, C), o(U, a);
-          },
+      }, X.truncate_async = (h, E, U) => {
+        vA(i, "truncate_async", { handle: h, len: E }).then(
+          (a) => o(U, a),
           () => o(U, -1)
         );
       }, t.env = {

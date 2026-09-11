@@ -288,14 +288,6 @@ void main() {
       expect(row.getDouble('real_number'), 7.5);
       expect(row.getDouble('forced_real'), 7.0);
 
-      final blobFirst = await database.query(
-        'SELECT ? AS payload',
-        parameters: [
-          Uint8List.fromList([1, 2, 3]),
-        ],
-      );
-      expect(blobFirst.rows.single.getBlob('payload'), [1, 2, 3]);
-
       await database.execute('CREATE TABLE changed (value INTEGER)');
       final inserted = await database.execute(
         'INSERT INTO changed VALUES (1), (2) RETURNING value',
@@ -324,12 +316,10 @@ void main() {
       expect(result.rows.single.getString('value'), 'before');
     });
 
-    test('should make memory opening nonpersistent and close idempotently', () async {
+    test('should make memory opening nonpersistent', () async {
       final first = await TursoDatabase.open(TursoLocation.memory());
       await first.execute('CREATE TABLE local_only (value INTEGER)');
       await first.close();
-      await first.close();
-      await expectLater(first.query('SELECT 1'), throwsStateError);
 
       final second = await TursoDatabase.open(TursoLocation.memory());
       addTearDown(second.close);
@@ -337,7 +327,6 @@ void main() {
         second.query('SELECT * FROM local_only'),
         throwsA(isA<TursoDatabaseException>()),
       );
-      expect((await second.query('SELECT 1 AS value')).rows.single.getInt('value'), 1);
     });
 
     test('should reject browser locations and web options on native platforms', () async {

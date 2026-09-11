@@ -337,7 +337,7 @@ final class _NativeDatabase {
     Pointer<bindings.turso_connection_t> connection = nullptr;
     try {
       final setupStatus = bindings.turso_setup(setup, errorOut);
-      _checkStatic(setupStatus, errorOut);
+      _check(setupStatus, errorOut);
 
       final pathPointer = path.toNativeUtf8();
       final experimentalFeaturesPointer =
@@ -357,7 +357,7 @@ final class _NativeDatabase {
           ..encryption_hexkey = hexKeyPointer.cast()
           ..page_codec = nullptr
           ..open_flags = 0;
-        _checkStatic(
+        _check(
           bindings.turso_database_new(config, databaseOut, errorOut),
           errorOut,
         );
@@ -382,10 +382,10 @@ final class _NativeDatabase {
           ..free(databaseOut);
       }
 
-      _checkStatic(bindings.turso_database_open(database, errorOut), errorOut);
+      _check(bindings.turso_database_open(database, errorOut), errorOut);
       final connectionOut = calloc<Pointer<bindings.turso_connection_t>>();
       try {
-        _checkStatic(
+        _check(
           bindings.turso_database_connect(database, connectionOut, errorOut),
           errorOut,
         );
@@ -561,10 +561,9 @@ final class _NativeDatabase {
       }
       expected.add(name);
     }
-    if (supplied.keys.toSet().length != supplied.length ||
-        supplied.keys.toSet().difference(expected.toSet()).isNotEmpty ||
-        expected.toSet().difference(supplied.keys.toSet()).isNotEmpty) {
-      throw ArgumentError('Named parameters must exactly match: ${expected.toSet().join(', ')}.');
+    final expectedNames = expected.toSet();
+    if (supplied.length != expectedNames.length || !expectedNames.containsAll(supplied.keys)) {
+      throw ArgumentError('Named parameters must exactly match: ${expectedNames.join(', ')}.');
     }
     for (var index = 0; index < expected.length; index++) {
       _bindAt(statement, index + 1, supplied[expected[index]]);
@@ -576,47 +575,26 @@ final class _NativeDatabase {
       null => bindings.turso_statement_bind_positional_null(statement, position),
       BigInt() => bindings.turso_statement_bind_positional_int(statement, position, value.toInt()),
       double() => bindings.turso_statement_bind_positional_double(statement, position, value),
-      String() => _bindText(statement, position, value),
-      Uint8List() => _bindBlob(statement, position, value),
+      String() => _bindBytes(statement, position, utf8.encode(value), text: true),
+      Uint8List() => _bindBytes(statement, position, value, text: false),
       _ => throw StateError('An unnormalized parameter reached the native worker.'),
     };
     if (status != bindings.turso_status_code_t.TURSO_OK) _throwStatus(status, nullptr);
   }
 
-  bindings.turso_status_code_t _bindText(
+  bindings.turso_status_code_t _bindBytes(
     Pointer<bindings.turso_statement_t> statement,
     int position,
-    String value,
-  ) {
-    final bytes = utf8.encode(value);
+    Uint8List bytes, {
+    required bool text,
+  }) {
     final pointer = calloc<Uint8>(bytes.length);
-    pointer.asTypedList(bytes.length).setAll(0, bytes);
     try {
-      return bindings.turso_statement_bind_positional_text(
-        statement,
-        position,
-        pointer.cast(),
-        bytes.length,
-      );
-    } finally {
-      calloc.free(pointer);
-    }
-  }
-
-  bindings.turso_status_code_t _bindBlob(
-    Pointer<bindings.turso_statement_t> statement,
-    int position,
-    Uint8List value,
-  ) {
-    final pointer = calloc<Uint8>(value.length);
-    pointer.asTypedList(value.length).setAll(0, value);
-    try {
-      return bindings.turso_statement_bind_positional_blob(
-        statement,
-        position,
-        pointer.cast(),
-        value.length,
-      );
+      pointer.asTypedList(bytes.length).setAll(0, bytes);
+      final bind = text
+          ? bindings.turso_statement_bind_positional_text
+          : bindings.turso_statement_bind_positional_blob;
+      return bind(statement, position, pointer.cast(), bytes.length);
     } finally {
       calloc.free(pointer);
     }
@@ -678,7 +656,7 @@ final class _NativeDatabase {
     }
   }
 
-  String? _readOwnedString(Pointer<Char> pointer) {
+  static String? _readOwnedString(Pointer<Char> pointer) {
     if (pointer == nullptr) return null;
     try {
       return pointer.cast<Utf8>().toDartString();
@@ -687,17 +665,18 @@ final class _NativeDatabase {
     }
   }
 
-  Never _throwStatus(
+  static Never _throwStatus(
     bindings.turso_status_code_t status,
     Pointer<Pointer<Char>> errorOut,
   ) {
     final message = errorOut == nullptr || errorOut.value == nullptr
         ? 'Upstream Turso failed with status ${status.name}.'
         : _readOwnedString(errorOut.value)!;
+    if (errorOut != nullptr) errorOut.value = nullptr;
     throw TursoDatabaseException(message, code: status.value);
   }
 
-  void _check(bindings.turso_status_code_t status, Pointer<Pointer<Char>> errorOut) {
+  static void _check(bindings.turso_status_code_t status, Pointer<Pointer<Char>> errorOut) {
     if (status != bindings.turso_status_code_t.TURSO_OK) _throwStatus(status, errorOut);
   }
 
@@ -705,38 +684,15 @@ final class _NativeDatabase {
     if (_closed) return;
     _closed = true;
     final errorOut = calloc<Pointer<Char>>();
-    Object? failure;
-    StackTrace? failureStack;
     try {
-      final status = bindings.turso_connection_close(_connection, errorOut);
-      if (status != bindings.turso_status_code_t.TURSO_OK) _throwStatus(status, errorOut);
-    } on Object catch (error, stackTrace) {
-      failure = error;
-      failureStack = stackTrace;
+      _check(bindings.turso_connection_close(_connection, errorOut), errorOut);
     } finally {
       calloc.free(errorOut);
       bindings.turso_connection_deinit(_connection);
       bindings.turso_database_deinit(_database);
     }
-    if (failure != null) Error.throwWithStackTrace(failure, failureStack!);
   }
 }
 
 String _encodeHex(Uint8List bytes) =>
     bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
-
-void _checkStatic(
-  bindings.turso_status_code_t status,
-  Pointer<Pointer<Char>> errorOut,
-) {
-  if (status == bindings.turso_status_code_t.TURSO_OK) return;
-  final errorPointer = errorOut.value;
-  final message = errorPointer == nullptr
-      ? 'Upstream Turso failed with status ${status.name}.'
-      : errorPointer.cast<Utf8>().toDartString();
-  if (errorPointer != nullptr) {
-    bindings.turso_str_deinit(errorPointer);
-    errorOut.value = nullptr;
-  }
-  throw TursoDatabaseException(message, code: status.value);
-}
