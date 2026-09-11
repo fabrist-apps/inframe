@@ -9,6 +9,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart'
     show EffectCancellation, EffectExecution, ScopeAccess, ScopeClosed;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
+import 'package:conflux/src/flow/combination.dart';
 import 'package:conflux/src/flow/concurrent.dart';
 import 'package:conflux/src/flow/coordination_adapter.dart';
 import 'package:conflux/src/flow/flow_buffer.dart';
@@ -113,6 +114,37 @@ final class Flow<A, E> {
     validateFlowBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => ConcurrentFlowSource.openMerge(
+        sources.map((source) => source.open),
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Pairs corresponding positions from [sources].
+  ///
+  /// Pulls one value from every source concurrently and completes when the
+  /// shortest source completes. Emitted lists are immutable and input ordered.
+  static Flow<List<A>, E> zip<A, E>(Iterable<Flow<A, E>> sources) => Flow._(
+    () => CombinationFlowSource.openZip(
+      sources.map((source) => source.open),
+    ),
+  );
+
+  /// Emits an immutable input-ordered snapshot after every source has a value.
+  ///
+  /// A source that completes before its first value completes the combination.
+  /// A completed source with a value retains that latest value until all finish.
+  static Flow<List<A>, E> combineLatest<A, E>(
+    Iterable<Flow<A, E>> sources, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => CombinationFlowSource.openCombineLatest(
         sources.map((source) => source.open),
         capacity: capacity,
         overflow: overflow,
@@ -308,6 +340,30 @@ final class Flow<A, E> {
       () => ConcurrentFlowSource.openExhaustMap(
         open,
         (value) => transform(value).open,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Combines primary values with the latest available [secondary] value.
+  ///
+  /// Secondary updates never emit by themselves. Primary values before the
+  /// first secondary value are ignored, and primary completion ends both.
+  Flow<C, E> withLatestFrom<B, C>(
+    Flow<B, E> secondary,
+    C Function(A primary, B latest) combine, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => CombinationFlowSource.openWithLatestFrom(
+        open,
+        secondary.open,
+        combine,
         capacity: capacity,
         overflow: overflow,
         onOverflow: onOverflow,
