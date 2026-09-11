@@ -108,6 +108,32 @@ once initially plus `n` additional times. `Effect.schedule` can execute at most
 expected-error channel and ends the operation; it is distinct from
 `ScheduleStop`.
 
+`spaced` measures each delay from the prior completion. `fixed` instead keeps an
+anchored cadence and skips missed ticks. Exponential delays have no implicit
+cap; add one explicitly with `modifyDelay` when the operation needs it:
+
+```dart
+final backoff = Schedule.exponential<String>(
+  const Duration(milliseconds: 100),
+).jittered().modifyDelay(
+  (delay) => delay > const Duration(seconds: 10)
+      ? const Duration(seconds: 10)
+      : delay,
+);
+
+final loaded = request.retry(backoff);
+```
+
+Exponential scaling and jitter round down to whole microseconds and fail with a
+defect if the computed delay exceeds Dart's signed 64-bit `Duration` range.
+`Schedule.max` continues while both policies continue and waits for their later
+delay. `Schedule.min` continues while either policy continues, reports stopped
+branches as `None`, and waits for the earliest active delay. `within` uses the
+runtime's monotonic clock to prevent a new start beyond its budget; work that
+already started is allowed to finish. `whileInput`, `concat`, and `tap` support
+input gates, sequential policies with fresh state, and effectful observation of
+continuing decisions.
+
 `Queue.bounded` acquires an in-memory FIFO Queue whose lifetime belongs to the
 current Effect scope. A full Queue applies lossless backpressure until a take
 releases capacity. Shutdown is immediate and interrupts pending data operations

@@ -9,4 +9,5 @@ export 'src/schedule/schedule.dart'
         ScheduleDecision,
         ScheduleDriver,
         ScheduleErrorMapping,
+        ScheduleOperations,
         ScheduleStop;
