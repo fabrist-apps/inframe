@@ -162,6 +162,14 @@ invalid. When both day-of-month and weekday are restricted, either may match.
 When either begins with `*`, including `*/step`, both must match. `format`
 returns six fields and keeps the location separate.
 
+`next` and `previous` search strictly beyond the supplied instant. They verify
+each candidate's local fields against timezone transitions, so spring-forward
+gaps are skipped and both instants in a fall-back overlap can be returned. Each
+occurrence search examines at most 10,000 calendar-day candidates within years
+1 through 9999. A `CronError` caused by that work or date limit does not prove
+that no occurrence exists. `sequence` searches lazily without timers or an end
+date; it yields one terminal failure and then stops if a search is exhausted.
+
 `Queue.bounded` acquires an in-memory FIFO Queue whose lifetime belongs to the
 current Effect scope. A full Queue applies lossless backpressure until a take
 releases capacity. Shutdown is immediate and interrupts pending data operations

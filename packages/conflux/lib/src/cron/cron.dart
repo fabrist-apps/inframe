@@ -163,7 +163,150 @@ final class Cron {
     _months.text,
     _weekdays.text,
   ].join(' ');
+
+  /// Finds the first matching occurrence strictly after [instant].
+  ///
+  /// Each query examines at most 10,000 calendar-day candidates in years 1
+  /// through 9999. Exhaustion returns [CronError] and does not prove that no
+  /// later occurrence exists. Nonexistent local times are skipped and repeated
+  /// local times represent two distinct occurrences.
+  Result<DateTime, CronError> next(DateTime instant) => _find(instant, forward: true);
+
+  /// Finds the first matching occurrence strictly before [instant].
+  ///
+  /// This uses the same date range, search budget, and timezone-transition
+  /// behavior as [next].
+  Result<DateTime, CronError> previous(DateTime instant) => _find(instant, forward: false);
+
+  /// Lazily yields occurrences strictly after [instant].
+  ///
+  /// A search failure is yielded once as the terminal element. The iterable is
+  /// synchronous and does not own a timer or impose an end date.
+  Iterable<Result<DateTime, CronError>> sequence(DateTime instant) sync* {
+    var cursor = instant;
+    while (true) {
+      final result = next(cursor);
+      yield result;
+      switch (result) {
+        case Success<DateTime, CronError>(:final value):
+          cursor = value;
+        case Failure<DateTime, CronError>():
+          return;
+      }
+    }
+  }
+
+  Result<DateTime, CronError> _find(DateTime instant, {required bool forward}) {
+    late final TZDateTime localBoundary;
+    try {
+      localBoundary = TZDateTime.from(instant, location);
+    } on Object {
+      return const Failure(CronError('The input instant is outside the supported date range.'));
+    }
+    var date = DateTime.utc(localBoundary.year, localBoundary.month, localBoundary.day);
+    final boundaryMicros = instant.toUtc().microsecondsSinceEpoch;
+    final offsets = location.zones.isEmpty
+        ? const [0]
+        : SplayTreeSet<int>.of(location.zones.map((zone) => zone.offset)).toList();
+
+    for (var iteration = 0; iteration < _searchBudget; iteration += 1) {
+      if (date.year < _minimumYear || date.year > _maximumYear) {
+        return const Failure(CronError('The search reached the supported date range.'));
+      }
+      if (_matchesDate(date)) {
+        final found = _findOnDate(
+          date,
+          boundaryMicros: boundaryMicros,
+          offsets: offsets,
+          forward: forward,
+        );
+        if (found != null) return Success(found);
+      }
+      date = date.add(Duration(days: forward ? 1 : -1));
+    }
+    return const Failure(
+      CronError('The search exhausted its 10,000 candidate-iteration budget.'),
+    );
+  }
+
+  bool _matchesDate(DateTime date) {
+    if (!_months.values.contains(date.month)) return false;
+    final dayMatches = _days.values.contains(date.day);
+    final weekdayMatches = _weekdays.values.contains(date.weekday % 7);
+    if (!_days.startsWithWildcard && !_weekdays.startsWithWildcard) {
+      return dayMatches || weekdayMatches;
+    }
+    return dayMatches && weekdayMatches;
+  }
+
+  DateTime? _findOnDate(
+    DateTime date, {
+    required int boundaryMicros,
+    required List<int> offsets,
+    required bool forward,
+  }) {
+    final orderedHours = forward ? _hours.values : _hours.values.toList().reversed;
+    final orderedMinutes = forward ? _minutes.values : _minutes.values.toList().reversed;
+    final orderedSeconds = forward ? _seconds.values : _seconds.values.toList().reversed;
+    final minimumOffset = offsets.first;
+    final maximumOffset = offsets.last;
+    DateTime? best;
+
+    for (final hour in orderedHours) {
+      for (final minute in orderedMinutes) {
+        for (final second in orderedSeconds) {
+          final wallMicros = DateTime.utc(
+            date.year,
+            date.month,
+            date.day,
+            hour,
+            minute,
+            second,
+          ).microsecondsSinceEpoch;
+          final earliestPossible =
+              wallMicros - (maximumOffset * Duration.microsecondsPerMillisecond);
+          final latestPossible = wallMicros - (minimumOffset * Duration.microsecondsPerMillisecond);
+          if (forward) {
+            if (latestPossible <= boundaryMicros) continue;
+            if (best != null && earliestPossible > best.microsecondsSinceEpoch) return best;
+          } else {
+            if (earliestPossible >= boundaryMicros) continue;
+            if (best != null && latestPossible < best.microsecondsSinceEpoch) return best;
+          }
+
+          for (final offset in offsets) {
+            final candidateMicros = wallMicros - (offset * Duration.microsecondsPerMillisecond);
+            if (forward ? candidateMicros <= boundaryMicros : candidateMicros >= boundaryMicros) {
+              continue;
+            }
+            final candidate = DateTime.fromMicrosecondsSinceEpoch(candidateMicros, isUtc: true);
+            if (!_hasLocalFields(candidate, date, hour, minute, second)) continue;
+            if (best == null || (forward ? candidate.isBefore(best) : candidate.isAfter(best))) {
+              best = candidate;
+            }
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  bool _hasLocalFields(DateTime candidate, DateTime date, int hour, int minute, int second) {
+    final local = TZDateTime.from(candidate, location);
+    return local.year == date.year &&
+        local.month == date.month &&
+        local.day == date.day &&
+        local.hour == hour &&
+        local.minute == minute &&
+        local.second == second &&
+        local.millisecond == 0 &&
+        local.microsecond == 0;
+  }
 }
+
+const _searchBudget = 10000;
+const _minimumYear = 1;
+const _maximumYear = 9999;
 
 final class _CronField {
   _CronField(Iterable<int> values, {required this.text, required this.startsWithWildcard})
