@@ -362,6 +362,7 @@ final class Cache<K, A, E> {
       load.complete(const Failed(Interrupted(ScopeClosed())));
     }
     _entries.clear();
+    _generations.clear();
     _loads.clear();
     _pendingLoads.clear();
   }
