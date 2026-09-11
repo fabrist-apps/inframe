@@ -10,7 +10,7 @@ import 'support/fake_clock.dart';
 
 void main() {
   tz_data.initializeTimeZones();
-  final utc = tz.getLocation('UTC');
+  final utc = tz.UTC;
 
   Cron parse(String expression) {
     return (Cron.parse(expression, utc) as Success<Cron, CronError>).value;

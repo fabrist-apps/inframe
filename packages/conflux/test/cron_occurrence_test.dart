@@ -6,7 +6,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 void main() {
   tz_data.initializeTimeZones();
-  final utc = tz.getLocation('UTC');
+  final utc = tz.UTC;
   final newYork = tz.getLocation('America/New_York');
 
   Cron parse(String expression, tz.Location location) {

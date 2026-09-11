@@ -86,8 +86,18 @@ final class Effect<A, E> {
       }
 
       if (execution.cancellation.isCancelled) {
-        await wait.cancel();
-        return Failed(Interrupted(execution.cancellation.reason));
+        final reason = execution.cancellation.reason;
+        try {
+          await wait.cancel();
+        } on Object catch (error, stackTrace) {
+          return Failed(
+            Sequential<Never>([
+              Interrupted<Never>(reason),
+              Defect<Never>(error, stackTrace),
+            ]),
+          );
+        }
+        return Failed(Interrupted(reason));
       }
       stopListening = execution.cancellation.listen(
         (reason) => unawaited(cancel(reason)),

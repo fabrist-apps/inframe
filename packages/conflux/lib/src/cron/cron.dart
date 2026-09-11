@@ -144,12 +144,7 @@ final class Cron {
         !_months.values.contains(local.month)) {
       return false;
     }
-    final dayMatches = _days.values.contains(local.day);
-    final weekdayMatches = _weekdays.values.contains(local.weekday % 7);
-    if (!_days.startsWithWildcard && !_weekdays.startsWithWildcard) {
-      return dayMatches || weekdayMatches;
-    }
-    return dayMatches && weekdayMatches;
+    return _matchesDay(local.day, local.weekday % 7);
   }
 
   /// Returns a normalized six-field expression without the location.
@@ -206,8 +201,8 @@ final class Cron {
     var date = DateTime.utc(localBoundary.year, localBoundary.month, localBoundary.day);
     final boundaryMicros = instant.toUtc().microsecondsSinceEpoch;
     final offsets = location.zones.isEmpty
-        ? const [0]
-        : SplayTreeSet<int>.of(location.zones.map((zone) => zone.offset)).toList();
+        ? const [Duration.zero]
+        : SplayTreeSet<Duration>.of(location.zones.map((zone) => zone.offset)).toList();
 
     for (var iteration = 0; iteration < _searchBudget; iteration += 1) {
       if (date.year < _minimumYear || date.year > _maximumYear) {
@@ -231,8 +226,12 @@ final class Cron {
 
   bool _matchesDate(DateTime date) {
     if (!_months.values.contains(date.month)) return false;
-    final dayMatches = _days.values.contains(date.day);
-    final weekdayMatches = _weekdays.values.contains(date.weekday % 7);
+    return _matchesDay(date.day, date.weekday % 7);
+  }
+
+  bool _matchesDay(int day, int weekday) {
+    final dayMatches = _days.values.contains(day);
+    final weekdayMatches = _weekdays.values.contains(weekday);
     if (!_days.startsWithWildcard && !_weekdays.startsWithWildcard) {
       return dayMatches || weekdayMatches;
     }
@@ -242,7 +241,7 @@ final class Cron {
   DateTime? _findOnDate(
     DateTime date, {
     required int boundaryMicros,
-    required List<int> offsets,
+    required List<Duration> offsets,
     required bool forward,
   }) {
     final orderedHours = forward ? _hours.values : _hours.values.toList().reversed;
@@ -263,9 +262,8 @@ final class Cron {
             minute,
             second,
           ).microsecondsSinceEpoch;
-          final earliestPossible =
-              wallMicros - (maximumOffset * Duration.microsecondsPerMillisecond);
-          final latestPossible = wallMicros - (minimumOffset * Duration.microsecondsPerMillisecond);
+          final earliestPossible = wallMicros - maximumOffset.inMicroseconds;
+          final latestPossible = wallMicros - minimumOffset.inMicroseconds;
           if (forward) {
             if (latestPossible <= boundaryMicros) continue;
             if (best != null && earliestPossible > best.microsecondsSinceEpoch) return best;
@@ -275,7 +273,7 @@ final class Cron {
           }
 
           for (final offset in offsets) {
-            final candidateMicros = wallMicros - (offset * Duration.microsecondsPerMillisecond);
+            final candidateMicros = wallMicros - offset.inMicroseconds;
             if (forward ? candidateMicros <= boundaryMicros : candidateMicros >= boundaryMicros) {
               continue;
             }
@@ -383,7 +381,8 @@ _CronField _parseField(String source, _FieldSpec spec) {
     if (stepParts.length > 2 || stepParts.any((value) => value.isEmpty)) {
       throw _InvalidCron(spec.name, 'Invalid step "$part".');
     }
-    final step = stepParts.length == 1 ? 1 : int.tryParse(stepParts[1]);
+    final stepText = stepParts.length == 1 ? '1' : stepParts[1];
+    final step = _decimal.hasMatch(stepText) ? int.tryParse(stepText) : null;
     if (step == null || step <= 0) {
       throw _InvalidCron(spec.name, 'Step must be a positive integer in "$part".');
     }
@@ -413,17 +412,41 @@ _CronField _parseField(String source, _FieldSpec spec) {
   if (values.isEmpty) throw _InvalidCron(spec.name, 'The field matches no values.');
   return _CronField(
     values,
-    text: token,
+    text: _canonicalFieldText(token, values, spec),
     startsWithWildcard: token.startsWith('*'),
   );
 }
 
+String _canonicalFieldText(String token, Set<int> values, _FieldSpec spec) {
+  if (!token.startsWith('*')) return values.join(',');
+  final allValues = _range(
+    spec.minimum,
+    spec.maximum,
+  ).map((value) => _normalize(value, spec)).toSet();
+  if (values.length == allValues.length && values.containsAll(allValues)) {
+    return '*';
+  }
+
+  final wildcard = token.split(',').first;
+  final separator = wildcard.indexOf('/');
+  final step = separator == -1 ? 1 : int.parse(wildcard.substring(separator + 1));
+  final wildcardValues = <int>{
+    for (var value = spec.minimum; value <= spec.maximum; value += step) _normalize(value, spec),
+  };
+  final extras = values.where((value) => !wildcardValues.contains(value));
+  final prefix = step == 1 ? '*' : '*/$step';
+  return extras.isEmpty ? prefix : '$prefix,${extras.join(',')}';
+}
+
 int _parseValue(String source, _FieldSpec spec) {
-  final value = spec.names[source] ?? int.tryParse(source);
+  final named = spec.names[source];
+  final value = named ?? (_decimal.hasMatch(source) ? int.tryParse(source) : null);
   if (value == null) throw _InvalidCron(spec.name, 'Invalid value "$source".');
   _validate(value, spec);
   return value;
 }
+
+final _decimal = RegExp(r'^\d+$');
 
 void _validate(int value, _FieldSpec spec) {
   if (value < spec.minimum || value > spec.maximum) {

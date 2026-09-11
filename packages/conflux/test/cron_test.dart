@@ -6,7 +6,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 void main() {
   tz_data.initializeTimeZones();
-  final utc = tz.getLocation('UTC');
+  final utc = tz.UTC;
   final newYork = tz.getLocation('America/New_York');
 
   group('Cron', () {
@@ -20,7 +20,7 @@ void main() {
       expect(cron.months, {1, 3});
       expect(cron.weekdays, {1, 2, 3, 4, 5});
       expect(cron.location, same(utc));
-      expect(cron.format(), '0 */15 9-17 * jan,mar mon-fri');
+      expect(cron.format(), '0 */15 9,10,11,12,13,14,15,16,17 * 1,3 1,2,3,4,5');
     });
 
     test('should parse six fields with lists ranges steps and Sunday aliases', () {
@@ -43,6 +43,9 @@ void main() {
         '* * * 0 * *',
         '* * * * foo *',
         '* * * * * */0',
+        '0xA * * * * *',
+        '+1 * * * * *',
+        '* * * * * */+2',
         '* * * * * mon-sun/what',
       ]) {
         expect(Cron.parse(expression, utc), isA<Failure<Cron, CronError>>());
@@ -115,6 +118,14 @@ void main() {
       ]) {
         expect(reparsed.matches(instant), original.matches(instant));
       }
+    });
+
+    test('should canonicalize equivalent names aliases and duplicate values', () {
+      final named = (Cron.parse('0 0 0 1 JAN SUN', utc) as Success<Cron, CronError>).value;
+      final numeric = (Cron.parse('0 0 0 1 1 7,0', utc) as Success<Cron, CronError>).value;
+
+      expect(named.format(), '0 0 0 1 1 0');
+      expect(numeric.format(), named.format());
     });
   });
 }

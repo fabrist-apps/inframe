@@ -28,7 +28,7 @@ void main() {
         (spacedSecond as ScheduleContinue<int>).delay,
         const Duration(seconds: 10),
       );
-      expect((third as ScheduleContinue<int>).delay, Duration.zero);
+      expect((third as ScheduleContinue<int>).delay, const Duration(seconds: 10));
     });
 
     test('should double exponential delays by default', () async {
@@ -145,6 +145,25 @@ void main() {
 
       expect(exit, isA<Succeeded<int, Never>>());
       expect(executions, 2);
+    });
+
+    test('should include effectful driver work in its elapsed budget', () async {
+      final clock = FakeClock();
+      final driver =
+          Schedule.spaced<Object?>(
+                const Duration(seconds: 10),
+              )
+              .tap((_) {
+                return Effect.sync(() {
+                  clock.advanceMonotonic(const Duration(seconds: 20));
+                });
+              })
+              .within(const Duration(seconds: 25))
+              .driver();
+
+      final decision = await driver.step(null).runFuture(clock: clock);
+
+      expect(decision, isA<ScheduleStop<int>>());
     });
 
     test('should combine both-alive policies with the later delay', () async {

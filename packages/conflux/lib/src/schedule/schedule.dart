@@ -76,7 +76,7 @@ final class Schedule<I, O, E> {
     });
   }
 
-  /// Continues forever on an anchored [interval], skipping missed ticks.
+  /// Continues forever on the next anchored [interval], skipping missed ticks.
   static Schedule<I, int, Never> fixed<I>(Duration interval) {
     _requireNonNegativeDuration(interval);
     return Schedule.fromDriver(() {
@@ -132,12 +132,13 @@ final class Schedule<I, O, E> {
       () => ScheduleDriver(
         (_) => EffectAccess.create((execution) async {
           final now = execution.clock.wallTime();
-          return switch (cron.next(now)) {
-            Success<DateTime, CronError>(:final value) => Succeeded(
-              ScheduleContinue(value.difference(now), value.difference(now)),
-            ),
-            Failure<DateTime, CronError>(:final error) => Failed(Expected(error)),
-          };
+          switch (cron.next(now)) {
+            case Success<DateTime, CronError>(:final value):
+              final delay = value.difference(now);
+              return Succeeded(ScheduleContinue(delay, delay));
+            case Failure<DateTime, CronError>(:final error):
+              return Failed(Expected(error));
+          }
         }),
       ),
     );
@@ -301,9 +302,9 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
       Duration? startedAt;
       return ScheduleDriver(
         (input) => EffectAccess.create((execution) async {
-          final now = execution.clock.monotonic();
-          startedAt ??= now;
+          startedAt ??= execution.clock.monotonic();
           final exit = await EffectAccess.evaluate(source.step(input), execution);
+          final now = execution.clock.monotonic();
           return switch (exit) {
             Failed<ScheduleDecision<O>, E>(:final cause) => Failed(cause),
             Succeeded<ScheduleDecision<O>, E>(
@@ -380,7 +381,7 @@ void _requireNonNegativeDuration(Duration duration) {
 Duration _nextFixedDelay(Duration anchor, Duration now, Duration interval) {
   final elapsed = now - anchor;
   final remainder = elapsed.inMicroseconds % interval.inMicroseconds;
-  if (remainder == 0) return Duration.zero;
+  if (remainder == 0) return interval;
   return Duration(microseconds: interval.inMicroseconds - remainder);
 }
 
