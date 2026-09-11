@@ -7,9 +7,9 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart'
     show EffectCancellation, EffectExecution, ScopeAccess, ScopeClosed;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
+import 'package:conflux/src/flow/protocol.dart';
+import 'package:conflux/src/flow/stream_adapter.dart';
 import 'package:context/context.dart';
-
-typedef _OpenCursor<A, E> = Effect<_FlowCursor<A, E>, E> Function();
 
 E _widenNever<E>(Never error) => error;
 
@@ -20,7 +20,7 @@ E _widenNever<E>(Never error) => error;
 final class Flow<A, E> {
   const Flow._(this._openCursor);
 
-  final _OpenCursor<A, E> _openCursor;
+  final OpenFlowCursor<A, E> _openCursor;
 
   /// Creates a Flow that completes without emitting a value.
   static Flow<A, E> empty<A, E>() => Flow._(
@@ -52,6 +52,40 @@ final class Flow<A, E> {
     () => Effect.defer(() => factory()._openCursor()),
   );
 
+  /// Adapts a Stream factory through a bounded Flow-owned buffer.
+  ///
+  /// Each consumption invokes [source] and subscribes once. Stream errors pass
+  /// through [onError]. [capacity] must be positive, and [onOverflow] is
+  /// required when [overflow] is [FlowOverflowPolicy.fail]. Backpressure pauses
+  /// this subscription but cannot bound buffering internal to a broadcast source.
+  static Flow<A, E> fromStream<A, E>(
+    Stream<A> Function() source, {
+    required E Function(Object error, StackTrace stackTrace) onError,
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    if (capacity <= 0) {
+      throw ArgumentError.value(capacity, 'capacity', 'Must be positive.');
+    }
+    if (overflow == FlowOverflowPolicy.fail && onOverflow == null) {
+      throw ArgumentError.value(
+        onOverflow,
+        'onOverflow',
+        'Must be supplied when overflow is FlowOverflowPolicy.fail.',
+      );
+    }
+    return Flow._(
+      () => StreamFlowSource.open(
+        source,
+        onError: onError,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
   /// Opens one scoped pull cursor.
   ///
   /// Only one [FlowCursor.next] may be outstanding. Completion or failure closes
@@ -69,12 +103,12 @@ final class Flow<A, E> {
 
     final opened = await EffectAccess.evaluate(Effect.defer(_openCursor), child);
     switch (opened) {
-      case Failed<_FlowCursor<A, E>, E>(:final cause):
+      case Failed<FlowSourceCursor<A, E>, E>(:final cause):
         stopParentCancellation();
         return Failed<FlowCursor<A, E>, E>(
           cause,
         ).appendCleanup(await child.scope.close());
-      case Succeeded<_FlowCursor<A, E>, E>(:final value):
+      case Succeeded<FlowSourceCursor<A, E>, E>(:final value):
         final cursor = _ManagedFlowCursor<A, E>(
           value,
           child,
@@ -304,16 +338,19 @@ final class Flow<A, E> {
   );
 }
 
-Effect<_FlowCursor<A, E>, E> _openWithExitHook<A, E>(
-  _OpenCursor<A, E> open,
+Effect<FlowSourceCursor<A, E>, E> _openWithExitHook<A, E>(
+  OpenFlowCursor<A, E> open,
   Effect<void, Never> Function(Exit<void, E> exit) finalizer,
 ) => EffectAccess.create((execution) async {
   final opened = await EffectAccess.evaluate(Effect.defer(open), execution);
   return switch (opened) {
-    Succeeded<_FlowCursor<A, E>, E>(:final value) => Succeeded(_ExitHookCursor(value, finalizer)),
-    Failed<_FlowCursor<A, E>, E>(:final cause) => Failed<_FlowCursor<A, E>, E>(cause).appendCleanup(
-      await _runFlowFinalizer(finalizer, Failed(cause), execution),
+    Succeeded<FlowSourceCursor<A, E>, E>(:final value) => Succeeded(
+      _ExitHookCursor(value, finalizer),
     ),
+    Failed<FlowSourceCursor<A, E>, E>(:final cause) =>
+      Failed<FlowSourceCursor<A, E>, E>(cause).appendCleanup(
+        await _runFlowFinalizer(finalizer, Failed(cause), execution),
+      ),
   };
 });
 
@@ -360,13 +397,7 @@ abstract interface class FlowCursor<A, E> {
   Effect<void, Never> close();
 }
 
-// The cursor protocol keeps stateful sources and operators interchangeable.
-// ignore: one_member_abstracts
-abstract interface class _FlowCursor<A, E> {
-  Effect<Option<A>, E> next();
-}
-
-abstract interface class _FlowCursorFinalizer<E> {
+abstract interface class _FlowSourceCursorFinalizer<E> {
   Effect<void, Never> Function(Exit<void, E> exit) get finalizer;
 }
 
@@ -378,7 +409,7 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
     this._stopParentCancellation,
   );
 
-  final _FlowCursor<A, E> _cursor;
+  final FlowSourceCursor<A, E> _cursor;
   final EffectExecution _execution;
   final EffectCancellation _cancellation;
   final void Function() _stopParentCancellation;
@@ -452,7 +483,7 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
     }
     if (interrupt) await _activePull;
     final hookFailure = switch (_cursor) {
-      _FlowCursorFinalizer<E>(:final finalizer) => await _runFlowFinalizer(
+      _FlowSourceCursorFinalizer<E>(:final finalizer) => await _runFlowFinalizer(
         finalizer,
         terminal,
         _execution,
@@ -464,12 +495,12 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
   }
 }
 
-final class _EmptyCursor<A, E> implements _FlowCursor<A, E> {
+final class _EmptyCursor<A, E> implements FlowSourceCursor<A, E> {
   @override
   Effect<Option<A>, E> next() => Effect.succeed(const None());
 }
 
-final class _ValueCursor<A, E> implements _FlowCursor<A, E> {
+final class _ValueCursor<A, E> implements FlowSourceCursor<A, E> {
   _ValueCursor(this._value);
 
   final A _value;
@@ -483,7 +514,7 @@ final class _ValueCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _FailureCursor<A, E> implements _FlowCursor<A, E> {
+final class _FailureCursor<A, E> implements FlowSourceCursor<A, E> {
   _FailureCursor(this._error);
 
   final E _error;
@@ -492,7 +523,7 @@ final class _FailureCursor<A, E> implements _FlowCursor<A, E> {
   Effect<Option<A>, E> next() => Effect.fail(_error);
 }
 
-final class _IteratorCursor<A, E> implements _FlowCursor<A, E> {
+final class _IteratorCursor<A, E> implements FlowSourceCursor<A, E> {
   _IteratorCursor(this._iterator);
 
   final Iterator<A> _iterator;
@@ -503,10 +534,10 @@ final class _IteratorCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _MapCursor<A, B, E> implements _FlowCursor<B, E> {
+final class _MapCursor<A, B, E> implements FlowSourceCursor<B, E> {
   _MapCursor(this._upstream, this._transform);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final B Function(A value) _transform;
 
   @override
@@ -518,10 +549,10 @@ final class _MapCursor<A, B, E> implements _FlowCursor<B, E> {
   });
 }
 
-final class _MapEffectCursor<A, B, E> implements _FlowCursor<B, E> {
+final class _MapEffectCursor<A, B, E> implements FlowSourceCursor<B, E> {
   _MapEffectCursor(this._upstream, this._transform);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final Effect<B, E> Function(A value) _transform;
 
   @override
@@ -535,27 +566,27 @@ final class _MapEffectCursor<A, B, E> implements _FlowCursor<B, E> {
   });
 }
 
-final class _ContextCursor<A, E> implements _FlowCursor<A, E> {
+final class _ContextCursor<A, E> implements FlowSourceCursor<A, E> {
   _ContextCursor(this._upstream, this._context);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final Context _context;
 
   @override
   Effect<Option<A>, E> next() => _upstream.next().withContext(_context);
 }
 
-final class _MapErrorCursor<A, E, F> implements _FlowCursor<A, F> {
+final class _MapErrorCursor<A, E, F> implements FlowSourceCursor<A, F> {
   _MapErrorCursor(this._upstream, this._transform);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final F Function(E error) _transform;
 
   @override
   Effect<Option<A>, F> next() => _upstream.next().mapError(_transform);
 }
 
-final class _CatchErrorCursor<A, E> implements _FlowCursor<A, E> {
+final class _CatchErrorCursor<A, E> implements FlowSourceCursor<A, E> {
   _CatchErrorCursor(this._openUpstream, this._recover);
 
   final Effect<FlowCursor<A, E>, E> Function() _openUpstream;
@@ -587,10 +618,10 @@ final class _CatchErrorCursor<A, E> implements _FlowCursor<A, E> {
   }
 }
 
-final class _TapCursor<A, E> implements _FlowCursor<A, E> {
+final class _TapCursor<A, E> implements FlowSourceCursor<A, E> {
   _TapCursor(this._upstream, this._observe);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final Effect<void, E> Function(A value) _observe;
 
   @override
@@ -602,30 +633,30 @@ final class _TapCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _TapErrorCursor<A, E> implements _FlowCursor<A, E> {
+final class _TapErrorCursor<A, E> implements FlowSourceCursor<A, E> {
   _TapErrorCursor(this._upstream, this._observe);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final Effect<void, Never> Function(E error) _observe;
 
   @override
   Effect<Option<A>, E> next() => _upstream.next().tapError(_observe);
 }
 
-final class _TapCauseCursor<A, E> implements _FlowCursor<A, E> {
+final class _TapCauseCursor<A, E> implements FlowSourceCursor<A, E> {
   _TapCauseCursor(this._upstream, this._observe);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final Effect<void, Never> Function(Cause<E> cause) _observe;
 
   @override
   Effect<Option<A>, E> next() => _upstream.next().tapCause(_observe);
 }
 
-final class _ExitHookCursor<A, E> implements _FlowCursor<A, E>, _FlowCursorFinalizer<E> {
+final class _ExitHookCursor<A, E> implements FlowSourceCursor<A, E>, _FlowSourceCursorFinalizer<E> {
   _ExitHookCursor(this._upstream, this.finalizer);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
 
   @override
   final Effect<void, Never> Function(Exit<void, E> exit) finalizer;
@@ -634,10 +665,10 @@ final class _ExitHookCursor<A, E> implements _FlowCursor<A, E>, _FlowCursorFinal
   Effect<Option<A>, E> next() => _upstream.next();
 }
 
-final class _ConcatMapCursor<A, B, E> implements _FlowCursor<B, E> {
+final class _ConcatMapCursor<A, B, E> implements FlowSourceCursor<B, E> {
   _ConcatMapCursor(this._upstream, this._transform);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final Flow<B, E> Function(A value) _transform;
   FlowCursor<B, E>? _inner;
 
@@ -661,10 +692,10 @@ final class _ConcatMapCursor<A, B, E> implements _FlowCursor<B, E> {
   });
 }
 
-final class _FilterCursor<A, E> implements _FlowCursor<A, E> {
+final class _FilterCursor<A, E> implements FlowSourceCursor<A, E> {
   _FilterCursor(this._upstream, this._predicate);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final bool Function(A value) _predicate;
 
   @override
@@ -683,10 +714,10 @@ final class _FilterCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _FilterMapCursor<A, B, E> implements _FlowCursor<B, E> {
+final class _FilterMapCursor<A, B, E> implements FlowSourceCursor<B, E> {
   _FilterMapCursor(this._upstream, this._transform);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final Option<B> Function(A value) _transform;
 
   @override
@@ -703,10 +734,10 @@ final class _FilterMapCursor<A, B, E> implements _FlowCursor<B, E> {
   });
 }
 
-final class _SkipCursor<A, E> implements _FlowCursor<A, E> {
+final class _SkipCursor<A, E> implements FlowSourceCursor<A, E> {
   _SkipCursor(this._upstream, this._remaining);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   int _remaining;
 
   @override
@@ -720,10 +751,10 @@ final class _SkipCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _TakeWhileCursor<A, E> implements _FlowCursor<A, E> {
+final class _TakeWhileCursor<A, E> implements FlowSourceCursor<A, E> {
   _TakeWhileCursor(this._upstream, this._predicate);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final bool Function(A value) _predicate;
   var _done = false;
 
@@ -740,10 +771,10 @@ final class _TakeWhileCursor<A, E> implements _FlowCursor<A, E> {
   }
 }
 
-final class _SkipWhileCursor<A, E> implements _FlowCursor<A, E> {
+final class _SkipWhileCursor<A, E> implements FlowSourceCursor<A, E> {
   _SkipWhileCursor(this._upstream, this._predicate);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final bool Function(A value) _predicate;
   var _skipping = true;
 
@@ -765,10 +796,10 @@ final class _SkipWhileCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _DistinctCursor<A, E> implements _FlowCursor<A, E> {
+final class _DistinctCursor<A, E> implements FlowSourceCursor<A, E> {
   _DistinctCursor(this._upstream, this._equals);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final bool Function(A previous, A current) _equals;
   late A _previous;
   var _hasPrevious = false;
@@ -790,12 +821,12 @@ final class _DistinctCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _ConcatCursor<A, E> implements _FlowCursor<A, E> {
+final class _ConcatCursor<A, E> implements FlowSourceCursor<A, E> {
   _ConcatCursor(this._first, this._openSecond);
 
-  _FlowCursor<A, E>? _first;
-  final _OpenCursor<A, E> _openSecond;
-  _FlowCursor<A, E>? _second;
+  FlowSourceCursor<A, E>? _first;
+  final OpenFlowCursor<A, E> _openSecond;
+  FlowSourceCursor<A, E>? _second;
 
   @override
   Effect<Option<A>, E> next() => Effect.build(($) async {
@@ -806,12 +837,12 @@ final class _ConcatCursor<A, E> implements _FlowCursor<A, E> {
       _first = null;
     }
     final existingSecond = _second;
-    late final _FlowCursor<A, E> activeSecond;
+    late final FlowSourceCursor<A, E> activeSecond;
     if (existingSecond != null) {
       activeSecond = existingSecond;
     } else {
       activeSecond = await $(
-        Effect.defer<_FlowCursor<A, E>, E>(_openSecond),
+        Effect.defer<FlowSourceCursor<A, E>, E>(_openSecond),
       );
       _second = activeSecond;
     }
@@ -819,10 +850,10 @@ final class _ConcatCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _ScanCursor<A, B, E> implements _FlowCursor<B, E> {
+final class _ScanCursor<A, B, E> implements FlowSourceCursor<B, E> {
   _ScanCursor(this._upstream, this._state, this._combine);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final B Function(B state, A value) _combine;
   B _state;
 
@@ -835,12 +866,12 @@ final class _ScanCursor<A, B, E> implements _FlowCursor<B, E> {
   });
 }
 
-final class _SwitchIfEmptyCursor<A, E> implements _FlowCursor<A, E> {
+final class _SwitchIfEmptyCursor<A, E> implements FlowSourceCursor<A, E> {
   _SwitchIfEmptyCursor(this._upstream, this._fallback);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   final Flow<A, E> Function() _fallback;
-  _FlowCursor<A, E>? _fallbackCursor;
+  FlowSourceCursor<A, E>? _fallbackCursor;
   var _emitted = false;
   var _upstreamDone = false;
 
@@ -857,12 +888,12 @@ final class _SwitchIfEmptyCursor<A, E> implements _FlowCursor<A, E> {
     }
 
     final existingFallback = _fallbackCursor;
-    late final _FlowCursor<A, E> activeFallback;
+    late final FlowSourceCursor<A, E> activeFallback;
     if (existingFallback != null) {
       activeFallback = existingFallback;
     } else {
       activeFallback = await $(
-        Effect.defer<_FlowCursor<A, E>, E>(() => _fallback()._openCursor()),
+        Effect.defer<FlowSourceCursor<A, E>, E>(() => _fallback()._openCursor()),
       );
       _fallbackCursor = activeFallback;
     }
@@ -870,10 +901,10 @@ final class _SwitchIfEmptyCursor<A, E> implements _FlowCursor<A, E> {
   });
 }
 
-final class _TakeCursor<A, E> implements _FlowCursor<A, E> {
+final class _TakeCursor<A, E> implements FlowSourceCursor<A, E> {
   _TakeCursor(this._upstream, this._remaining);
 
-  final _FlowCursor<A, E> _upstream;
+  final FlowSourceCursor<A, E> _upstream;
   int _remaining;
 
   @override
@@ -894,10 +925,10 @@ extension FlowNeverError<A> on Flow<A, Never> {
   );
 }
 
-final class _WidenErrorCursor<A, E> implements _FlowCursor<A, E> {
+final class _WidenErrorCursor<A, E> implements FlowSourceCursor<A, E> {
   _WidenErrorCursor(this._upstream);
 
-  final _FlowCursor<A, Never> _upstream;
+  final FlowSourceCursor<A, Never> _upstream;
 
   @override
   Effect<Option<A>, E> next() => EffectAccess.create((execution) async {
@@ -918,7 +949,7 @@ abstract final class FlowAccess {
   );
 }
 
-final class _EffectCursor<A, E> implements _FlowCursor<A, E> {
+final class _EffectCursor<A, E> implements FlowSourceCursor<A, E> {
   _EffectCursor(this._effect);
 
   final Effect<A, E> _effect;
