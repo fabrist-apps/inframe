@@ -131,6 +131,35 @@ void main() {
       expect(exits[2], isA<Failed<void, String>>());
       expect((exits[2] as Failed<void, String>).cause.containsInterruption, isTrue);
     });
+
+    test('should preserve ordered exit hooks through later operators', () async {
+      final events = <String>[];
+      final flow = Flow.fromIterable([1, 2])
+          .onExit(
+            (exit) => Effect.sync(
+              () => events.add('source ${exit is Succeeded<void, Never>}'),
+            ),
+          )
+          .map((value) => value * 2)
+          .onExit((_) => Effect.sync(() => events.add('mapped')))
+          .ensuring(Effect.sync(() => events.add('outer')));
+
+      expect(await flow.runCollect().runFuture(), [2, 4]);
+      expect(events, ['source true', 'mapped', 'outer']);
+    });
+
+    test('should finalize concatenated source scopes in consumption order', () async {
+      final events = <String>[];
+      final first = Flow.succeed<int, Never>(1).ensuring(
+        Effect.sync(() => events.add('first')),
+      );
+      final second = Flow.succeed<int, Never>(2).ensuring(
+        Effect.sync(() => events.add('second')),
+      );
+
+      expect(await first.concat(second).runCollect().runFuture(), [1, 2]);
+      expect(events, ['first', 'second']);
+    });
   });
 }
 
