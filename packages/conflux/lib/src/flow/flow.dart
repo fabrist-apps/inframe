@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
+import 'package:conflux/src/effect/cause.dart' show CauseGroup;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart'
     show EffectCancellation, EffectExecution, ScopeAccess, ScopeClosed;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
+import 'package:context/context.dart';
 
 typedef _OpenCursor<A, E> = Effect<_FlowCursor<A, E>, E> Function();
 
@@ -87,7 +89,10 @@ final class Flow<A, E> {
         );
         if (registered) return Succeeded(cursor);
 
-        final cleanup = await cursor._close(interrupt: true);
+        final cleanup = await cursor._close(
+          interrupt: true,
+          terminal: const Failed(Interrupted(ScopeClosed())),
+        );
         return Failed<FlowCursor<A, E>, E>(
           const Interrupted(ScopeClosed()),
         ).appendCleanup(cleanup);
@@ -173,6 +178,44 @@ final class Flow<A, E> {
     () => _openCursor().map((cursor) => _ConcatMapCursor(cursor, transform)),
   );
 
+  /// Runs source acquisition and every pull with [context].
+  Flow<A, E> withContext(Context context) => Flow._(
+    () => _openCursor().withContext(context).map((cursor) => _ContextCursor(cursor, context)),
+  );
+
+  /// Transforms every expected error leaf while preserving cause structure.
+  Flow<A, F> mapError<F>(F Function(E error) transform) => Flow._(
+    () => _openCursor().mapError(transform).map((cursor) => _MapErrorCursor(cursor, transform)),
+  );
+
+  /// Recovers once from an all-expected terminal cause.
+  Flow<A, E> catchError(Flow<A, E> Function(E error) recover) => Flow._(
+    () => Effect.succeed(_CatchErrorCursor(open, recover)),
+  );
+
+  /// Runs an effectful observer after each value and retains that value.
+  Flow<A, E> tap(Effect<void, E> Function(A value) observe) => Flow._(
+    () => _openCursor().map((cursor) => _TapCursor(cursor, observe)),
+  );
+
+  /// Observes the primary expected error without recovering it.
+  Flow<A, E> tapError(Effect<void, Never> Function(E error) observe) => Flow._(
+    () => _openCursor().tapError(observe).map((cursor) => _TapErrorCursor(cursor, observe)),
+  );
+
+  /// Observes a complete terminal cause without recovering it.
+  Flow<A, E> tapCause(Effect<void, Never> Function(Cause<E> cause) observe) => Flow._(
+    () => _openCursor().tapCause(observe).map((cursor) => _TapCauseCursor(cursor, observe)),
+  );
+
+  /// Runs [finalizer] once after every terminal outcome.
+  Flow<A, E> ensuring(Effect<void, Never> finalizer) => onExit((_) => finalizer);
+
+  /// Runs the returned finalizer once with the complete consumption [Exit].
+  Flow<A, E> onExit(Effect<void, Never> Function(Exit<void, E> exit) finalizer) => Flow._(
+    () => _openWithExitHook(_openCursor, finalizer),
+  );
+
   /// Emits at most the first [count] values and then closes upstream.
   Flow<A, E> take(int count) {
     if (count < 0) {
@@ -252,9 +295,60 @@ final class Flow<A, E> {
   ) => Effect.using(
     Effect.build<R, E>(($) async {
       final cursor = await $(open());
-      return consume(cursor, $);
+      return $(
+        Effect.build<R, E>((consumeEffect) => consume(cursor, consumeEffect)).onExit(
+          (exit) => _finishCursor(cursor, _voidExit(exit)),
+        ),
+      );
     }),
   );
+}
+
+Effect<_FlowCursor<A, E>, E> _openWithExitHook<A, E>(
+  _OpenCursor<A, E> open,
+  Effect<void, Never> Function(Exit<void, E> exit) finalizer,
+) => EffectAccess.create((execution) async {
+  final opened = await EffectAccess.evaluate(Effect.defer(open), execution);
+  return switch (opened) {
+    Succeeded<_FlowCursor<A, E>, E>(:final value) => Succeeded(_ExitHookCursor(value, finalizer)),
+    Failed<_FlowCursor<A, E>, E>(:final cause) => Failed<_FlowCursor<A, E>, E>(cause).appendCleanup(
+      await _runFlowFinalizer(finalizer, Failed(cause), execution),
+    ),
+  };
+});
+
+Effect<void, Never> _finishCursor<A, E>(
+  FlowCursor<A, E> cursor,
+  Exit<void, E> exit,
+) => switch (cursor) {
+  _ManagedFlowCursor<A, E>() => cursor._finish(exit),
+  _ => cursor.close(),
+};
+
+Exit<void, E> _voidExit<A, E>(Exit<A, E> exit) => switch (exit) {
+  Succeeded<A, E>() => const Succeeded(null),
+  Failed<A, E>(:final cause) => Failed(cause),
+};
+
+Future<Cause<Never>?> _runFlowFinalizer<E>(
+  Effect<void, Never> Function(Exit<void, E> exit) finalizer,
+  Exit<void, E> exit,
+  EffectExecution execution,
+) async {
+  late final Effect<void, Never> effect;
+  try {
+    effect = finalizer(exit);
+  } on Object catch (error, stackTrace) {
+    return Defect(error, stackTrace);
+  }
+  return switch (await EffectExecution.runProtected(
+    effect,
+    execution.context,
+    execution.clock,
+  )) {
+    Succeeded<void, Never>() => null,
+    Failed<void, Never>(:final cause) => cause,
+  };
 }
 
 /// A scoped pull cursor for one Flow consumption.
@@ -270,6 +364,10 @@ abstract interface class FlowCursor<A, E> {
 // ignore: one_member_abstracts
 abstract interface class _FlowCursor<A, E> {
   Effect<Option<A>, E> next();
+}
+
+abstract interface class _FlowCursorFinalizer<E> {
+  Effect<void, Never> Function(Exit<void, E> exit) get finalizer;
 }
 
 final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
@@ -309,7 +407,9 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
     }
 
     if (exit case Failed<Option<A>, E>() || Succeeded<Option<A>, E>(value: None())) {
-      return exit.appendCleanup(await _close(interrupt: false));
+      return exit.appendCleanup(
+        await _close(interrupt: false, terminal: _voidExit(exit)),
+      );
     }
     return exit;
   });
@@ -318,26 +418,49 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
   Effect<void, Never> close() => _closeEffect;
 
   Effect<void, Never> get _closeEffect => EffectAccess.create((_) async {
-    final cleanup = await _close(interrupt: true);
+    final cleanup = await _close(
+      interrupt: true,
+      terminal: const Failed(Interrupted(FlowCursorClosed())),
+    );
     return cleanup == null ? const Succeeded(null) : Failed(cleanup);
   });
 
-  Future<Cause<Never>?> _close({required bool interrupt}) {
+  Effect<void, Never> _finish(Exit<void, E> exit) => EffectAccess.create((_) async {
+    final cleanup = await _close(interrupt: false, terminal: exit);
+    return cleanup == null ? const Succeeded(null) : Failed(cleanup);
+  });
+
+  Future<Cause<Never>?> _close({
+    required bool interrupt,
+    required Exit<void, E> terminal,
+  }) {
     final active = _closing;
     if (active != null) return active;
-    final closing = _closeNow(interrupt: interrupt);
+    final closing = _closeNow(interrupt: interrupt, terminal: terminal);
     _closing = closing;
     return closing;
   }
 
-  Future<Cause<Never>?> _closeNow({required bool interrupt}) async {
+  Future<Cause<Never>?> _closeNow({
+    required bool interrupt,
+    required Exit<void, E> terminal,
+  }) async {
     _closed = true;
     _stopParentCancellation();
     if (interrupt && !_cancellation.isCancelled) {
       _cancellation.cancel(const FlowCursorClosed());
     }
     if (interrupt) await _activePull;
-    return _execution.scope.close();
+    final hookFailure = switch (_cursor) {
+      _FlowCursorFinalizer<E>(:final finalizer) => await _runFlowFinalizer(
+        finalizer,
+        terminal,
+        _execution,
+      ),
+      _ => null,
+    };
+    final scopeFailure = await _execution.scope.close();
+    return CauseGroup.sequential([?hookFailure, ?scopeFailure]);
   }
 }
 
@@ -410,6 +533,105 @@ final class _MapEffectCursor<A, B, E> implements _FlowCursor<B, E> {
       None() => const None(),
     };
   });
+}
+
+final class _ContextCursor<A, E> implements _FlowCursor<A, E> {
+  _ContextCursor(this._upstream, this._context);
+
+  final _FlowCursor<A, E> _upstream;
+  final Context _context;
+
+  @override
+  Effect<Option<A>, E> next() => _upstream.next().withContext(_context);
+}
+
+final class _MapErrorCursor<A, E, F> implements _FlowCursor<A, F> {
+  _MapErrorCursor(this._upstream, this._transform);
+
+  final _FlowCursor<A, E> _upstream;
+  final F Function(E error) _transform;
+
+  @override
+  Effect<Option<A>, F> next() => _upstream.next().mapError(_transform);
+}
+
+final class _CatchErrorCursor<A, E> implements _FlowCursor<A, E> {
+  _CatchErrorCursor(this._openUpstream, this._recover);
+
+  final Effect<FlowCursor<A, E>, E> Function() _openUpstream;
+  final Flow<A, E> Function(E error) _recover;
+  FlowCursor<A, E>? _active;
+  var _recovered = false;
+
+  @override
+  Effect<Option<A>, E> next() => Effect.defer(() {
+    final active = _active;
+    if (active != null) {
+      final pull = active.next();
+      return _recovered ? pull : pull.catchError(_recoverAndPull);
+    }
+    return Effect.defer(_openUpstream)
+        .flatMap((cursor) {
+          _active = cursor;
+          return cursor.next();
+        })
+        .catchError(_recoverAndPull);
+  });
+
+  Effect<Option<A>, E> _recoverAndPull(E error) {
+    _recovered = true;
+    return Effect.defer(() => _recover(error).open()).flatMap((cursor) {
+      _active = cursor;
+      return cursor.next();
+    });
+  }
+}
+
+final class _TapCursor<A, E> implements _FlowCursor<A, E> {
+  _TapCursor(this._upstream, this._observe);
+
+  final _FlowCursor<A, E> _upstream;
+  final Effect<void, E> Function(A value) _observe;
+
+  @override
+  Effect<Option<A>, E> next() => _upstream.next().flatMap((option) {
+    return switch (option) {
+      Some<A>(:final value) => Effect.defer(() => _observe(value)).map((_) => option),
+      None() => Effect.succeed(const None()),
+    };
+  });
+}
+
+final class _TapErrorCursor<A, E> implements _FlowCursor<A, E> {
+  _TapErrorCursor(this._upstream, this._observe);
+
+  final _FlowCursor<A, E> _upstream;
+  final Effect<void, Never> Function(E error) _observe;
+
+  @override
+  Effect<Option<A>, E> next() => _upstream.next().tapError(_observe);
+}
+
+final class _TapCauseCursor<A, E> implements _FlowCursor<A, E> {
+  _TapCauseCursor(this._upstream, this._observe);
+
+  final _FlowCursor<A, E> _upstream;
+  final Effect<void, Never> Function(Cause<E> cause) _observe;
+
+  @override
+  Effect<Option<A>, E> next() => _upstream.next().tapCause(_observe);
+}
+
+final class _ExitHookCursor<A, E> implements _FlowCursor<A, E>, _FlowCursorFinalizer<E> {
+  _ExitHookCursor(this._upstream, this.finalizer);
+
+  final _FlowCursor<A, E> _upstream;
+
+  @override
+  final Effect<void, Never> Function(Exit<void, E> exit) finalizer;
+
+  @override
+  Effect<Option<A>, E> next() => _upstream.next();
 }
 
 final class _ConcatMapCursor<A, B, E> implements _FlowCursor<B, E> {
