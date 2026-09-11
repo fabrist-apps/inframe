@@ -35,10 +35,18 @@ typedef ErrorHandler = FutureOr<Response> Function(
 /// Observes an unexpected runtime failure.
 typedef ErrorReporter = void Function(Object error, StackTrace stackTrace);
 
-/// Runs application work for the lifetime of an upgraded WebSocket session.
+/// Runs application work for the full lifetime of an upgraded WebSocket.
+///
+/// Inlet closes the socket when this callback completes. Keep the returned
+/// future pending while application code uses the session.
 typedef WebSocketCallback = FutureOr<void> Function(WebSocket socket);
 
 /// Selects one of the subprotocols offered by a WebSocket client.
+///
+/// Inlet invokes the selector once with an immutable ordered list, including
+/// an empty list when the client offered no protocols. Return `null` to select
+/// none, return an offered value, or throw [WebSocketException] to reject the
+/// handshake with the default status 400 response.
 typedef WebSocketProtocolSelector = FutureOr<String?> Function(List<String> offered);
 
 /// An application that dispatches registered routes in process or over HTTP.

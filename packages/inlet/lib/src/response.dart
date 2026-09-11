@@ -12,7 +12,7 @@ final class ResponseBodyLimitExceededException implements Exception {
   String toString() => 'ResponseBodyLimitExceededException: Body exceeds $maxBytes bytes.';
 }
 
-/// A buffered, streamed, or server-sent event response.
+/// A content response or an inspectable WebSocket upgrade intent.
 final class Response {
   Response._({
     required this.statusCode,
@@ -93,6 +93,23 @@ final class Response {
   );
 
   /// Creates an inspectable intent to upgrade a GET request to WebSocket.
+  ///
+  /// Network delivery requires a valid WebSocket handshake. [selectProtocol]
+  /// runs before the upgrade, while [onConnect] owns the complete upgraded
+  /// session. Inlet closes with code 1000 when the callback completes and
+  /// reports then closes with 1011 when it fails, unless callback code already
+  /// selected a close reason.
+  ///
+  /// [maxFrameBytes] limits one incoming frame's uncompressed payload through
+  /// Dart's transport. It does not bound a fragmented message or total
+  /// connection memory. Compression is disabled unless [compression] enables
+  /// it. The application owns origin policy, message protocols, outgoing queue
+  /// limits, slow clients, and coordinated shutdown.
+  ///
+  /// In process this remains an inspectable intent: no handshake is parsed and
+  /// neither callback runs. Body access throws [StateError]. Application
+  /// headers are visible, but `sec-websocket-*` headers are handshake-owned and
+  /// rejected.
   factory Response.webSocket({
     required WebSocketCallback onConnect,
     Headers headers = const Headers.empty(),
@@ -142,6 +159,8 @@ final class Response {
   _Body get _body => _delivery.body;
 
   /// The body stream, claimed when it is first listened to.
+  ///
+  /// Accessing the body of a WebSocket upgrade intent throws [StateError].
   Stream<List<int>> get body {
     if (isWebSocketUpgrade) {
       throw StateError('A WebSocket upgrade response has no body.');
@@ -174,6 +193,8 @@ final class Response {
         );
 
   /// Buffers the body once and returns a private byte copy.
+  ///
+  /// A WebSocket upgrade intent has no body and throws [StateError].
   Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
     if (isWebSocketUpgrade) {
       throw StateError('A WebSocket upgrade response has no body.');

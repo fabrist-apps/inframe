@@ -52,6 +52,7 @@ void main() {
         'sec-websocket-accept',
         'sec-websocket-extensions',
         'sec-websocket-protocol',
+        'sec-websocket-custom',
       ]) {
         final headers = Headers.from({
           name: ['value'],

@@ -109,6 +109,34 @@ void main() {
       expect(reports, isEmpty);
     });
 
+    test('should return 405 instead of upgrading a HEAD fallback', () async {
+      var selectorCalls = 0;
+      var sessionCalls = 0;
+      final application = Inlet()
+        ..get('/chat', (_, _) {
+          return Response.webSocket(
+            selectProtocol: (_) {
+              selectorCalls++;
+              return null;
+            },
+            onConnect: (_) => sessionCalls++,
+          );
+        });
+      final server = await application.serve(port: 0);
+      addTearDown(() => server.close(force: true));
+      final client = HttpClient();
+      addTearDown(() => client.close(force: true));
+
+      final request = await client.head(server.address.address, server.port, '/chat');
+      final response = await request.close();
+      await response.drain<void>();
+
+      expect(response.statusCode, HttpStatus.methodNotAllowed);
+      expect(response.headers.value(HttpHeaders.allowHeader), 'GET');
+      expect(selectorCalls, 0);
+      expect(sessionCalls, 0);
+    });
+
     test('should let origin policy reject before upgrading', () async {
       var callbackCalls = 0;
       final application = Inlet()

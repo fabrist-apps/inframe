@@ -1,6 +1,6 @@
 # Inlet
 
-Inlet routes the same Dart handler in process or through an HTTP/TLS listener. It provides immutable request metadata, scoped middleware, bounded body buffering, lazy byte streams, and server-sent events without application-level retries or automatic compression.
+Inlet routes the same Dart handler in process or through an HTTP/TLS listener. It provides immutable request metadata, scoped middleware, bounded body buffering, lazy byte streams, server-sent events, and WebSocket sessions without application-level retries or automatic compression.
 
 ## JSON endpoint
 
@@ -80,6 +80,50 @@ The event producer owns heartbeat timing, replay and `Last-Event-ID` handling, e
 
 HEAD returns the SSE headers without subscribing to the source. Closing an untouched response also avoids subscription. Return an ordinary `Response.empty()` with status 204 when an EventSource client should stop reconnecting.
 
+## WebSocket sessions
+
+Return `Response.webSocket` from a GET route. The callback owns the complete session and must remain pending while application code uses the socket:
+
+```dart
+import 'dart:io';
+
+import 'package:inlet/inlet.dart';
+
+final sessions = <WebSocket>{};
+
+final app = Inlet()
+  ..get('/chat', (_, request) {
+    if (request.headers['origin'] != 'https://app.example.com') {
+      return Response.empty(status: HttpStatus.forbidden);
+    }
+    return Response.webSocket(
+      selectProtocol: (offered) {
+        if (offered.contains('chat.v1')) return 'chat.v1';
+        throw const WebSocketException('chat.v1 is required.');
+      },
+      maxFrameBytes: 64 * 1024,
+      onConnect: (socket) async {
+        sessions.add(socket);
+        try {
+          await socket.forEach(socket.add);
+        } finally {
+          sessions.remove(socket);
+        }
+      },
+    );
+  });
+```
+
+Inlet invokes a supplied selector once with an immutable ordered list, including an empty list. Return `null` to negotiate no subprotocol. A selected value must exactly match an offered token. Invalid offered tokens and a selector's `WebSocketException` default to empty 400 responses; unoffered results and other selector failures use the normal error boundary and default to 500. `onError` can replace a preflight rejection with an ordinary response, but cannot recursively return another upgrade intent.
+
+Compression is off by default. `maxFrameBytes` defaults to 1 MiB and controls Dart's incoming uncompressed frame payload limit. It is not a total fragmented-message or connection-memory limit because Dart may assemble messages before delivering them.
+
+When `onConnect` completes, Inlet closes an open socket with code 1000. If it fails, Inlet reports the error and closes an open socket with 1011. Cleanup does not overwrite a close code or reason already chosen by callback code. Returning while another owner continues to use the socket is unsupported because callback completion ends the session.
+
+Middleware has already unwound when `onConnect` starts, so acquire and release session resources inside the callback. `InletServer.close()`, including forced close, does not close or wait for upgraded sockets. Track them in an application registry when coordinated shutdown is required. Origin checks, application message protocols, outgoing queue limits, slow-client policy, and shutdown deadlines remain application responsibilities.
+
+In-process dispatch returns the same intent without parsing a handshake or invoking the selector or session callback. It has status 101 and `isWebSocketUpgrade == true`. Its application headers remain inspectable, while body access and buffering throw `StateError`; `sec-websocket-*` response headers are rejected because Dart owns them. Closing an unused intent is side-effect free. A HEAD fallback to a GET handler that returns an intent becomes an empty 405 response with `Allow: GET`.
+
 ## Routes and middleware
 
 Literal segments take precedence over `:parameters`, then final `*wildcards`. Strict routing distinguishes a trailing slash; create `Inlet(strict: false)` to ignore one trailing slash. Mount a prepared child router with `route`:
@@ -120,7 +164,7 @@ Malformed UTF-8 or JSON maps to an empty 400 response. A selected request limit 
 
 ## Public API
 
-`package:inlet/inlet.dart` exposes `Inlet`, `Router`, `Request`, `Response`, `SseEvent`, `Headers`, `ConnectionInfo`, `InletServer`, the handler and middleware callback types, and the request/response body-limit exceptions. WebSockets are not part of this API.
+`package:inlet/inlet.dart` exposes `Inlet`, `Router`, `Request`, `Response`, `SseEvent`, `Headers`, `ConnectionInfo`, `InletServer`, the handler, middleware, WebSocket callback types, and the request/response body-limit exceptions.
 
 ## Run the package
 
@@ -130,6 +174,7 @@ From `packages/inlet` in the repository workspace:
 dart run example/inlet_example.dart
 dart run example/stream_transfers.dart
 dart run example/live_events.dart
+dart run example/web_socket_chat.dart
 dart test
 dart analyze --fatal-infos
 ```

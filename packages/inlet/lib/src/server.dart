@@ -21,7 +21,10 @@ final class InletServer {
   Future<void>? _closeFuture;
   bool _forced = false;
 
-  /// Stops request admission, optionally closing active connections.
+  /// Stops request admission, optionally closing active HTTP connections.
+  ///
+  /// Upgraded WebSockets are detached from the listener. This method neither
+  /// closes them nor waits for their session callbacks.
   Future<void> close({bool force = false}) {
     _adapter.beginClosing(force: force);
     if (force && !_forced) {
