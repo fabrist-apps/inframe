@@ -479,6 +479,209 @@ void main() {
       expect(() => fixture.cache.values, throwsStateError);
       expect(() => fixture.cache.entries, throwsStateError);
     });
+
+    test('should keep a set value when an older lookup completes', () async {
+      final clock = FakeClock();
+      final lookupStarted = Completer<void>();
+      final lookupGate = Completer<int>();
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
+        lookup: (_) => Effect.tryFuture<int, String>(
+          () {
+            lookupStarted.complete();
+            return lookupGate.future;
+          },
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final oldWaiter = caller.fork(fixture.cache.get('key'));
+      await lookupStarted.future;
+
+      await fixture.cache.set('key', 2).runFuture();
+      lookupGate.complete(1);
+
+      expect((await oldWaiter.join() as Succeeded<int, String>).value, 1);
+      expect(await fixture.cache.get('key').runFuture(), 2);
+      clock.advanceMonotonic(const Duration(seconds: 5));
+      expect(await fixture.cache.getOption('key').runFuture(), isA<None>());
+    });
+
+    test('should let old waiters finish without repopulating an invalidated key', () async {
+      final gates = [Completer<int>(), Completer<int>()];
+      var lookups = 0;
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (_) => Effect.tryFuture<int, String>(
+          () => gates[lookups++].future,
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final oldWaiter = caller.fork(fixture.cache.get('key'));
+      await _flushMicrotasks();
+
+      await fixture.cache.invalidate('key').runFuture();
+      final currentWaiter = caller.fork(fixture.cache.get('key'));
+      await _flushMicrotasks();
+      gates[1].complete(2);
+      expect((await currentWaiter.join() as Succeeded<int, String>).value, 2);
+      gates[0].complete(1);
+
+      expect((await oldWaiter.join() as Succeeded<int, String>).value, 1);
+      expect(await fixture.cache.get('key').runFuture(), 2);
+      expect(lookups, 2);
+    });
+
+    test('should invalidate ready and pending generations together', () async {
+      final pending = Completer<int>();
+      final lookups = <String, int>{};
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (key) => Effect.defer(() {
+          lookups.update(key, (count) => count + 1, ifAbsent: () => 1);
+          return key == 'pending'
+              ? Effect.tryFuture<int, String>(
+                  () => pending.future,
+                  onError: (error, _) => '$error',
+                )
+              : Effect.succeed(key.codeUnitAt(0));
+        }),
+      );
+      addTearDown(fixture.close);
+      await fixture.cache.get('ready').runFuture();
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final oldPending = caller.fork(fixture.cache.get('pending'));
+      await _flushMicrotasks();
+
+      await fixture.cache.invalidateAll().runFuture();
+      expect(fixture.cache.size, 0);
+      expect(await fixture.cache.get('ready').runFuture(), 'ready'.codeUnitAt(0));
+      pending.complete(7);
+
+      expect((await oldPending.join() as Succeeded<int, String>).value, 7);
+      expect(await fixture.cache.getOption('pending').runFuture(), isA<None>());
+      expect(lookups, {'ready': 2, 'pending': 1});
+    });
+
+    test('should apply invalidateWhere only to ready unexpired entries', () async {
+      final clock = FakeClock();
+      final pending = Completer<int>();
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        expiry: CacheExpiry.byValue(
+          (_, value) => Duration(seconds: value == 3 ? 1 : 10),
+        ),
+        lookup: (key) => key == 'pending'
+            ? Effect.tryFuture<int, String>(
+                () => pending.future,
+                onError: (error, _) => '$error',
+              )
+            : Effect.succeed(int.parse(key)),
+      );
+      addTearDown(fixture.close);
+      await fixture.cache.get('1').runFuture();
+      await fixture.cache.get('2').runFuture();
+      await fixture.cache.get('3').runFuture();
+      final caller = Runtime();
+      addTearDown(caller.close);
+      caller.fork(fixture.cache.get('pending'));
+      await _flushMicrotasks();
+      clock.advanceMonotonic(const Duration(seconds: 1));
+      final inspected = <(String, int)>[];
+
+      await fixture.cache.invalidateWhere((key, value) {
+        inspected.add((key, value));
+        return value.isEven;
+      }).runFuture();
+
+      expect(inspected, [('1', 1), ('2', 2)]);
+      expect(await fixture.cache.containsKey('1').runFuture(), isTrue);
+      expect(await fixture.cache.containsKey('2').runFuture(), isFalse);
+      expect(await fixture.cache.containsKey('3').runFuture(), isFalse);
+      expect(await fixture.cache.containsKey('pending').runFuture(), isFalse);
+    });
+
+    test('should protect a queued invalidated generation before it starts', () async {
+      final activeGate = Completer<int>();
+      final oldGate = Completer<int>();
+      final currentGate = Completer<int>();
+      var keyLookups = 0;
+      final started = <String>[];
+      final fixture = await _CacheFixture.start<int>(
+        concurrency: 1,
+        lookup: (key) => Effect.tryFuture<int, String>(
+          () {
+            started.add(key);
+            if (key == 'active') return activeGate.future;
+            keyLookups += 1;
+            return keyLookups == 1 ? oldGate.future : currentGate.future;
+          },
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final active = caller.fork(fixture.cache.get('active'));
+      final oldWaiter = caller.fork(fixture.cache.get('key'));
+      await _flushMicrotasks();
+      await fixture.cache.invalidate('key').runFuture();
+      final currentWaiter = caller.fork(fixture.cache.get('key'));
+
+      activeGate.complete(0);
+      await active.join();
+      await _flushMicrotasks();
+      expect(started, ['active', 'key']);
+      oldGate.complete(1);
+      expect((await oldWaiter.join() as Succeeded<int, String>).value, 1);
+      await _flushMicrotasks();
+      expect(started, ['active', 'key', 'key']);
+      expect(await fixture.cache.getOption('key').runFuture(), isA<None>());
+      currentGate.complete(2);
+
+      expect((await currentWaiter.join() as Succeeded<int, String>).value, 2);
+      expect(await fixture.cache.get('key').runFuture(), 2);
+    });
+
+    test('should reject mutation after scope closure', () async {
+      final fixture = await _CacheFixture.start<int>(
+        lookup: (_) => Effect.succeed(1),
+      );
+      await fixture.close();
+
+      final exits = await Future.wait([
+        fixture.cache.set('key', 1).runFutureExit(),
+        fixture.cache.invalidate('key').runFutureExit(),
+        fixture.cache.invalidateAll().runFutureExit(),
+        fixture.cache.invalidateWhere((_, _) => true).runFutureExit(),
+      ]);
+
+      for (final exit in exits) {
+        expect((exit as Failed<void, Never>).cause, isA<Defect<Never>>());
+      }
+    });
+
+    test('should apply capacity without disposing values supplied through set', () async {
+      final first = _BorrowedValue();
+      final second = _BorrowedValue();
+      final fixture = await _CacheFixture.start<_BorrowedValue>(
+        capacity: 1,
+        lookup: (_) => Effect.succeed(_BorrowedValue()),
+      );
+      addTearDown(fixture.close);
+
+      await fixture.cache.set('first', first).runFuture();
+      await fixture.cache.set('second', second).runFuture();
+
+      expect(fixture.cache.keys, ['second']);
+      expect(first.closed, isFalse);
+      expect(second.closed, isFalse);
+    });
   });
 }
 

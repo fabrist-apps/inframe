@@ -142,6 +142,46 @@ final class Cache<K, A, E> {
     return Succeeded(_readyEntry(key, touch: false) != null);
   });
 
+  /// Replaces [key] with a successful [value] under a new generation.
+  Effect<void, Never> set(K key, A value) => EffectAccess.create((_) async {
+    _ensureOpen();
+    _advanceGeneration(key);
+    _retain(key, value);
+    return const Succeeded(null);
+  });
+
+  /// Removes [key] and prevents older loads from repopulating it.
+  Effect<void, Never> invalidate(K key) => EffectAccess.create((_) async {
+    _ensureOpen();
+    _advanceGeneration(key);
+    return const Succeeded(null);
+  });
+
+  /// Removes every ready value and invalidates every known pending generation.
+  Effect<void, Never> invalidateAll() => EffectAccess.create((_) async {
+    _ensureOpen();
+    <K>{
+      ..._generations.keys,
+      ..._entries.keys,
+      ..._loads.values.map((load) => load.key),
+    }.forEach(_advanceGeneration);
+    return const Succeeded(null);
+  });
+
+  /// Invalidates ready entries matching [predicate] without inspecting loads.
+  Effect<void, Never> invalidateWhere(
+    bool Function(K key, A value) predicate,
+  ) => EffectAccess.create((_) async {
+    _ensureOpen();
+    _removeExpiredEntries();
+    _entries.entries
+        .where((entry) => predicate(entry.key, entry.value.value))
+        .map((entry) => entry.key)
+        .toList()
+        .forEach(_advanceGeneration);
+    return const Succeeded(null);
+  });
+
   /// The number of ready unexpired entries.
   int get size {
     _ensureOpen();
@@ -272,6 +312,11 @@ final class Cache<K, A, E> {
   void _removeExpiredEntries() {
     final now = _ownerExecution.clock.monotonic();
     _entries.removeWhere((_, entry) => now >= entry.expiresAt);
+  }
+
+  void _advanceGeneration(K key) {
+    _generations[key] = (_generations[key] ?? 0) + 1;
+    _entries.remove(key);
   }
 
   void _drainPendingLoads() {
