@@ -14,6 +14,7 @@ import 'package:conflux/src/flow/concurrent.dart';
 import 'package:conflux/src/flow/coordination_adapter.dart';
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:conflux/src/flow/sharing.dart';
 import 'package:conflux/src/flow/stream_adapter.dart';
 import 'package:context/context.dart';
 
@@ -369,6 +370,33 @@ final class Flow<A, E> {
         onOverflow: onOverflow,
       ),
     );
+  }
+
+  /// Shares one upstream connection while at least one subscriber is attached.
+  ///
+  /// Each subscriber has a [capacity]-bounded live buffer. [replay] retains at
+  /// most that many past values for subscribers joining the current connection.
+  /// Completion or failure and replay remain available until the last attached
+  /// subscriber scope closes. A later subscriber starts a fresh connection only
+  /// after prior upstream cleanup completes.
+  Flow<A, E> share({
+    int capacity = 16,
+    int replay = 0,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    if (replay < 0) {
+      throw ArgumentError.value(replay, 'replay', 'Must not be negative.');
+    }
+    final shared = SharedFlowSource.create<A, E>(
+      open,
+      capacity: capacity,
+      replay: replay,
+      overflow: overflow,
+      onOverflow: onOverflow,
+    );
+    return Flow._(shared);
   }
 
   /// Runs source acquisition and every pull with [context].
