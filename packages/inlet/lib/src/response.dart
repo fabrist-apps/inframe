@@ -12,7 +12,7 @@ final class ResponseBodyLimitExceededException implements Exception {
   String toString() => 'ResponseBodyLimitExceededException: Body exceeds $maxBytes bytes.';
 }
 
-/// A buffered, streamed, or server-sent event response.
+/// A content response or an inspectable WebSocket upgrade intent.
 final class Response {
   Response._({
     required this.statusCode,
@@ -92,6 +92,47 @@ final class Response {
     delivery: _SseDelivery(_Body(events.map((event) => event._encoded))),
   );
 
+  /// Creates an inspectable intent to upgrade a GET request to WebSocket.
+  ///
+  /// Network delivery requires a valid WebSocket handshake. [selectProtocol]
+  /// runs before the upgrade, while [onConnect] owns the complete upgraded
+  /// session. Inlet closes with code 1000 when the callback completes and
+  /// reports then closes with 1011 when it fails, unless callback code already
+  /// selected a close reason.
+  ///
+  /// [maxFrameBytes] limits one incoming frame's uncompressed payload through
+  /// Dart's transport. It does not bound a fragmented message or total
+  /// connection memory. Compression is disabled unless [compression] enables
+  /// it. The application owns origin policy, message protocols, outgoing queue
+  /// limits, slow clients, and coordinated shutdown.
+  ///
+  /// In process this remains an inspectable intent: no handshake is parsed and
+  /// neither callback runs. Body access throws [StateError]. Application
+  /// headers are visible, but `sec-websocket-*` headers are handshake-owned and
+  /// rejected.
+  factory Response.webSocket({
+    required WebSocketCallback onConnect,
+    Headers headers = const Headers.empty(),
+    WebSocketProtocolSelector? selectProtocol,
+    int maxFrameBytes = _defaultBodyLimit,
+    CompressionOptions compression = CompressionOptions.compressionOff,
+  }) {
+    if (maxFrameBytes <= 0) {
+      throw ArgumentError.value(maxFrameBytes, 'maxFrameBytes', 'must be positive');
+    }
+    return Response._(
+      statusCode: HttpStatus.switchingProtocols,
+      headers: _webSocketHeaders(headers),
+      delivery: _WebSocketDelivery(
+        _Body.bytes(const []),
+        onConnect: onConnect,
+        selectProtocol: selectProtocol,
+        maxFrameBytes: maxFrameBytes,
+        compression: compression,
+      ),
+    );
+  }
+
   factory Response._create({required int status, required Headers headers, required _Body body}) {
     _validateStatus(status);
     _validateResponseHeaders(headers);
@@ -112,16 +153,27 @@ final class Response {
   final _ResponseDelivery _delivery;
   final bool _suppressBody;
 
+  /// Whether this response represents a WebSocket upgrade intent.
+  bool get isWebSocketUpgrade => _delivery is _WebSocketDelivery;
+
   _Body get _body => _delivery.body;
 
   /// The body stream, claimed when it is first listened to.
-  Stream<List<int>> get body => _suppressBody ? const Stream.empty() : _body.stream;
+  ///
+  /// Accessing the body of a WebSocket upgrade intent throws [StateError].
+  Stream<List<int>> get body {
+    if (isWebSocketUpgrade) {
+      throw StateError('A WebSocket upgrade response has no body.');
+    }
+    return _suppressBody ? const Stream.empty() : _body.stream;
+  }
 
   /// Creates a metadata view sharing this response's body owner.
   Response withHeaders(Headers headers) {
     final validatedHeaders = switch (_delivery) {
       _OrdinaryDelivery() => _validatedResponseHeaders(headers),
       _SseDelivery() => _sseHeaders(headers),
+      _WebSocketDelivery() => _webSocketHeaders(headers),
     };
     return Response._(
       statusCode: statusCode,
@@ -141,7 +193,12 @@ final class Response {
         );
 
   /// Buffers the body once and returns a private byte copy.
+  ///
+  /// A WebSocket upgrade intent has no body and throws [StateError].
   Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
+    if (isWebSocketUpgrade) {
+      throw StateError('A WebSocket upgrade response has no body.');
+    }
     _validateMaxBytes(maxBytes);
     if (_suppressBody) {
       return Uint8List(0);
@@ -177,6 +234,21 @@ final class _OrdinaryDelivery extends _ResponseDelivery {
 
 final class _SseDelivery extends _ResponseDelivery {
   const _SseDelivery(super.body);
+}
+
+final class _WebSocketDelivery extends _ResponseDelivery {
+  const _WebSocketDelivery(
+    super.body, {
+    required this.onConnect,
+    required this.selectProtocol,
+    required this.maxFrameBytes,
+    required this.compression,
+  });
+
+  final WebSocketCallback onConnect;
+  final WebSocketProtocolSelector? selectProtocol;
+  final int maxFrameBytes;
+  final CompressionOptions compression;
 }
 
 Headers _withDefaultContentType(Headers headers, String? contentType) {
@@ -234,4 +306,14 @@ Headers _sseHeaders(Headers headers) {
     result = result.set(HttpHeaders.cacheControlHeader, 'no-cache');
   }
   return result;
+}
+
+Headers _webSocketHeaders(Headers headers) {
+  _validateResponseHeaders(headers);
+  for (final name in headers.toMap().keys) {
+    if (name.startsWith('sec-websocket-')) {
+      throw ArgumentError.value(name, 'headers', 'is owned by the WebSocket handshake');
+    }
+  }
+  return headers;
 }
