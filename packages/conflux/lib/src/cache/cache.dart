@@ -8,39 +8,21 @@ import 'package:conflux/src/effect/execution.dart';
 import 'package:conflux/src/effect/exit.dart';
 
 /// Selects how long successful Cache values remain ready.
-sealed class CacheExpiry<K, A> {
-  const CacheExpiry._();
+final class CacheExpiry<K, A> {
+  const CacheExpiry._(this._durationFor);
 
   /// Uses one [duration] for every successful value.
   static CacheExpiry<K, A> fixed<K, A>(Duration duration) {
     _requireNonNegativeExpiry(duration);
-    return _FixedCacheExpiry(duration);
+    return CacheExpiry._((_, _) => duration);
   }
 
   /// Computes each successful value's lifetime from its key and value.
   static CacheExpiry<K, A> byValue<K, A>(
     Duration Function(K key, A value) expiry,
-  ) => _ValueCacheExpiry(expiry);
+  ) => CacheExpiry._(expiry);
 
-  Duration _durationFor(K key, A value);
-}
-
-final class _FixedCacheExpiry<K, A> extends CacheExpiry<K, A> {
-  const _FixedCacheExpiry(this.duration) : super._();
-
-  final Duration duration;
-
-  @override
-  Duration _durationFor(K key, A value) => duration;
-}
-
-final class _ValueCacheExpiry<K, A> extends CacheExpiry<K, A> {
-  const _ValueCacheExpiry(this.expiry) : super._();
-
-  final Duration Function(K key, A value) expiry;
-
-  @override
-  Duration _durationFor(K key, A value) => expiry(key, value);
+  final Duration Function(K key, A value) _durationFor;
 }
 
 /// A scoped loading cache that retains successful lookup results.
@@ -118,6 +100,10 @@ final class Cache<K, A, E> {
   final CacheExpiry<K, A> _expiry;
   final Effect<A, E> Function(K key) _lookup;
   final EffectExecution _ownerExecution;
+
+  // Ready entries are ordered from least to most recently used. A load stays
+  // in _loads from admission through completion, including while queued. Its
+  // captured generation is the only authority to publish a successful value.
   final LinkedHashMap<K, _CacheEntry<A>> _entries = LinkedHashMap();
   final Map<K, int> _generations = {};
   final Map<(K, int), _CacheLoad<K, A, E>> _loads = {};
@@ -131,10 +117,7 @@ final class Cache<K, A, E> {
     final ready = _readyEntry(key, touch: true);
     if (ready != null) return Future.value(Succeeded(ready.value));
 
-    final generation = _generations[key] ?? 0;
-    final loadKey = (key, generation);
-    final load = _loads[loadKey] ?? _startLoad(key, generation);
-    return _awaitLoad(load, caller);
+    return _awaitLoad(_currentLoad(key), caller);
   });
 
   /// Loads [key] again while leaving an unexpired value readable.
@@ -143,10 +126,7 @@ final class Cache<K, A, E> {
   /// failed refresh leaves the previous unexpired value and deadline intact.
   Effect<A, E> refresh(K key) => EffectAccess.create((caller) {
     _ensureOpen();
-    final generation = _generations[key] ?? 0;
-    final loadKey = (key, generation);
-    final load = _loads[loadKey] ?? _startLoad(key, generation);
-    return _awaitLoad(load, caller);
+    return _awaitLoad(_currentLoad(key), caller);
   });
 
   /// Inspects a ready value without starting or awaiting a lookup.
@@ -230,6 +210,11 @@ final class Cache<K, A, E> {
     return List.unmodifiable(
       _entries.entries.map((entry) => MapEntry(entry.key, entry.value.value)),
     );
+  }
+
+  _CacheLoad<K, A, E> _currentLoad(K key) {
+    final generation = _generations[key] ?? 0;
+    return _loads[(key, generation)] ?? _startLoad(key, generation);
   }
 
   _CacheLoad<K, A, E> _startLoad(K key, int generation) {
