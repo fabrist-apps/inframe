@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:inlet/inlet.dart';
 import 'package:test/test.dart';
 
+import 'wire_client.dart';
+
 void main() {
   group('Inlet HTTP streaming', () {
     test('should deliver response chunks before the source completes', () async {
@@ -52,7 +54,7 @@ void main() {
         });
       final server = await application.serve(port: 0);
       addTearDown(() => server.close(force: true));
-      final wire = await _WireClient.connect(server);
+      final wire = await WireClient.connect(server);
       addTearDown(wire.close);
 
       wire.send(
@@ -80,7 +82,7 @@ void main() {
         });
       final server = await application.serve(port: 0);
       addTearDown(() => server.close(force: true));
-      final wire = await _WireClient.connect(server);
+      final wire = await WireClient.connect(server);
       addTearDown(wire.close);
 
       wire.send(
@@ -104,7 +106,7 @@ void main() {
         });
       final server = await application.serve(port: 0);
       addTearDown(() => server.close(force: true));
-      final wire = await _WireClient.connect(server);
+      final wire = await WireClient.connect(server);
       addTearDown(wire.close);
 
       wire.send(
@@ -143,7 +145,7 @@ void main() {
       final server = await application.serve(port: 0);
       addTearDown(() => server.close(force: true));
       addTearDown(() => bodySubscription?.cancel() ?? Future<void>.value());
-      final wire = await _WireClient.connect(server);
+      final wire = await WireClient.connect(server);
       addTearDown(wire.close);
 
       wire.send(
@@ -234,60 +236,4 @@ void main() {
       expect(hookCalls, 0);
     });
   });
-}
-
-final class _WireClient {
-  _WireClient._(this._socket) {
-    _socket.listen(
-      (chunk) {
-        _bytes.addAll(chunk);
-        if (!_changed.isCompleted) {
-          _changed.complete();
-        }
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        if (!_changed.isCompleted) {
-          _changed.completeError(error, stackTrace);
-        }
-      },
-      onDone: () {
-        _done = true;
-        if (!_changed.isCompleted) {
-          _changed.complete();
-        }
-      },
-    );
-  }
-
-  static Future<_WireClient> connect(InletServer server) async =>
-      _WireClient._(await Socket.connect(server.address, server.port));
-
-  final Socket _socket;
-  final List<int> _bytes = [];
-  Completer<void> _changed = Completer<void>();
-  bool _done = false;
-
-  String get text => latin1.decode(_bytes);
-
-  void send(String value) {
-    _socket.add(latin1.encode(value));
-    unawaited(_socket.flush());
-  }
-
-  Future<void> waitFor(bool Function(String value) predicate) async {
-    while (!predicate(text)) {
-      if (_done) {
-        fail('Connection closed before the expected response arrived:\n$text');
-      }
-      final changed = _changed;
-      await changed.future.timeout(const Duration(seconds: 2));
-      if (identical(changed, _changed)) {
-        _changed = Completer<void>();
-      }
-    }
-  }
-
-  Future<void> close() async {
-    await _socket.close();
-  }
 }

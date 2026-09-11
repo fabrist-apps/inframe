@@ -13,6 +13,9 @@ final class JsonAdd extends JsonPatchOperation {
   /// Creates an add operation and captures an immutable copy of [value].
   new(super.path, Object? value) : value = _freezeJson(value, location: r'$value');
 
+  // Internal callers have already captured a deeply immutable JSON value.
+  const new _frozen(super.path, this.value);
+
   /// The value to add.
   final Object? value;
 }
@@ -28,6 +31,9 @@ final class JsonReplace extends JsonPatchOperation {
   /// Creates a replace operation and captures an immutable copy of [value].
   new(super.path, Object? value) : value = _freezeJson(value, location: r'$value');
 
+  // Internal callers have already captured a deeply immutable JSON value.
+  const new _frozen(super.path, this.value);
+
   /// The replacement value.
   final Object? value;
 }
@@ -36,6 +42,9 @@ final class JsonReplace extends JsonPatchOperation {
 final class JsonTest extends JsonPatchOperation {
   /// Creates a test operation and captures an immutable copy of [value].
   new(super.path, Object? value) : value = _freezeJson(value, location: r'$value');
+
+  // Internal callers have already captured a deeply immutable JSON value.
+  const new _frozen(super.path, this.value);
 
   /// The expected value.
   final Object? value;

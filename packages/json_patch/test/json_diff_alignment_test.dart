@@ -115,17 +115,18 @@ void main() {
       expect(_operationAt(patch, '/later/0'), isA<JsonReplace>());
     });
 
-    test('should round-trip nested aligned gaps after releasing parent tables', () {
+    test('should recursively edit nested gaps around aligned values', () {
       final source = <Object?>[
         <Object?>[1, 2, 3],
+        'anchor',
         <String, Object?>{
           'items': <Object?>['a', 'b'],
         },
         true,
       ];
       final target = <Object?>[
-        false,
         <Object?>[1, 3],
+        'anchor',
         <String, Object?>{
           'items': <Object?>['a', 'new', 'b'],
         },
@@ -134,6 +135,10 @@ void main() {
 
       final patch = JsonPatch.diff(source, target);
 
+      expect(patch.toJson(), <Object?>[
+        <String, Object?>{'op': 'remove', 'path': '/0/1'},
+        <String, Object?>{'op': 'add', 'path': '/2/items/1', 'value': 'new'},
+      ]);
       expect(JsonPatch.patch(source, patch), target);
     });
   });

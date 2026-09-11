@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:context/context.dart';
 
 import 'package:inlet/src/headers.dart';
+import 'package:inlet/src/http_token.dart';
 
 part 'body.dart';
 part 'middleware.dart';
@@ -52,11 +53,9 @@ typedef WebSocketProtocolSelector = FutureOr<String?> Function(List<String> offe
 /// An application that dispatches registered routes in process or over HTTP.
 final class Inlet extends Router {
   /// Creates an editable application.
-  // `Router` keeps its strictness private, so a super parameter would expose `_strict`.
-  // ignore: use_super_parameters
   Inlet({Context? context, bool strict = true, this.onError, this.onReportError})
     : context = context ?? Context(),
-      super._(strict: strict);
+      super._(strict);
 
   /// The port used by [serve] when no port is supplied.
   static const int defaultHttpPort = 8080;

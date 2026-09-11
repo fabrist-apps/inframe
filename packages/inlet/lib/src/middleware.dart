@@ -50,26 +50,6 @@ Future<Response> _runMiddleware(
     }
   }
 
-  return _invokeMiddleware(
-    middleware[index],
-    middleware,
-    terminal,
-    dispatch,
-    context,
-    request,
-    index,
-  );
-}
-
-Future<Response> _invokeMiddleware(
-  Middleware current,
-  List<Middleware> middleware,
-  Handler terminal,
-  _DispatchState dispatch,
-  Context context,
-  Request request,
-  int index,
-) {
   var active = true;
   var called = false;
   var downstreamSettled = false;
@@ -116,7 +96,7 @@ Future<Response> _invokeMiddleware(
 
   late final FutureOr<Response> result;
   try {
-    result = current(context, request, next);
+    result = middleware[index](context, request, next);
   } on Object catch (error, stackTrace) {
     active = false;
     if (called && !downstreamSettled) {

@@ -1,3 +1,5 @@
+import 'package:inlet/src/http_token.dart';
+
 /// An immutable, case-insensitive collection of HTTP header values.
 final class Headers {
   /// Creates empty headers.
@@ -69,7 +71,7 @@ final class Headers {
 }
 
 String _validateName(String name) {
-  if (name.isEmpty || name.codeUnits.any((unit) => !_isTokenCodeUnit(unit))) {
+  if (!isHttpToken(name)) {
     throw ArgumentError.value(name, 'name', 'must be a nonempty HTTP token');
   }
   return name.toLowerCase();
@@ -81,27 +83,4 @@ void _validateValue(String value) {
       throw ArgumentError.value(value, 'value', 'must contain printable ASCII or horizontal tab');
     }
   }
-}
-
-bool _isTokenCodeUnit(int unit) {
-  const separators = <int>{
-    0x28,
-    0x29,
-    0x3c,
-    0x3e,
-    0x40,
-    0x2c,
-    0x3b,
-    0x3a,
-    0x5c,
-    0x22,
-    0x2f,
-    0x5b,
-    0x5d,
-    0x3f,
-    0x3d,
-    0x7b,
-    0x7d,
-  };
-  return unit > 0x20 && unit < 0x7f && !separators.contains(unit);
 }

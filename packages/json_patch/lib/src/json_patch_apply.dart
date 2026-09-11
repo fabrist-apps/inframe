@@ -14,7 +14,11 @@ final class _PatchApplication {
       final operation = patch.operations[index];
       switch (operation) {
         case JsonAdd():
-          _add(operation.path, operation.value, index);
+          _insert(
+            operation.path,
+            _mutableJsonCopy(operation.value, location: r'$operationValue'),
+            index,
+          );
         case JsonRemove():
           _remove(operation.path, index);
         case JsonReplace():
@@ -30,8 +34,9 @@ final class _PatchApplication {
     return root;
   }
 
-  void _add(JsonPointer path, Object? value, int operationIndex) {
-    final inserted = _mutableJsonCopy(value, location: r'$operationValue');
+  // The inserted value is already owned by this application. Add and copy
+  // detach their values first; move transfers a subtree removed from this tree.
+  void _insert(JsonPointer path, Object? inserted, int operationIndex) {
     if (path.segments.isEmpty) {
       root = inserted;
       return;
@@ -44,8 +49,7 @@ final class _PatchApplication {
         final index = _arrayIndex(
           segment,
           length: parent.length,
-          allowEnd: true,
-          allowAppend: true,
+          inserting: true,
           path: path,
           operationIndex: operationIndex,
         );
@@ -62,10 +66,7 @@ final class _PatchApplication {
 
   Object? _remove(JsonPointer path, int operationIndex) {
     if (path.segments.isEmpty) {
-      if (identical(root, JsonAbsent.instance)) {
-        _fail(operationIndex, path, JsonPatchFailure.missingTarget, 'The document root is absent.');
-      }
-      final removed = root;
+      final removed = _existingRoot(path, operationIndex);
       root = JsonAbsent.instance;
       return removed;
     }
@@ -87,9 +88,7 @@ final class _PatchApplication {
   void _replace(JsonPointer path, Object? value, int operationIndex) {
     final replacement = _mutableJsonCopy(value, location: r'$operationValue');
     if (path.segments.isEmpty) {
-      if (identical(root, JsonAbsent.instance)) {
-        _fail(operationIndex, path, JsonPatchFailure.missingTarget, 'The document root is absent.');
-      }
+      _existingRoot(path, operationIndex);
       root = replacement;
       return;
     }
@@ -143,19 +142,23 @@ final class _PatchApplication {
     if (from == path) return;
 
     final value = _remove(from, operationIndex);
-    _add(path, value, operationIndex);
+    _insert(path, value, operationIndex);
   }
 
   void _copy(JsonPointer from, JsonPointer path, int operationIndex) {
     final value = _resolveValue(from, operationIndex);
-    _add(path, value, operationIndex);
+    _insert(path, _mutableJsonCopy(value, location: r'$operationValue'), operationIndex);
   }
 
-  ({Object parent, String segment}) _resolveParent(JsonPointer path, int operationIndex) {
+  Object? _existingRoot(JsonPointer path, int operationIndex) {
     if (identical(root, JsonAbsent.instance)) {
       _fail(operationIndex, path, JsonPatchFailure.missingTarget, 'The document root is absent.');
     }
-    var current = root;
+    return root;
+  }
+
+  ({Object parent, String segment}) _resolveParent(JsonPointer path, int operationIndex) {
+    var current = _existingRoot(path, operationIndex);
     for (final segment in path.segments.take(path.segments.length - 1)) {
       current = switch (current) {
         Map<String, Object?>() => _objectMember(current, segment, path, operationIndex),
@@ -187,10 +190,7 @@ final class _PatchApplication {
 
   Object? _resolveValue(JsonPointer path, int operationIndex) {
     if (path.segments.isEmpty) {
-      if (identical(root, JsonAbsent.instance)) {
-        _fail(operationIndex, path, JsonPatchFailure.missingTarget, 'The document root is absent.');
-      }
-      return root;
+      return _existingRoot(path, operationIndex);
     }
     final (:parent, :segment) = _resolveParent(path, operationIndex);
     return switch (parent) {
@@ -239,11 +239,10 @@ final class _PatchApplication {
     required int length,
     required JsonPointer path,
     required int operationIndex,
-    bool allowEnd = false,
-    bool allowAppend = false,
+    bool inserting = false,
   }) {
     if (segment == '-') {
-      if (allowAppend) return length;
+      if (inserting) return length;
       _fail(
         operationIndex,
         path,
@@ -260,7 +259,7 @@ final class _PatchApplication {
       );
     }
     final index = int.tryParse(segment);
-    final maximum = allowEnd ? length : length - 1;
+    final maximum = inserting ? length : length - 1;
     if (index == null || index < 0 || index > maximum) {
       _fail(
         operationIndex,

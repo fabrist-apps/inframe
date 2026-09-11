@@ -283,7 +283,8 @@ final class _BufferingBody extends _BodyState {
   _BufferingBody(this.maxBytes);
 
   final int maxBytes;
-  final BytesBuilder builder = BytesBuilder();
+  // Each added chunk is already a private, validated copy.
+  final BytesBuilder builder = BytesBuilder(copy: false);
   final Completer<void> settled = Completer<void>.sync();
   final _TrackedSubscription<List<int>> source = _TrackedSubscription<List<int>>();
 

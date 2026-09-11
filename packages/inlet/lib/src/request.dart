@@ -139,8 +139,6 @@ final class Request {
   Future<Object?> json({int maxBytes = _defaultBodyLimit}) async {
     try {
       return jsonDecode(await text(maxBytes: maxBytes));
-    } on MalformedBodyException {
-      rethrow;
     } on FormatException {
       throw const MalformedBodyException();
     }
@@ -165,33 +163,10 @@ final class _RequestExchange {
 }
 
 String _validateMethod(String method) {
-  if (method.isEmpty || method.codeUnits.any((unit) => !_isMethodTokenCodeUnit(unit))) {
+  if (!isHttpToken(method)) {
     throw ArgumentError.value(method, 'method', 'must be a nonempty HTTP token');
   }
   return method;
-}
-
-bool _isMethodTokenCodeUnit(int unit) {
-  const separators = <int>{
-    0x28,
-    0x29,
-    0x3c,
-    0x3e,
-    0x40,
-    0x2c,
-    0x3b,
-    0x3a,
-    0x5c,
-    0x22,
-    0x2f,
-    0x5b,
-    0x5d,
-    0x3f,
-    0x3d,
-    0x7b,
-    0x7d,
-  };
-  return unit > 0x20 && unit < 0x7f && !separators.contains(unit);
 }
 
 Uri _validateUri(Uri uri) {

@@ -280,32 +280,53 @@ void main() {
       expect(await rejected.drain<List<int>>(<int>[]), isEmpty);
     });
 
-    test('should recover SDK failures before the handshake commits', () async {
-      Object? recoveredError;
-      final reports = <Object>[];
-      final application =
-          Inlet(
-            onError: (_, _, error, _) {
-              recoveredError = error;
-              return Response.empty(status: HttpStatus.badGateway);
-            },
-            onReportError: (error, _) => reports.add(error),
-          )..get('/chat', (_, _) {
-            return Response.webSocket(onConnect: (_) {});
-          });
-      final server = await application.serve(port: 0);
-      addTearDown(() => server.close(force: true));
+    for (final selectProtocol in [false, true]) {
+      for (final invalidExtension in [
+        'permessage-deflate; x="',
+        'permessage-deflate; server_max_window_bits=09',
+      ]) {
+        test(
+          'should recover extension preflight failures with protocol selection $selectProtocol: $invalidExtension',
+          () async {
+            Object? recoveredError;
+            var sessionCalls = 0;
+            final reports = <Object>[];
+            final application =
+                Inlet(
+                  onError: (_, _, error, _) {
+                    recoveredError = error;
+                    return Response.empty(status: HttpStatus.badGateway);
+                  },
+                  onReportError: (error, _) => reports.add(error),
+                )..get(
+                  '/chat',
+                  (_, _) => Response.webSocket(
+                    selectProtocol: selectProtocol ? (offered) => offered.first : null,
+                    compression: CompressionOptions.compressionDefault,
+                    onConnect: (_) => sessionCalls++,
+                  ),
+                );
+            final server = await application.serve(port: 0);
+            addTearDown(() => server.close(force: true));
 
-      final response = await _handshake(
-        server,
-        '/chat',
-        extensionHeader: 'permessage-deflate; x="',
-      );
+            final response = await _handshake(
+              server,
+              '/chat',
+              extensionHeader: invalidExtension,
+              protocolHeaders: selectProtocol ? ['chat.v1'] : null,
+            ).timeout(_testTimeout);
 
-      expect(response.statusCode, HttpStatus.badGateway);
-      expect(recoveredError, isA<HttpException>());
-      expect(reports, [same(recoveredError)]);
-    });
+            expect(response.statusCode, HttpStatus.badGateway);
+            expect(
+              recoveredError,
+              invalidExtension.endsWith('09') ? isA<ArgumentError>() : isA<HttpException>(),
+            );
+            expect(reports, [same(recoveredError)]);
+            expect(sessionCalls, 0);
+          },
+        );
+      }
+    }
 
     test('should call an asynchronous selector once with immutable empty offers', () async {
       var selectorCalls = 0;
