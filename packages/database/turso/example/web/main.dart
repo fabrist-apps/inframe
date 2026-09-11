@@ -6,31 +6,61 @@ import 'package:web/web.dart' as web;
 
 const _phaseKey = 'turso-dart-web-verification-phase';
 const _databaseName = 'turso-dart-web-verification.db';
+const _attachedDatabaseName = 'turso-dart-web-attached.db';
+const _boundAttachmentName = 'turso-dart-web-bound-attached.db';
+const _encryptedAttachmentName = 'turso-dart-web-encrypted-attached.db';
+const _memoryMainAttachmentName = 'turso-dart-web-memory-main-attached.db';
+const _uriAttachmentName = 'turso-dart-web-uri attached.db';
+const _ownershipMainName = 'turso-dart-web-ownership-main.db';
+const _sharedAttachmentName = 'turso-dart-web-shared-attached.db';
+const _failedAttachmentName = 'turso-dart-web-failed-attached.db';
+const _contentionMainName = 'turso-dart-web-contention-main.db';
+const _uncertainMainName = 'turso-dart-web-uncertain-main.db';
+const _uncertainAttachmentName = 'turso-dart-web-uncertain-attached.db';
 final _bridge = TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js'));
 
 Future<void> main() async {
+  var stage = 'initial persistence';
   try {
     if (web.window.localStorage.getItem(_phaseKey) == null) {
+      stage = 'write persistent data';
       await _writePersistentData();
+      stage = 'write persistent attachment';
+      await _writePersistentAttachment();
+      stage = 'write encrypted data';
       await _writeEncryptedData();
       web.window.localStorage.setItem(_phaseKey, 'reload');
       web.window.location.reload();
       return;
     }
 
-    await _verifyReloadedData();
-    await _verifyEncryptedData();
-    await _verifyTransactions();
-    await _verifyWorkerDeath();
-    await _verifyCloseFailure();
-    await _verifyLockRelease();
-    await _verifyMemoryDatabase();
-    await _verifyRepresentativeWorkload();
-    await _verifyPlatformFailures();
+    for (final verification in <(String, Future<void> Function())>[
+      ('reloaded data', _verifyReloadedData),
+      ('persistent attachment', _verifyPersistentAttachment),
+      ('bound attachments', _verifyBoundPersistentAttachments),
+      ('encrypted attachment', _verifyEncryptedPersistentAttachment),
+      ('attachment ownership failures', _verifyAttachmentOwnershipFailures),
+      ('attachment contention', _verifyAttachmentContention),
+      ('attachment boundary failures', _verifyAttachmentBoundaryFailures),
+      ('memory-main rejection', _verifyPersistentAttachmentFromMemoryMainIsRejected),
+      ('encrypted main', _verifyEncryptedData),
+      ('transactions', _verifyTransactions),
+      ('worker death', _verifyWorkerDeath),
+      ('close failure', _verifyCloseFailure),
+      ('lock release', _verifyLockRelease),
+      ('memory database', _verifyMemoryDatabase),
+      ('memory attachments', _verifyMemoryAttachments),
+      ('representative workload', _verifyRepresentativeWorkload),
+      ('platform failures', _verifyPlatformFailures),
+    ]) {
+      stage = verification.$1;
+      web.document.body!.textContent = 'RUN\n$stage';
+      await verification.$2();
+    }
     web.window.localStorage.removeItem(_phaseKey);
     web.document.body!.textContent = 'PASS\n${web.window.navigator.userAgent}';
   } on Object catch (error, stackTrace) {
-    web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
+    web.document.body!.textContent = 'FAIL\n$stage\n$error\n$stackTrace';
   }
 }
 
@@ -171,6 +201,14 @@ Future<void> _verifyEncryptedData() async {
         'value',
       );
       _expect(value == 'encrypted with ${cipher.name}', '${cipher.name} data did not persist.');
+      await database.execute("ATTACH DATABASE ':memory:' AS auxiliary");
+      await database.execute('CREATE TABLE auxiliary.items (id INTEGER PRIMARY KEY)');
+      await database.execute('INSERT INTO auxiliary.items VALUES (1)');
+      _expect(
+        (await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
+        '${cipher.name} memory attachment failed.',
+      );
+      await database.execute('DETACH DATABASE auxiliary');
     } finally {
       await database.close();
     }
@@ -275,6 +313,70 @@ Future<void> _writePersistentData() async {
   }
 }
 
+Future<void> _writePersistentAttachment() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  try {
+    await database.query("ATTACH DATABASE '$_attachedDatabaseName' AS auxiliary");
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS auxiliary.items (id INTEGER PRIMARY KEY)',
+    );
+    await database.execute('DELETE FROM auxiliary.items');
+    await database.execute('INSERT INTO auxiliary.items VALUES (1)');
+    _expect(
+      (await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
+      'Persistent browser attachment could not be read.',
+    );
+
+    await database.execute('PRAGMA foreign_keys=ON');
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS auxiliary.parents (id INTEGER PRIMARY KEY)',
+    );
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS auxiliary.children ( '
+      'id INTEGER PRIMARY KEY, '
+      'parent_id INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED)',
+    );
+    await database.execute('DELETE FROM auxiliary.children');
+    await database.execute('DELETE FROM auxiliary.parents');
+    await database.execute('INSERT INTO auxiliary.parents VALUES (1)');
+    await database.execute('INSERT INTO auxiliary.children VALUES (1, 1)');
+    await _expectFailure<TursoDatabaseException>(
+      () => database.transaction<void>((tx) async {
+        await tx.execute('INSERT INTO auxiliary.children VALUES (2, 99)');
+      }),
+    );
+    _expect(
+      (await database.query('SELECT count(*) AS count FROM auxiliary.children')).rows.single
+              .getInt('count') ==
+          1,
+      'Persistent attachment deferred violation escaped rollback.',
+    );
+    await database.execute('DETACH DATABASE auxiliary');
+
+    await database.transaction((tx) async {
+      await tx.execute("ATTACH DATABASE '$_attachedDatabaseName' AS transaction_auxiliary");
+      _expect(
+        (await tx.query('SELECT id FROM transaction_auxiliary.items')).rows.single.getInt('id') ==
+            1,
+        'Transaction routes could not read a persistent browser attachment.',
+      );
+    });
+    await database.query('DETACH DATABASE transaction_auxiliary');
+
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE upper('computed.db') AS computed"),
+    );
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE 'invalid/path.db' AS invalid_path"),
+    );
+  } finally {
+    await database.close();
+  }
+}
+
 Future<void> _verifyReloadedData() async {
   final database = await TursoDatabase.open(
     TursoLocation.browser(_databaseName),
@@ -309,6 +411,472 @@ Future<void> _verifyReloadedData() async {
   }
 }
 
+Future<void> _verifyPersistentAttachment() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  try {
+    await database.execute("ATTACH DATABASE '$_attachedDatabaseName' AS auxiliary");
+    _expect(
+      (await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
+      'Persistent browser attachment did not survive reload.',
+    );
+    await database.query('DETACH DATABASE auxiliary');
+  } finally {
+    await database.close();
+  }
+
+  final released = await TursoDatabase.open(
+    TursoLocation.browser(_attachedDatabaseName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await released.query('SELECT id FROM items')).rows.single.getInt('id') == 1,
+      'DETACH did not release the persistent browser attachment.',
+    );
+  } finally {
+    await released.close();
+  }
+}
+
+Future<void> _verifyPersistentAttachmentFromMemoryMainIsRejected() async {
+  final memory = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
+  try {
+    await _expectFailure<TursoUnsupportedException>(
+      () => memory.execute(
+        "ATTACH DATABASE '$_memoryMainAttachmentName' AS persistent",
+      ),
+    );
+  } finally {
+    await memory.close();
+  }
+}
+
+Future<void> _verifyBoundPersistentAttachments() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  try {
+    final positional = <Object?>[_boundAttachmentName, 'positional_auxiliary'];
+    final attach = database.execute('ATTACH DATABASE ? AS ?', parameters: positional);
+    positional
+      ..[0] = 'mutated.db'
+      ..[1] = 'mutated';
+    await attach;
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS positional_auxiliary.items (id INTEGER PRIMARY KEY)',
+    );
+    await database.execute('DELETE FROM positional_auxiliary.items');
+    await database.execute('INSERT INTO positional_auxiliary.items VALUES (3)');
+    await database.query('DETACH DATABASE ?', parameters: const ['positional_auxiliary']);
+
+    final named = <String, Object?>{
+      ':file': _boundAttachmentName,
+      ':alias': 'named_auxiliary',
+    };
+    final namedAttach = database.query(
+      'ATTACH DATABASE :file AS :alias KEY :alias',
+      namedParameters: named,
+    );
+    named
+      ..[':file'] = 'mutated.db'
+      ..[':alias'] = 'mutated';
+    await namedAttach;
+    _expect(
+      (await database.query('SELECT id FROM named_auxiliary.items')).rows.single.getInt('id') == 3,
+      'Named attachment arguments or their submission snapshot changed.',
+    );
+    await database.execute(
+      'DETACH DATABASE :alias',
+      namedParameters: const {':alias': 'named_auxiliary'},
+    );
+
+    await database.execute(
+      'ATTACH DATABASE ? AS ?',
+      parameters: const [_boundAttachmentName, 'MiXeD_Auxiliary'],
+    );
+    await database.execute(
+      'DETACH DATABASE ?',
+      parameters: const ['MiXeD_Auxiliary'],
+    );
+    await database.execute(
+      'ATTACH DATABASE ? AS mixed_reopened',
+      parameters: const [_boundAttachmentName],
+    );
+    _expect(
+      (await database.query('SELECT id FROM mixed_reopened.items')).rows.single.getInt('id') == 3,
+      'A bound mixed-case alias did not detach with its supplied spelling.',
+    );
+    await database.execute('DETACH DATABASE mixed_reopened');
+
+    await database.transaction((tx) async {
+      await tx.execute(
+        'ATTACH DATABASE ?2 AS ?3 KEY ?1',
+        parameters: const ['unused', _boundAttachmentName, 'slot_auxiliary'],
+      );
+      _expect(
+        (await tx.query('SELECT id FROM slot_auxiliary.items')).rows.single.getInt('id') == 3,
+        'Numbered attachment slots did not retain parser ordering.',
+      );
+    });
+    await database.execute('DETACH DATABASE slot_auxiliary');
+
+    await _expectFailure<ArgumentError>(
+      () => database.execute(
+        'ATTACH DATABASE :file AS :alias',
+        namedParameters: const {':file': 'missing-alias.db'},
+      ),
+    );
+    await _expectFailure<ArgumentError>(
+      () => database.execute(
+        'ATTACH DATABASE ? AS ?',
+        parameters: const [1, 'non_string'],
+      ),
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+Future<void> _verifyEncryptedPersistentAttachment() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  final hexkey = _hexKey(_encryptionKey());
+  final uri = 'file:$_encryptedAttachmentName?mode=rwc&cipher=aegis256&hexkey=$hexkey';
+  try {
+    await database.execute(
+      'ATTACH DATABASE ? AS ?',
+      parameters: [uri, 'encrypted_auxiliary'],
+    );
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS encrypted_auxiliary.secrets (value TEXT)',
+    );
+    await database.execute('DELETE FROM encrypted_auxiliary.secrets');
+    await database.execute("INSERT INTO encrypted_auxiliary.secrets VALUES ('attached secret')");
+    await database.execute('DETACH DATABASE encrypted_auxiliary');
+
+    final wrongHexkey = '${hexkey.substring(0, 62)}ff';
+    final wrongUri = 'file:$_encryptedAttachmentName?cipher=aegis256&hexkey=$wrongHexkey&mode=rwc';
+    final wrongKeyFailure = await _captureFailure(
+      () => database.execute('ATTACH DATABASE ? AS wrong_key', parameters: [wrongUri]),
+    );
+    _expect(wrongKeyFailure is TursoDatabaseException, 'Wrong attachment key had the wrong error.');
+    _expect(
+      !wrongKeyFailure.toString().contains(wrongHexkey) &&
+          !wrongKeyFailure.toString().contains(wrongUri),
+      'Attachment diagnostics exposed a key-bearing URI.',
+    );
+    await _expectFailure<TursoDatabaseException>(
+      () => database.execute(
+        "ATTACH DATABASE '$_encryptedAttachmentName' AS missing_key",
+      ),
+    );
+
+    await database.query("ATTACH DATABASE '$uri' AS encrypted_auxiliary");
+    _expect(
+      (await database.query('SELECT value FROM encrypted_auxiliary.secrets')).rows.single
+              .getString('value') ==
+          'attached secret',
+      'Encrypted browser attachment could not be reopened with its key.',
+    );
+    await database.execute('DETACH DATABASE encrypted_auxiliary');
+
+    await database.execute(
+      "ATTACH DATABASE 'file:${Uri.encodeComponent(_uriAttachmentName)}?mode=rwc' "
+      'AS uri_auxiliary',
+    );
+    await database.execute('CREATE TABLE IF NOT EXISTS uri_auxiliary.items (id INTEGER)');
+    await database.execute('DELETE FROM uri_auxiliary.items');
+    await database.execute('INSERT INTO uri_auxiliary.items VALUES (4)');
+    await database.execute('DETACH DATABASE uri_auxiliary');
+
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE 'file:readonly.db?mode=ro' AS readonly"),
+    );
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE 'file:nested%2Fpath.db' AS nested"),
+    );
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE 'file://localhost/absolute.db' AS absolute"),
+    );
+    await _expectFailure<ArgumentError>(
+      () => database.execute(
+        "ATTACH DATABASE 'file:unpaired.db?cipher=aegis256' AS unpaired",
+      ),
+    );
+  } finally {
+    await database.close();
+  }
+
+  final decoded = await TursoDatabase.open(
+    TursoLocation.browser(_uriAttachmentName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await decoded.query('SELECT id FROM items')).rows.single.getInt('id') == 4,
+      'File URI registration did not use the decoded OPFS filename.',
+    );
+  } finally {
+    await decoded.close();
+  }
+}
+
+String _hexKey(Uint8List key) => key.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+
+Future<void> _verifyAttachmentOwnershipFailures() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_ownershipMainName),
+    web: _bridge,
+  );
+  try {
+    await database.execute('CREATE TABLE IF NOT EXISTS main_items (value INTEGER)');
+    await database.execute('DELETE FROM main_items');
+    await database.execute('INSERT INTO main_items VALUES (5)');
+    await database.execute("ATTACH DATABASE '$_sharedAttachmentName' AS first_owner");
+    await database.execute('CREATE TABLE IF NOT EXISTS first_owner.items (value INTEGER)');
+    await database.execute('DELETE FROM first_owner.items');
+    await database.execute('INSERT INTO first_owner.items VALUES (7)');
+    await database.execute("ATTACH DATABASE '$_sharedAttachmentName' AS second_owner");
+
+    final duplicateAlias = await _captureFailure(
+      () => database.execute("ATTACH DATABASE '$_failedAttachmentName' AS first_owner"),
+      label: 'duplicate alias',
+    );
+    _expect(
+      duplicateAlias is TursoDatabaseException,
+      'Duplicate alias returned ${duplicateAlias.runtimeType}: $duplicateAlias',
+    );
+    final reservedAlias = await _captureFailure(
+      () => database.execute("ATTACH DATABASE 'reserved-main.db' AS main"),
+      label: 'reserved alias',
+    );
+    _expect(
+      reservedAlias is TursoDatabaseException,
+      'Reserved alias returned ${reservedAlias.runtimeType}: $reservedAlias',
+    );
+    await database.execute("ATTACH DATABASE '$_ownershipMainName' AS main_copy");
+    _expect(
+      (await database.query('SELECT value FROM main_copy.main_items')).rows.single
+              .getInt('value') ==
+          5,
+      'Attaching the main filename registered or redirected another file.',
+    );
+    await database.execute('DETACH DATABASE main_copy');
+
+    final failedDetach = await _captureFailure(
+      () => database.execute('DETACH DATABASE missing_owner'),
+      label: 'missing-schema DETACH',
+    );
+    _expect(
+      failedDetach is TursoDatabaseException,
+      'Failed DETACH returned ${failedDetach.runtimeType}: $failedDetach',
+    );
+    _expect(
+      (await database.query('SELECT value FROM first_owner.items')).rows.single.getInt('value') ==
+          7,
+      'A failed DETACH lost the attached schema.',
+    );
+
+    await database.execute('DETACH DATABASE first_owner');
+    _expect(
+      (await database.query('SELECT value FROM second_owner.items')).rows.single.getInt('value') ==
+          7,
+      'DETACH released a file still owned by another alias.',
+    );
+    await database.execute('DETACH DATABASE second_owner');
+  } finally {
+    await database.close();
+  }
+
+  final failed = await TursoDatabase.open(
+    TursoLocation.browser(_failedAttachmentName),
+    web: _bridge,
+  );
+  try {
+    await failed.execute('CREATE TABLE IF NOT EXISTS preserved (value INTEGER)');
+  } finally {
+    await failed.close();
+  }
+
+  final shared = await TursoDatabase.open(
+    TursoLocation.browser(_sharedAttachmentName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await shared.query('SELECT value FROM items')).rows.single.getInt('value') == 7,
+      'The last DETACH did not preserve or release the shared attachment.',
+    );
+  } finally {
+    await shared.close();
+  }
+
+  final draining = await TursoDatabase.open(
+    TursoLocation.browser(_ownershipMainName),
+    web: _bridge,
+  );
+  try {
+    await draining.execute("ATTACH DATABASE '$_sharedAttachmentName' AS close_owner");
+    final accepted = draining.execute('INSERT INTO close_owner.items VALUES (9)');
+    final closed = draining.close();
+    await accepted;
+    await closed;
+  } finally {
+    await draining.close();
+  }
+
+  final afterClose = await TursoDatabase.open(
+    TursoLocation.browser(_sharedAttachmentName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await afterClose.query('SELECT max(value) AS value FROM items')).rows.single
+              .getInt('value') ==
+          9,
+      'Close did not drain accepted attachment work before releasing files.',
+    );
+  } finally {
+    await afterClose.close();
+  }
+}
+
+Future<void> _verifyAttachmentContention() async {
+  final owner = await TursoDatabase.open(
+    TursoLocation.browser(_sharedAttachmentName),
+    web: _bridge,
+  );
+  final contender = await TursoDatabase.open(
+    TursoLocation.browser(_contentionMainName),
+    web: _bridge,
+  );
+  try {
+    await _expectFailure<TursoDatabaseException>(
+      () => contender.execute("ATTACH DATABASE '$_sharedAttachmentName' AS locked"),
+    );
+    await owner.execute('INSERT INTO items VALUES (10)');
+    _expect(
+      (await owner.query('SELECT max(value) AS value FROM items')).rows.single.getInt('value') ==
+          10,
+      'A competing worker disturbed the original OPFS owner.',
+    );
+  } finally {
+    await contender.close();
+    await owner.close();
+  }
+
+  final reopened = await TursoDatabase.open(
+    TursoLocation.browser(_contentionMainName),
+    web: _bridge,
+  );
+  try {
+    await reopened.execute("ATTACH DATABASE '$_sharedAttachmentName' AS released");
+    await reopened.execute('DETACH DATABASE released');
+  } finally {
+    await reopened.close();
+  }
+}
+
+Future<void> _verifyAttachmentBoundaryFailures() async {
+  final preserved = await TursoDatabase.open(
+    TursoLocation.browser(_failedAttachmentName),
+    web: _bridge,
+  );
+  try {
+    await preserved.execute('DELETE FROM preserved');
+    await preserved.execute('INSERT INTO preserved VALUES (11)');
+  } finally {
+    await preserved.close();
+  }
+
+  final registrationFailure = await TursoDatabase.open(
+    TursoLocation.browser(_contentionMainName),
+    web: _faultBridge('attachment-wal-registration'),
+  );
+  try {
+    await _expectFailure<TursoDatabaseException>(
+      () => registrationFailure.execute("ATTACH DATABASE '$_failedAttachmentName' AS failed"),
+    );
+  } finally {
+    await registrationFailure.close();
+  }
+
+  final afterFailure = await TursoDatabase.open(
+    TursoLocation.browser(_failedAttachmentName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await afterFailure.query('SELECT value FROM preserved')).rows.single.getInt('value') == 11,
+      'Registration failure deleted or changed the existing attachment file.',
+    );
+  } finally {
+    await afterFailure.close();
+  }
+
+  final uncertain = await TursoDatabase.open(
+    TursoLocation.browser(_uncertainMainName),
+    web: _faultBridge('attach-finalization'),
+  );
+  try {
+    final interrupted = _expectFailure<TursoPlatformException>(
+      () => uncertain.execute("ATTACH DATABASE '$_uncertainAttachmentName' AS uncertain"),
+    );
+    final queued = _expectFailure<TursoPlatformException>(() => uncertain.query('SELECT 1'));
+    await Future.wait([interrupted, queued]);
+    await _expectFailure<TursoPlatformException>(() => uncertain.query('SELECT 2'));
+  } finally {
+    await uncertain.close();
+  }
+
+  final recovered = await TursoDatabase.open(
+    TursoLocation.browser(_uncertainMainName),
+    web: _bridge,
+  );
+  try {
+    await recovered.execute("ATTACH DATABASE '$_uncertainAttachmentName' AS recovered");
+    await recovered.execute('CREATE TABLE IF NOT EXISTS recovered.items (value INTEGER)');
+    await recovered.execute('DETACH DATABASE recovered');
+  } finally {
+    await recovered.close();
+  }
+
+  final rollbackFailure = await TursoDatabase.open(
+    TursoLocation.browser(_uncertainMainName),
+    web: _bridge,
+  );
+  try {
+    await rollbackFailure.execute(
+      "ATTACH DATABASE '$_uncertainAttachmentName' AS rollback_owner",
+    );
+    final transactionFailure = await _captureFailure(
+      () => rollbackFailure.transaction(
+        (tx) => tx.execute('DETACH DATABASE missing_rollback_owner'),
+      ),
+      label: 'transaction rollback failure',
+    );
+    _expect(
+      transactionFailure is TursoTransactionException &&
+          transactionFailure.primaryError is TursoDatabaseException &&
+          transactionFailure.rollbackError is TursoDatabaseException,
+      'Rollback failure did not preserve both database errors: $transactionFailure',
+    );
+    await _expectFailure<TursoPlatformException>(() => rollbackFailure.query('SELECT 1'));
+  } finally {
+    await rollbackFailure.close();
+  }
+}
+
+TursoWebOptions _faultBridge(String fault) => TursoWebOptions(
+  moduleUri: Uri.parse('turso/turso_bridge.js?__turso_test_fault=$fault'),
+);
+
 Future<void> _verifyLockRelease() async {
   final owner = await TursoDatabase.open(TursoLocation.browser(_databaseName), web: _bridge);
   await _expectFailure<TursoPlatformException>(
@@ -330,6 +898,80 @@ Future<void> _verifyMemoryDatabase() async {
     await _expectFailure<TursoDatabaseException>(() => second.query('SELECT * FROM local_only'));
   } finally {
     await second.close();
+  }
+}
+
+Future<void> _verifyMemoryAttachments() async {
+  final persistent = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await persistent.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys') == 0,
+      'Browser open changed the upstream foreign-key default.',
+    );
+    await persistent.query("ATTACH DATABASE ':memory:' AS auxiliary");
+    await persistent.execute('CREATE TABLE auxiliary.items (id INTEGER PRIMARY KEY)');
+    await persistent.execute('INSERT INTO auxiliary.items VALUES (1)');
+    _expect(
+      (await persistent.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
+      'Persistent browser main could not read its memory attachment.',
+    );
+    await persistent.execute('DETACH DATABASE auxiliary');
+    await _expectFailure<TursoDatabaseException>(
+      () => persistent.query('SELECT * FROM auxiliary.items'),
+    );
+  } finally {
+    await persistent.close();
+  }
+
+  final memory = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
+  try {
+    await memory.transaction((tx) async {
+      await tx.execute("ATTACH DATABASE ':memory:' AS auxiliary");
+      await tx.execute('CREATE TABLE auxiliary.parents (id INTEGER PRIMARY KEY)');
+      await tx.execute(
+        'CREATE TABLE auxiliary.children ( '
+        'id INTEGER PRIMARY KEY, '
+        'parent_id INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED)',
+      );
+      _expect(
+        (await tx.query('SELECT count(*) AS count FROM auxiliary.parents')).rows.single.getInt(
+              'count',
+            ) ==
+            0,
+        'Transaction query did not reach the attached memory schema.',
+      );
+    });
+    await memory.execute('PRAGMA foreign_keys=ON');
+    await memory.execute('INSERT INTO auxiliary.parents VALUES (1)');
+    await memory.execute('INSERT INTO auxiliary.children VALUES (1, 1)');
+    await _expectFailure<TursoDatabaseException>(
+      () => memory.transaction<void>((tx) async {
+        await tx.execute('INSERT INTO auxiliary.children VALUES (2, 99)');
+      }),
+    );
+    _expect(
+      (await memory.query('SELECT count(*) AS count FROM auxiliary.children')).rows.single
+              .getInt('count') ==
+          1,
+      'Deferred attached-schema violation escaped rollback.',
+    );
+    await memory.execute('PRAGMA foreign_keys=OFF');
+    await memory.execute('INSERT INTO auxiliary.children VALUES (3, 99)');
+    await memory.execute('DETACH DATABASE auxiliary');
+  } finally {
+    await memory.close();
+  }
+
+  final reopened = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
+  try {
+    await _expectFailure<TursoDatabaseException>(
+      () => reopened.query('SELECT * FROM auxiliary.children'),
+    );
+  } finally {
+    await reopened.close();
   }
 }
 
@@ -372,8 +1014,22 @@ Future<void> _expectFailure<T extends Object>(Future<Object?> Function() action)
     await action();
   } on T {
     return;
+  } on Object catch (error) {
+    throw StateError('Expected $T, got ${error.runtimeType}: $error');
   }
-  throw StateError('Expected $T.');
+  throw StateError('Expected $T, but the operation succeeded.');
+}
+
+Future<Object> _captureFailure(
+  Future<Object?> Function() action, {
+  String label = 'operation',
+}) async {
+  try {
+    await action();
+  } on Object catch (error) {
+    return error;
+  }
+  throw StateError('Expected $label to fail.');
 }
 
 void _expect(bool condition, String message) {

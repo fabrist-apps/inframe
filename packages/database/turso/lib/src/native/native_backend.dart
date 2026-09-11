@@ -340,8 +340,8 @@ final class _NativeDatabase {
       _checkStatic(setupStatus, errorOut);
 
       final pathPointer = path.toNativeUtf8();
-      final experimentalFeaturesPointer = (key == null ? 'index_method' : 'encryption,index_method')
-          .toNativeUtf8();
+      final experimentalFeaturesPointer =
+          (key == null ? 'attach,index_method' : 'attach,encryption,index_method').toNativeUtf8();
       final cipherPointer = cipher == null ? nullptr : cipher.toNativeUtf8();
       final hexKey = key == null ? null : _encodeHex(key);
       final hexKeyPointer = hexKey == null ? nullptr : hexKey.toNativeUtf8();

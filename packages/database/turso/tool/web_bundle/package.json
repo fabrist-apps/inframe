@@ -1,0 +1,17 @@
+{
+  "name": "turso-dart-web-bundle",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "node --test attachment_registry.test.mjs"
+  },
+  "dependencies": {
+    "@tursodatabase/database-common": "0.8.0-pre.10",
+    "@tursodatabase/database-wasm": "0.8.0-pre.10",
+    "@tursodatabase/database-wasm-common": "0.8.0-pre.10"
+  },
+  "devDependencies": {
+    "vite": "7.3.6"
+  }
+}

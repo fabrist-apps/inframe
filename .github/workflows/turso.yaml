@@ -35,10 +35,27 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Build and run Linux Flutter application
+      - name: Install Linux Flutter dependencies
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes libgtk-3-dev ninja-build xvfb
+          # Blacksmith uses a separate mirror list that source-file edits miss.
+          if [[ -f /etc/apt/blacksmith-ubuntu-mirrors.txt ]]; then
+            echo 'https://archive.ubuntu.com/ubuntu/' \
+              | sudo tee /etc/apt/blacksmith-ubuntu-mirrors.txt
+          fi
+          sudo find /etc/apt -maxdepth 2 -type f \
+            \( -name '*.list' -o -name '*.sources' \) \
+            -exec sed -i -E 's|http://([a-z.]*ubuntu\.com)/|https://\1/|g' {} +
+          APT_OPTIONS=(
+            -o Acquire::Retries=2
+            -o Acquire::http::Timeout=20
+            -o Acquire::https::Timeout=20
+          )
+          sudo apt-get "${APT_OPTIONS[@]}" update --error-on=any
+          sudo apt-get "${APT_OPTIONS[@]}" install --yes libgtk-3-dev ninja-build xvfb
+      - name: Build and run Linux Flutter application
+        timeout-minutes: 10
+        run: |
           flutter create --empty --platforms=linux "$RUNNER_TEMP/turso_smoke"
           cd "$RUNNER_TEMP/turso_smoke"
           flutter pub add turso --path "$GITHUB_WORKSPACE/packages/database/turso"

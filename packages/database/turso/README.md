@@ -105,6 +105,62 @@ then releases the connection and worker. Repeated calls share the same shutdown 
 failure or failed rollback retires the connection; later operations fail and diagnostics treat an
 interrupted write as having an uncertain outcome.
 
+## Attached databases and foreign keys
+
+ATTACH and DETACH are enabled for every database connection. Use the existing raw SQL API to add a
+schema, including a bound native path:
+
+```dart
+await database.execute(
+  'ATTACH DATABASE ? AS auxiliary',
+  parameters: [attachedPath],
+);
+await database.execute('CREATE TABLE auxiliary.items (id INTEGER PRIMARY KEY)');
+final items = await database.query('SELECT id FROM auxiliary.items');
+await database.execute('DETACH DATABASE auxiliary');
+```
+
+Native parent directories must already exist. `':memory:'` creates an in-memory attachment on
+native and web. A persistent browser main accepts a single OPFS filename and alias as direct SQL
+arguments or positional and named parameters. Bound aliases retain the supplied spelling, so use a
+stable lowercase alias when later statements refer to it. Computed attachment arguments are
+unsupported. A browser memory main supports memory attachments only.
+
+Browser filenames may also use a lowercase `file:` URI with one percent-encoded filename, optional
+`mode=rwc`, and paired `cipher` and `hexkey` options:
+
+```dart
+await database.execute(
+  'ATTACH DATABASE ? AS encrypted',
+  parameters: [
+    'file:other%20database.db?mode=rwc&cipher=aegis256&hexkey=$hexKey',
+  ],
+);
+```
+
+Supported ciphers are `aegis256` and `aes256gcm`; `hexkey` must contain exactly 64 hexadecimal
+characters. Authorities, fragments, path separators, other modes, and other URI options are
+rejected. The original URI reaches Turso unchanged while the bridge uses its decoded filename for
+OPFS ownership. Encryption keys remain scoped to the operation and are redacted from bridge errors.
+They are not inherited from the main database or restored after a reload.
+
+An alias belongs to one connection: DETACH or close releases it, and reopening the main database
+does not restore it. The attached database contents persist independently, so callers can explicitly
+re-attach the file later. Multiple aliases for one file share that connection's registration until
+the final alias detaches. A failed ATTACH releases only new registrations; a failed DETACH leaves
+existing aliases available. If execution or statement finalization has an uncertain outcome, the
+connection is retired before its attachment files are released.
+
+OPFS access handles are exclusive across browser workers and tabs. Attaching a file already owned by
+another worker fails explicitly without stealing the handle or opening a memory database. The
+original owner remains usable, and the file can be attached after that owner closes.
+
+Foreign-key enforcement keeps the upstream default, which is off. Applications that need it issue
+`PRAGMA foreign_keys=ON` after every open and before starting a transaction. Enforcement applies to
+relationships within each schema; cross-schema foreign keys are unavailable. The package does not
+scan or repair existing data, add multi-file crash atomicity beyond Turso, or make an attached file
+inherit the main database's encryption key.
+
 ## Encryption
 
 Pass `TursoEncryption` with either `TursoCipher.aegis256` or `TursoCipher.aes256gcm` and exactly 32
@@ -181,6 +237,8 @@ unavailable in v1.
 
 ## Upstream
 
-The package pins unchanged Turso `v0.8.0-pre.10` at commit
+The package pins Turso `v0.8.0-pre.10` at commit
 `342dfbe267ebdb9141c434c499ce31e10bb46f27`. The generated FFI bindings and native library use the
-matching `sdk-kit/turso.h`. See [native/README.md](native/README.md) for build provenance.
+matching `sdk-kit/turso.h`. The browser build applies the documented JavaScript worker-protocol
+adapter required for a fresh persistent ATTACH; its Rust/WASM engine binary remains unchanged. See
+[native/README.md](native/README.md) and [web/README.md](web/README.md) for build provenance.

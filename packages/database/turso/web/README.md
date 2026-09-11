@@ -18,14 +18,53 @@ Cross-Origin-Embedder-Policy: require-corp
 The bridge, upstream bundle, and SQL parser adapter execute in a dedicated application worker.
 Upstream Turso creates its own worker for OPFS access.
 
+ATTACH and DETACH are enabled by the bridge for ordinary and encrypted opens. In-memory attachments
+need no additional browser files. From a persistent main database, the filename and alias may be
+direct arguments or positional and named parameters. The bridge snapshots bindings before awaiting
+OPFS registration and executes the original SQL and bindings without interpolation. Bound aliases
+retain their supplied spelling, so callers should use a stable lowercase alias in later statements.
+Computed attachment arguments are unsupported.
+
+A persistent filename may be a plain single-file name or a lowercase `file:` URI containing one
+percent-encoded filename, optional `mode=rwc`, and paired `cipher` and `hexkey` options. Supported
+ciphers are `aegis256` and `aes256gcm`; the key must be exactly 64 hexadecimal characters.
+Authorities, fragments, path separators, other modes, and other options are rejected before file
+acquisition. The original URI reaches Turso unchanged while its decoded filename identifies the
+OPFS registration. URI keys remain scoped to the current operation and are redacted from bridge
+errors. They are not inherited or restored after reload.
+
+The bridge registers the attached database and its WAL with the existing Turso OPFS worker before
+executing the original SQL. DETACH releases those registrations after the engine releases the alias;
+closing the main database releases every remaining attachment. Reopening never restores aliases
+automatically. A browser memory main supports memory attachments only.
+
+The registry keeps one logical owner per alias and one OPFS registration per filename. Failed
+attachment execution releases only registrations acquired for that attempt. Failed DETACH leaves
+the existing alias and registration intact. Close drains accepted Dart operations, closes the Turso
+engine, and then releases attachment registrations. An uncertain execution, finalization, or worker
+protocol outcome retires the connection before cleanup, so queued and future operations fail.
+
+Persistent attachments from an in-memory browser main are rejected before acquiring OPFS handles.
+Browser attachment names cannot contain a path separator or NUL. A competing browser worker or tab
+that owns the same OPFS file causes an explicit open failure; the bridge does not steal the handle or
+fall back to memory. Re-run the installer whenever these assets change.
+
 ## Provenance
 
 | Asset | Source | SHA-256 |
 | --- | --- | --- |
-| `turso_upstream.js` | npm `@tursodatabase/database-wasm@0.8.0-pre.10`, `bundle/main.es.js` | `f24740d5d56b258ed8dd0117c66b46b5fff3f29b8bad325914749fe96bf3d51d` |
-| `turso_sql_guard.wasm` | `tool/sql_guard`, using `turso_parser` at `342dfbe267ebdb9141c434c499ce31e10bb46f27` | `a76856cfa0a72c7a49c9fd337d43770041c8c4c4e013e77fd19631cda0991d9c` |
+| `turso_attachment_registry.js` | Package-owned retryable alias and registration ownership state | `1b52c4f7ceeda6a0c7857b45d07388db075766ec8056b057126114a82a93e4c6` |
+| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `10652f04abb38e9dc0b9206b5c12bee1401a6d8c5fab6ebdcac172b2cd930469` |
+| `turso_sql_guard.wasm` | `tool/sql_guard`, using `turso_parser` at `342dfbe267ebdb9141c434c499ce31e10bb46f27` | `53befd5b351189a382af748f7148525d39ed0681d636d4664c8d1775dae66297` |
 
 The npm tarball integrity is
 `sha512-jzfyctq86UEpciLq/oN+WaL/VJy/a1ChMHnc8mN3BmaXNFIEAwbtKAWYyTbTLAAedfdKPVzqVFO6YP2BHzcoXQ==`.
-The parser adapter only reports whether the pinned upstream parser sees zero, one, or multiple SQL
-statements. It does not change Turso engine behavior.
+The bundle inputs and reproduction command are recorded in `tool/web_bundle/README.md`. The adapter
+changes only the pinned JavaScript worker protocol: acknowledged OPFS registrations expose their
+worker handles to the same main WASM instance, and the fresh ATTACH open uses a bounded synchronous
+worker request. Registration mutations are serialized, access handles remain indexed until close
+succeeds, and a timed-out, malformed, or failed worker session is poisoned. The Turso Rust/WASM
+engine binary remains unchanged.
+
+The parser adapter reports one-statement validation plus structured ATTACH/DETACH argument metadata
+from the matching pinned parser. It does not change Turso engine behavior.

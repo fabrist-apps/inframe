@@ -23,6 +23,7 @@ doc/api/
 *.js
 !packages/database/turso/example/web/crashing_bridge.js
 !packages/database/turso/example/web/failing_close_bridge.js
+!packages/database/turso/web/turso_attachment_registry.js
 *.js_
 *.js.deps
 *.js.map

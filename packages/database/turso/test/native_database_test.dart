@@ -53,6 +53,117 @@ void main() {
       await reopened.close();
     });
 
+    test('should attach persistent and memory databases with caller foreign keys', () async {
+      final mainPath = '${temporaryDirectory.path}/main.turso';
+      final attachedPath = '${temporaryDirectory.path}/attached.turso';
+      final database = await TursoDatabase.open(TursoLocation.file(mainPath));
+      addTearDown(database.close);
+
+      expect(
+        (await database.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys'),
+        0,
+      );
+      await database.execute(
+        'ATTACH DATABASE ? AS auxiliary',
+        parameters: [attachedPath],
+      );
+      await database.execute(
+        'CREATE TABLE auxiliary.parents (id INTEGER PRIMARY KEY)',
+      );
+      await database.execute(
+        'CREATE TABLE auxiliary.children ( '
+        'id INTEGER PRIMARY KEY, '
+        'parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE)',
+      );
+      await database.execute('PRAGMA foreign_keys=ON');
+      await database.execute('INSERT INTO auxiliary.parents VALUES (1)');
+      await database.execute('INSERT INTO auxiliary.children VALUES (1, 1)');
+      expect(
+        (await database.query(
+          'SELECT children.id AS id FROM auxiliary.children '
+          'JOIN auxiliary.parents ON parents.id = children.parent_id',
+        )).rows.single.getInt('id'),
+        1,
+      );
+      await expectLater(
+        database.execute('INSERT INTO auxiliary.children VALUES (2, 99)'),
+        throwsA(isA<TursoDatabaseException>()),
+      );
+      await database.execute('DELETE FROM auxiliary.parents WHERE id = 1');
+      expect(
+        (await database.query('SELECT count(*) AS count FROM auxiliary.children')).rows.single
+            .getInt('count'),
+        0,
+      );
+      await database.execute(
+        'CREATE TABLE auxiliary.deferred_children ( '
+        'id INTEGER PRIMARY KEY, '
+        'parent_id INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED)',
+      );
+      await expectLater(
+        database.transaction((tx) async {
+          await tx.execute('INSERT INTO auxiliary.deferred_children VALUES (1, 99)');
+        }),
+        throwsA(isA<TursoDatabaseException>()),
+      );
+      expect(
+        (await database.query('SELECT count(*) AS count FROM auxiliary.deferred_children'))
+            .rows
+            .single
+            .getInt('count'),
+        0,
+      );
+
+      await database.execute('INSERT INTO auxiliary.parents VALUES (2)');
+      await database.execute('DETACH DATABASE auxiliary');
+      await expectLater(
+        database.query('SELECT * FROM auxiliary.parents'),
+        throwsA(isA<TursoDatabaseException>()),
+      );
+      await database.execute(
+        'ATTACH DATABASE ? AS auxiliary',
+        parameters: [attachedPath],
+      );
+      expect(
+        (await database.query('SELECT id FROM auxiliary.parents')).rows.single.getInt('id'),
+        2,
+      );
+      await database.execute('DETACH DATABASE auxiliary');
+
+      await database.execute("ATTACH DATABASE ':memory:' AS scratch");
+      await database.execute('CREATE TABLE scratch.values_table (value INTEGER)');
+      await database.execute('INSERT INTO scratch.values_table VALUES (7)');
+      expect(
+        (await database.query('SELECT value FROM scratch.values_table')).rows.single
+            .getInt('value'),
+        7,
+      );
+      await database.execute('DETACH DATABASE scratch');
+      await database.execute('PRAGMA foreign_keys=OFF');
+      await database.execute(
+        'ATTACH DATABASE ? AS auxiliary',
+        parameters: [attachedPath],
+      );
+      await database.execute('INSERT INTO auxiliary.children VALUES (3, 99)');
+      await database.execute('DETACH DATABASE auxiliary');
+
+      await database.close();
+      final attached = await TursoDatabase.open(TursoLocation.file(attachedPath));
+      addTearDown(attached.close);
+      expect((await attached.query('SELECT id FROM parents')).rows.single.getInt('id'), 2);
+    });
+
+    test('should attach memory databases from a memory main database', () async {
+      final database = await TursoDatabase.open(TursoLocation.memory());
+      addTearDown(database.close);
+
+      await database.execute("ATTACH DATABASE ':memory:' AS auxiliary");
+      await database.execute('CREATE TABLE auxiliary.items (id INTEGER PRIMARY KEY)');
+      await database.execute('INSERT INTO auxiliary.items VALUES (1)');
+      expect((await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id'), 1);
+      await database.execute('DETACH DATABASE auxiliary');
+    });
+
     for (final cipher in TursoCipher.values) {
       test('should persist ${cipher.name} encryption without plaintext fallback', () async {
         final path = '${temporaryDirectory.path}/${cipher.name}.turso';
@@ -95,6 +206,14 @@ void main() {
         );
         final result = await reopened.query('SELECT value FROM secrets');
         expect(result.rows.single.getString('value'), 'encrypted');
+        await reopened.execute("ATTACH DATABASE ':memory:' AS auxiliary");
+        await reopened.execute('CREATE TABLE auxiliary.items (id INTEGER PRIMARY KEY)');
+        await reopened.execute('INSERT INTO auxiliary.items VALUES (1)');
+        expect(
+          (await reopened.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id'),
+          1,
+        );
+        await reopened.execute('DETACH DATABASE auxiliary');
         await reopened.close();
       });
     }
