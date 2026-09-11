@@ -252,6 +252,7 @@ final class Cache<K, A, E> {
         } on Object catch (error, stackTrace) {
           delivered = Failed(Defect(error, stackTrace));
         }
+        _pruneGeneration(load.key);
         load.complete(delivered);
         _drainPendingLoads();
       }),
@@ -320,9 +321,19 @@ final class Cache<K, A, E> {
   }
 
   void _advanceGeneration(K key) {
-    _generations[key] = (_generations[key] ?? 0) + 1;
+    if (_hasLoad(key)) {
+      _generations[key] = (_generations[key] ?? 0) + 1;
+    } else {
+      _generations.remove(key);
+    }
     _entries.remove(key);
   }
+
+  void _pruneGeneration(K key) {
+    if (!_hasLoad(key)) _generations.remove(key);
+  }
+
+  bool _hasLoad(K key) => _loads.values.any((load) => load.key == key);
 
   void _drainPendingLoads() {
     if (_isClosed) {
