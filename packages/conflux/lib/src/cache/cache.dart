@@ -290,6 +290,7 @@ final class Cache<K, A, E> {
   void _retain(K key, A value) {
     final duration = _expiry._durationFor(key, value);
     _requireNonNegativeExpiry(duration);
+    _removeExpiredEntries();
     final entry = _CacheEntry(
       value,
       _ownerExecution.clock.monotonic() + duration,

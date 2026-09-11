@@ -184,6 +184,36 @@ void main() {
       expect(lookups, {'a': 1, 'b': 2, 'c': 1});
     });
 
+    test('should discard expired entries before applying LRU capacity', () async {
+      final clock = FakeClock();
+      final fixture = await _CacheFixture.start<int>(
+        ownerClock: clock,
+        capacity: 2,
+        expiry: CacheExpiry.byValue(
+          (_, value) => value == 1 ? const Duration(seconds: 1) : const Duration(minutes: 1),
+        ),
+        lookup: (key) => Effect.succeed(
+          switch (key) {
+            'live' => 2,
+            'expired' => 1,
+            _ => 3,
+          },
+        ),
+      );
+      addTearDown(fixture.close);
+      await fixture.cache.get('live').runFuture();
+      await fixture.cache.get('expired').runFuture();
+      clock.advanceMonotonic(const Duration(seconds: 1));
+
+      await fixture.cache.get('new').runFuture();
+
+      expect(
+        await fixture.cache.getOption('live').runFuture(),
+        isA<Some<int>>().having((option) => option.value, 'value', 2),
+      );
+      expect(fixture.cache.keys, ['new', 'live']);
+    });
+
     test('should count a shared load as one active lookup', () async {
       final firstGate = Completer<int>();
       final secondGate = Completer<int>();
@@ -930,7 +960,7 @@ final class _CacheFixture<A> {
     final owner = Runtime(context: ownerContext, clock: ownerClock);
     final created = Completer<Cache<String, A, String>>();
     final keepScopeOpen = Completer<void>();
-    owner.fork(
+    final fiber = owner.fork(
       Effect.build<void, Never>(($) async {
         final cache = await $(
           Cache.make<String, A, String>(
@@ -949,7 +979,25 @@ final class _CacheFixture<A> {
         );
       }),
     );
-    return _CacheFixture<A>._(await created.future, owner);
+    unawaited(
+      fiber.join().then((exit) {
+        if (created.isCompleted) return;
+        switch (exit) {
+          case Succeeded<void, Never>():
+            created.completeError(
+              StateError('Cache scope ended before acquisition completed.'),
+            );
+          case Failed<void, Never>(:final cause):
+            created.completeError(EffectException(cause));
+        }
+      }),
+    );
+    try {
+      return _CacheFixture<A>._(await created.future, owner);
+    } on Object {
+      await owner.close();
+      rethrow;
+    }
   }
 
   Future<void> close() => _owner.close();
