@@ -139,6 +139,13 @@ void main() {
         7,
       );
       await database.execute('DETACH DATABASE scratch');
+      await database.execute('PRAGMA foreign_keys=OFF');
+      await database.execute(
+        'ATTACH DATABASE ? AS auxiliary',
+        parameters: [attachedPath],
+      );
+      await database.execute('INSERT INTO auxiliary.children VALUES (3, 99)');
+      await database.execute('DETACH DATABASE auxiliary');
 
       await database.close();
       final attached = await TursoDatabase.open(TursoLocation.file(attachedPath));
