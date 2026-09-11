@@ -305,6 +305,31 @@ Future<void> _writePersistentAttachment() async {
       (await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
       'Persistent browser attachment could not be read.',
     );
+
+    await database.execute('PRAGMA foreign_keys=ON');
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS auxiliary.parents (id INTEGER PRIMARY KEY)',
+    );
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS auxiliary.children ( '
+      'id INTEGER PRIMARY KEY, '
+      'parent_id INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED)',
+    );
+    await database.execute('DELETE FROM auxiliary.children');
+    await database.execute('DELETE FROM auxiliary.parents');
+    await database.execute('INSERT INTO auxiliary.parents VALUES (1)');
+    await database.execute('INSERT INTO auxiliary.children VALUES (1, 1)');
+    await _expectFailure<TursoDatabaseException>(
+      () => database.transaction<void>((tx) async {
+        await tx.execute('INSERT INTO auxiliary.children VALUES (2, 99)');
+      }),
+    );
+    _expect(
+      (await database.query('SELECT count(*) AS count FROM auxiliary.children')).rows.single
+              .getInt('count') ==
+          1,
+      'Persistent attachment deferred violation escaped rollback.',
+    );
     await database.execute('DETACH DATABASE auxiliary');
 
     await database.transaction((tx) async {
