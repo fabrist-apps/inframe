@@ -146,7 +146,14 @@ They are not inherited from the main database or restored after a reload.
 
 An alias belongs to one connection: DETACH or close releases it, and reopening the main database
 does not restore it. The attached database contents persist independently, so callers can explicitly
-re-attach the file later.
+re-attach the file later. Multiple aliases for one file share that connection's registration until
+the final alias detaches. A failed ATTACH releases only new registrations; a failed DETACH leaves
+existing aliases available. If execution or statement finalization has an uncertain outcome, the
+connection is retired before its attachment files are released.
+
+OPFS access handles are exclusive across browser workers and tabs. Attaching a file already owned by
+another worker fails explicitly without stealing the handle or opening a memory database. The
+original owner remains usable, and the file can be attached after that owner closes.
 
 Foreign-key enforcement keeps the upstream default, which is off. Applications that need it issue
 `PRAGMA foreign_keys=ON` after every open and before starting a transaction. Enforcement applies to

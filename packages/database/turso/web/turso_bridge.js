@@ -1,4 +1,10 @@
+import {
+  AttachmentRegistry,
+  AttachmentRegistryError,
+} from './turso_attachment_registry.js';
+
 const upstreamVersion = '0.8.0-pre.10';
+const testFault = new URL(import.meta.url).searchParams.get('__turso_test_fault');
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const sqlGuard = loadSqlGuard();
@@ -7,8 +13,8 @@ const upstreamModule = import('./turso_upstream.js');
 let database;
 let mainDatabasePath;
 let fileRegistration;
-const attachedSchemas = new Map();
-const attachmentOwners = new Map();
+let attachmentRegistry;
+let testFaultConsumed = false;
 const sensitiveValues = new Set();
 
 class InputError extends Error {}
@@ -57,7 +63,13 @@ async function open({ path, persistent, encryption }) {
     throw new UnsupportedError('Origin-private file storage is unavailable.');
   }
   await sqlGuard;
-  const { Database, registerFile, runWithSynchronousIo, unregisterFile } = await upstreamModule;
+  const {
+    Database,
+    isWorkerUnavailable,
+    registerFile,
+    runWithSynchronousIo,
+    unregisterFile,
+  } = await upstreamModule;
   const options = {
     experimental: encryption === null ? ['attach'] : ['attach', 'encryption'],
     ...(encryption === null ? {} : encryptionOptions(encryption)),
@@ -67,7 +79,17 @@ async function open({ path, persistent, encryption }) {
     await candidate.connect();
     database = candidate;
     mainDatabasePath = persistent ? path : null;
-    fileRegistration = { registerFile, runWithSynchronousIo, unregisterFile };
+    fileRegistration = {
+      isWorkerUnavailable,
+      registerFile,
+      runWithSynchronousIo,
+      unregisterFile,
+    };
+    attachmentRegistry = new AttachmentRegistry({
+      mainDatabasePath,
+      registerFile: registerAttachmentFile,
+      unregisterFile,
+    });
   } catch (error) {
     try {
       await candidate.close();
@@ -126,15 +148,7 @@ async function execute({ sql, parameters }) {
 
 async function close() {
   if (database === undefined) return null;
-  const owned = database;
-  database = undefined;
-  try {
-    await owned.close();
-  } finally {
-    await releaseAllAttachments();
-    mainDatabasePath = undefined;
-    fileRegistration = undefined;
-  }
+  await shutdownDatabase();
   return null;
 }
 
@@ -211,34 +225,52 @@ async function runStatement(sql, parameters, action) {
     );
   }
   try {
-    statement.close();
+    closeCompletedStatement(statement, pendingAttachment);
   } catch (_) {
-    await discardAttachment(pendingAttachment);
-    throw new IntegrationError(
+    await retireAfterUncertainOutcome(
+      pendingAttachment,
       'The Turso statement could not be finalized; its outcome is uncertain.',
     );
   }
   try {
     await completeAttachment(pendingAttachment);
   } catch (_) {
-    throw new IntegrationError('The Turso attachment registry could not release its files.');
+    await retireAfterUncertainOutcome(
+      pendingAttachment,
+      'The Turso attachment registry could not release its files.',
+    );
   }
   return result;
+}
+
+function closeCompletedStatement(statement, pendingAttachment) {
+  if (
+    !testFaultConsumed &&
+    testFault === 'attach-finalization' &&
+    pendingAttachment?.kind === 'attach'
+  ) {
+    testFaultConsumed = true;
+    throw new Error('Controlled ATTACH finalization failure.');
+  }
+  statement.close();
 }
 
 async function closeStatementAfterFailure(statement, pendingAttachment, error) {
   try {
     statement.close();
   } catch (_) {
-    await discardAttachment(pendingAttachment);
-    throw new IntegrationError(
+    await retireAfterUncertainOutcome(
+      pendingAttachment,
       'The Turso statement could not be finalized; its outcome is uncertain.',
     );
   }
   try {
     await discardAttachment(pendingAttachment);
   } catch (_) {
-    throw new IntegrationError('The Turso attachment registry could not release its files.');
+    await retireAfterUncertainOutcome(
+      pendingAttachment,
+      'The Turso attachment registry could not release its files.',
+    );
   }
   throw error;
 }
@@ -259,7 +291,21 @@ async function prepareAttachment(inspection, parameters) {
         );
       }
       const canonicalFilename = browserStorageFilename(filename);
-      const acquired = await acquireAttachment(canonicalFilename);
+      let acquired;
+      try {
+        acquired = await requireAttachmentRegistry().acquire(canonicalFilename);
+      } catch (error) {
+        if (
+          error instanceof AttachmentRegistryError ||
+          requireFileRegistration().isWorkerUnavailable(error)
+        ) {
+          await retireAfterUncertainOutcome(
+            { kind: 'attach', filename: canonicalFilename, acquired: true },
+            'The Turso attachment registration outcome is uncertain.',
+          );
+        }
+        throw error;
+      }
       return { kind: 'attach', alias, filename: canonicalFilename, acquired };
     }
     case 'detach':
@@ -455,66 +501,56 @@ function canonicalAlias(alias) {
   return normalized;
 }
 
-async function acquireAttachment(filename) {
-  if (filename === mainDatabasePath || attachmentOwners.has(filename)) return false;
-  const registration = requireFileRegistration();
-  await registration.registerFile(filename);
-  try {
-    await registration.registerFile(`${filename}-wal`);
-  } catch (error) {
-    await registration.unregisterFile(filename);
-    throw error;
-  }
-  return true;
-}
-
 async function completeAttachment(pending) {
   if (pending === null || pending === undefined) return;
   if (pending.kind === 'detach') {
-    await releaseAlias(pending.alias);
+    await requireAttachmentRegistry().releaseAlias(pending.alias);
     return;
   }
-
-  attachedSchemas.set(pending.alias, pending.filename);
-  if (pending.filename === null || pending.filename === mainDatabasePath) return;
-  let owners = attachmentOwners.get(pending.filename);
-  if (owners === undefined) {
-    owners = new Set();
-    attachmentOwners.set(pending.filename, owners);
-  }
-  owners.add(pending.alias);
+  requireAttachmentRegistry().rememberAttachment(pending);
 }
 
 async function discardAttachment(pending) {
-  if (pending?.kind !== 'attach' || !pending.acquired) return;
-  await unregisterAttachmentFiles(pending.filename);
+  if (pending?.kind !== 'attach') return;
+  await requireAttachmentRegistry().discardNewAttachment(pending);
 }
 
-async function releaseAlias(alias) {
-  if (!attachedSchemas.has(alias)) return;
-  const filename = attachedSchemas.get(alias);
-  attachedSchemas.delete(alias);
-  if (filename === null || filename === mainDatabasePath) return;
-  const owners = attachmentOwners.get(filename);
-  owners?.delete(alias);
-  if (owners !== undefined && owners.size !== 0) return;
-  attachmentOwners.delete(filename);
-  await unregisterAttachmentFiles(filename);
-}
-
-async function releaseAllAttachments() {
-  const filenames = [...attachmentOwners.keys()];
-  attachedSchemas.clear();
-  attachmentOwners.clear();
-  for (const filename of filenames) {
-    await unregisterAttachmentFiles(filename);
+async function shutdownDatabase(additionalFilenames = []) {
+  const owned = database;
+  const registry = attachmentRegistry;
+  database = undefined;
+  let closeError;
+  let releaseError;
+  try {
+    await owned?.close();
+  } catch (error) {
+    closeError = error;
   }
+  if (closeError === undefined) {
+    try {
+      await registry?.releaseAll(additionalFilenames);
+    } catch (error) {
+      releaseError = error;
+    }
+  }
+  mainDatabasePath = undefined;
+  fileRegistration = undefined;
+  attachmentRegistry = undefined;
+  if (closeError !== undefined) throw closeError;
+  if (releaseError !== undefined) throw releaseError;
 }
 
-async function unregisterAttachmentFiles(filename) {
-  const registration = requireFileRegistration();
-  await registration.unregisterFile(`${filename}-wal`);
-  await registration.unregisterFile(filename);
+async function retireAfterUncertainOutcome(pending, message) {
+  const additionalFilenames =
+    pending?.kind === 'attach' && pending.acquired && pending.filename !== null
+      ? [pending.filename]
+      : [];
+  try {
+    await shutdownDatabase(additionalFilenames);
+  } catch (_) {
+    // The platform failure retires the owning worker after this response.
+  }
+  throw new IntegrationError(message);
 }
 
 function requireFileRegistration() {
@@ -522,6 +558,25 @@ function requireFileRegistration() {
     throw new IntegrationError('The Turso file registration bridge is unavailable.');
   }
   return fileRegistration;
+}
+
+function registerAttachmentFile(path) {
+  if (
+    !testFaultConsumed &&
+    testFault === 'attachment-wal-registration' &&
+    path.endsWith('-wal')
+  ) {
+    testFaultConsumed = true;
+    throw new Error('Controlled attachment WAL registration failure.');
+  }
+  return requireFileRegistration().registerFile(path);
+}
+
+function requireAttachmentRegistry() {
+  if (attachmentRegistry === undefined) {
+    throw new IntegrationError('The Turso attachment registry is unavailable.');
+  }
+  return attachmentRegistry;
 }
 
 function decodeValue(value) {

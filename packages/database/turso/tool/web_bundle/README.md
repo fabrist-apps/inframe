@@ -7,12 +7,15 @@ main WASM instance, and OPFS worker share one registration map and module instan
 The adapter is limited to persistent ATTACH. Turso `0.8.0-pre.10` registers OPFS files in its worker,
 but a fresh ATTACH opens its registry miss synchronously from the main WASM instance. The adapter
 returns the acknowledged worker handle and size during registration and proxies that bounded open
-to the same worker. It does not modify Turso's Rust/WASM engine binary or create a helper database.
+to the same worker. Registration mutations are serialized, close retains indexes until the access
+handle is released, and protocol timeout or worker failure poisons future requests. It does not
+modify Turso's Rust/WASM engine binary or create a helper database.
 
 Rebuild with:
 
 ```sh
 npm ci
+npm test
 npm run build
 shasum -a 256 ../../web/turso_upstream.js
 ```

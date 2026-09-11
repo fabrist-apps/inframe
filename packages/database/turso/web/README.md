@@ -38,6 +38,12 @@ executing the original SQL. DETACH releases those registrations after the engine
 closing the main database releases every remaining attachment. Reopening never restores aliases
 automatically. A browser memory main supports memory attachments only.
 
+The registry keeps one logical owner per alias and one OPFS registration per filename. Failed
+attachment execution releases only registrations acquired for that attempt. Failed DETACH leaves
+the existing alias and registration intact. Close drains accepted Dart operations, closes the Turso
+engine, and then releases attachment registrations. An uncertain execution, finalization, or worker
+protocol outcome retires the connection before cleanup, so queued and future operations fail.
+
 Persistent attachments from an in-memory browser main are rejected before acquiring OPFS handles.
 Browser attachment names cannot contain a path separator or NUL. A competing browser worker or tab
 that owns the same OPFS file causes an explicit open failure; the bridge does not steal the handle or
@@ -47,7 +53,8 @@ fall back to memory. Re-run the installer whenever these assets change.
 
 | Asset | Source | SHA-256 |
 | --- | --- | --- |
-| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `2511663dedf69a22fff1c36c74dfa88868645c3d92515db60472b604ef742ab0` |
+| `turso_attachment_registry.js` | Package-owned retryable alias and registration ownership state | `dda632e8e710a7d5cd637617315ba3aff796b1ff56d18fadcbb35d53413e226d` |
+| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `3f6342715902c76a32f4422d5c1c89e297ecf1f068fa36a198f18e68dbffd647` |
 | `turso_sql_guard.wasm` | `tool/sql_guard`, using `turso_parser` at `342dfbe267ebdb9141c434c499ce31e10bb46f27` | `53befd5b351189a382af748f7148525d39ed0681d636d4664c8d1775dae66297` |
 
 The npm tarball integrity is
@@ -55,7 +62,9 @@ The npm tarball integrity is
 The bundle inputs and reproduction command are recorded in `tool/web_bundle/README.md`. The adapter
 changes only the pinned JavaScript worker protocol: acknowledged OPFS registrations expose their
 worker handles to the same main WASM instance, and the fresh ATTACH open uses a bounded synchronous
-worker request. The Turso Rust/WASM engine binary remains unchanged.
+worker request. Registration mutations are serialized, access handles remain indexed until close
+succeeds, and a timed-out, malformed, or failed worker session is poisoned. The Turso Rust/WASM
+engine binary remains unchanged.
 
 The parser adapter reports one-statement validation plus structured ATTACH/DETACH argument metadata
 from the matching pinned parser. It does not change Turso engine behavior.

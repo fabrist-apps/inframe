@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build",
+    "test": "node --test attachment_registry.test.mjs"
   },
   "dependencies": {
     "@tursodatabase/database-common": "0.8.0-pre.10",
