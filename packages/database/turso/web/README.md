@@ -54,7 +54,7 @@ fall back to memory. Re-run the installer whenever these assets change.
 | Asset | Source | SHA-256 |
 | --- | --- | --- |
 | `turso_attachment_registry.js` | Package-owned retryable alias and registration ownership state | `1b52c4f7ceeda6a0c7857b45d07388db075766ec8056b057126114a82a93e4c6` |
-| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `817b43b3375d66170420501a1cfde8f9f8344c7347a94c947ba749427a967cd9` |
+| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `10652f04abb38e9dc0b9206b5c12bee1401a6d8c5fab6ebdcac172b2cd930469` |
 | `turso_sql_guard.wasm` | `tool/sql_guard`, using `turso_parser` at `342dfbe267ebdb9141c434c499ce31e10bb46f27` | `53befd5b351189a382af748f7148525d39ed0681d636d4664c8d1775dae66297` |
 
 The npm tarball integrity is

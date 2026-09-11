@@ -279,23 +279,31 @@ export function setupWebWorker() {
       );
       return;
     }
-    const asyncOperations = {
-      read_async: () =>
-        opfs.read(
-          event.data.handle,
-          new Uint8Array(memory.buffer, event.data.ptr >>> 0, event.data.len),
-          event.data.offset,
-        ),
-      write_async: () =>
-        opfs.write(
-          event.data.handle,
-          new Uint8Array(memory.buffer, event.data.ptr >>> 0, event.data.len),
-          event.data.offset,
-        ),
-      sync_async: () => opfs.sync(event.data.handle),
-      truncate_async: () => opfs.truncate(event.data.handle, event.data.len),
-    };
-    const asyncOperation = asyncOperations[event.data.__turso__];
+    let asyncOperation;
+    switch (event.data.__turso__) {
+      case 'read_async':
+        asyncOperation = () =>
+          opfs.read(
+            event.data.handle,
+            new Uint8Array(memory.buffer, event.data.ptr >>> 0, event.data.len),
+            event.data.offset,
+          );
+        break;
+      case 'write_async':
+        asyncOperation = () =>
+          opfs.write(
+            event.data.handle,
+            new Uint8Array(memory.buffer, event.data.ptr >>> 0, event.data.len),
+            event.data.offset,
+          );
+        break;
+      case 'sync_async':
+        asyncOperation = () => opfs.sync(event.data.handle);
+        break;
+      case 'truncate_async':
+        asyncOperation = () => opfs.truncate(event.data.handle, event.data.len);
+        break;
+    }
     if (asyncOperation !== undefined) {
       respondToAsyncOperation(event.data, asyncOperation, (reply) => self.postMessage(reply));
       return;
