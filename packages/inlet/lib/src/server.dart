@@ -324,7 +324,11 @@ final class _ServerAdapter {
         detachedSocket = await detach;
         final events = StreamIterator(response.body);
         detachedResponse = _DetachedSseResponse(detachedSocket, events);
-        _ownDetachedResponse(detachedResponse);
+        if (!_ownDetachedResponse(detachedResponse)) {
+          detachedResponse = null;
+          detachedSocket = null;
+          return;
+        }
         await detachedSocket.flush();
         while (await events.moveNext()) {
           detachedSocket.add(events.current);
@@ -355,12 +359,13 @@ final class _ServerAdapter {
     }
   }
 
-  void _ownDetachedResponse(_DetachedSseResponse response) {
+  bool _ownDetachedResponse(_DetachedSseResponse response) {
     if (_forceClosing) {
       response.abort().ignore();
-      return;
+      return false;
     }
     _detachedResponses.add(response);
+    return true;
   }
 
   Future<void> _sendEmpty(

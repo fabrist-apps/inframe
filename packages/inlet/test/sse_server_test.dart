@@ -216,6 +216,11 @@ void main() {
         )..get('/events', (_, _) => Response.sse(events.stream));
         final server = await application.serve(port: 0);
         final wire = await _WireClient.connect(server);
+        addTearDown(() async {
+          await wire.close();
+          await server.close(force: true);
+          await events.close();
+        });
 
         wire.send(
           'GET /events HTTP/1.1\r\n'
@@ -273,6 +278,7 @@ void main() {
     });
 
     test('should cancel active delivery when listener close escalates to force', () async {
+      final reports = <Object>[];
       final cancelled = Completer<void>();
       late StreamController<SseEvent> events;
       events = StreamController<SseEvent>(
@@ -280,7 +286,7 @@ void main() {
         onCancel: cancelled.complete,
       );
       final application = Inlet(
-        onReportError: (_, _) {},
+        onReportError: (error, _) => reports.add(error),
       )..get('/events', (_, _) => Response.sse(events.stream));
       final server = await application.serve(port: 0);
       final client = HttpClient();
@@ -308,6 +314,8 @@ void main() {
       expect(server.close(force: true), same(normalClose));
 
       await cancelled.future.timeout(const Duration(seconds: 2));
+      await Future<void>.delayed(Duration.zero);
+      expect(reports, isEmpty);
     });
   });
 }
