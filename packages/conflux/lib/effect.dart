@@ -10,6 +10,7 @@ export 'src/effect/effect.dart'
         EffectCleanup,
         EffectObservation,
         EffectRecovery,
+        EffectTiming,
         EffectTransformation,
         FlattenEffect;
 export 'src/effect/execution.dart' show Fiber, Scope, ScopeClosed;

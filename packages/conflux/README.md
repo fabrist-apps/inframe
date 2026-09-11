@@ -65,6 +65,28 @@ Scopes interrupt and await child fibers before running finalizers once in
 reverse registration order. Finalizers are protected from ordinary
 cancellation, so an uncooperative finalizer can prevent bounded shutdown.
 
+Timing operations use the runtime's `Clock`, so tests can control both wall and
+monotonic time. `delay` waits before starting work, `timed` reports monotonic
+elapsed time, and `timeout` interrupts and awaits child cleanup before returning
+its expected error:
+
+```dart
+final measured = await Effect.succeed<String, String>('ready')
+    .delay(const Duration(milliseconds: 10))
+    .timeout(
+      const Duration(seconds: 1),
+      onTimeout: () => 'operation timed out',
+    )
+    .timed()
+    .runFuture();
+
+print('${measured.value} after ${measured.elapsed}');
+```
+
+Durations must be non-negative. Conflux passes their microsecond value to the
+configured `Clock` without rounding; that Clock and its platform timer determine
+effective precision.
+
 `Queue.bounded` acquires an in-memory FIFO Queue whose lifetime belongs to the
 current Effect scope. A full Queue applies lossless backpressure until a take
 releases capacity. Shutdown is immediate and interrupts pending data operations
