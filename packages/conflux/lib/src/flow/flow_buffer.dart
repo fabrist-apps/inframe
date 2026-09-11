@@ -115,6 +115,25 @@ final class FlowMailbox<A, E> {
     };
   });
 
+  /// Takes an immediately available value or terminal outcome without waiting.
+  ///
+  /// The outer [Option] is absent while the mailbox remains open and empty.
+  Option<Exit<Option<A>, E>> poll() {
+    if (_values.isNotEmpty) {
+      final value = _values.removeFirst();
+      _acceptOffers();
+      return Some(Succeeded(Some(value)));
+    }
+    final terminal = _terminal;
+    if (terminal == null) return const None();
+    return Some(
+      switch (terminal) {
+        _MailboxCompleted<E>() => const Succeeded(None()),
+        _MailboxFailed<E>(:final cause) => Failed(cause),
+      },
+    );
+  }
+
   void _startOffer(_PendingMailboxOffer<A, E> offer) {
     if (_closed || _terminal != null) {
       offer.waiter.interrupt(const FlowMailboxClosed());

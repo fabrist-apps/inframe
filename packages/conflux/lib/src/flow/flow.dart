@@ -14,6 +14,7 @@ import 'package:conflux/src/flow/combination.dart';
 import 'package:conflux/src/flow/concurrent.dart';
 import 'package:conflux/src/flow/coordination_adapter.dart';
 import 'package:conflux/src/flow/flow_buffer.dart';
+import 'package:conflux/src/flow/flow_scheduling.dart';
 import 'package:conflux/src/flow/protocol.dart';
 import 'package:conflux/src/flow/sharing.dart';
 import 'package:conflux/src/flow/stream_adapter.dart';
@@ -443,6 +444,54 @@ final class Flow<A, E> {
     );
   }
 
+  /// Emits the latest value after no newer value arrives within [duration].
+  ///
+  /// Timing uses the runtime's monotonic Clock. Normal completion emits a final
+  /// pending value immediately, while failure discards it. [capacity] bounds
+  /// both input staging and pending output when downstream is slow.
+  Flow<A, E> debounce(
+    Duration duration, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    _validateFlowDuration(duration);
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => FlowSchedulingSource.openDebounce(
+        open,
+        duration: duration,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Emits the leading value and suppresses later values within [duration].
+  ///
+  /// There is no trailing emission. Intervals use upstream arrival timestamps
+  /// from the runtime's monotonic Clock. [capacity] bounds input and output
+  /// staging while downstream is slow.
+  Flow<A, E> throttle(
+    Duration duration, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    _validateFlowDuration(duration);
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => FlowSchedulingSource.openThrottle(
+        open,
+        duration: duration,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
   /// Runs source acquisition and every pull with [context].
   Flow<A, E> withContext(Context context) => Flow._(() => open().withContext(context));
 
@@ -565,6 +614,12 @@ final class Flow<A, E> {
       );
     }),
   );
+}
+
+void _validateFlowDuration(Duration duration) {
+  if (duration.isNegative) {
+    throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
+  }
 }
 
 Effect<FlowSourceCursor<A, E>, E> _openWithExitHook<A, E>(
