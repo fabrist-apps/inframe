@@ -4,6 +4,7 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/pubsub.dart';
 import 'package:conflux/queue.dart';
+import 'package:conflux/schedule.dart';
 import 'package:conflux/src/effect/cause.dart' show CauseGroup;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart'
@@ -14,6 +15,7 @@ import 'package:conflux/src/flow/combination.dart';
 import 'package:conflux/src/flow/concurrent.dart';
 import 'package:conflux/src/flow/coordination_adapter.dart';
 import 'package:conflux/src/flow/flow_buffer.dart';
+import 'package:conflux/src/flow/flow_retry.dart';
 import 'package:conflux/src/flow/flow_scheduling.dart';
 import 'package:conflux/src/flow/protocol.dart';
 import 'package:conflux/src/flow/sharing.dart';
@@ -491,6 +493,18 @@ final class Flow<A, E> {
       ),
     );
   }
+
+  /// Resubscribes after expected failures while [schedule] continues.
+  ///
+  /// Every consumption creates a fresh Schedule driver, and every retry waits
+  /// for the failed attempt's cleanup before the policy delay and next source
+  /// factory call. Values delivered before failure may be delivered again.
+  /// Repeatable factories and idempotent external operations remain the caller's
+  /// responsibility. Causes containing a defect or interruption are preserved
+  /// without retrying.
+  Flow<A, E> retry<O>(Schedule<E, O, E> schedule) => Flow._(
+    () => RetryFlowSource.open(open, schedule),
+  );
 
   /// Runs source acquisition and every pull with [context].
   Flow<A, E> withContext(Context context) => Flow._(() => open().withContext(context));
