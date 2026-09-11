@@ -18,6 +18,10 @@ Cross-Origin-Embedder-Policy: require-corp
 The bridge, upstream bundle, and SQL parser adapter execute in a dedicated application worker.
 Upstream Turso creates its own worker for OPFS access.
 
+ATTACH and DETACH are enabled by the bridge for ordinary and encrypted opens. In-memory attachments
+need no additional browser files. Persistent attachments require additional OPFS registration and
+remain unsupported until that integration is installed with the bridge.
+
 ## Provenance
 
 | Asset | Source | SHA-256 |

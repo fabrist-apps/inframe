@@ -52,7 +52,10 @@ async function open({ path, persistent, encryption }) {
   }
   await sqlGuard;
   const { Database } = await upstreamModule;
-  const options = encryption === null ? {} : encryptionOptions(encryption);
+  const options = {
+    experimental: encryption === null ? ['attach'] : ['attach', 'encryption'],
+    ...(encryption === null ? {} : encryptionOptions(encryption)),
+  };
   const candidate = new Database(path, options);
   try {
     await candidate.connect();
@@ -76,7 +79,6 @@ function encryptionOptions(encryption) {
   sensitiveValues.add(hexkey);
   sensitiveValues.add(encryption.key.join(','));
   return {
-    experimental: ['encryption'],
     encryption: {
       cipher: browserCipher(encryption.cipher),
       hexkey,

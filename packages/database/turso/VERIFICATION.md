@@ -40,6 +40,7 @@ Mobile browsers are excluded; Android and iOS use their native Flutter targets.
 | Flutter native artifact loading | Release Flutter application on Linux, Android emulator plus ARM64 APK, and iOS simulator plus device build; Windows is temporarily disabled as described above |
 | Browser persistence/reload, storage lock release, failed-open cleanup, and memory opening | `example/web/main.dart` in Chrome, Firefox, and Safari |
 | Browser bindings, exact integers, immutable results, transactions, lifecycle, encryption, and vectors | `example/web/main.dart` in Chrome, Firefox, and Safari |
+| Browser memory ATTACH/DETACH, explicit foreign-key policy, attached-schema rollback, and encrypted connections | The memory attachment scenarios in `example/web/main.dart` through the installed bridge in Chrome, Firefox, and Safari |
 | Web FTS exclusion | The browser suite asserts `fts == false`; native suites execute FTS SQL |
 | Artifact selection and integrity | Native asset build-hook tests plus SHA-256 checks in the platform jobs |
 | Workspace integration | `dart pub get`, formatter, analyzer, and the repository's existing test jobs |

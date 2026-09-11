@@ -25,6 +25,7 @@ Future<void> main() async {
     await _verifyCloseFailure();
     await _verifyLockRelease();
     await _verifyMemoryDatabase();
+    await _verifyMemoryAttachments();
     await _verifyRepresentativeWorkload();
     await _verifyPlatformFailures();
     web.window.localStorage.removeItem(_phaseKey);
@@ -171,6 +172,14 @@ Future<void> _verifyEncryptedData() async {
         'value',
       );
       _expect(value == 'encrypted with ${cipher.name}', '${cipher.name} data did not persist.');
+      await database.execute("ATTACH DATABASE ':memory:' AS auxiliary");
+      await database.execute('CREATE TABLE auxiliary.items (id INTEGER PRIMARY KEY)');
+      await database.execute('INSERT INTO auxiliary.items VALUES (1)');
+      _expect(
+        (await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
+        '${cipher.name} memory attachment failed.',
+      );
+      await database.execute('DETACH DATABASE auxiliary');
     } finally {
       await database.close();
     }
@@ -330,6 +339,78 @@ Future<void> _verifyMemoryDatabase() async {
     await _expectFailure<TursoDatabaseException>(() => second.query('SELECT * FROM local_only'));
   } finally {
     await second.close();
+  }
+}
+
+Future<void> _verifyMemoryAttachments() async {
+  final persistent = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await persistent.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys') == 0,
+      'Browser open changed the upstream foreign-key default.',
+    );
+    await persistent.query("ATTACH DATABASE ':memory:' AS auxiliary");
+    await persistent.execute('CREATE TABLE auxiliary.items (id INTEGER PRIMARY KEY)');
+    await persistent.execute('INSERT INTO auxiliary.items VALUES (1)');
+    _expect(
+      (await persistent.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
+      'Persistent browser main could not read its memory attachment.',
+    );
+    await persistent.execute('DETACH DATABASE auxiliary');
+    await _expectFailure<TursoDatabaseException>(
+      () => persistent.query('SELECT * FROM auxiliary.items'),
+    );
+  } finally {
+    await persistent.close();
+  }
+
+  final memory = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
+  try {
+    await memory.transaction((tx) async {
+      await tx.execute("ATTACH DATABASE ':memory:' AS auxiliary");
+      await tx.execute('CREATE TABLE auxiliary.parents (id INTEGER PRIMARY KEY)');
+      await tx.execute(
+        'CREATE TABLE auxiliary.children ( '
+        'id INTEGER PRIMARY KEY, '
+        'parent_id INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED)',
+      );
+      _expect(
+        (await tx.query('SELECT count(*) AS count FROM auxiliary.parents')).rows.single.getInt(
+              'count',
+            ) ==
+            0,
+        'Transaction query did not reach the attached memory schema.',
+      );
+    });
+    await memory.execute('PRAGMA foreign_keys=ON');
+    await _expectFailure<TursoDatabaseException>(
+      () => memory.transaction<void>((tx) async {
+        await tx.execute('INSERT INTO auxiliary.children VALUES (1, 99)');
+      }),
+    );
+    _expect(
+      (await memory.query('SELECT count(*) AS count FROM auxiliary.children')).rows.single
+              .getInt('count') ==
+          0,
+      'Deferred attached-schema violation escaped rollback.',
+    );
+    await memory.execute('PRAGMA foreign_keys=OFF');
+    await memory.execute('INSERT INTO auxiliary.children VALUES (2, 99)');
+    await memory.execute('DETACH DATABASE auxiliary');
+  } finally {
+    await memory.close();
+  }
+
+  final reopened = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
+  try {
+    await _expectFailure<TursoDatabaseException>(
+      () => reopened.query('SELECT * FROM auxiliary.children'),
+    );
+  } finally {
+    await reopened.close();
   }
 }
 
