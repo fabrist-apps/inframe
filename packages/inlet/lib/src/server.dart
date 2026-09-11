@@ -245,7 +245,9 @@ final class _ServerAdapter {
         await _cleanUp(response.close);
       }
       await _cleanUp(request.close);
-      await _cleanUp(input.finish);
+      if (!input.isFinishStarted) {
+        await _cleanUp(input.finish);
+      }
     }
   }
 
@@ -313,7 +315,7 @@ final class _ServerAdapter {
 
         // The WebSocket owns the detached transport before the obsolete HTTP
         // request subscription is cancelled.
-        await input.finish();
+        await _cleanUp(input.finish);
         await _runWebSocketSession(socket, webSocket);
         return;
       }
@@ -324,11 +326,7 @@ final class _ServerAdapter {
       }
       _prepareTarget(target, input, reset: resetTarget);
       target.statusCode = response.statusCode;
-      for (final MapEntry(key: name, value: values) in response.headers.toMap().entries) {
-        for (final value in values) {
-          target.headers.add(name, value);
-        }
-      }
+      _applyResponseHeaders(target, response.headers);
       final knownLength = response._body.knownLength;
       if (response.statusCode == HttpStatus.noContent ||
           response.statusCode == HttpStatus.notModified) {
@@ -403,6 +401,10 @@ final class _ServerAdapter {
 
   void _prepareWebSocketTarget(HttpResponse target, Headers headers) {
     target.bufferOutput = false;
+    _applyResponseHeaders(target, headers);
+  }
+
+  void _applyResponseHeaders(HttpResponse target, Headers headers) {
     for (final MapEntry(key: name, value: values) in headers.toMap().entries) {
       for (final value in values) {
         target.headers.add(name, value);
@@ -631,6 +633,8 @@ final class _HttpRequestBody extends Stream<List<int>> {
   Future<void>? _finishFuture;
 
   bool get isComplete => _completeCleanly;
+
+  bool get isFinishStarted => _finishFuture != null;
 
   void pause() {
     if (!_completeCleanly) {

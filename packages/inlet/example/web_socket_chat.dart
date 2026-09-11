@@ -68,7 +68,11 @@ Future<void> main() async {
 }
 
 Future<void> _waitUntil(bool Function() condition) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 2));
   while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TimeoutException('Chat sessions did not settle.');
+    }
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
 }
