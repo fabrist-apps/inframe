@@ -21,7 +21,9 @@ abstract final class ConcurrentFlowSource {
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<A, E>(capacity, overflow, onOverflow);
     final coordinator = _MergeCoordinator<A, E>(mailbox, execution);
-    _registerCleanup(mailbox, coordinator, execution);
+    if (!_registerCleanup(mailbox, coordinator, execution)) {
+      return const Failed(Interrupted(ScopeClosed()));
+    }
     coordinator.startSources(sources);
     return Succeeded(_ConcurrentCursor(mailbox));
   });
@@ -38,7 +40,9 @@ abstract final class ConcurrentFlowSource {
     final mailbox = FlowMailbox<B, E>(capacity, overflow, onOverflow);
     final coordinator = _MergeCoordinator<B, E>(mailbox, execution);
     final gate = _ConcurrencyGate(concurrency);
-    _registerCleanup(mailbox, coordinator, execution, gate: gate);
+    if (!_registerCleanup(mailbox, coordinator, execution, gate: gate)) {
+      return const Failed(Interrupted(ScopeClosed()));
+    }
     coordinator.startMappedSource(upstream, transform, gate);
     return Succeeded(_ConcurrentCursor(mailbox));
   });
@@ -62,7 +66,7 @@ abstract final class ConcurrentFlowSource {
       mailbox,
       execution,
     );
-    ScopeAccess.addFinalizer(
+    final registered = ScopeAccess.addFinalizer(
       execution.scope,
       Effect.sync(() {
         coordinator.close();
@@ -71,6 +75,11 @@ abstract final class ConcurrentFlowSource {
       execution.context,
       execution.clock,
     );
+    if (!registered) {
+      coordinator.close();
+      mailbox.close();
+      return const Failed(Interrupted(ScopeClosed()));
+    }
     coordinator.start();
     return Succeeded(_SwitchCursor(mailbox, coordinator));
   });
@@ -90,7 +99,7 @@ abstract final class ConcurrentFlowSource {
       mailbox,
       execution,
     );
-    ScopeAccess.addFinalizer(
+    final registered = ScopeAccess.addFinalizer(
       execution.scope,
       Effect.sync(() {
         coordinator.close();
@@ -99,17 +108,22 @@ abstract final class ConcurrentFlowSource {
       execution.context,
       execution.clock,
     );
+    if (!registered) {
+      coordinator.close();
+      mailbox.close();
+      return const Failed(Interrupted(ScopeClosed()));
+    }
     coordinator.start();
     return Succeeded(_ConcurrentCursor(mailbox));
   });
 
-  static void _registerCleanup<A, E>(
+  static bool _registerCleanup<A, E>(
     FlowMailbox<A, E> mailbox,
     _MergeCoordinator<A, E> coordinator,
     EffectExecution execution, {
     _ConcurrencyGate? gate,
   }) {
-    ScopeAccess.addFinalizer(
+    final registered = ScopeAccess.addFinalizer(
       execution.scope,
       Effect.sync(() {
         coordinator.close();
@@ -119,6 +133,12 @@ abstract final class ConcurrentFlowSource {
       execution.context,
       execution.clock,
     );
+    if (!registered) {
+      coordinator.close();
+      gate?.close();
+      mailbox.close();
+    }
+    return registered;
   }
 }
 
@@ -520,6 +540,7 @@ final class _LatestSlot<A> {
   Option<_GenerationValue<A>> _pending = const None();
   CoordinationWaiter<void>? _waiter;
   var _generation = 0;
+  var _signalled = false;
   var _closed = false;
 
   int get generation => _generation;
@@ -545,6 +566,9 @@ final class _LatestSlot<A> {
           waiter.interrupt(const ConcurrentFlowClosed());
         } else if (_pending case Some<_GenerationValue<A>>()) {
           waiter.succeed(null);
+        } else if (_signalled) {
+          _signalled = false;
+          waiter.succeed(null);
         } else {
           _waiter = waiter;
         }
@@ -558,12 +582,17 @@ final class _LatestSlot<A> {
   void signal() {
     final waiter = _waiter;
     _waiter = null;
-    waiter?.succeed(null);
+    if (waiter == null) {
+      if (_pending is None) _signalled = true;
+    } else {
+      waiter.succeed(null);
+    }
   }
 
   void close() {
     _closed = true;
     _pending = const None();
+    _signalled = false;
     _waiter?.interrupt(const ConcurrentFlowClosed());
     _waiter = null;
   }

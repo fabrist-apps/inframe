@@ -427,9 +427,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow)? onOverflow,
   }) {
-    if (duration.isNegative) {
-      throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
-    }
+    _validateFlowDuration(duration);
     if (maxSize <= 0) {
       throw ArgumentError.value(maxSize, 'maxSize', 'Must be positive.');
     }

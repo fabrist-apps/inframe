@@ -53,7 +53,7 @@ abstract final class FlowSchedulingSource {
   }) => EffectAccess.create((execution) async {
     final input = FlowMailbox<_Stamped<A>, E>(capacity, overflow, onOverflow);
     final output = FlowMailbox<A, E>(capacity, overflow, onOverflow);
-    ScopeAccess.addFinalizer(
+    final registered = ScopeAccess.addFinalizer(
       execution.scope,
       Effect.sync(() {
         input.close();
@@ -62,6 +62,11 @@ abstract final class FlowSchedulingSource {
       execution.context,
       execution.clock,
     );
+    if (!registered) {
+      input.close();
+      output.close();
+      return const Failed(Interrupted(ScopeClosed()));
+    }
     var sourceFinished = false;
     var terminalizing = false;
 

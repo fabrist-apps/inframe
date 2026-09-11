@@ -35,7 +35,9 @@ abstract final class CombinationFlowSource {
       execution,
       sourceList.length,
     );
-    _registerCombinationCleanup(mailbox, coordinator.close, execution);
+    if (!_registerCombinationCleanup(mailbox, coordinator.close, execution)) {
+      return const Failed(Interrupted(ScopeClosed()));
+    }
     coordinator.start(sourceList);
     return Succeeded(_CombinationCursor(mailbox));
   });
@@ -55,18 +57,20 @@ abstract final class CombinationFlowSource {
       combine,
       execution,
     );
-    _registerCombinationCleanup(mailbox, coordinator.close, execution);
+    if (!_registerCombinationCleanup(mailbox, coordinator.close, execution)) {
+      return const Failed(Interrupted(ScopeClosed()));
+    }
     coordinator.start(primary, secondary);
     return Succeeded(_CombinationCursor(mailbox));
   });
 }
 
-void _registerCombinationCleanup<A, E>(
+bool _registerCombinationCleanup<A, E>(
   FlowMailbox<A, E> mailbox,
   void Function() closeCoordinator,
   EffectExecution execution,
 ) {
-  ScopeAccess.addFinalizer(
+  final registered = ScopeAccess.addFinalizer(
     execution.scope,
     Effect.sync(() {
       closeCoordinator();
@@ -75,6 +79,11 @@ void _registerCombinationCleanup<A, E>(
     execution.context,
     execution.clock,
   );
+  if (!registered) {
+    closeCoordinator();
+    mailbox.close();
+  }
+  return registered;
 }
 
 final class _ZipCursor<A, E> implements FlowSourceCursor<List<A>, E> {
