@@ -273,6 +273,37 @@ final broadcast = Effect.build<int, Never>(($) async {
 final value = await broadcast.runFuture();
 ```
 
+`Flow` describes a lazy typed sequence. Each runner starts a fresh consumption
+scope and awaits its cleanup. A bounded prefix closes upstream as soon as the
+runner has its result:
+
+```dart
+final firstThree = Flow.fromIterable([1, 2, 3, 4])
+    .map((value) => value * 2)
+    .take(3)
+    .runCollect();
+
+final values = await firstThree.runFuture(); // [2, 4, 6]
+```
+
+Use a factory when adapting a Dart `Stream`, then choose how the bounded
+Flow-owned buffer behaves when a producer outruns its consumer:
+
+```dart
+final events = Flow.fromStream<int, String>(
+  () => eventStream,
+  onError: (error, stackTrace) => 'stream failed: $error',
+  capacity: 32,
+  overflow: FlowOverflowPolicy.backpressure,
+);
+```
+
+`Flow.fromQueue(queue)` creates competing consumers: one consumer receives each
+accepted item. `Flow.fromPubSub(pubsub)` acquires an independent subscription
+for every consumption, so active consumers receive each publication. These
+adapters remove their pending takes and PubSub subscriptions on exit, but the
+scope that acquired the shared Queue or PubSub still owns its shutdown.
+
 Ordinary recovery runs once for a cause containing only expected errors and
 uses the first expected leaf in deterministic execution/source order. A defect
 or interruption prevents recovery and retains the complete cause. `tapCause`
