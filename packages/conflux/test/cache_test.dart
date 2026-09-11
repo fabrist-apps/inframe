@@ -124,28 +124,199 @@ void main() {
       expect((waitingExit as Failed<int, String>).cause, isA<Interrupted<String>>());
       expect((closedExit as Failed<int, String>).cause, isA<Defect<String>>());
     });
+
+    test('should bound active lookups independently across keys', () async {
+      final gates = <String, Completer<int>>{
+        'a': Completer<int>(),
+        'b': Completer<int>(),
+        'c': Completer<int>(),
+      };
+      final started = <String>[];
+      final fixture = await _CacheFixture.start(
+        concurrency: 2,
+        lookup: (key) => Effect.tryFuture<int, String>(
+          () {
+            started.add(key);
+            return gates[key]!.future;
+          },
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final first = caller.fork(fixture.cache.get('a'));
+      final second = caller.fork(fixture.cache.get('b'));
+      final third = caller.fork(fixture.cache.get('c'));
+      await _flushMicrotasks();
+
+      expect(started, ['a', 'b']);
+
+      gates['a']!.complete(1);
+      await _flushMicrotasks();
+      expect(started, ['a', 'b', 'c']);
+      gates['b']!.complete(2);
+      gates['c']!.complete(3);
+      expect((await first.join() as Succeeded<int, String>).value, 1);
+      expect((await second.join() as Succeeded<int, String>).value, 2);
+      expect((await third.join() as Succeeded<int, String>).value, 3);
+    });
+
+    test('should evict the least recently used retained value', () async {
+      final lookups = <String, int>{};
+      final fixture = await _CacheFixture.start(
+        capacity: 2,
+        lookup: (key) => Effect.sync(() {
+          lookups.update(key, (count) => count + 1, ifAbsent: () => 1);
+          return key.codeUnitAt(0);
+        }),
+      );
+      addTearDown(fixture.close);
+
+      await fixture.cache.get('a').runFuture();
+      await fixture.cache.get('b').runFuture();
+      await fixture.cache.get('a').runFuture();
+      await fixture.cache.get('c').runFuture();
+      await fixture.cache.get('b').runFuture();
+
+      expect(lookups, {'a': 1, 'b': 2, 'c': 1});
+    });
+
+    test('should count a shared load as one active lookup', () async {
+      final firstGate = Completer<int>();
+      final secondGate = Completer<int>();
+      final started = <String>[];
+      final fixture = await _CacheFixture.start(
+        concurrency: 1,
+        lookup: (key) => Effect.tryFuture<int, String>(
+          () {
+            started.add(key);
+            return key == 'a' ? firstGate.future : secondGate.future;
+          },
+          onError: (error, _) => '$error',
+        ),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final first = caller.fork(fixture.cache.get('a'));
+      final shared = caller.fork(fixture.cache.get('a'));
+      final second = caller.fork(fixture.cache.get('b'));
+      await _flushMicrotasks();
+
+      expect(started, ['a']);
+      firstGate.complete(1);
+      await _flushMicrotasks();
+      expect(started, ['a', 'b']);
+      secondGate.complete(2);
+
+      expect((await first.join() as Succeeded<int, String>).value, 1);
+      expect((await shared.join() as Succeeded<int, String>).value, 1);
+      expect((await second.join() as Succeeded<int, String>).value, 2);
+    });
+
+    test('should release an active slot when a lookup fails', () async {
+      final started = <String>[];
+      final fixture = await _CacheFixture.start(
+        concurrency: 1,
+        lookup: (key) => Effect.defer(() {
+          started.add(key);
+          return key == 'a' ? Effect.fail<int, String>('failed') : Effect.succeed<int, String>(2);
+        }),
+      );
+      addTearDown(fixture.close);
+      final caller = Runtime();
+      addTearDown(caller.close);
+
+      final failed = caller.fork(fixture.cache.get('a'));
+      final succeeded = caller.fork(fixture.cache.get('b'));
+
+      expect(await failed.join(), isA<Failed<int, String>>());
+      expect((await succeeded.join() as Succeeded<int, String>).value, 2);
+      expect(started, ['a', 'b']);
+    });
+
+    test('should interrupt active and queued lookups when closed', () async {
+      final activeStarted = Completer<void>();
+      final activeGate = Completer<int>();
+      final started = <String>[];
+      final fixture = await _CacheFixture.start(
+        concurrency: 1,
+        lookup: (key) => Effect.tryFuture<int, String>(
+          () {
+            started.add(key);
+            if (key == 'a') activeStarted.complete();
+            return activeGate.future;
+          },
+          onError: (error, _) => '$error',
+        ),
+      );
+      final caller = Runtime();
+      addTearDown(caller.close);
+      final active = caller.fork(fixture.cache.get('a'));
+      final queued = caller.fork(fixture.cache.get('b'));
+      await activeStarted.future;
+
+      await fixture.close();
+
+      expect(started, ['a']);
+      expect((await active.join() as Failed<int, String>).cause, isA<Interrupted<String>>());
+      expect((await queued.join() as Failed<int, String>).cause, isA<Interrupted<String>>());
+    });
+
+    test('should reject non-positive capacity and concurrency at acquisition', () async {
+      for (final configuration in [(capacity: 0, concurrency: 1), (capacity: 1, concurrency: 0)]) {
+        final exit = await Cache.make<String, int, String>(
+          capacity: configuration.capacity,
+          concurrency: configuration.concurrency,
+          lookup: (_) => Effect.succeed(1),
+        ).runFutureExit();
+
+        final cause = (exit as Failed<Cache<String, int, String>, Never>).cause;
+        expect(cause, isA<Defect<Never>>());
+        expect((cause as Defect<Never>).error, isA<ArgumentError>());
+      }
+    });
+
+    test('should not dispose values evicted from the Cache', () async {
+      final values = <String, _BorrowedValue>{};
+      final fixture = await _CacheFixture.start(
+        capacity: 1,
+        lookup: (key) => Effect.sync(() {
+          return values.putIfAbsent(key, _BorrowedValue.new);
+        }),
+      );
+      addTearDown(fixture.close);
+
+      await fixture.cache.get('a').runFuture();
+      await fixture.cache.get('b').runFuture();
+
+      expect(values['a']!.closed, isFalse);
+    });
   });
 }
 
-final class _CacheFixture {
+final class _CacheFixture<A> {
   _CacheFixture._(this.cache, this._owner);
 
-  final Cache<String, int, String> cache;
+  final Cache<String, A, String> cache;
   final Runtime _owner;
 
-  static Future<_CacheFixture> start({
-    required Effect<int, String> Function(String key) lookup,
+  static Future<_CacheFixture<A>> start<A>({
+    required Effect<A, String> Function(String key) lookup,
     Context? ownerContext,
+    int capacity = 16,
+    int concurrency = 4,
   }) async {
     final owner = Runtime(context: ownerContext);
-    final created = Completer<Cache<String, int, String>>();
+    final created = Completer<Cache<String, A, String>>();
     final keepScopeOpen = Completer<void>();
     owner.fork(
       Effect.build<void, Never>(($) async {
         final cache = await $(
-          Cache.make<String, int, String>(
-            capacity: 16,
-            concurrency: 4,
+          Cache.make<String, A, String>(
+            capacity: capacity,
+            concurrency: concurrency,
             lookup: lookup,
           ),
         );
@@ -158,8 +329,16 @@ final class _CacheFixture {
         );
       }),
     );
-    return _CacheFixture._(await created.future, owner);
+    return _CacheFixture<A>._(await created.future, owner);
   }
 
   Future<void> close() => _owner.close();
+}
+
+Future<void> _flushMicrotasks() => Future<void>.delayed(Duration.zero);
+
+final class _BorrowedValue {
+  bool closed = false;
+
+  void close() => closed = true;
 }

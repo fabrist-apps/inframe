@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:conflux/src/effect/cause.dart';
 import 'package:conflux/src/effect/effect.dart';
@@ -68,16 +69,18 @@ final class Cache<K, A, E> {
 
   final Effect<A, E> Function(K key) _lookup;
   final EffectExecution _ownerExecution;
-  final Map<K, A> _values = {};
+  final LinkedHashMap<K, A> _values = LinkedHashMap();
   final Map<K, int> _generations = {};
-  final Map<(K, int), _CacheLoad<A, E>> _loads = {};
+  final Map<(K, int), _CacheLoad<K, A, E>> _loads = {};
+  final ListQueue<_CacheLoad<K, A, E>> _pendingLoads = ListQueue();
+  var _activeLoads = 0;
   var _closed = false;
 
   /// Returns a retained success, joins a current load, or starts the lookup.
   Effect<A, E> get(K key) => EffectAccess.create((caller) {
     _ensureOpen();
     if (_values.containsKey(key)) {
-      return Future.value(Succeeded(_values[key] as A));
+      return Future.value(Succeeded(_touch(key)));
     }
 
     final generation = _generations[key] ?? 0;
@@ -86,31 +89,43 @@ final class Cache<K, A, E> {
     return _awaitLoad(load, caller);
   });
 
-  _CacheLoad<A, E> _startLoad(K key, int generation) {
+  _CacheLoad<K, A, E> _startLoad(K key, int generation) {
     final loadKey = (key, generation);
-    final load = _CacheLoad<A, E>();
+    final load = _CacheLoad<K, A, E>(key, generation);
     _loads[loadKey] = load;
+    if (_activeLoads < concurrency) {
+      _runLoad(load);
+    } else {
+      _pendingLoads.addLast(load);
+    }
+    return load;
+  }
+
+  void _runLoad(_CacheLoad<K, A, E> load) {
+    _activeLoads += 1;
     final fiber = ScopeAccess.fork(
       _ownerExecution.scope,
-      Effect.defer(() => _lookup(key)),
+      Effect.defer(() => _lookup(load.key)),
       _ownerExecution,
     );
     unawaited(
       fiber.join().then((exit) {
-        _loads.remove(loadKey);
+        _activeLoads -= 1;
+        final loadKey = (load.key, load.generation);
+        if (identical(_loads[loadKey], load)) _loads.remove(loadKey);
         if (exit case Succeeded<A, E>(:final value)) {
-          if (!_isClosed && (_generations[key] ?? 0) == generation) {
-            _values[key] = value;
+          if (!_isClosed && (_generations[load.key] ?? 0) == load.generation) {
+            _retain(load.key, value);
           }
         }
         load.complete(exit);
+        _drainPendingLoads();
       }),
     );
-    return load;
   }
 
   Future<Exit<A, E>> _awaitLoad(
-    _CacheLoad<A, E> load,
+    _CacheLoad<K, A, E> load,
     EffectExecution caller,
   ) {
     if (caller.cancellation.isCancelled) {
@@ -137,6 +152,34 @@ final class Cache<K, A, E> {
     return completion.future;
   }
 
+  A _touch(K key) {
+    final value = _values.remove(key) as A;
+    _values[key] = value;
+    return value;
+  }
+
+  void _retain(K key, A value) {
+    _values.remove(key);
+    _values[key] = value;
+    while (_values.length > capacity) {
+      _values.remove(_values.keys.first);
+    }
+  }
+
+  void _drainPendingLoads() {
+    if (_isClosed) {
+      while (_pendingLoads.isNotEmpty) {
+        _pendingLoads.removeFirst().complete(
+          const Failed(Interrupted(ScopeClosed())),
+        );
+      }
+      return;
+    }
+    while (_pendingLoads.isNotEmpty && _activeLoads < concurrency) {
+      _runLoad(_pendingLoads.removeFirst());
+    }
+  }
+
   bool get _isClosed => _closed || _ownerExecution.scope.isClosed;
 
   void _ensureOpen() {
@@ -151,10 +194,15 @@ final class Cache<K, A, E> {
     }
     _values.clear();
     _loads.clear();
+    _pendingLoads.clear();
   }
 }
 
-final class _CacheLoad<A, E> {
+final class _CacheLoad<K, A, E> {
+  _CacheLoad(this.key, this.generation);
+
+  final K key;
+  final int generation;
   final Completer<Exit<A, E>> _completion = Completer();
 
   Future<Exit<A, E>> get exit => _completion.future;
