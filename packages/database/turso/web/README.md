@@ -19,11 +19,24 @@ The bridge, upstream bundle, and SQL parser adapter execute in a dedicated appli
 Upstream Turso creates its own worker for OPFS access.
 
 ATTACH and DETACH are enabled by the bridge for ordinary and encrypted opens. In-memory attachments
-need no additional browser files. From a persistent main database, a direct single-file name such
-as `ATTACH DATABASE 'other.db' AS auxiliary` registers that database and its WAL with the existing
-Turso OPFS worker before executing the original SQL. DETACH releases those registrations after the
-engine releases the alias; closing the main database releases every remaining attachment. Reopening
-never restores aliases automatically.
+need no additional browser files. From a persistent main database, the filename and alias may be
+direct arguments or positional and named parameters. The bridge snapshots bindings before awaiting
+OPFS registration and executes the original SQL and bindings without interpolation. Bound aliases
+retain their supplied spelling, so callers should use a stable lowercase alias in later statements.
+Computed attachment arguments are unsupported.
+
+A persistent filename may be a plain single-file name or a lowercase `file:` URI containing one
+percent-encoded filename, optional `mode=rwc`, and paired `cipher` and `hexkey` options. Supported
+ciphers are `aegis256` and `aes256gcm`; the key must be exactly 64 hexadecimal characters.
+Authorities, fragments, path separators, other modes, and other options are rejected before file
+acquisition. The original URI reaches Turso unchanged while its decoded filename identifies the
+OPFS registration. URI keys remain scoped to the current operation and are redacted from bridge
+errors. They are not inherited or restored after reload.
+
+The bridge registers the attached database and its WAL with the existing Turso OPFS worker before
+executing the original SQL. DETACH releases those registrations after the engine releases the alias;
+closing the main database releases every remaining attachment. Reopening never restores aliases
+automatically. A browser memory main supports memory attachments only.
 
 Persistent attachments from an in-memory browser main are rejected before acquiring OPFS handles.
 Browser attachment names cannot contain a path separator or NUL. A competing browser worker or tab

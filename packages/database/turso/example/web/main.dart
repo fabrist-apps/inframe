@@ -7,7 +7,10 @@ import 'package:web/web.dart' as web;
 const _phaseKey = 'turso-dart-web-verification-phase';
 const _databaseName = 'turso-dart-web-verification.db';
 const _attachedDatabaseName = 'turso-dart-web-attached.db';
+const _boundAttachmentName = 'turso-dart-web-bound-attached.db';
+const _encryptedAttachmentName = 'turso-dart-web-encrypted-attached.db';
 const _memoryMainAttachmentName = 'turso-dart-web-memory-main-attached.db';
+const _uriAttachmentName = 'turso-dart-web-uri attached.db';
 final _bridge = TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js'));
 
 Future<void> main() async {
@@ -23,6 +26,8 @@ Future<void> main() async {
 
     await _verifyReloadedData();
     await _verifyPersistentAttachment();
+    await _verifyBoundPersistentAttachments();
+    await _verifyEncryptedPersistentAttachment();
     await _verifyPersistentAttachmentFromMemoryMainIsRejected();
     await _verifyEncryptedData();
     await _verifyTransactions();
@@ -430,6 +435,162 @@ Future<void> _verifyPersistentAttachmentFromMemoryMainIsRejected() async {
   }
 }
 
+Future<void> _verifyBoundPersistentAttachments() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  try {
+    final positional = <Object?>[_boundAttachmentName, 'positional_auxiliary'];
+    final attach = database.execute('ATTACH DATABASE ? AS ?', parameters: positional);
+    positional
+      ..[0] = 'mutated.db'
+      ..[1] = 'mutated';
+    await attach;
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS positional_auxiliary.items (id INTEGER PRIMARY KEY)',
+    );
+    await database.execute('DELETE FROM positional_auxiliary.items');
+    await database.execute('INSERT INTO positional_auxiliary.items VALUES (3)');
+    await database.query('DETACH DATABASE ?', parameters: const ['positional_auxiliary']);
+
+    final named = <String, Object?>{
+      ':file': _boundAttachmentName,
+      ':alias': 'named_auxiliary',
+    };
+    final namedAttach = database.query(
+      'ATTACH DATABASE :file AS :alias KEY :alias',
+      namedParameters: named,
+    );
+    named
+      ..[':file'] = 'mutated.db'
+      ..[':alias'] = 'mutated';
+    await namedAttach;
+    _expect(
+      (await database.query('SELECT id FROM named_auxiliary.items')).rows.single.getInt('id') == 3,
+      'Named attachment arguments or their submission snapshot changed.',
+    );
+    await database.execute(
+      'DETACH DATABASE :alias',
+      namedParameters: const {':alias': 'named_auxiliary'},
+    );
+
+    await database.transaction((tx) async {
+      await tx.execute(
+        'ATTACH DATABASE ?2 AS ?3 KEY ?1',
+        parameters: const ['unused', _boundAttachmentName, 'slot_auxiliary'],
+      );
+      _expect(
+        (await tx.query('SELECT id FROM slot_auxiliary.items')).rows.single.getInt('id') == 3,
+        'Numbered attachment slots did not retain parser ordering.',
+      );
+    });
+    await database.execute('DETACH DATABASE slot_auxiliary');
+
+    await _expectFailure<ArgumentError>(
+      () => database.execute(
+        'ATTACH DATABASE :file AS :alias',
+        namedParameters: const {':file': 'missing-alias.db'},
+      ),
+    );
+    await _expectFailure<ArgumentError>(
+      () => database.execute(
+        'ATTACH DATABASE ? AS ?',
+        parameters: const [1, 'non_string'],
+      ),
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+Future<void> _verifyEncryptedPersistentAttachment() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  final hexkey = _hexKey(_encryptionKey());
+  final uri = 'file:$_encryptedAttachmentName?mode=rwc&cipher=aegis256&hexkey=$hexkey';
+  try {
+    await database.execute(
+      'ATTACH DATABASE ? AS ?',
+      parameters: [uri, 'encrypted_auxiliary'],
+    );
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS encrypted_auxiliary.secrets (value TEXT)',
+    );
+    await database.execute('DELETE FROM encrypted_auxiliary.secrets');
+    await database.execute("INSERT INTO encrypted_auxiliary.secrets VALUES ('attached secret')");
+    await database.execute('DETACH DATABASE encrypted_auxiliary');
+
+    final wrongHexkey = '${hexkey.substring(0, 62)}ff';
+    final wrongUri = 'file:$_encryptedAttachmentName?cipher=aegis256&hexkey=$wrongHexkey&mode=rwc';
+    final wrongKeyFailure = await _captureFailure(
+      () => database.execute('ATTACH DATABASE ? AS wrong_key', parameters: [wrongUri]),
+    );
+    _expect(wrongKeyFailure is TursoDatabaseException, 'Wrong attachment key had the wrong error.');
+    _expect(
+      !wrongKeyFailure.toString().contains(wrongHexkey) &&
+          !wrongKeyFailure.toString().contains(wrongUri),
+      'Attachment diagnostics exposed a key-bearing URI.',
+    );
+    await _expectFailure<TursoDatabaseException>(
+      () => database.execute(
+        "ATTACH DATABASE '$_encryptedAttachmentName' AS missing_key",
+      ),
+    );
+
+    await database.query("ATTACH DATABASE '$uri' AS encrypted_auxiliary");
+    _expect(
+      (await database.query('SELECT value FROM encrypted_auxiliary.secrets')).rows.single
+              .getString('value') ==
+          'attached secret',
+      'Encrypted browser attachment could not be reopened with its key.',
+    );
+    await database.execute('DETACH DATABASE encrypted_auxiliary');
+
+    await database.execute(
+      "ATTACH DATABASE 'file:turso-dart-web-uri%20attached.db?mode=rwc' AS uri_auxiliary",
+    );
+    await database.execute('CREATE TABLE IF NOT EXISTS uri_auxiliary.items (id INTEGER)');
+    await database.execute('DELETE FROM uri_auxiliary.items');
+    await database.execute('INSERT INTO uri_auxiliary.items VALUES (4)');
+    await database.execute('DETACH DATABASE uri_auxiliary');
+
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE 'file:readonly.db?mode=ro' AS readonly"),
+    );
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE 'file:nested%2Fpath.db' AS nested"),
+    );
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE 'file://localhost/absolute.db' AS absolute"),
+    );
+    await _expectFailure<ArgumentError>(
+      () => database.execute(
+        "ATTACH DATABASE 'file:unpaired.db?cipher=aegis256' AS unpaired",
+      ),
+    );
+  } finally {
+    await database.close();
+  }
+
+  final decoded = await TursoDatabase.open(
+    TursoLocation.browser(_uriAttachmentName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await decoded.query('SELECT id FROM items')).rows.single.getInt('id') == 4,
+      'File URI registration did not use the decoded OPFS filename.',
+    );
+  } finally {
+    await decoded.close();
+  }
+}
+
+String _hexKey(Uint8List key) => key.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+
 Future<void> _verifyLockRelease() async {
   final owner = await TursoDatabase.open(TursoLocation.browser(_databaseName), web: _bridge);
   await _expectFailure<TursoPlatformException>(
@@ -569,6 +730,15 @@ Future<void> _expectFailure<T extends Object>(Future<Object?> Function() action)
     return;
   }
   throw StateError('Expected $T.');
+}
+
+Future<Object> _captureFailure(Future<Object?> Function() action) async {
+  try {
+    await action();
+  } on Object catch (error) {
+    return error;
+  }
+  throw StateError('Expected an operation failure.');
 }
 
 void _expect(bool condition, String message) {

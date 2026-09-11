@@ -121,11 +121,32 @@ await database.execute('DETACH DATABASE auxiliary');
 ```
 
 Native parent directories must already exist. `':memory:'` creates an in-memory attachment on
-native and web. A persistent browser main accepts a single OPFS filename such as `other.db`; path
-separators are unsupported. A browser memory main supports memory attachments only. An alias belongs
-to one connection: DETACH or close releases it, and reopening the main database does not restore it.
-The attached database contents persist independently, so callers can explicitly re-attach the file
-later.
+native and web. A persistent browser main accepts a single OPFS filename and alias as direct SQL
+arguments or positional and named parameters. Bound aliases retain the supplied spelling, so use a
+stable lowercase alias when later statements refer to it. Computed attachment arguments are
+unsupported. A browser memory main supports memory attachments only.
+
+Browser filenames may also use a lowercase `file:` URI with one percent-encoded filename, optional
+`mode=rwc`, and paired `cipher` and `hexkey` options:
+
+```dart
+await database.execute(
+  'ATTACH DATABASE ? AS encrypted',
+  parameters: [
+    'file:other%20database.db?mode=rwc&cipher=aegis256&hexkey=$hexKey',
+  ],
+);
+```
+
+Supported ciphers are `aegis256` and `aes256gcm`; `hexkey` must contain exactly 64 hexadecimal
+characters. Authorities, fragments, path separators, other modes, and other URI options are
+rejected. The original URI reaches Turso unchanged while the bridge uses its decoded filename for
+OPFS ownership. Encryption keys remain scoped to the operation and are redacted from bridge errors.
+They are not inherited from the main database or restored after a reload.
+
+An alias belongs to one connection: DETACH or close releases it, and reopening the main database
+does not restore it. The attached database contents persist independently, so callers can explicitly
+re-attach the file later.
 
 Foreign-key enforcement keeps the upstream default, which is off. Applications that need it issue
 `PRAGMA foreign_keys=ON` after every open and before starting a transaction. Enforcement applies to

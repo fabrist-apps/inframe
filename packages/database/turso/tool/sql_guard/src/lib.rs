@@ -267,6 +267,48 @@ mod tests {
                 payload: ":schema".to_string(),
             }
         );
+
+        let bare = inspect("ATTACH DATABASE ? AS @schema KEY ?5");
+        assert_eq!(
+            bare.first,
+            Argument {
+                form: BOUND_ARGUMENT,
+                binding_index: 1,
+                payload: String::new(),
+            }
+        );
+        assert_eq!(
+            bare.second,
+            Argument {
+                form: BOUND_ARGUMENT,
+                binding_index: 2,
+                payload: "@schema".to_string(),
+            }
+        );
+
+        let repeated = inspect("ATTACH DATABASE :file AS $schema KEY :file");
+        assert_eq!(repeated.first.binding_index, 1);
+        assert_eq!(repeated.first.payload, ":file");
+        assert_eq!(repeated.second.binding_index, 2);
+        assert_eq!(repeated.second.payload, "$schema");
+    }
+
+    #[test]
+    fn inspects_bound_detach_and_direct_edge_cases() {
+        let detached = inspect("DETACH DATABASE ?1");
+        assert_eq!(detached.kind, DETACH_STATEMENT);
+        assert_eq!(
+            detached.first,
+            Argument {
+                form: BOUND_ARGUMENT,
+                binding_index: 1,
+                payload: "?1".to_string(),
+            }
+        );
+
+        let direct = inspect("ATTACH DATABASE '' AS [Mixed Name]");
+        assert_eq!(direct.first, Argument::direct(String::new()));
+        assert_eq!(direct.second, Argument::direct("mixed name".to_string()));
     }
 
     #[test]
@@ -299,6 +341,8 @@ mod tests {
             std::str::from_utf8(&encoded[payload_offset..payload_offset + payload_length]).unwrap(),
             "数据.db"
         );
+
+        assert_eq!(Inspection::from_bytes(&[0xff]).status, INVALID_UTF8);
     }
 
     fn inspect(sql: &str) -> Inspection {
