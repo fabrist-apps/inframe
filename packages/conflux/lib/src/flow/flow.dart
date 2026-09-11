@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
+import 'package:conflux/pubsub.dart';
+import 'package:conflux/queue.dart';
 import 'package:conflux/src/effect/cause.dart' show CauseGroup;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart'
     show EffectCancellation, EffectExecution, ScopeAccess, ScopeClosed;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
+import 'package:conflux/src/flow/coordination_adapter.dart';
 import 'package:conflux/src/flow/protocol.dart';
 import 'package:conflux/src/flow/stream_adapter.dart';
 import 'package:context/context.dart';
@@ -50,6 +53,24 @@ final class Flow<A, E> {
   /// a defect with its original stack trace.
   static Flow<A, E> defer<A, E>(Flow<A, E> Function() factory) => Flow._(
     () => Effect.defer(() => factory()._openCursor()),
+  );
+
+  /// Consumes [queue] as a shared competing source.
+  ///
+  /// Each accepted item reaches one Queue consumer. Flow cleanup removes its
+  /// pending take but never shuts down the externally owned Queue. Queue
+  /// shutdown becomes normal Flow completion; other interruptions remain fatal.
+  static Flow<A, Never> fromQueue<A>(Queue<A> queue) => Flow._(
+    () => CoordinationFlowSource.openQueue(queue),
+  );
+
+  /// Consumes [pubsub] through one subscription per Flow consumption.
+  ///
+  /// The Flow scope owns and releases its subscription without shutting down the
+  /// externally owned PubSub. PubSub or subscription shutdown becomes normal
+  /// Flow completion; other interruptions remain fatal.
+  static Flow<A, Never> fromPubSub<A>(PubSub<A> pubsub) => Flow._(
+    () => CoordinationFlowSource.openPubSub(pubsub),
   );
 
   /// Adapts a Stream factory through a bounded Flow-owned buffer.
@@ -415,6 +436,7 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
   final void Function() _stopParentCancellation;
   Future<Exit<Option<A>, E>>? _activePull;
   Future<Cause<Never>?>? _closing;
+  var _cleanupReported = false;
   var _closed = false;
 
   @override
@@ -464,9 +486,19 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
   Future<Cause<Never>?> _close({
     required bool interrupt,
     required Exit<void, E> terminal,
-  }) {
-    final active = _closing;
-    if (active != null) return active;
+  }) async {
+    var closing = _closing;
+    closing ??= _startClosing(interrupt, terminal);
+    final cleanup = await closing;
+    if (_cleanupReported) return null;
+    _cleanupReported = true;
+    return cleanup;
+  }
+
+  Future<Cause<Never>?> _startClosing(
+    bool interrupt,
+    Exit<void, E> terminal,
+  ) {
     final closing = _closeNow(interrupt: interrupt, terminal: terminal);
     _closing = closing;
     return closing;
