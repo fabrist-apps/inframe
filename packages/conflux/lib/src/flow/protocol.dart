@@ -13,3 +13,19 @@ abstract interface class FlowSourceCursor<A, E> {
   /// Pulls one value or terminal completion.
   Effect<Option<A>, E> next();
 }
+
+/// Opens and sequentially consumes one internal Flow cursor.
+Effect<void, E> pumpFlow<A, E>(
+  OpenFlowCursor<A, E> open,
+  Effect<void, E> Function(A value) emit,
+) => Effect.build((resolve) async {
+  final cursor = await resolve(Effect.defer(open));
+  while (true) {
+    switch (await resolve(cursor.next())) {
+      case Some<A>(:final value):
+        await resolve(Effect.defer(() => emit(value)));
+      case None():
+        return;
+    }
+  }
+});

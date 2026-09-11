@@ -4,13 +4,21 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/pubsub.dart';
 import 'package:conflux/queue.dart';
+import 'package:conflux/schedule.dart';
 import 'package:conflux/src/effect/cause.dart' show CauseGroup;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart'
     show EffectCancellation, EffectExecution, ScopeAccess, ScopeClosed;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
+import 'package:conflux/src/flow/batching.dart';
+import 'package:conflux/src/flow/combination.dart';
+import 'package:conflux/src/flow/concurrent.dart';
 import 'package:conflux/src/flow/coordination_adapter.dart';
+import 'package:conflux/src/flow/flow_buffer.dart';
+import 'package:conflux/src/flow/flow_retry.dart';
+import 'package:conflux/src/flow/flow_scheduling.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:conflux/src/flow/sharing.dart';
 import 'package:conflux/src/flow/stream_adapter.dart';
 import 'package:context/context.dart';
 
@@ -86,20 +94,63 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow)? onOverflow,
   }) {
-    if (capacity <= 0) {
-      throw ArgumentError.value(capacity, 'capacity', 'Must be positive.');
-    }
-    if (overflow == FlowOverflowPolicy.fail && onOverflow == null) {
-      throw ArgumentError.value(
-        onOverflow,
-        'onOverflow',
-        'Must be supplied when overflow is FlowOverflowPolicy.fail.',
-      );
-    }
+    validateFlowBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => StreamFlowSource.open(
         source,
         onError: onError,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Concurrently merges [sources] as their values become available.
+  ///
+  /// [capacity] bounds the shared output buffer. Backpressure waits for the
+  /// consumer by default; the other [overflow] policies match [fromStream].
+  static Flow<A, E> merge<A, E>(
+    Iterable<Flow<A, E>> sources, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => ConcurrentFlowSource.openMerge(
+        sources.map((source) => source.open),
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Pairs corresponding positions from [sources].
+  ///
+  /// Pulls one value from every source concurrently and completes when the
+  /// shortest source completes. Emitted lists are immutable and input ordered.
+  static Flow<List<A>, E> zip<A, E>(Iterable<Flow<A, E>> sources) => Flow._(
+    () => CombinationFlowSource.openZip(
+      sources.map((source) => source.open),
+    ),
+  );
+
+  /// Emits an immutable input-ordered snapshot after every source has a value.
+  ///
+  /// A source that completes before its first value completes the combination.
+  /// A completed source with a value retains that latest value until all finish.
+  static Flow<List<A>, E> combineLatest<A, E>(
+    Iterable<Flow<A, E>> sources, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => CombinationFlowSource.openCombineLatest(
+        sources.map((source) => source.open),
         capacity: capacity,
         overflow: overflow,
         onOverflow: onOverflow,
@@ -233,6 +284,226 @@ final class Flow<A, E> {
     () => open().map((cursor) => _ConcatMapCursor(cursor, transform)),
   );
 
+  /// Concurrently consumes mapped inner Flows and emits available values.
+  ///
+  /// At most [concurrency] inners are active. [capacity] bounds their shared
+  /// output buffer, whose overflow behavior matches [fromStream].
+  Flow<B, E> mergeMap<B>(
+    Flow<B, E> Function(A value) transform, {
+    required int concurrency,
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    if (concurrency <= 0) {
+      throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
+    }
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => ConcurrentFlowSource.openMergeMap(
+        open,
+        (value) => transform(value).open,
+        concurrency: concurrency,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Replaces active inner work after its cleanup completes.
+  ///
+  /// Values from a replaced inner are suppressed immediately. If outer values
+  /// arrive during cleanup, only the latest pending value is mapped afterward.
+  Flow<B, E> switchMap<B>(
+    Flow<B, E> Function(A value) transform, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => ConcurrentFlowSource.openSwitchMap(
+        open,
+        (value) => transform(value).open,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Ignores outer values without mapping them while an inner Flow is active.
+  Flow<B, E> exhaustMap<B>(
+    Flow<B, E> Function(A value) transform, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => ConcurrentFlowSource.openExhaustMap(
+        open,
+        (value) => transform(value).open,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Combines primary values with the latest available [secondary] value.
+  ///
+  /// Secondary updates never emit by themselves. Primary values before the
+  /// first secondary value are ignored, and primary completion ends both.
+  Flow<C, E> withLatestFrom<B, C>(
+    Flow<B, E> secondary,
+    C Function(A primary, B latest) combine, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => CombinationFlowSource.openWithLatestFrom(
+        open,
+        secondary.open,
+        combine,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Shares one upstream connection while at least one subscriber is attached.
+  ///
+  /// Each subscriber has a [capacity]-bounded live buffer. [replay] retains at
+  /// most that many past values for subscribers joining the current connection.
+  /// Completion or failure and replay remain available until the last attached
+  /// subscriber scope closes. A later subscriber starts a fresh connection only
+  /// after prior upstream cleanup completes.
+  Flow<A, E> share({
+    int capacity = 16,
+    int replay = 0,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    if (replay < 0) {
+      throw ArgumentError.value(replay, 'replay', 'Must not be negative.');
+    }
+    final shared = SharedFlowSource.create<A, E>(
+      open,
+      capacity: capacity,
+      replay: replay,
+      overflow: overflow,
+      onOverflow: onOverflow,
+    );
+    return Flow._(shared);
+  }
+
+  /// Collects consecutive values into immutable batches of [count].
+  ///
+  /// [count] must be positive. Normal completion flushes a non-empty partial
+  /// batch, while failure discards it and preserves the complete failure cause.
+  Flow<List<A>, E> bufferCount(int count) {
+    if (count <= 0) {
+      throw ArgumentError.value(count, 'count', 'Must be positive.');
+    }
+    return Flow._(() => BatchingFlowSource.openCount(open, count));
+  }
+
+  /// Collects values until [duration] elapses or [maxSize] is reached.
+  ///
+  /// The timer starts with the first value in each batch and uses the runtime
+  /// Clock. [maxSize] and [capacity] must be positive; [capacity] independently
+  /// bounds source read-ahead while the downstream consumer is slow. Normal
+  /// completion flushes a partial batch, while failure discards it.
+  Flow<List<A>, E> bufferTime(
+    Duration duration, {
+    required int maxSize,
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    _validateFlowDuration(duration);
+    if (maxSize <= 0) {
+      throw ArgumentError.value(maxSize, 'maxSize', 'Must be positive.');
+    }
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => BatchingFlowSource.openTime(
+        open,
+        duration: duration,
+        maxSize: maxSize,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Emits the latest value after no newer value arrives within [duration].
+  ///
+  /// Timing uses the runtime's monotonic Clock. Normal completion emits a final
+  /// pending value immediately, while failure discards it. [capacity] bounds
+  /// both input staging and pending output when downstream is slow.
+  Flow<A, E> debounce(
+    Duration duration, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    _validateFlowDuration(duration);
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => FlowSchedulingSource.openDebounce(
+        open,
+        duration: duration,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Emits the leading value and suppresses later values within [duration].
+  ///
+  /// There is no trailing emission. Intervals use upstream arrival timestamps
+  /// from the runtime's monotonic Clock. [capacity] bounds input and output
+  /// staging while downstream is slow.
+  Flow<A, E> throttle(
+    Duration duration, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    _validateFlowDuration(duration);
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => FlowSchedulingSource.openThrottle(
+        open,
+        duration: duration,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Resubscribes after expected failures while [schedule] continues.
+  ///
+  /// Every consumption creates a fresh Schedule driver, and every retry waits
+  /// for the failed attempt's cleanup before the policy delay and next source
+  /// factory call. Values delivered before failure may be delivered again.
+  /// Repeatable factories and idempotent external operations remain the caller's
+  /// responsibility. Causes containing a defect or interruption are preserved
+  /// without retrying.
+  Flow<A, E> retry<O>(Schedule<E, O, E> schedule) => Flow._(
+    () => RetryFlowSource.open(open, schedule),
+  );
+
   /// Runs source acquisition and every pull with [context].
   Flow<A, E> withContext(Context context) => Flow._(() => open().withContext(context));
 
@@ -355,6 +626,12 @@ final class Flow<A, E> {
       );
     }),
   );
+}
+
+void _validateFlowDuration(Duration duration) {
+  if (duration.isNegative) {
+    throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
+  }
 }
 
 Effect<FlowSourceCursor<A, E>, E> _openWithExitHook<A, E>(

@@ -4,34 +4,8 @@ import 'dart:collection';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
+import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
-
-/// The action a Stream source takes when its Flow-owned buffer is full.
-enum FlowOverflowPolicy {
-  /// Pauses the Stream subscription until a pull frees capacity.
-  backpressure,
-
-  /// Discards the arriving value.
-  dropNewest,
-
-  /// Discards the oldest buffered value and retains the arriving value.
-  dropOldest,
-
-  /// Terminates through the `onOverflow` expected-error mapper.
-  fail,
-}
-
-/// Describes a full Flow-owned Stream buffer.
-final class FlowBufferOverflow {
-  /// Creates an overflow for the configured positive [capacity].
-  const FlowBufferOverflow(this.capacity);
-
-  /// The maximum number of values retained by the Flow adapter.
-  final int capacity;
-
-  @override
-  String toString() => 'Flow buffer reached capacity $capacity';
-}
 
 /// Opens bounded Stream-backed Flow cursors.
 abstract final class StreamFlowSource {
