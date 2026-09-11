@@ -274,6 +274,47 @@ final class Flow<A, E> {
     );
   }
 
+  /// Replaces active inner work after its cleanup completes.
+  ///
+  /// Values from a replaced inner are suppressed immediately. If outer values
+  /// arrive during cleanup, only the latest pending value is mapped afterward.
+  Flow<B, E> switchMap<B>(
+    Flow<B, E> Function(A value) transform, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => ConcurrentFlowSource.openSwitchMap(
+        open,
+        (value) => transform(value).open,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
+  /// Ignores outer values without mapping them while an inner Flow is active.
+  Flow<B, E> exhaustMap<B>(
+    Flow<B, E> Function(A value) transform, {
+    int capacity = 16,
+    FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
+    E Function(FlowBufferOverflow overflow)? onOverflow,
+  }) {
+    validateFlowBuffer(capacity, overflow, onOverflow);
+    return Flow._(
+      () => ConcurrentFlowSource.openExhaustMap(
+        open,
+        (value) => transform(value).open,
+        capacity: capacity,
+        overflow: overflow,
+        onOverflow: onOverflow,
+      ),
+    );
+  }
+
   /// Runs source acquisition and every pull with [context].
   Flow<A, E> withContext(Context context) => Flow._(() => open().withContext(context));
 
