@@ -19,17 +19,30 @@ The bridge, upstream bundle, and SQL parser adapter execute in a dedicated appli
 Upstream Turso creates its own worker for OPFS access.
 
 ATTACH and DETACH are enabled by the bridge for ordinary and encrypted opens. In-memory attachments
-need no additional browser files. Persistent attachments require additional OPFS registration and
-remain unsupported until that integration is installed with the bridge.
+need no additional browser files. From a persistent main database, a direct single-file name such
+as `ATTACH DATABASE 'other.db' AS auxiliary` registers that database and its WAL with the existing
+Turso OPFS worker before executing the original SQL. DETACH releases those registrations after the
+engine releases the alias; closing the main database releases every remaining attachment. Reopening
+never restores aliases automatically.
+
+Persistent attachments from an in-memory browser main are rejected before acquiring OPFS handles.
+Browser attachment names cannot contain a path separator or NUL. A competing browser worker or tab
+that owns the same OPFS file causes an explicit open failure; the bridge does not steal the handle or
+fall back to memory. Re-run the installer whenever these assets change.
 
 ## Provenance
 
 | Asset | Source | SHA-256 |
 | --- | --- | --- |
-| `turso_upstream.js` | npm `@tursodatabase/database-wasm@0.8.0-pre.10`, `bundle/main.es.js` | `f24740d5d56b258ed8dd0117c66b46b5fff3f29b8bad325914749fe96bf3d51d` |
-| `turso_sql_guard.wasm` | `tool/sql_guard`, using `turso_parser` at `342dfbe267ebdb9141c434c499ce31e10bb46f27` | `a76856cfa0a72c7a49c9fd337d43770041c8c4c4e013e77fd19631cda0991d9c` |
+| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `2511663dedf69a22fff1c36c74dfa88868645c3d92515db60472b604ef742ab0` |
+| `turso_sql_guard.wasm` | `tool/sql_guard`, using `turso_parser` at `342dfbe267ebdb9141c434c499ce31e10bb46f27` | `53befd5b351189a382af748f7148525d39ed0681d636d4664c8d1775dae66297` |
 
 The npm tarball integrity is
 `sha512-jzfyctq86UEpciLq/oN+WaL/VJy/a1ChMHnc8mN3BmaXNFIEAwbtKAWYyTbTLAAedfdKPVzqVFO6YP2BHzcoXQ==`.
-The parser adapter only reports whether the pinned upstream parser sees zero, one, or multiple SQL
-statements. It does not change Turso engine behavior.
+The bundle inputs and reproduction command are recorded in `tool/web_bundle/README.md`. The adapter
+changes only the pinned JavaScript worker protocol: acknowledged OPFS registrations expose their
+worker handles to the same main WASM instance, and the fresh ATTACH open uses a bounded synchronous
+worker request. The Turso Rust/WASM engine binary remains unchanged.
+
+The parser adapter reports one-statement validation plus structured ATTACH/DETACH argument metadata
+from the matching pinned parser. It does not change Turso engine behavior.

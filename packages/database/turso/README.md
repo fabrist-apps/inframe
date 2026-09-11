@@ -121,9 +121,11 @@ await database.execute('DETACH DATABASE auxiliary');
 ```
 
 Native parent directories must already exist. `':memory:'` creates an in-memory attachment on
-native and web. An alias belongs to one connection: DETACH or close releases it, and reopening the
-main database does not restore it. The attached database contents persist independently, so callers
-can explicitly re-attach the file later.
+native and web. A persistent browser main accepts a single OPFS filename such as `other.db`; path
+separators are unsupported. A browser memory main supports memory attachments only. An alias belongs
+to one connection: DETACH or close releases it, and reopening the main database does not restore it.
+The attached database contents persist independently, so callers can explicitly re-attach the file
+later.
 
 Foreign-key enforcement keeps the upstream default, which is off. Applications that need it issue
 `PRAGMA foreign_keys=ON` after every open and before starting a transaction. Enforcement applies to
@@ -207,6 +209,8 @@ unavailable in v1.
 
 ## Upstream
 
-The package pins unchanged Turso `v0.8.0-pre.10` at commit
+The package pins Turso `v0.8.0-pre.10` at commit
 `342dfbe267ebdb9141c434c499ce31e10bb46f27`. The generated FFI bindings and native library use the
-matching `sdk-kit/turso.h`. See [native/README.md](native/README.md) for build provenance.
+matching `sdk-kit/turso.h`. The browser build applies the documented JavaScript worker-protocol
+adapter required for a fresh persistent ATTACH; its Rust/WASM engine binary remains unchanged. See
+[native/README.md](native/README.md) and [web/README.md](web/README.md) for build provenance.

@@ -6,12 +6,15 @@ import 'package:web/web.dart' as web;
 
 const _phaseKey = 'turso-dart-web-verification-phase';
 const _databaseName = 'turso-dart-web-verification.db';
+const _attachedDatabaseName = 'turso-dart-web-attached.db';
+const _memoryMainAttachmentName = 'turso-dart-web-memory-main-attached.db';
 final _bridge = TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js'));
 
 Future<void> main() async {
   try {
     if (web.window.localStorage.getItem(_phaseKey) == null) {
       await _writePersistentData();
+      await _writePersistentAttachment();
       await _writeEncryptedData();
       web.window.localStorage.setItem(_phaseKey, 'reload');
       web.window.location.reload();
@@ -19,6 +22,8 @@ Future<void> main() async {
     }
 
     await _verifyReloadedData();
+    await _verifyPersistentAttachment();
+    await _verifyPersistentAttachmentFromMemoryMainIsRejected();
     await _verifyEncryptedData();
     await _verifyTransactions();
     await _verifyWorkerDeath();
@@ -284,6 +289,45 @@ Future<void> _writePersistentData() async {
   }
 }
 
+Future<void> _writePersistentAttachment() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  try {
+    await database.query("ATTACH DATABASE '$_attachedDatabaseName' AS auxiliary");
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS auxiliary.items (id INTEGER PRIMARY KEY)',
+    );
+    await database.execute('DELETE FROM auxiliary.items');
+    await database.execute('INSERT INTO auxiliary.items VALUES (1)');
+    _expect(
+      (await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
+      'Persistent browser attachment could not be read.',
+    );
+    await database.execute('DETACH DATABASE auxiliary');
+
+    await database.transaction((tx) async {
+      await tx.execute("ATTACH DATABASE '$_attachedDatabaseName' AS transaction_auxiliary");
+      _expect(
+        (await tx.query('SELECT id FROM transaction_auxiliary.items')).rows.single.getInt('id') ==
+            1,
+        'Transaction routes could not read a persistent browser attachment.',
+      );
+    });
+    await database.query('DETACH DATABASE transaction_auxiliary');
+
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE upper('computed.db') AS computed"),
+    );
+    await _expectFailure<TursoUnsupportedException>(
+      () => database.execute("ATTACH DATABASE 'invalid/path.db' AS invalid_path"),
+    );
+  } finally {
+    await database.close();
+  }
+}
+
 Future<void> _verifyReloadedData() async {
   final database = await TursoDatabase.open(
     TursoLocation.browser(_databaseName),
@@ -315,6 +359,49 @@ Future<void> _verifyReloadedData() async {
     await _expectFailure<StateError>(() async => row.value('duplicate'));
   } finally {
     await database.close();
+  }
+}
+
+Future<void> _verifyPersistentAttachment() async {
+  final database = await TursoDatabase.open(
+    TursoLocation.browser(_databaseName),
+    web: _bridge,
+  );
+  try {
+    await database.execute("ATTACH DATABASE '$_attachedDatabaseName' AS auxiliary");
+    _expect(
+      (await database.query('SELECT id FROM auxiliary.items')).rows.single.getInt('id') == 1,
+      'Persistent browser attachment did not survive reload.',
+    );
+    await database.query('DETACH DATABASE auxiliary');
+  } finally {
+    await database.close();
+  }
+
+  final released = await TursoDatabase.open(
+    TursoLocation.browser(_attachedDatabaseName),
+    web: _bridge,
+  );
+  try {
+    _expect(
+      (await released.query('SELECT id FROM items')).rows.single.getInt('id') == 1,
+      'DETACH did not release the persistent browser attachment.',
+    );
+  } finally {
+    await released.close();
+  }
+}
+
+Future<void> _verifyPersistentAttachmentFromMemoryMainIsRejected() async {
+  final memory = await TursoDatabase.open(TursoLocation.memory(), web: _bridge);
+  try {
+    await _expectFailure<TursoUnsupportedException>(
+      () => memory.execute(
+        "ATTACH DATABASE '$_memoryMainAttachmentName' AS persistent",
+      ),
+    );
+  } finally {
+    await memory.close();
   }
 }
 
