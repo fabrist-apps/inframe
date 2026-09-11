@@ -134,6 +134,34 @@ already started is allowed to finish. `whileInput`, `concat`, and `tap` support
 input gates, sequential policies with fresh state, and effectful observation of
 continuing decisions.
 
+`Cron` is a pure calendar value with an explicit `timezone.Location`. The
+application chooses and initializes the timezone database; Conflux does not
+change the global local timezone:
+
+```dart
+import 'package:conflux/cron.dart';
+import 'package:conflux/result.dart';
+import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
+
+tz_data.initializeTimeZones();
+final location = tz.getLocation('America/New_York');
+final parsed = Cron.parse('0 9 * * mon-fri', location);
+
+switch (parsed) {
+  case Success(value: final cron):
+    print(cron.matches(DateTime.now()));
+  case Failure(error: final error):
+    print('Invalid Cron: $error');
+}
+```
+
+Five-field expressions use second zero; six-field expressions put seconds
+first. Omitted `fromFields` values are wildcards, while explicit empty sets are
+invalid. When both day-of-month and weekday are restricted, either may match.
+When either begins with `*`, including `*/step`, both must match. `format`
+returns six fields and keeps the location separate.
+
 `Queue.bounded` acquires an in-memory FIFO Queue whose lifetime belongs to the
 current Effect scope. A full Queue applies lossless backpressure until a take
 releases capacity. Shutdown is immediate and interrupts pending data operations
