@@ -35,6 +35,20 @@ typedef ErrorHandler = FutureOr<Response> Function(
 /// Observes an unexpected runtime failure.
 typedef ErrorReporter = void Function(Object error, StackTrace stackTrace);
 
+/// Runs application work for the full lifetime of an upgraded WebSocket.
+///
+/// Inlet closes the socket when this callback completes. Keep the returned
+/// future pending while application code uses the session.
+typedef WebSocketCallback = FutureOr<void> Function(WebSocket socket);
+
+/// Selects one of the subprotocols offered by a WebSocket client.
+///
+/// Inlet invokes the selector once with an immutable ordered list, including
+/// an empty list when the client offered no protocols. Return `null` to select
+/// none, return an offered value, or throw [WebSocketException] to reject the
+/// handshake with the default status 400 response.
+typedef WebSocketProtocolSelector = FutureOr<String?> Function(List<String> offered);
+
 /// An application that dispatches registered routes in process or over HTTP.
 final class Inlet extends Router {
   /// Creates an editable application.
@@ -155,8 +169,17 @@ final class Inlet extends Router {
         stackTrace,
       );
     }
+    var finalizedResponse = response;
+    if (request.method == 'HEAD') {
+      if (resolution case _MatchedRoute(isHeadFallback: true) when response.isWebSocketUpgrade) {
+        await response.close();
+        finalizedResponse = _headWebSocketRejected();
+      } else {
+        finalizedResponse = response._withoutBody();
+      }
+    }
     return _DispatchResult(
-      request.method == 'HEAD' ? response._withoutBody() : response,
+      finalizedResponse,
       dispatch.context,
       dispatch.request,
     );
@@ -201,6 +224,11 @@ final class Inlet extends Router {
   }
 }
 
+Response _headWebSocketRejected() => Response.empty(
+  status: HttpStatus.methodNotAllowed,
+  headers: const Headers.empty().set(HttpHeaders.allowHeader, 'GET'),
+);
+
 final class _DispatchResult {
   const _DispatchResult(this.response, this.context, this.request);
 
@@ -223,6 +251,7 @@ Handler _methodNotAllowed(List<String> allowedMethods) =>
     );
 
 Response _defaultErrorResponse(Object error) => switch (error) {
+  _WebSocketHandshakeRejected() => Response.empty(status: HttpStatus.badRequest),
   MalformedBodyException() => Response.empty(status: HttpStatus.badRequest),
   BodyLimitExceededException() => Response.empty(
     status: HttpStatus.requestEntityTooLarge,
@@ -231,6 +260,8 @@ Response _defaultErrorResponse(Object error) => switch (error) {
 };
 
 bool _isUnexpected(Object error) =>
-    error is! MalformedBodyException && error is! BodyLimitExceededException;
+    error is! _WebSocketHandshakeRejected &&
+    error is! MalformedBodyException &&
+    error is! BodyLimitExceededException;
 
 bool _wasReported(Object error) => error is _ContinuationStateError && error.wasReported;

@@ -317,7 +317,7 @@ final class _CompiledRouter {
       }
       final fallback = _matchForMethod(candidates, 'GET');
       if (fallback != null) {
-        return fallback;
+        return fallback.asHeadFallback();
       }
     } else {
       final match = _matchForMethod(candidates, request.method);
@@ -432,10 +432,21 @@ sealed class _RouteResolution {
 }
 
 final class _MatchedRoute extends _RouteResolution {
-  const _MatchedRoute(this.registration, this.pathParameters);
+  const _MatchedRoute(
+    this.registration,
+    this.pathParameters, {
+    this.isHeadFallback = false,
+  });
 
   final _RouteRegistration registration;
   final Map<String, String> pathParameters;
+  final bool isHeadFallback;
+
+  _MatchedRoute asHeadFallback() => _MatchedRoute(
+    registration,
+    pathParameters,
+    isHeadFallback: true,
+  );
 }
 
 final class _BadRoutePath extends _RouteResolution {

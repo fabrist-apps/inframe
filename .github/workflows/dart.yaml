@@ -12,6 +12,7 @@ permissions:
 jobs:
   test:
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v7
@@ -39,6 +40,7 @@ jobs:
           dart run packages/inlet/example/inlet_example.dart
           dart run packages/inlet/example/stream_transfers.dart
           dart run packages/inlet/example/live_events.dart
+          dart run packages/inlet/example/web_socket_chat.dart
 
       - name: Run Conflux tests and consumer checks
         run: dart test packages/conflux/test --chain-stack-traces

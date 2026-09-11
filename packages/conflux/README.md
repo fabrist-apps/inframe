@@ -65,6 +65,51 @@ Scopes interrupt and await child fibers before running finalizers once in
 reverse registration order. Finalizers are protected from ordinary
 cancellation, so an uncooperative finalizer can prevent bounded shutdown.
 
+`Cache` shares scoped lookups and retains successful values with a separate
+limit for active loads and stored entries:
+
+```dart
+final cachedLengths = Effect.build<(int, int), Never>(($) async {
+  final cache = await $(
+    Cache.make<String, int, Never>(
+      capacity: 100,
+      concurrency: 8,
+      expiry: CacheExpiry.fixed(const Duration(minutes: 5)),
+      lookup: (key) => Effect.sync(key.length),
+    ),
+  );
+
+  final first = await $(cache.get('conflux'));
+  final second = await $(cache.get('conflux'));
+  return (first, second);
+});
+```
+
+`Cache.make` captures its creation scope's Context and Clock. A lookup started
+by another caller still uses those dependencies. Put request-dependent data in
+the key or acquire the Cache inside the request scope. Cache coordination is
+confined to one isolate.
+
+Concurrent requests for one key and generation share a load. Cancelling one
+waiter leaves that owner-scoped load available to other waiters. `concurrency`
+bounds active lookups, while `capacity` bounds successful retained values by
+LRU. Expiry uses monotonic time from successful completion. Use
+`CacheExpiry.fixed` for one TTL or `CacheExpiry.byValue` to derive it from the
+key and successful value.
+
+`getOption` and `containsKey` inspect only ready unexpired values. The `size`,
+`keys`, `values`, and `entries` getters return immutable ready snapshots and
+never start a lookup. `set`, `invalidate`, `invalidateAll`, and
+`invalidateWhere` advance generations so older loads cannot overwrite newer
+state. `refresh` starts or joins a current-generation load while an existing
+unexpired value remains readable; a failed refresh keeps that value and its
+original deadline.
+
+Cached values are borrowed. Eviction, invalidation, and Cache closure do not
+dispose them. Scope closure interrupts active loads, wakes waiters, and makes
+later Cache use a defect. Failure caching, eviction-time disposal, durable
+persistence, and automatic invalidation streams are outside this API.
+
 Timing operations use the runtime's `Clock`, so tests can control both wall and
 monotonic time. `delay` waits before starting work, `timed` reports monotonic
 elapsed time, and `timeout` interrupts and awaits child cleanup before returning
@@ -227,6 +272,37 @@ final broadcast = Effect.build<int, Never>(($) async {
 
 final value = await broadcast.runFuture();
 ```
+
+`Flow` describes a lazy typed sequence. Each runner starts a fresh consumption
+scope and awaits its cleanup. A bounded prefix closes upstream as soon as the
+runner has its result:
+
+```dart
+final firstThree = Flow.fromIterable([1, 2, 3, 4])
+    .map((value) => value * 2)
+    .take(3)
+    .runCollect();
+
+final values = await firstThree.runFuture(); // [2, 4, 6]
+```
+
+Use a factory when adapting a Dart `Stream`, then choose how the bounded
+Flow-owned buffer behaves when a producer outruns its consumer:
+
+```dart
+final events = Flow.fromStream<int, String>(
+  () => eventStream,
+  onError: (error, stackTrace) => 'stream failed: $error',
+  capacity: 32,
+  overflow: FlowOverflowPolicy.backpressure,
+);
+```
+
+`Flow.fromQueue(queue)` creates competing consumers: one consumer receives each
+accepted item. `Flow.fromPubSub(pubsub)` acquires an independent subscription
+for every consumption, so active consumers receive each publication. These
+adapters remove their pending takes and PubSub subscriptions on exit, but the
+scope that acquired the shared Queue or PubSub still owns its shutdown.
 
 Ordinary recovery runs once for a cause containing only expected errors and
 uses the first expected leaf in deterministic execution/source order. A defect

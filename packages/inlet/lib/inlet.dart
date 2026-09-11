@@ -1,4 +1,4 @@
-/// In-process and HTTP routing with buffered and streamed bodies.
+/// In-process and HTTP routing with live responses and WebSocket sessions.
 library;
 
 export 'src/headers.dart';
