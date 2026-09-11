@@ -124,6 +124,33 @@ void main() {
       expect(values, [1, 2, 3]);
     });
 
+    test('should cancel while a pulled value is waiting for resume', () async {
+      final values = <int>[];
+      final first = Completer<void>();
+      final secondPulled = Completer<void>();
+      late StreamSubscription<int> subscription;
+      subscription = Flow.fromIterable([1, 2])
+          .tap((value) {
+            if (value == 2) secondPulled.complete();
+            return Effect.succeed(null);
+          })
+          .toStream()
+          .listen((value) {
+            values.add(value);
+            if (value == 1) {
+              subscription.pause();
+              first.complete();
+            }
+          });
+      addTearDown(subscription.cancel);
+      await first.future;
+      await secondPulled.future;
+
+      await subscription.cancel();
+
+      expect(values, [1]);
+    });
+
     test('should await Flow cleanup when a Stream subscription is cancelled', () async {
       final started = Completer<void>();
       final pending = Completer<int>();

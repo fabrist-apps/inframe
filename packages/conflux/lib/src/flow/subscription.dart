@@ -170,18 +170,24 @@ final class _StreamPump<A, E> {
   ) {
     final result = Completer<Exit<void, E>>();
     var settled = false;
-    late final void Function() stopCancellation;
+    void Function()? stopCancellation;
 
     void complete(Exit<void, E> exit) {
       if (settled) return;
       settled = true;
-      stopCancellation();
+      stopCancellation?.call();
+      stopCancellation = null;
       result.complete(exit);
     }
 
-    stopCancellation = execution.cancellation.listen(
+    final disposeCancellation = execution.cancellation.listen(
       (reason) => complete(Failed(Interrupted(reason))),
     );
+    stopCancellation = disposeCancellation;
+    if (settled) {
+      disposeCancellation();
+      stopCancellation = null;
+    }
     unawaited(
       resumed.future.then(
         (_) => complete(const Succeeded(null)),
