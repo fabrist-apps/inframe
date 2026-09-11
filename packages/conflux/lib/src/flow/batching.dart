@@ -24,10 +24,16 @@ abstract final class BatchingFlowSource {
     required FlowOverflowPolicy overflow,
     required E Function(FlowBufferOverflow overflow)? onOverflow,
   }) => EffectAccess.create((execution) async {
-    final mailbox = FlowMailbox<A, E>(capacity, overflow, onOverflow)..registerClose(execution);
+    final mailbox = FlowMailbox<_TimedValue<A>, E>(capacity, overflow, onOverflow)
+      ..registerClose(execution);
     final pump = ScopeAccess.fork(
       execution.scope,
-      pumpFlow(upstream, mailbox.offer),
+      pumpFlow(
+        upstream,
+        (value) => mailbox.offer(
+          _TimedValue(value, execution.clock.monotonic()),
+        ),
+      ),
       execution,
     );
     unawaited(
@@ -71,42 +77,65 @@ final class _CountBatchCursor<A, E> implements FlowSourceCursor<List<A>, E> {
 }
 
 final class _TimeBatchCursor<A, E> implements FlowSourceCursor<List<A>, E> {
-  const _TimeBatchCursor(this._mailbox, this._duration, this._maxSize);
+  _TimeBatchCursor(this._mailbox, this._duration, this._maxSize);
 
-  final FlowMailbox<A, E> _mailbox;
+  final FlowMailbox<_TimedValue<A>, E> _mailbox;
   final Duration _duration;
   final int _maxSize;
+  _TimedValue<A>? _pending;
 
   @override
   Effect<Option<List<A>>, E> next() => EffectAccess.create((execution) async {
-    final first = await EffectAccess.evaluate(_mailbox.take(), execution);
+    final pending = _pending;
+    _pending = null;
+    final first = pending == null
+        ? await EffectAccess.evaluate(_mailbox.take(), execution)
+        : Succeeded<Option<_TimedValue<A>>, E>(Some(pending));
     switch (first) {
-      case Failed<Option<A>, E>(:final cause):
+      case Failed<Option<_TimedValue<A>>, E>(:final cause):
         return Failed(cause);
-      case Succeeded<Option<A>, E>(value: None()):
+      case Succeeded<Option<_TimedValue<A>>, E>(value: None()):
         return const Succeeded(None());
-      case Succeeded<Option<A>, E>(value: Some<A>(:final value)):
-        final batch = <A>[value];
-        final deadline = execution.clock.monotonic() + _duration;
+      case Succeeded<Option<_TimedValue<A>>, E>(
+        value: Some<_TimedValue<A>>(:final value),
+      ):
+        final batch = <A>[value.value];
+        final deadline = value.receivedAt + _duration;
         while (batch.length < _maxSize) {
           switch (await EffectAccess.evaluate(_mailbox.takeUntil(deadline), execution)) {
-            case Failed<({bool elapsed, Option<A> value}), E>(:final cause):
+            case Failed<({bool elapsed, Option<_TimedValue<A>> value}), E>(
+              :final cause,
+            ):
               return Failed(cause);
-            case Succeeded<({bool elapsed, Option<A> value}), E>(
+            case Succeeded<({bool elapsed, Option<_TimedValue<A>> value}), E>(
               value: (elapsed: true, value: _),
             ):
               return Succeeded(Some(List<A>.unmodifiable(batch)));
-            case Succeeded<({bool elapsed, Option<A> value}), E>(
+            case Succeeded<({bool elapsed, Option<_TimedValue<A>> value}), E>(
               value: (elapsed: false, value: None()),
             ):
               return Succeeded(Some(List<A>.unmodifiable(batch)));
-            case Succeeded<({bool elapsed, Option<A> value}), E>(
-              value: (elapsed: false, value: Some<A>(:final value)),
+            case Succeeded<({bool elapsed, Option<_TimedValue<A>> value}), E>(
+              value: (
+                elapsed: false,
+                value: Some<_TimedValue<A>>(:final value),
+              ),
             ):
-              batch.add(value);
+              if (value.receivedAt >= deadline) {
+                _pending = value;
+                return Succeeded(Some(List<A>.unmodifiable(batch)));
+              }
+              batch.add(value.value);
           }
         }
         return Succeeded(Some(List<A>.unmodifiable(batch)));
     }
   });
+}
+
+final class _TimedValue<A> {
+  const _TimedValue(this.value, this.receivedAt);
+
+  final A value;
+  final Duration receivedAt;
 }

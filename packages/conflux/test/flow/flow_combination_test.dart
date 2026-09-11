@@ -142,7 +142,78 @@ void main() {
       expect(await result, [13]);
       expect(secondaryCancelled.isCompleted, isTrue);
     });
+
+    test('should retain primary completion outside every overflow buffer', () async {
+      for (final overflow in FlowOverflowPolicy.values) {
+        final primaryListening = Completer<void>();
+        final secondaryListening = Completer<void>();
+        final secondaryCancelled = Completer<void>();
+        final consumerStarted = Completer<void>();
+        final releaseConsumer = Completer<void>();
+        final primary = StreamController<int>(sync: true)..onListen = primaryListening.complete;
+        final secondary = StreamController<int>(
+          sync: true,
+          onListen: secondaryListening.complete,
+          onCancel: secondaryCancelled.complete,
+        );
+        final values = <int>[];
+        final subscription =
+            Flow.fromStream<int, String>(
+                  () => primary.stream,
+                  onError: (error, stackTrace) => '$error',
+                )
+                .withLatestFrom(
+                  Flow.fromStream(
+                    () => secondary.stream,
+                    onError: (error, stackTrace) => '$error',
+                  ),
+                  (trigger, latest) => trigger + latest,
+                  capacity: 1,
+                  overflow: overflow,
+                  onOverflow: (_) => 'overflow',
+                )
+                .subscribe((value) {
+                  values.add(value);
+                  if (values.length > 1) return Effect.succeed(null);
+                  return Effect.tryFuture<void, String>(
+                    () {
+                      consumerStarted.complete();
+                      return releaseConsumer.future;
+                    },
+                    onError: (error, stackTrace) => '$error',
+                  );
+                });
+
+        await Future.wait([
+          primaryListening.future,
+          secondaryListening.future,
+        ]);
+        secondary.add(10);
+        await _flushMicrotasks();
+        primary.add(1);
+        await consumerStarted.future;
+        primary.add(2);
+        await primary.close();
+        await _flushMicrotasks();
+        releaseConsumer.complete();
+
+        expect(
+          await subscription.completion,
+          isA<Succeeded<void, String>>(),
+          reason: '$overflow',
+        );
+        expect(values, [11, 12], reason: '$overflow');
+        expect(secondaryCancelled.isCompleted, isTrue, reason: '$overflow');
+        await secondary.close();
+      }
+    });
   });
+}
+
+Future<void> _flushMicrotasks() async {
+  for (var index = 0; index < 10; index += 1) {
+    await Future<void>.delayed(Duration.zero);
+  }
 }
 
 String _widenNever(Never error) => error;

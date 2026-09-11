@@ -4,8 +4,7 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/src/effect/cause.dart' show CauseGroup, CauseRuntimeOperations;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
-import 'package:conflux/src/effect/execution.dart' show ScopeAccess;
-import 'package:conflux/src/flow/concurrent.dart';
+import 'package:conflux/src/effect/execution.dart' show EffectExecution, ScopeAccess;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
 
@@ -30,26 +29,15 @@ abstract final class CombinationFlowSource {
     required E Function(FlowBufferOverflow overflow)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final sourceList = List<OpenFlowCursor<A, E>>.of(sources);
-    final opened = await EffectAccess.evaluate(
-      ConcurrentFlowSource.openMerge(
-        sourceList.indexed.map(
-          (entry) =>
-              () => Effect.defer(entry.$2).map(
-                (cursor) => _IndexedCursor(cursor, entry.$1),
-              ),
-        ),
-        capacity: capacity,
-        overflow: overflow,
-        onOverflow: onOverflow,
-      ),
+    final mailbox = FlowMailbox<List<A>, E>(capacity, overflow, onOverflow);
+    final coordinator = _CombineLatestCoordinator<A, E>(
+      mailbox,
       execution,
+      sourceList.length,
     );
-    return switch (opened) {
-      Succeeded<FlowSourceCursor<_IndexedEvent<A>, E>, E>(:final value) => Succeeded(
-        _CombineLatestCursor(value, sourceList.length),
-      ),
-      Failed<FlowSourceCursor<_IndexedEvent<A>, E>, E>(:final cause) => Failed(cause),
-    };
+    _registerCombinationCleanup(mailbox, coordinator.close, execution);
+    coordinator.start(sourceList);
+    return Succeeded(_CombinationCursor(mailbox));
   });
 
   /// Opens primary and secondary events for trigger-based combination.
@@ -61,26 +49,32 @@ abstract final class CombinationFlowSource {
     required FlowOverflowPolicy overflow,
     required E Function(FlowBufferOverflow overflow)? onOverflow,
   }) => EffectAccess.create((execution) async {
-    final sources = <OpenFlowCursor<_WithLatestEvent<A, B>, E>>[
-      () => Effect.defer(primary).map(_PrimaryCursor<A, B, E>.new),
-      () => Effect.defer(secondary).map(_SecondaryCursor<A, B, E>.new),
-    ];
-    final opened = await EffectAccess.evaluate(
-      ConcurrentFlowSource.openMerge(
-        sources,
-        capacity: capacity,
-        overflow: overflow,
-        onOverflow: onOverflow,
-      ),
+    final mailbox = FlowMailbox<C, E>(capacity, overflow, onOverflow);
+    final coordinator = _WithLatestCoordinator<A, B, C, E>(
+      mailbox,
+      combine,
       execution,
     );
-    return switch (opened) {
-      Succeeded<FlowSourceCursor<_WithLatestEvent<A, B>, E>, E>(:final value) => Succeeded(
-        _WithLatestCursor(value, combine),
-      ),
-      Failed<FlowSourceCursor<_WithLatestEvent<A, B>, E>, E>(:final cause) => Failed(cause),
-    };
+    _registerCombinationCleanup(mailbox, coordinator.close, execution);
+    coordinator.start(primary, secondary);
+    return Succeeded(_CombinationCursor(mailbox));
   });
+}
+
+void _registerCombinationCleanup<A, E>(
+  FlowMailbox<A, E> mailbox,
+  void Function() closeCoordinator,
+  EffectExecution execution,
+) {
+  ScopeAccess.addFinalizer(
+    execution.scope,
+    Effect.sync(() {
+      closeCoordinator();
+      mailbox.close();
+    }),
+    execution.context,
+    execution.clock,
+  );
 }
 
 final class _ZipCursor<A, E> implements FlowSourceCursor<List<A>, E> {
@@ -155,177 +149,219 @@ Future<Cause<E>?> _interruptZipPulls<E>(
   );
 }
 
-sealed class _IndexedEvent<A> {
-  const _IndexedEvent(this.index);
+final class _CombinationCursor<A, E> implements FlowSourceCursor<A, E> {
+  const _CombinationCursor(this._mailbox);
 
-  final int index;
-}
-
-final class _IndexedValue<A> extends _IndexedEvent<A> {
-  const _IndexedValue(super.index, this.value);
-
-  final A value;
-}
-
-final class _IndexedDone<A> extends _IndexedEvent<A> {
-  const _IndexedDone(super.index);
-}
-
-final class _IndexedCursor<A, E> implements FlowSourceCursor<_IndexedEvent<A>, E> {
-  _IndexedCursor(this._upstream, this._index);
-
-  final FlowSourceCursor<A, E> _upstream;
-  final int _index;
-  var _sentDone = false;
+  final FlowMailbox<A, E> _mailbox;
 
   @override
-  Effect<Option<_IndexedEvent<A>>, E> next() {
-    if (_sentDone) return Effect.succeed(const None());
-    return _upstream.next().map((option) {
-      return switch (option) {
-        Some<A>(:final value) => Some(_IndexedValue(_index, value)),
-        None() => () {
-          _sentDone = true;
-          return Some(_IndexedDone<A>(_index));
-        }(),
-      };
-    });
-  }
+  Effect<Option<A>, E> next() => _mailbox.take();
 }
 
-final class _CombineLatestCursor<A, E> implements FlowSourceCursor<List<A>, E> {
-  _CombineLatestCursor(this._events, int sourceCount)
-    : _latest = List<Option<A>>.filled(sourceCount, const None()),
-      _active = sourceCount;
+final class _CombineLatestCoordinator<A, E> {
+  _CombineLatestCoordinator(
+    this._mailbox,
+    this._execution,
+    int sourceCount,
+  ) : _latest = List<Option<A>>.filled(sourceCount, const None()),
+      _remaining = sourceCount;
 
-  final FlowSourceCursor<_IndexedEvent<A>, E> _events;
+  final FlowMailbox<List<A>, E> _mailbox;
+  final EffectExecution _execution;
   final List<Option<A>> _latest;
-  int _active;
+  final Map<int, Fiber<void, E>> _fibers = {};
+  int _remaining;
+  var _terminalizing = false;
+  var _closed = false;
 
-  @override
-  Effect<Option<List<A>>, E> next() => Effect.build(($) async {
-    if (_active == 0) return const None();
-    while (true) {
-      switch (await $(_events.next())) {
-        case Some<_IndexedEvent<A>>(value: _IndexedValue<A>(:final index, :final value)):
-          _latest[index] = Some(value);
-          if (_latest.every((value) => value is Some<A>)) {
-            return Some(
-              List.unmodifiable([
-                for (final latest in _latest)
-                  switch (latest) {
-                    Some<A>(:final value) => value,
-                    None() => throw StateError('Missing latest Flow value.'),
-                  },
-              ]),
-            );
-          }
-        case Some<_IndexedEvent<A>>(value: _IndexedDone<A>(:final index)):
-          if (_latest[index] case None()) return const None();
-          _active -= 1;
-          if (_active == 0) return const None();
-        case None():
-          return const None();
-      }
+  void start(List<OpenFlowCursor<A, E>> sources) {
+    if (sources.isEmpty) {
+      _terminalizing = true;
+      _mailbox.complete();
+      return;
     }
+    for (final entry in sources.indexed) {
+      final index = entry.$1;
+      final fiber = ScopeAccess.fork(
+        _execution.scope,
+        pumpFlow(entry.$2, (value) => _accept(index, value)),
+        _execution,
+      );
+      _fibers[index] = fiber;
+      unawaited(fiber.exit.then((exit) => _finished(index, fiber, exit)));
+    }
+  }
+
+  Effect<void, E> _accept(int index, A value) => EffectAccess.create((execution) {
+    if (_terminalizing || _closed) return Future.value(const Succeeded(null));
+    _latest[index] = Some(value);
+    if (_latest.any((value) => value is None)) {
+      return Future.value(const Succeeded(null));
+    }
+    final snapshot = List<A>.unmodifiable([
+      for (final latest in _latest)
+        switch (latest) {
+          Some<A>(:final value) => value,
+          None() => throw StateError('Missing latest Flow value.'),
+        },
+    ]);
+    return EffectAccess.evaluate(_mailbox.offer(snapshot), execution);
   });
-}
 
-sealed class _WithLatestEvent<A, B> {
-  const _WithLatestEvent();
-}
-
-final class _PrimaryValue<A, B> extends _WithLatestEvent<A, B> {
-  const _PrimaryValue(this.value);
-
-  final A value;
-}
-
-final class _PrimaryDone<A, B> extends _WithLatestEvent<A, B> {
-  const _PrimaryDone();
-}
-
-final class _SecondaryValue<A, B> extends _WithLatestEvent<A, B> {
-  const _SecondaryValue(this.value);
-
-  final B value;
-}
-
-final class _SecondaryDone<A, B> extends _WithLatestEvent<A, B> {
-  const _SecondaryDone();
-}
-
-final class _PrimaryCursor<A, B, E> implements FlowSourceCursor<_WithLatestEvent<A, B>, E> {
-  _PrimaryCursor(this._upstream);
-
-  final FlowSourceCursor<A, E> _upstream;
-  var _sentDone = false;
-
-  @override
-  Effect<Option<_WithLatestEvent<A, B>>, E> next() {
-    if (_sentDone) return Effect.succeed(const None());
-    return _upstream.next().map((option) {
-      return switch (option) {
-        Some<A>(:final value) => Some(_PrimaryValue<A, B>(value)),
-        None() => () {
-          _sentDone = true;
-          return Some(_PrimaryDone<A, B>());
-        }(),
-      };
-    });
+  Future<void> _finished(
+    int index,
+    Fiber<void, E> fiber,
+    Exit<void, E> exit,
+  ) async {
+    if (identical(_fibers[index], fiber)) _fibers.remove(index);
+    if (_terminalizing || _closed || _execution.cancellation.isCancelled) return;
+    switch (exit) {
+      case Failed<void, E>(:final cause):
+        await _fail(cause);
+      case Succeeded<void, E>():
+        if (_latest[index] case None()) {
+          await _completeEarly();
+          return;
+        }
+        _remaining -= 1;
+        if (_remaining == 0) {
+          _terminalizing = true;
+          _mailbox.complete();
+        }
+    }
   }
-}
 
-final class _SecondaryCursor<A, B, E> implements FlowSourceCursor<_WithLatestEvent<A, B>, E> {
-  _SecondaryCursor(this._upstream);
-
-  final FlowSourceCursor<B, E> _upstream;
-  var _sentDone = false;
-
-  @override
-  Effect<Option<_WithLatestEvent<A, B>>, E> next() {
-    if (_sentDone) return Effect.succeed(const None());
-    return _upstream.next().map((option) {
-      return switch (option) {
-        Some<B>(:final value) => Some(_SecondaryValue<A, B>(value)),
-        None() => () {
-          _sentDone = true;
-          return Some(_SecondaryDone<A, B>());
-        }(),
-      };
-    });
+  Future<void> _completeEarly() async {
+    if (_terminalizing || _closed) return;
+    _terminalizing = true;
+    final cleanup = await _interruptCombination(_fibers.values);
+    if (cleanup == null) {
+      _mailbox.complete();
+    } else {
+      _mailbox.fail(cleanup.mapExpected<E>(_widenNever));
+    }
   }
+
+  Future<void> _fail(Cause<E> cause) async {
+    if (_terminalizing || _closed) return;
+    _terminalizing = true;
+    final cleanup = await _interruptCombination(_fibers.values);
+    _mailbox.fail(
+      CauseGroup.sequential([
+        cause,
+        ?cleanup?.mapExpected<E>(_widenNever),
+      ])!,
+    );
+  }
+
+  void close() => _closed = true;
 }
 
-final class _WithLatestCursor<A, B, C, E> implements FlowSourceCursor<C, E> {
-  _WithLatestCursor(this._events, this._combine);
+final class _WithLatestCoordinator<A, B, C, E> {
+  _WithLatestCoordinator(this._mailbox, this._combine, this._execution);
 
-  final FlowSourceCursor<_WithLatestEvent<A, B>, E> _events;
+  final FlowMailbox<C, E> _mailbox;
   final C Function(A primary, B latest) _combine;
+  final EffectExecution _execution;
+  final Map<int, Fiber<void, E>> _fibers = {};
   Option<B> _latest = const None();
+  var _terminalizing = false;
+  var _closed = false;
+
+  void start(
+    OpenFlowCursor<A, E> primary,
+    OpenFlowCursor<B, E> secondary,
+  ) {
+    _startPump(0, primary, _acceptPrimary);
+    _startPump(1, secondary, _acceptSecondary);
+  }
+
+  void _startPump<T>(
+    int index,
+    OpenFlowCursor<T, E> source,
+    Effect<void, E> Function(T value) emit,
+  ) {
+    final fiber = ScopeAccess.fork(
+      _execution.scope,
+      pumpFlow(source, emit),
+      _execution,
+    );
+    _fibers[index] = fiber;
+    unawaited(fiber.exit.then((exit) => _finished(index, fiber, exit)));
+  }
+
+  Effect<void, E> _acceptPrimary(A value) => EffectAccess.create((execution) {
+    if (_terminalizing || _closed) return Future.value(const Succeeded(null));
+    final latest = _latest;
+    if (latest case None()) return Future.value(const Succeeded(null));
+    final combined = _combine(value, (latest as Some<B>).value);
+    return EffectAccess.evaluate(_mailbox.offer(combined), execution);
+  });
+
+  Effect<void, E> _acceptSecondary(B value) => Effect.sync(() {
+    if (!_terminalizing && !_closed) _latest = Some(value);
+  }).mapError<E>(_widenNever);
+
+  Future<void> _finished(
+    int index,
+    Fiber<void, E> fiber,
+    Exit<void, E> exit,
+  ) async {
+    if (identical(_fibers[index], fiber)) _fibers.remove(index);
+    if (_terminalizing || _closed || _execution.cancellation.isCancelled) return;
+    switch (exit) {
+      case Failed<void, E>(:final cause):
+        await _fail(cause);
+      case Succeeded<void, E>():
+        if (index == 0 || _latest is None) await _complete();
+    }
+  }
+
+  Future<void> _complete() async {
+    if (_terminalizing || _closed) return;
+    _terminalizing = true;
+    final cleanup = await _interruptCombination(_fibers.values);
+    if (cleanup == null) {
+      _mailbox.complete();
+    } else {
+      _mailbox.fail(cleanup.mapExpected<E>(_widenNever));
+    }
+  }
+
+  Future<void> _fail(Cause<E> cause) async {
+    if (_terminalizing || _closed) return;
+    _terminalizing = true;
+    final cleanup = await _interruptCombination(_fibers.values);
+    _mailbox.fail(
+      CauseGroup.sequential([
+        cause,
+        ?cleanup?.mapExpected<E>(_widenNever),
+      ])!,
+    );
+  }
+
+  void close() => _closed = true;
+}
+
+Future<Cause<Never>?> _interruptCombination<E>(
+  Iterable<Fiber<void, E>> fibers,
+) async {
+  final exits = await Future.wait(
+    fibers.map((fiber) => fiber.interrupt(const _CombinationFinished())),
+  );
+  return CauseGroup.parallel(
+    exits
+        .whereType<Failed<void, E>>()
+        .map((exit) => exit.cause.defectsOnly)
+        .whereType<Cause<Never>>(),
+  );
+}
+
+final class _CombinationFinished {
+  const _CombinationFinished();
 
   @override
-  Effect<Option<C>, E> next() => Effect.build(($) async {
-    while (true) {
-      switch (await $(_events.next())) {
-        case Some<_WithLatestEvent<A, B>>(value: _SecondaryValue<A, B>(:final value)):
-          _latest = Some(value);
-        case Some<_WithLatestEvent<A, B>>(value: _SecondaryDone<A, B>()) when _latest is None:
-          return const None();
-        case Some<_WithLatestEvent<A, B>>(value: _SecondaryDone<A, B>()):
-          continue;
-        case Some<_WithLatestEvent<A, B>>(value: _PrimaryValue<A, B>(:final value)):
-          switch (_latest) {
-            case Some<B>(value: final latest):
-              return Some(_combine(value, latest));
-            case None():
-              continue;
-          }
-        case Some<_WithLatestEvent<A, B>>(value: _PrimaryDone<A, B>()) || None():
-          return const None();
-      }
-    }
-  });
+  String toString() => 'Flow combination finished';
 }
 
 E _widenNever<E>(Never error) => error;

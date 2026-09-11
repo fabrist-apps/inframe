@@ -166,13 +166,7 @@ final class FlowMailbox<A, E> {
                 _defectsOnly(await timer.interrupt(const _MailboxRaceLost())),
               ),
           },
-          _MailboxTimerFinished<A, E>(exit: Succeeded<void, Never>()) =>
-            Succeeded<({bool elapsed, Option<A> value}), E>((
-              elapsed: true,
-              value: const None(),
-            )).appendCleanup(
-              _defectsOnly(await next.interrupt(const _MailboxRaceLost())),
-            ),
+          _MailboxTimerFinished<A, E>(exit: Succeeded<void, Never>()) => await _finishElapsed(next),
           _MailboxTimerFinished<A, E>(exit: Failed<void, Never>(:final cause)) =>
             Failed<({bool elapsed, Option<A> value}), E>(
               cause.mapExpected<E>(_widenNever),
@@ -181,6 +175,23 @@ final class FlowMailbox<A, E> {
             ),
         };
       });
+
+  Future<Exit<({bool elapsed, Option<A> value}), E>> _finishElapsed(
+    Fiber<Option<A>, E> next,
+  ) async {
+    final nextExit = await next.interrupt(const _MailboxRaceLost());
+    return switch (nextExit) {
+      Succeeded<Option<A>, E>(:final value) => Succeeded((
+        elapsed: false,
+        value: value,
+      )),
+      Failed<Option<A>, E>(
+        cause: Interrupted<E>(reason: _MailboxRaceLost()),
+      ) =>
+        const Succeeded((elapsed: true, value: None())),
+      Failed<Option<A>, E>(:final cause) => Failed(cause),
+    };
+  }
 
   Option<Exit<Option<A>, E>> _poll() {
     if (_values.isNotEmpty) {

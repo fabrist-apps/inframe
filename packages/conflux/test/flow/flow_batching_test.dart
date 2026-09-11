@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:conflux/option.dart';
+import 'package:conflux/src/flow/flow_buffer.dart' show FlowMailbox;
 import 'package:test/test.dart';
 
 import '../support/fake_clock.dart';
@@ -118,6 +120,35 @@ void main() {
       expect(cancelled.isCompleted, isTrue);
     });
 
+    test('should preserve an interrupted terminal cause at a timer boundary', () async {
+      final clock = FakeClock();
+      final runtime = Runtime(clock: clock);
+      addTearDown(runtime.close);
+      final mailbox = FlowMailbox<int, String>(
+        1,
+        FlowOverflowPolicy.backpressure,
+        null,
+      );
+      final sourceCause = Sequential<String>([
+        const Interrupted('source stopped'),
+        Defect(StateError('source cleanup failed'), StackTrace.current),
+      ]);
+      final fiber = runtime.fork(
+        mailbox.takeUntil(const Duration(seconds: 5)),
+      );
+
+      await _waitUntil(() => clock.activeWaits == 1);
+      clock.advanceMonotonic(const Duration(seconds: 5));
+      mailbox.fail(sourceCause);
+
+      final exit = await fiber.join();
+      expect(exit, isA<Failed<({bool elapsed, Option<int> value}), String>>());
+      expect(
+        (exit as Failed<({bool elapsed, Option<int> value}), String>).cause,
+        same(sourceCause),
+      );
+    });
+
     test('should bound timed source read-ahead and batch growth', () async {
       var pulled = 0;
       final consumerStarted = Completer<void>();
@@ -150,6 +181,59 @@ void main() {
       expect(await subscription.completion, isA<Succeeded<void, String>>());
       expect(batches, everyElement(hasLength(lessThanOrEqualTo(2))));
       expect(pulled, 100);
+    });
+
+    test('should anchor buffered windows to upstream arrival time', () async {
+      final clock = FakeClock();
+      final runtime = Runtime(clock: clock);
+      addTearDown(runtime.close);
+      final listening = Completer<void>();
+      final consumerStarted = Completer<void>();
+      final releaseConsumer = Completer<void>();
+      final controller = StreamController<int>(sync: true)..onListen = listening.complete;
+      addTearDown(controller.close);
+      final batches = <List<int>>[];
+      final fiber = runtime.fork(
+        Flow.fromStream<int, String>(
+              () => controller.stream,
+              onError: (error, stackTrace) => '$error',
+            )
+            .bufferTime(
+              const Duration(seconds: 5),
+              maxSize: 2,
+              capacity: 4,
+            )
+            .runForEach((batch) {
+              batches.add(batch);
+              if (batches.length > 1) return Effect.succeed(null);
+              return Effect.tryFuture<void, String>(
+                () {
+                  consumerStarted.complete();
+                  return releaseConsumer.future;
+                },
+                onError: (error, stackTrace) => '$error',
+              );
+            }),
+      );
+
+      await listening.future;
+      controller
+        ..add(1)
+        ..add(2);
+      await consumerStarted.future;
+      controller.add(3);
+      await _flushMicrotasks();
+      clock.advanceMonotonic(const Duration(seconds: 6));
+      controller.add(4);
+      await controller.close();
+      releaseConsumer.complete();
+
+      expect(await fiber.join(), isA<Succeeded<void, String>>());
+      expect(batches, [
+        [1, 2],
+        [3],
+        [4],
+      ]);
     });
 
     test('should validate batch configuration eagerly', () {

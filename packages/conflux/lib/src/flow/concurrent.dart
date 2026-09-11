@@ -386,10 +386,11 @@ final class _SwitchCoordinator<Outer, A, E> {
     if (_terminalizing || _closed) return;
     _terminalizing = true;
     _slot.close();
+    final replacing = _replacing;
     final siblings = <Fiber<void, E>>[
       ?_outer,
       ?_supervisor,
-      ?_inner,
+      if (_inner != null && !identical(_inner, replacing)) _inner!,
     ];
     _outer = null;
     _supervisor = null;

@@ -184,6 +184,49 @@ void main() {
       expect(connections, 2);
     });
 
+    test('should cancel an attachment waiting for previous cleanup', () async {
+      var connections = 0;
+      final firstStarted = Completer<void>();
+      final cleanupStarted = Completer<void>();
+      final releaseCleanup = Completer<void>();
+      final pending = Completer<int>();
+      final shared = Flow.defer<int, String>(() {
+        connections += 1;
+        return Effect.tryFuture<int, String>(
+          () {
+            firstStarted.complete();
+            return pending.future;
+          },
+          onError: (error, stackTrace) => '$error',
+          onCancel: () async {
+            cleanupStarted.complete();
+            await releaseCleanup.future;
+          },
+        ).asFlow();
+      }).share();
+      final first = shared.subscribe((_) => Effect.succeed(null));
+
+      await firstStarted.future;
+      final firstCancellation = first.cancel('disconnect');
+      await cleanupStarted.future;
+      final waiting = shared.subscribe((_) => Effect.succeed(null));
+      await _flushMicrotasks();
+      final waitingCancellation = waiting.cancel('stop waiting');
+      var cancelled = false;
+      unawaited(waitingCancellation.then((_) => cancelled = true));
+      await _flushMicrotasks();
+
+      expect(cancelled, isTrue);
+      expect(
+        await waitingCancellation,
+        isA<Failed<void, String>>(),
+      );
+      expect(connections, 1);
+
+      releaseCleanup.complete();
+      await firstCancellation;
+    });
+
     test('should bound subscriber read-ahead under backpressure', () async {
       var pulled = 0;
       final consumerStarted = Completer<void>();

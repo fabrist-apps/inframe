@@ -2,7 +2,9 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/schedule.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
-import 'package:conflux/src/effect/execution.dart' show EffectExecution;
+import 'package:conflux/src/effect/execution.dart'
+    show EffectCancellation, EffectExecution, ScopeAccess;
+import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
 import 'package:conflux/src/flow/protocol.dart';
 
 /// Opens Flow cursors that resubscribe through a fresh Schedule driver.
@@ -11,7 +13,17 @@ abstract final class RetryFlowSource {
   static Effect<FlowSourceCursor<A, E>, E> open<A, E, O>(
     OpenFlowCursor<A, E> upstream,
     Schedule<E, O, E> schedule,
-  ) => Effect.succeed(_RetryCursor(upstream, schedule.driver()));
+  ) => EffectAccess.create((execution) async {
+    final cursor = _RetryCursor(upstream, schedule.driver());
+    final registered = ScopeAccess.addFinalizer(
+      execution.scope,
+      cursor.close(),
+      execution.context,
+      execution.clock,
+    );
+    if (registered) return Succeeded(cursor);
+    return const Failed(Interrupted(ScopeClosed()));
+  });
 }
 
 final class _RetryCursor<A, E, O> implements FlowSourceCursor<A, E> {
@@ -19,7 +31,7 @@ final class _RetryCursor<A, E, O> implements FlowSourceCursor<A, E> {
 
   final OpenFlowCursor<A, E> _upstream;
   final ScheduleDriver<E, O, E> _driver;
-  FlowSourceCursor<A, E>? _attempt;
+  _RetryAttempt<A, E>? _attempt;
   var _completed = false;
 
   @override
@@ -28,32 +40,42 @@ final class _RetryCursor<A, E, O> implements FlowSourceCursor<A, E> {
     while (true) {
       var attempt = _attempt;
       if (attempt == null) {
-        final opened = await EffectAccess.evaluate(Effect.defer(_upstream), execution);
+        final opened = await _RetryAttempt.open(_upstream, execution);
         switch (opened) {
-          case Succeeded<FlowSourceCursor<A, E>, E>(:final value):
+          case Succeeded<_RetryAttempt<A, E>, E>(:final value):
             attempt = value;
             _attempt = value;
-          case Failed<FlowSourceCursor<A, E>, E>(:final cause):
+          case Failed<_RetryAttempt<A, E>, E>(:final cause):
             final retry = await _retry(cause, execution);
             if (retry case Some<Exit<Option<A>, E>>(:final value)) return value;
             continue;
         }
       }
 
-      final pulled = await EffectAccess.evaluate(attempt.next(), execution);
-      switch (pulled) {
+      final pulled = await attempt.pull();
+      if (pulled case Succeeded<Option<A>, E>(value: Some<A>())) return pulled;
+
+      _attempt = null;
+      final terminal = pulled.appendCleanup(await attempt.close(interrupt: false));
+      switch (terminal) {
         case Succeeded<Option<A>, E>(value: None()):
           _completed = true;
-          _attempt = null;
-          return pulled;
-        case Succeeded<Option<A>, E>(value: Some<A>()):
-          return pulled;
+          return terminal;
         case Failed<Option<A>, E>(:final cause):
-          _attempt = null;
           final retry = await _retry(cause, execution);
           if (retry case Some<Exit<Option<A>, E>>(:final value)) return value;
+        case Succeeded<Option<A>, E>(value: Some<A>()):
+          throw StateError('A retry attempt closed after emitting a value.');
       }
     }
+  });
+
+  Effect<void, Never> close() => EffectAccess.create((_) async {
+    final attempt = _attempt;
+    _attempt = null;
+    if (attempt == null) return const Succeeded(null);
+    final cleanup = await attempt.close(interrupt: true);
+    return cleanup == null ? const Succeeded(null) : Failed(cleanup);
   });
 
   Future<Option<Exit<Option<A>, E>>> _retry(
@@ -80,6 +102,75 @@ final class _RetryCursor<A, E, O> implements FlowSourceCursor<A, E> {
         };
     }
   }
+}
+
+final class _RetryAttempt<A, E> {
+  _RetryAttempt(
+    this._cursor,
+    this._execution,
+    this._cancellation,
+    this._stopParentCancellation,
+  );
+
+  final FlowSourceCursor<A, E> _cursor;
+  final EffectExecution _execution;
+  final EffectCancellation _cancellation;
+  final void Function() _stopParentCancellation;
+  Future<Cause<Never>?>? _closing;
+
+  static Future<Exit<_RetryAttempt<A, E>, E>> open<A, E>(
+    OpenFlowCursor<A, E> upstream,
+    EffectExecution parent,
+  ) async {
+    final cancellation = EffectCancellation();
+    final stopParentCancellation = parent.cancellation.listen(
+      cancellation.cancel,
+    );
+    final execution = EffectExecution(
+      context: parent.context,
+      scope: ScopeAccess.create(),
+      clock: parent.clock,
+      cancellation: cancellation,
+    );
+    final opened = await EffectAccess.evaluate(Effect.defer(upstream), execution);
+    return switch (opened) {
+      Succeeded<FlowSourceCursor<A, E>, E>(:final value) => Succeeded(
+        _RetryAttempt(value, execution, cancellation, stopParentCancellation),
+      ),
+      Failed<FlowSourceCursor<A, E>, E>(:final cause) => () async {
+        stopParentCancellation();
+        return Failed<_RetryAttempt<A, E>, E>(
+          cause,
+        ).appendCleanup(await execution.scope.close());
+      }(),
+    };
+  }
+
+  Future<Exit<Option<A>, E>> pull() => EffectAccess.evaluate(
+    _cursor.next(),
+    _execution,
+  );
+
+  Future<Cause<Never>?> close({required bool interrupt}) {
+    final active = _closing;
+    if (active != null) return active;
+    final closing = _close(interrupt);
+    _closing = closing;
+    return closing;
+  }
+
+  Future<Cause<Never>?> _close(bool interrupt) async {
+    _stopParentCancellation();
+    if (interrupt) _cancellation.cancel(const _RetryAttemptClosed());
+    return _execution.scope.close();
+  }
+}
+
+final class _RetryAttemptClosed {
+  const _RetryAttemptClosed();
+
+  @override
+  String toString() => 'Flow retry attempt closed';
 }
 
 E _widenNever<E>(Never error) => error;

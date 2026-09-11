@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
+import 'package:conflux/src/effect/cause.dart' show CauseGroup, CauseRuntimeOperations;
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show ScopeAccess;
 import 'package:conflux/src/flow/flow_buffer.dart';
@@ -61,6 +62,8 @@ abstract final class FlowSchedulingSource {
       execution.context,
       execution.clock,
     );
+    var sourceFinished = false;
+    var terminalizing = false;
 
     final source = ScopeAccess.fork(
       execution.scope,
@@ -77,7 +80,8 @@ abstract final class FlowSchedulingSource {
     );
     unawaited(
       source.exit.then((exit) {
-        if (execution.cancellation.isCancelled) return;
+        sourceFinished = true;
+        if (execution.cancellation.isCancelled || terminalizing) return;
         switch (exit) {
           case Succeeded<void, E>():
             input.complete();
@@ -93,13 +97,20 @@ abstract final class FlowSchedulingSource {
       execution,
     );
     unawaited(
-      processor.exit.then((exit) {
-        if (execution.cancellation.isCancelled) return;
+      processor.exit.then((exit) async {
+        if (execution.cancellation.isCancelled || terminalizing) return;
         switch (exit) {
           case Succeeded<void, E>():
             output.complete();
           case Failed<void, E>(:final cause):
-            output.fail(cause);
+            terminalizing = true;
+            final cleanup = sourceFinished
+                ? null
+                : switch (await source.interrupt(const _SchedulingFailed())) {
+                    Succeeded<void, E>() => null,
+                    Failed<void, E>(:final cause) => cause.defectsOnly,
+                  };
+            output.fail(CauseGroup.sequential([cause, ?cleanup])!);
         }
       }),
     );
@@ -179,4 +190,11 @@ final class _Stamped<A> {
 
   final A value;
   final Duration receivedAt;
+}
+
+final class _SchedulingFailed {
+  const _SchedulingFailed();
+
+  @override
+  String toString() => 'Flow scheduling failed';
 }

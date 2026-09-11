@@ -164,6 +164,52 @@ void main() {
       expect(values, List.generate(100, (index) => index));
     });
 
+    test('should stop the source before exposing output overflow', () async {
+      final listening = Completer<void>();
+      final sourceCancelled = Completer<void>();
+      final consumerStarted = Completer<void>();
+      final releaseConsumer = Completer<void>();
+      final controller = StreamController<int>(
+        sync: true,
+        onListen: listening.complete,
+        onCancel: sourceCancelled.complete,
+      );
+      addTearDown(controller.close);
+      final subscription =
+          Flow.fromStream<int, String>(
+                () => controller.stream,
+                onError: (error, stackTrace) => '$error',
+              )
+              .debounce(
+                Duration.zero,
+                capacity: 1,
+                overflow: FlowOverflowPolicy.fail,
+                onOverflow: (_) => 'overflow',
+              )
+              .subscribe((_) {
+                return Effect.tryFuture<void, String>(
+                  () {
+                    if (!consumerStarted.isCompleted) consumerStarted.complete();
+                    return releaseConsumer.future;
+                  },
+                  onError: (error, stackTrace) => '$error',
+                );
+              });
+
+      await listening.future;
+      controller.add(1);
+      await consumerStarted.future;
+      controller.add(2);
+      await _flushMicrotasks();
+      controller.add(3);
+      await sourceCancelled.future;
+      releaseConsumer.complete();
+
+      final exit = await subscription.completion;
+      expect(exit, isA<Failed<void, String>>());
+      expect((exit as Failed<void, String>).cause.expectedErrors, ['overflow']);
+    });
+
     test('should compose debounced values through switchMap', () async {
       final clock = FakeClock();
       final runtime = Runtime(clock: clock);

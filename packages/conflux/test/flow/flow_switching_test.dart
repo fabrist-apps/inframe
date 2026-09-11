@@ -97,6 +97,52 @@ void main() {
       expect(consumed, [0, 10]);
     });
 
+    test('should report replacement cleanup defects once if the outer fails', () async {
+      final listening = Completer<void>();
+      final innerStarted = Completer<void>();
+      final cleanupStarted = Completer<void>();
+      final releaseCleanup = Completer<void>();
+      final pending = Completer<int>();
+      final outer = StreamController<int>(sync: true)..onListen = listening.complete;
+      addTearDown(outer.close);
+      final result =
+          Flow.fromStream<int, String>(
+                () => outer.stream,
+                onError: (error, stackTrace) => '$error',
+              )
+              .switchMap((value) {
+                if (value > 0) return Flow.succeed(value);
+                return Effect.tryFuture<int, String>(
+                  () {
+                    innerStarted.complete();
+                    return pending.future;
+                  },
+                  onError: (error, stackTrace) => '$error',
+                  onCancel: () async {
+                    cleanupStarted.complete();
+                    await releaseCleanup.future;
+                    throw StateError('inner cleanup failed');
+                  },
+                ).asFlow();
+              })
+              .runDrain()
+              .runFutureExit();
+
+      await listening.future;
+      outer.add(0);
+      await innerStarted.future;
+      outer.add(1);
+      await cleanupStarted.future;
+      outer.addError('outer failed');
+      releaseCleanup.complete();
+
+      final exit = await result;
+      expect(exit, isA<Failed<void, String>>());
+      final cause = (exit as Failed<void, String>).cause;
+      expect(cause.expectedErrors, ['outer failed']);
+      expect(_countDefects(cause, 'inner cleanup failed'), 1);
+    });
+
     test('should release outer and inner work on downstream cancellation', () async {
       final listening = Completer<void>();
       final outerCancelled = Completer<void>();
@@ -214,3 +260,12 @@ void main() {
     });
   });
 }
+
+int _countDefects(Cause<Object?> cause, String message) => switch (cause) {
+  Defect<Object?>(:final error) when '$error'.contains(message) => 1,
+  Sequential<Object?>(:final causes) || Parallel<Object?>(:final causes) => causes.fold(
+    0,
+    (count, cause) => count + _countDefects(cause, message),
+  ),
+  Expected<Object?>() || Interrupted<Object?>() || Defect<Object?>() => 0,
+};

@@ -58,10 +58,16 @@ final class _SharedFlowState<A, E> {
     while (true) {
       final cleanup = _cleanup;
       if (cleanup == null) break;
-      await cleanup;
-    }
-    if (execution.cancellation.isCancelled) {
-      return Failed(Interrupted(execution.cancellation.reason));
+      final waited = await EffectAccess.evaluate(
+        Effect.tryFuture<Cause<Never>?, Never>(
+          () => cleanup,
+          onError: Error.throwWithStackTrace,
+        ),
+        execution,
+      );
+      if (waited case Failed<Cause<Never>?, Never>(:final cause)) {
+        return Failed(cause.mapExpected<E>(_widenNever));
+      }
     }
 
     final subscriber = _SharedSubscriber<A, E>(
@@ -242,6 +248,8 @@ final class _SharedCursor<A, E> implements FlowSourceCursor<A, E> {
     return _mailbox.take();
   }
 }
+
+E _widenNever<E>(Never error) => error;
 
 /// Why a shared Flow stopped an upstream connection after final detachment.
 final class SharedFlowDisconnected {
