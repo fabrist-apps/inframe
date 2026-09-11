@@ -23,7 +23,7 @@ final class InletServer {
 
   /// Stops request admission, optionally closing active connections.
   Future<void> close({bool force = false}) {
-    _adapter.beginClosing();
+    _adapter.beginClosing(force: force);
     if (force && !_forced) {
       _forced = true;
       final forceClose = _closeTransport(force: true);
@@ -129,13 +129,24 @@ final class _ServerAdapter {
   final void Function(Object, StackTrace) _report;
 
   bool _closing = false;
+  bool _forceClosing = false;
+  final Set<_DetachedSseResponse> _detachedResponses = {};
 
   void start() {
     _server.listen(_accept, onError: _report);
   }
 
-  void beginClosing() {
+  void beginClosing({required bool force}) {
     _closing = true;
+    if (!force || _forceClosing) {
+      return;
+    }
+    _forceClosing = true;
+    final responses = _detachedResponses.toList();
+    _detachedResponses.clear();
+    for (final response in responses) {
+      response.abort().ignore();
+    }
   }
 
   void report(Object error, StackTrace stackTrace) => _report(error, stackTrace);
@@ -263,6 +274,7 @@ final class _ServerAdapter {
   }) async {
     var committed = false;
     Socket? detachedSocket;
+    _DetachedSseResponse? detachedResponse;
     try {
       final suppressBody = response._suppressBody || isHead;
       if (!suppressBody && !response._body.isUntouched) {
@@ -310,12 +322,17 @@ final class _ServerAdapter {
         final detach = target.detachSocket();
         committed = true;
         detachedSocket = await detach;
+        final events = StreamIterator(response.body);
+        detachedResponse = _DetachedSseResponse(detachedSocket, events);
+        _ownDetachedResponse(detachedResponse);
         await detachedSocket.flush();
-        await for (final event in response.body) {
-          detachedSocket.add(event);
+        while (await events.moveNext()) {
+          detachedSocket.add(events.current);
           await detachedSocket.flush();
         }
         await detachedSocket.close();
+        _detachedResponses.remove(detachedResponse);
+        detachedResponse = null;
         detachedSocket = null;
         return;
       }
@@ -327,9 +344,23 @@ final class _ServerAdapter {
       await delivery;
       await target.close();
     } on Object catch (error, stackTrace) {
-      detachedSocket?.destroy();
+      final ownedResponse = detachedResponse;
+      if (ownedResponse == null) {
+        detachedSocket?.destroy();
+      } else {
+        _detachedResponses.remove(ownedResponse);
+        ownedResponse.abort().ignore();
+      }
       throw _DeliveryFailure(error, stackTrace, committed: committed);
     }
+  }
+
+  void _ownDetachedResponse(_DetachedSseResponse response) {
+    if (_forceClosing) {
+      response.abort().ignore();
+      return;
+    }
+    _detachedResponses.add(response);
   }
 
   Future<void> _sendEmpty(
@@ -378,6 +409,22 @@ final class _ServerAdapter {
     } on Object catch (error, stackTrace) {
       _report(error, stackTrace);
     }
+  }
+}
+
+final class _DetachedSseResponse {
+  _DetachedSseResponse(this.socket, this.events);
+
+  final Socket socket;
+  final StreamIterator<List<int>> events;
+
+  Future<void>? _abortFuture;
+
+  Future<void> abort() => _abortFuture ??= _abort();
+
+  Future<void> _abort() async {
+    socket.destroy();
+    await events.cancel();
   }
 }
 
