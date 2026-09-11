@@ -1,7 +1,9 @@
 import 'dart:math';
 
+import 'package:conflux/cron.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 
 /// The result of stepping a [ScheduleDriver].
@@ -118,6 +120,27 @@ final class Schedule<I, O, E> {
         }),
       );
     });
+  }
+
+  /// Continues forever at occurrences selected by [cron].
+  ///
+  /// Every step reads the runtime's current wall time and chooses the next
+  /// occurrence strictly after it. The output and delay are both the duration
+  /// until that occurrence. Search exhaustion is an expected [CronError].
+  static Schedule<I, Duration, CronError> cron<I>(Cron cron) {
+    return Schedule.fromDriver(
+      () => ScheduleDriver(
+        (_) => EffectAccess.create((execution) async {
+          final now = execution.clock.wallTime();
+          return switch (cron.next(now)) {
+            Success<DateTime, CronError>(:final value) => Succeeded(
+              ScheduleContinue(value.difference(now), value.difference(now)),
+            ),
+            Failure<DateTime, CronError>(:final error) => Failed(Expected(error)),
+          };
+        }),
+      ),
+    );
   }
 
   /// Continues while both policies continue and selects their later delay.

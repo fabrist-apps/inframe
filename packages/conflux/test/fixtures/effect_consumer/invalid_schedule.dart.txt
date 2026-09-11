@@ -1,0 +1,5 @@
+import 'package:conflux/conflux.dart';
+
+Schedule<Option<int>, Duration, String> invalidSchedule(Cron cron) {
+  return Schedule.cron<Option<int>>(cron);
+}

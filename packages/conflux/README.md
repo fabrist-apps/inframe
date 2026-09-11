@@ -170,6 +170,33 @@ occurrence search examines at most 10,000 calendar-day candidates within years
 that no occurrence exists. `sequence` searches lazily without timers or an end
 date; it yields one terminal failure and then stops if a search is exhausted.
 
+Attach a validated Cron to an Effect through `Schedule.cron`. `repeat` performs
+the operation immediately, while `schedule` waits for the first future
+occurrence. Map calendar search failures into the operation's domain error
+before attaching the policy:
+
+```dart
+sealed class JobError {}
+final class InvalidCalendar extends JobError {
+  InvalidCalendar(this.error);
+  final CronError error;
+}
+
+final cron = switch (Cron.parse('0 9 * * mon-fri', location)) {
+  Success(value: final value) => value,
+  Failure(error: final error) => throw FormatException('$error'),
+};
+final policy = Schedule.cron<void>(cron).mapError<JobError>(InvalidCalendar.new);
+final Effect<void, JobError> job = Effect.sync(() => print('run job'));
+final scheduled = job.repeat(policy);
+```
+
+Each decision reads current wall time, so a wait that becomes overdue may run
+once and the following decision skips missed occurrences. Cancellation uses the
+runtime Clock and removes the active wait. Scheduling and retries can repeat an
+external side effect after partial success; callers own idempotency keys and
+reconciliation.
+
 `Queue.bounded` acquires an in-memory FIFO Queue whose lifetime belongs to the
 current Effect scope. A full Queue applies lossless backpressure until a take
 releases capacity. Shutdown is immediate and interrupts pending data operations
