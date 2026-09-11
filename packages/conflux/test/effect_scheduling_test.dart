@@ -55,6 +55,23 @@ void main() {
       expect(executions, 3);
     });
 
+    test('should distinguish zero repeat recurrences from zero scheduled runs', () async {
+      var repeated = 0;
+      var scheduled = 0;
+
+      final repeatOutput = await Effect.sync(() => ++repeated)
+          .repeat(Schedule.recurs(0))
+          .runFuture();
+      final scheduleOutput = await Effect.sync(() => ++scheduled)
+          .schedule(Schedule.recurs(0))
+          .runFuture();
+
+      expect(repeatOutput, 0);
+      expect(repeated, 1);
+      expect(scheduleOutput, 0);
+      expect(scheduled, 0);
+    });
+
     test('should preserve None and nullable Some schedule inputs', () async {
       final inputs = <Option<int?>>[];
       var decisions = 0;
@@ -208,6 +225,16 @@ void main() {
       expect((exit as Failed<int, String>).cause, isA<Interrupted<String>>());
       expect(attempts, 1);
       expect(clock.activeWaits, 0);
+    });
+
+    test('should yield during a long immediate repetition', () async {
+      var yielded = false;
+      Future<void>.delayed(Duration.zero, () => yielded = true);
+
+      final output = await Effect.succeed<int, Never>(1).repeat(Schedule.recurs(2000)).runFuture();
+
+      expect(output, 2000);
+      expect(yielded, isTrue);
     });
 
     test('should await failed schedule cleanup before returning', () async {
