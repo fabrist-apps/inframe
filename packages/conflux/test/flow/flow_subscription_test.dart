@@ -94,6 +94,36 @@ void main() {
       expect(pulled, 3);
     });
 
+    test('should honor a new pause before a pending delivery resumes', () async {
+      final values = <int>[];
+      final first = Completer<void>();
+      final done = Completer<void>();
+      late StreamSubscription<int> subscription;
+      subscription = Flow.fromIterable([1, 2, 3]).toStream().listen(
+        (value) {
+          values.add(value);
+          if (value == 1) {
+            subscription.pause();
+            first.complete();
+          }
+        },
+        onDone: done.complete,
+      );
+      addTearDown(subscription.cancel);
+      await first.future;
+
+      subscription
+        ..resume()
+        ..pause();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(values, [1]);
+      subscription.resume();
+      await done.future;
+      expect(values, [1, 2, 3]);
+    });
+
     test('should await Flow cleanup when a Stream subscription is cancelled', () async {
       final started = Completer<void>();
       final pending = Completer<int>();

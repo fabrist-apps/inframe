@@ -124,6 +124,8 @@ final class _StreamCursor<A, E> implements FlowSourceCursor<A, E> {
 
   Effect<void, Never> close() => EffectAccess.create((_) async {
     _closed = true;
+    _values.clear();
+    _terminalFailure = null;
     final pending = _pendingPull;
     _pendingPull = null;
     pending?.complete(

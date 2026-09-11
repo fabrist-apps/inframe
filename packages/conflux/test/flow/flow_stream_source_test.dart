@@ -163,6 +163,39 @@ void main() {
       await source.close();
     });
 
+    test('should preserve parent interruption after awaiting source cancellation', () async {
+      final cancellationStarted = Completer<void>();
+      final releaseCancellation = Completer<void>();
+      final source = StreamController<int>(
+        onCancel: () {
+          cancellationStarted.complete();
+          return releaseCancellation.future;
+        },
+      );
+      final runtime = Runtime();
+      addTearDown(runtime.close);
+      final consuming = runtime.fork(
+        Flow.fromStream<int, String>(
+          () => source.stream,
+          onError: (error, stackTrace) => '$error',
+        ).runDrain(),
+      );
+      await _waitForListener(source);
+
+      final cancellation = consuming.interrupt('stop Stream Flow');
+      await cancellationStarted.future;
+      var completed = false;
+      unawaited(cancellation.then((_) => completed = true));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(completed, isFalse);
+      releaseCancellation.complete();
+      final cause = (await cancellation as Failed<void, String>).cause;
+      expect(cause, isA<Interrupted<String>>());
+      expect((cause as Interrupted<String>).reason, 'stop Stream Flow');
+      await source.close();
+    });
+
     test('should validate capacity and fail-policy configuration', () {
       Stream<int> source() => const Stream.empty();
       String mapError(Object error, StackTrace stackTrace) => '$error';
