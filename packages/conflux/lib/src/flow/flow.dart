@@ -163,6 +163,16 @@ final class Flow<A, E> {
     ),
   );
 
+  /// Sequences one effectful transformation at a time in source order.
+  Flow<B, E> mapEffect<B>(Effect<B, E> Function(A value) transform) => Flow._(
+    () => _openCursor().map((cursor) => _MapEffectCursor(cursor, transform)),
+  );
+
+  /// Consumes each transformed inner Flow fully before opening the next one.
+  Flow<B, E> concatMap<B>(Flow<B, E> Function(A value) transform) => Flow._(
+    () => _openCursor().map((cursor) => _ConcatMapCursor(cursor, transform)),
+  );
+
   /// Emits at most the first [count] values and then closes upstream.
   Flow<A, E> take(int count) {
     if (count < 0) {
@@ -193,6 +203,49 @@ final class Flow<A, E> {
   ///
   /// The consumer scope closes immediately after the first value.
   Effect<Option<A>, E> runFirst() => _consume((cursor, $) => $(cursor.next()));
+
+  /// Runs one effectful [consume] callback at a time in source order.
+  Effect<void, E> runForEach(Effect<void, E> Function(A value) consume) =>
+      _consume((cursor, $) async {
+        while (true) {
+          switch (await $(cursor.next())) {
+            case Some<A>(:final value):
+              await $(Effect.defer(() => consume(value)));
+            case None():
+              return;
+          }
+        }
+      });
+
+  /// Reduces all values from [initial] and returns the final state.
+  Effect<B, E> runFold<B>(B initial, B Function(B state, A value) combine) =>
+      _consume((cursor, $) async {
+        var state = initial;
+        while (true) {
+          switch (await $(cursor.next())) {
+            case Some<A>(:final value):
+              state = combine(state, value);
+            case None():
+              return state;
+          }
+        }
+      });
+
+  /// Returns the final value after normal completion, or [None] when empty.
+  Effect<Option<A>, E> runLast() => _consume((cursor, $) async {
+    Option<A> last = const None();
+    while (true) {
+      switch (await $(cursor.next())) {
+        case final Some<A> value:
+          last = value;
+        case None():
+          return last;
+      }
+    }
+  });
+
+  /// Consumes and discards every value.
+  Effect<void, E> runDrain() => runForEach((_) => Effect.succeed(null));
 
   Effect<R, E> _consume<R>(
     FutureOr<R> Function(FlowCursor<A, E> cursor, EffectBuilder<E> $) consume,
@@ -339,6 +392,50 @@ final class _MapCursor<A, B, E> implements _FlowCursor<B, E> {
       Some<A>(:final value) => Some(_transform(value)),
       None() => const None(),
     };
+  });
+}
+
+final class _MapEffectCursor<A, B, E> implements _FlowCursor<B, E> {
+  _MapEffectCursor(this._upstream, this._transform);
+
+  final _FlowCursor<A, E> _upstream;
+  final Effect<B, E> Function(A value) _transform;
+
+  @override
+  Effect<Option<B>, E> next() => Effect.build(($) async {
+    return switch (await $(_upstream.next())) {
+      Some<A>(:final value) => Some(
+        await $(Effect.defer(() => _transform(value))),
+      ),
+      None() => const None(),
+    };
+  });
+}
+
+final class _ConcatMapCursor<A, B, E> implements _FlowCursor<B, E> {
+  _ConcatMapCursor(this._upstream, this._transform);
+
+  final _FlowCursor<A, E> _upstream;
+  final Flow<B, E> Function(A value) _transform;
+  FlowCursor<B, E>? _inner;
+
+  @override
+  Effect<Option<B>, E> next() => Effect.build(($) async {
+    while (true) {
+      final inner = _inner;
+      if (inner != null) {
+        final option = await $(inner.next());
+        if (option case Some<B>()) return option;
+        _inner = null;
+      }
+
+      switch (await $(_upstream.next())) {
+        case Some<A>(:final value):
+          _inner = await $(Effect.defer(() => _transform(value).open()));
+        case None():
+          return const None();
+      }
+    }
   });
 }
 
