@@ -65,6 +65,138 @@ Scopes interrupt and await child fibers before running finalizers once in
 reverse registration order. Finalizers are protected from ordinary
 cancellation, so an uncooperative finalizer can prevent bounded shutdown.
 
+Timing operations use the runtime's `Clock`, so tests can control both wall and
+monotonic time. `delay` waits before starting work, `timed` reports monotonic
+elapsed time, and `timeout` interrupts and awaits child cleanup before returning
+its expected error:
+
+```dart
+final measured = await Effect.succeed<String, String>('ready')
+    .delay(const Duration(milliseconds: 10))
+    .timeout(
+      const Duration(seconds: 1),
+      onTimeout: () => 'operation timed out',
+    )
+    .timed()
+    .runFuture();
+
+print('${measured.value} after ${measured.elapsed}');
+```
+
+Durations must be non-negative. Conflux passes their microsecond value to the
+configured `Clock` without rounding; that Clock and its platform timer determine
+effective precision.
+
+`Schedule` values are reusable policy descriptions; every `retry`, `repeat`,
+or `schedule` execution creates a fresh driver. `retry` feeds expected errors
+to its driver, `repeat` runs immediately and feeds successful values, and
+`schedule` asks the driver before the first execution using `None`:
+
+```dart
+var attempts = 0;
+final loaded = Effect.defer<int, String>(() {
+  attempts += 1;
+  return attempts < 3 ? Effect.fail('try again') : Effect.succeed(42);
+}).retry(Schedule.recurs(3));
+
+final value = await loaded.runFuture();
+```
+
+`recurs(n)` permits `n` continuing decisions, so retry and repeat can execute
+once initially plus `n` additional times. `Effect.schedule` can execute at most
+`n` times because it consults the policy first. A failed schedule step uses its
+expected-error channel and ends the operation; it is distinct from
+`ScheduleStop`.
+
+`spaced` measures each delay from the prior completion. `fixed` instead keeps an
+anchored cadence and skips missed ticks. Exponential delays have no implicit
+cap; add one explicitly with `modifyDelay` when the operation needs it:
+
+```dart
+final backoff = Schedule.exponential<String>(
+  const Duration(milliseconds: 100),
+).jittered().modifyDelay(
+  (delay) => delay > const Duration(seconds: 10)
+      ? const Duration(seconds: 10)
+      : delay,
+);
+
+final loaded = request.retry(backoff);
+```
+
+Exponential scaling and jitter round down to whole microseconds and fail with a
+defect if the computed delay exceeds Dart's signed 64-bit `Duration` range.
+`Schedule.max` continues while both policies continue and waits for their later
+delay. `Schedule.min` continues while either policy continues, reports stopped
+branches as `None`, and waits for the earliest active delay. `within` uses the
+runtime's monotonic clock to prevent a new start beyond its budget; work that
+already started is allowed to finish. `whileInput`, `concat`, and `tap` support
+input gates, sequential policies with fresh state, and effectful observation of
+continuing decisions.
+
+`Cron` is a pure calendar value with an explicit `timezone.Location`. The
+application chooses and initializes the timezone database; Conflux does not
+change the global local timezone:
+
+```dart
+import 'package:conflux/cron.dart';
+import 'package:conflux/result.dart';
+import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
+
+tz_data.initializeTimeZones();
+final location = tz.getLocation('America/New_York');
+final parsed = Cron.parse('0 9 * * mon-fri', location);
+
+switch (parsed) {
+  case Success(value: final cron):
+    print(cron.matches(DateTime.now()));
+  case Failure(error: final error):
+    print('Invalid Cron: $error');
+}
+```
+
+Five-field expressions use second zero; six-field expressions put seconds
+first. Omitted `fromFields` values are wildcards, while explicit empty sets are
+invalid. When both day-of-month and weekday are restricted, either may match.
+When either begins with `*`, including `*/step`, both must match. `format`
+returns six fields and keeps the location separate.
+
+`next` and `previous` search strictly beyond the supplied instant. They verify
+each candidate's local fields against timezone transitions, so spring-forward
+gaps are skipped and both instants in a fall-back overlap can be returned. Each
+occurrence search examines at most 10,000 calendar-day candidates within years
+1 through 9999. A `CronError` caused by that work or date limit does not prove
+that no occurrence exists. `sequence` searches lazily without timers or an end
+date; it yields one terminal failure and then stops if a search is exhausted.
+
+Attach a validated Cron to an Effect through `Schedule.cron`. `repeat` performs
+the operation immediately, while `schedule` waits for the first future
+occurrence. Map calendar search failures into the operation's domain error
+before attaching the policy:
+
+```dart
+sealed class JobError {}
+final class InvalidCalendar extends JobError {
+  InvalidCalendar(this.error);
+  final CronError error;
+}
+
+final cron = switch (Cron.parse('0 9 * * mon-fri', location)) {
+  Success(value: final value) => value,
+  Failure(error: final error) => throw FormatException('$error'),
+};
+final policy = Schedule.cron<void>(cron).mapError<JobError>(InvalidCalendar.new);
+final Effect<void, JobError> job = Effect.sync(() => print('run job'));
+final scheduled = job.repeat(policy);
+```
+
+Each decision reads current wall time, so a wait that becomes overdue may run
+once and the following decision skips missed occurrences. Cancellation uses the
+runtime Clock and removes the active wait. Scheduling and retries can repeat an
+external side effect after partial success; callers own idempotency keys and
+reconciliation.
+
 `Queue.bounded` acquires an in-memory FIFO Queue whose lifetime belongs to the
 current Effect scope. A full Queue applies lossless backpressure until a take
 releases capacity. Shutdown is immediate and interrupts pending data operations

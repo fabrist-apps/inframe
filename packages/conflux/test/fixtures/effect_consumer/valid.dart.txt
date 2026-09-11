@@ -1,4 +1,5 @@
 import 'package:conflux/conflux.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 Future<void> main() async {
   final program = Effect.build<String, String>(($) async {
@@ -29,6 +30,25 @@ Future<void> main() async {
   if (widenedExit is! Succeeded<int, _BaseError>) {
     throw StateError('Expected widened recovery to succeed.');
   }
+
+  final Schedule<_BaseError, int, Never> retries = Schedule.recurs(1);
+  final Effect<int, _BaseError> retried = widened.retry(retries);
+  final Schedule<int, int, _BaseError> mappedPolicy = Schedule<int, int, _SpecificError>.fromDriver(
+    () => ScheduleDriver(
+      (_) => Effect.fail(const _SpecificError()),
+    ),
+  ).mapError<_BaseError>((error) => error);
+  await Runtime().run(retried);
+  await Runtime().run(mappedPolicy.driver().step(0));
+
+  final cron = (Cron.fromFields(
+    location: tz.UTC,
+    seconds: const {0},
+  ) as Success<Cron, CronError>).value;
+  final Schedule<Option<int?>, Duration, _BaseError> calendar = Schedule.cron<Option<int?>>(cron)
+      .mapError<_BaseError>(_CalendarError.new);
+  final Effect<int?, _BaseError> nullable = Effect.succeed(null);
+  await nullable.schedule(calendar.within(Duration.zero)).runFuture();
 }
 
 sealed class _BaseError {
@@ -37,4 +57,10 @@ sealed class _BaseError {
 
 final class _SpecificError extends _BaseError {
   const _SpecificError();
+}
+
+final class _CalendarError extends _BaseError {
+  const _CalendarError(this.error);
+
+  final CronError error;
 }

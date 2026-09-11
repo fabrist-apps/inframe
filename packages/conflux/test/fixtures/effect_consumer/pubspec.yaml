@@ -7,3 +7,4 @@ environment:
 dependencies:
   conflux:
     path: ../../..
+  timezone: ^0.11.1

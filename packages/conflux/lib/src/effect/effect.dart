@@ -5,6 +5,7 @@ import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/effect/builder.dart';
 import 'package:conflux/src/effect/cause.dart';
+import 'package:conflux/src/effect/clock.dart';
 import 'package:conflux/src/effect/execution.dart';
 import 'package:conflux/src/effect/exit.dart';
 import 'package:context/context.dart';
@@ -51,6 +52,82 @@ final class Effect<A, E> {
   /// Lazily chooses another effect for each execution.
   static Effect<A, E> defer<A, E>(Effect<A, E> Function() factory) =>
       Effect._((execution) => factory()._evaluate(execution));
+
+  /// Waits for [duration] using the execution's cancellable [Clock].
+  ///
+  /// The duration must not be negative. It is passed to [Clock.sleep] without
+  /// rounding; the selected Clock defines its effective timer precision.
+  static Effect<void, Never> sleep(Duration duration) {
+    _requireNonNegativeDuration(duration);
+    return Effect._((execution) async {
+      final wait = execution.clock.sleep(duration);
+      final completed = Completer<Exit<void, Never>>();
+      var settled = false;
+      late final void Function() stopListening;
+
+      Future<void> cancel(Object? reason) async {
+        if (settled) return;
+        settled = true;
+        stopListening();
+        try {
+          await wait.cancel();
+        } on Object catch (error, stackTrace) {
+          completed.complete(
+            Failed(
+              Sequential<Never>([
+                Interrupted<Never>(reason),
+                Defect<Never>(error, stackTrace),
+              ]),
+            ),
+          );
+          return;
+        }
+        completed.complete(Failed(Interrupted<Never>(reason)));
+      }
+
+      if (execution.cancellation.isCancelled) {
+        final reason = execution.cancellation.reason;
+        try {
+          await wait.cancel();
+        } on Object catch (error, stackTrace) {
+          return Failed(
+            Sequential<Never>([
+              Interrupted<Never>(reason),
+              Defect<Never>(error, stackTrace),
+            ]),
+          );
+        }
+        return Failed(Interrupted(reason));
+      }
+      stopListening = execution.cancellation.listen(
+        (reason) => unawaited(cancel(reason)),
+      );
+      if (!settled) {
+        unawaited(
+          wait.completed.then<void>(
+            (_) async {
+              if (settled) return;
+              settled = true;
+              stopListening();
+              try {
+                await wait.cancel();
+                completed.complete(const Succeeded(null));
+              } on Object catch (error, stackTrace) {
+                completed.complete(Failed(Defect(error, stackTrace)));
+              }
+            },
+            onError: (Object error, StackTrace stackTrace) {
+              if (settled) return;
+              settled = true;
+              stopListening();
+              completed.complete(Failed(Defect(error, stackTrace)));
+            },
+          ),
+        );
+      }
+      return completed.future;
+    });
+  }
 
   /// Converts a synchronous [Result] into an effect.
   static Effect<A, E> fromResult<A, E>(Result<A, E> result) => switch (result) {
@@ -258,6 +335,134 @@ final class Effect<A, E> {
     }
     return Succeeded(List.unmodifiable(values));
   });
+}
+
+/// Clock-based timing for an Effect.
+extension EffectTiming<A, E> on Effect<A, E> {
+  /// Waits for [duration] before starting this Effect.
+  Effect<A, E> delay(Duration duration) {
+    _requireNonNegativeDuration(duration);
+    return Effect._((execution) async {
+      final waited = await Effect.sleep(duration)._evaluate(execution);
+      return switch (waited) {
+        Succeeded<void, Never>() => _evaluate(execution),
+        Failed<void, Never>(:final cause) => Failed(cause),
+      };
+    });
+  }
+
+  /// Measures this Effect with the execution's monotonic clock.
+  Effect<({A value, Duration elapsed}), E> timed() => Effect._((execution) async {
+    final startedAt = execution.clock.monotonic();
+    return switch (await _evaluate(execution)) {
+      Succeeded<A, E>(:final value) => Succeeded((
+        value: value,
+        elapsed: execution.clock.monotonic() - startedAt,
+      )),
+      Failed<A, E>(:final cause) => Failed(cause),
+    };
+  });
+
+  /// Interrupts this Effect after [duration] and returns [onTimeout].
+  ///
+  /// Child cleanup finishes before the timeout result becomes available, so
+  /// cleanup can make the total elapsed time exceed [duration].
+  Effect<A, E> timeout(
+    Duration duration, {
+    required E Function() onTimeout,
+  }) {
+    _requireNonNegativeDuration(duration);
+    return Effect._((execution) async {
+      final operation = ScopeAccess.fork(execution.scope, this, execution);
+      final timer = ScopeAccess.fork(
+        execution.scope,
+        Effect.sleep(duration),
+        execution,
+      );
+      final winner = await Future.any<_TimeoutWinner<A, E>>([
+        operation.join().then(_OperationFinished.new),
+        timer.join().then(_TimerFinished.new),
+      ]);
+
+      return switch (winner) {
+        _OperationFinished<A, E>(:final exit) => () async {
+          final timerExit = await timer.interrupt(const _TimeoutCancelled());
+          final cleanup = switch (timerExit) {
+            Succeeded<void, Never>() => null,
+            Failed<void, Never>(:final cause) => cause.defectsOnly,
+          };
+          return exit.appendCleanup(cleanup);
+        }(),
+        _TimerFinished<A, E>(exit: Failed<void, Never>(:final cause)) => () async {
+          final operationExit = await operation.interrupt(
+            execution.cancellation.reason,
+          );
+          return Failed<A, E>(
+            cause.mapExpected<E>(_absurd),
+          ).appendCleanup(_defectsFrom(operationExit));
+        }(),
+        _TimerFinished<A, E>(exit: Succeeded<void, Never>()) => () async {
+          final operationExit = await operation.interrupt(
+            const _TimeoutElapsed(),
+          );
+          late final E error;
+          try {
+            error = onTimeout();
+          } on Object catch (failure, stackTrace) {
+            return Failed<A, E>(
+              Defect(failure, stackTrace),
+            ).appendCleanup(_defectsFrom(operationExit));
+          }
+          return Failed<A, E>(
+            Expected(error),
+          ).appendCleanup(_defectsFrom(operationExit));
+        }(),
+      };
+    });
+  }
+}
+
+Cause<Never>? _defectsFrom<A, E>(Exit<A, E> exit) => switch (exit) {
+  Succeeded<A, E>() => null,
+  Failed<A, E>(:final cause) => cause.defectsOnly,
+};
+
+void _requireNonNegativeDuration(Duration duration) {
+  if (duration.isNegative) {
+    throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
+  }
+}
+
+E _absurd<E>(Never value) => value;
+
+sealed class _TimeoutWinner<A, E> {
+  const _TimeoutWinner();
+}
+
+final class _OperationFinished<A, E> extends _TimeoutWinner<A, E> {
+  const _OperationFinished(this.exit);
+
+  final Exit<A, E> exit;
+}
+
+final class _TimerFinished<A, E> extends _TimeoutWinner<A, E> {
+  const _TimerFinished(this.exit);
+
+  final Exit<void, Never> exit;
+}
+
+final class _TimeoutElapsed {
+  const _TimeoutElapsed();
+
+  @override
+  String toString() => 'Effect timeout elapsed';
+}
+
+final class _TimeoutCancelled {
+  const _TimeoutCancelled();
+
+  @override
+  String toString() => 'Effect timeout cancelled';
 }
 
 sealed class _ValueSlot<A> {
@@ -619,6 +824,11 @@ extension EffectCleanup<A, E> on Effect<A, E> {
 
 /// Uses Effect internals across the runtime's normal libraries.
 abstract final class EffectAccess {
+  /// Creates an Effect for another Conflux subsystem using runtime execution.
+  static Effect<A, E> create<A, E>(
+    Future<Exit<A, E>> Function(EffectExecution execution) run,
+  ) => Effect._(run);
+
   /// Evaluates [effect] inside [execution].
   static Future<Exit<A, E>> evaluate<A, E>(
     Effect<A, E> effect,

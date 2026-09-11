@@ -23,5 +23,13 @@ void main() {
         containing: 'ARGUMENT_TYPE_NOT_ASSIGNABLE',
       );
     });
+
+    test('should reject an incompatible Schedule error type', () async {
+      await fixtures.analyzeFails(
+        'effect_consumer',
+        'invalid_schedule.dart',
+        containing: 'RETURN_OF_INVALID_TYPE',
+      );
+    });
   });
 }
