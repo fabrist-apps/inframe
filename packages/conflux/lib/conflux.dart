@@ -1,6 +1,7 @@
 /// Functional values and effectful composition for Inframe.
 library;
 
+export 'cache.dart';
 export 'cron.dart';
 export 'effect.dart';
 export 'non_empty_list.dart';
