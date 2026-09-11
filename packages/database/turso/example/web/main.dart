@@ -386,19 +386,21 @@ Future<void> _verifyMemoryAttachments() async {
       );
     });
     await memory.execute('PRAGMA foreign_keys=ON');
+    await memory.execute('INSERT INTO auxiliary.parents VALUES (1)');
+    await memory.execute('INSERT INTO auxiliary.children VALUES (1, 1)');
     await _expectFailure<TursoDatabaseException>(
       () => memory.transaction<void>((tx) async {
-        await tx.execute('INSERT INTO auxiliary.children VALUES (1, 99)');
+        await tx.execute('INSERT INTO auxiliary.children VALUES (2, 99)');
       }),
     );
     _expect(
       (await memory.query('SELECT count(*) AS count FROM auxiliary.children')).rows.single
               .getInt('count') ==
-          0,
+          1,
       'Deferred attached-schema violation escaped rollback.',
     );
     await memory.execute('PRAGMA foreign_keys=OFF');
-    await memory.execute('INSERT INTO auxiliary.children VALUES (2, 99)');
+    await memory.execute('INSERT INTO auxiliary.children VALUES (3, 99)');
     await memory.execute('DETACH DATABASE auxiliary');
   } finally {
     await memory.close();
