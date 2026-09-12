@@ -490,7 +490,7 @@ final class ChroniclerRuntime {
     }
     try {
       // Validate caller data before field-name rules can hide it.
-      codec.encodeRecord(original);
+      codec.validateRecord(original);
       var record = _redactRecord(original);
       final hook = options.redaction.beforeRecord;
       if (hook != null) {
@@ -513,7 +513,7 @@ final class ChroniclerRuntime {
           return disposition;
         }
         try {
-          codec.encodeRecord(changed);
+          codec.validateRecord(changed);
         } on Object {
           _dropDisposition(disposition, DropReason.invalidRecord);
           return disposition;

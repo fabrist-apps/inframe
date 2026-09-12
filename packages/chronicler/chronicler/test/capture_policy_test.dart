@@ -126,6 +126,41 @@ void main() {
       expect(record.payload.attributes['newToken'], '[REDACTED]');
     });
 
+    test('should enforce complete-record size after hooks and field redaction', () async {
+      final hookExporter = TestExporter();
+      final hooked = _chronicler(
+        exporter: hookExporter,
+        maxRecordBytes: 512,
+        redaction: RedactionOptions(
+          beforeRecord: (record) {
+            final log = record as LogRecord;
+            return log.copyWith(payload: log.payload.copyWith(message: 'redacted'));
+          },
+        ),
+      );
+      Context().withChronicler(hooked.recorder).logs.info('x' * 1000);
+
+      final fieldExporter = TestExporter();
+      final fieldRedacted = _chronicler(
+        exporter: fieldExporter,
+        maxRecordBytes: 512,
+      );
+      Context()
+          .withChronicler(fieldRedacted.recorder)
+          .logs
+          .info('redact field', attributes: {'token': 'x' * 400});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        (hookExporter.batches.single.records.single as LogRecord).payload.message,
+        'redacted',
+      );
+      expect(
+        (fieldExporter.batches.single.records.single as LogRecord).payload.attributes,
+        {'token': '[REDACTED]'},
+      );
+    });
+
     test('should contain null, throwing, invalid, and protected-field hook results', () async {
       Future<(TestExporter, Chronicler)> capture(
         ChroniclerRecord? Function(ChroniclerRecord) hook,
@@ -348,13 +383,17 @@ Chronicler _chronicler({
   RedactionOptions redaction = const RedactionOptions(),
   SamplingOptions sampling = const SamplingOptions(),
   int maxBatchRecords = 1,
+  int maxRecordBytes = 64 * 1024,
 }) => Chronicler(
   appId: 'app',
   release: 'release',
   source: ChroniclerSource.server,
   exporter: exporter,
   options: ChroniclerOptions(
-    delivery: DeliveryOptions(maxBatchRecords: maxBatchRecords),
+    delivery: DeliveryOptions(
+      maxBatchRecords: maxBatchRecords,
+      maxRecordBytes: maxRecordBytes,
+    ),
     redaction: redaction,
     sampling: sampling,
   ),

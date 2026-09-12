@@ -50,9 +50,20 @@ final class ChroniclerCodec {
 
   RecordValidator get _recordValidator => RecordValidator(limits, maxSnapshotBytes: maxRecordBytes);
 
-  Uint8List encodeRecord(ChroniclerRecord record) {
+  /// Validates record fields without applying the complete encoded-record limit.
+  void validateRecord(ChroniclerRecord record) {
     try {
       _validateRecord(record);
+    } on ChroniclerEncodingException {
+      rethrow;
+    } on Object {
+      throw const ChroniclerEncodingException('record is invalid');
+    }
+  }
+
+  Uint8List encodeRecord(ChroniclerRecord record) {
+    try {
+      validateRecord(record);
       final encoded = _encodeObject(_recordMap(record));
       if (encoded.length > maxRecordBytes) {
         throw const ChroniclerEncodingException('record byte limit exceeded');
@@ -71,7 +82,7 @@ final class ChroniclerCodec {
     }
     final recordMaps = batch.records
         .map((record) {
-          _validateRecord(record);
+          validateRecord(record);
           final map = _recordMap(record);
           if (_encodeObject(map).length > maxRecordBytes) {
             throw const ChroniclerEncodingException('record byte limit exceeded');
