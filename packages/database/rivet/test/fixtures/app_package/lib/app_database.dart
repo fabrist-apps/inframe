@@ -2,7 +2,7 @@
 // ignore_for_file: public_member_api_docs, specify_nonobvious_property_types
 
 import 'package:rivet/rivet.dart';
-import 'package:rivet_fixture_schema/package_users.dart' as schema;
+import 'package:rivet_fixture_schema/package_users.dart' as schema hide PackageAccess;
 
 part 'app_database.rivet.dart';
 
@@ -39,6 +39,7 @@ final class PackageUsers extends RivetTableDefinition<PackageUsers> {
   late final access = enumText<schema.AccessLevel>()();
   late final accessRecord = text().map(const AccessRecordConverter())();
   late final accessCallback = text().map(const AccessCallbackConverter())();
+  late final packageAccess = text().map(const schema.PackageAccessConverter())();
   late final package = one<schema.PackageUsers>(
     fields: [packageName],
     references: (users) => [users.name],

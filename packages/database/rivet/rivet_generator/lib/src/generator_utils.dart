@@ -46,8 +46,11 @@ String columnValueType(DartType type, LibraryElement library) {
 
 String referenceToType(DartType type, LibraryElement from) {
   if (type.alias case final alias?) {
-    return '${referenceTo(alias.element, from)}${_typeArguments(alias.typeArguments, from)}'
-        '${_nullability(alias.nullabilitySuffix)}';
+    final reference = _tryReferenceTo(alias.element, from);
+    if (reference != null) {
+      return '$reference${_typeArguments(alias.typeArguments, from)}'
+          '${_nullability(alias.nullabilitySuffix)}';
+    }
   }
   return switch (type) {
     final InterfaceType interface =>
@@ -111,6 +114,16 @@ String _functionType(FunctionType type, LibraryElement from) {
 String _nullability(NullabilitySuffix suffix) => suffix == NullabilitySuffix.question ? '?' : '';
 
 String referenceTo(Element target, LibraryElement from) {
+  final reference = _tryReferenceTo(target, from);
+  if (reference != null) return reference;
+  final name = target.displayName;
+  throw InvalidGenerationSourceError(
+    '`${target.library?.uri}::$name` is not accessible from `${from.uri}`.',
+    element: target,
+  );
+}
+
+String? _tryReferenceTo(Element target, LibraryElement from) {
   final name = target.displayName;
   if (target.library == from) return name;
   for (final fragment in from.fragments) {
@@ -126,8 +139,5 @@ String referenceTo(Element target, LibraryElement from) {
       return prefix == null ? name : '${prefix.displayName}.$name';
     }
   }
-  throw InvalidGenerationSourceError(
-    '`${target.library?.uri}::$name` is not accessible from `${from.uri}`.',
-    element: target,
-  );
+  return null;
 }

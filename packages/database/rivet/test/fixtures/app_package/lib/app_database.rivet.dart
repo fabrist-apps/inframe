@@ -15,6 +15,7 @@ final class PackageUsersRow {
     required this.access,
     required this.accessRecord,
     required this.accessCallback,
+    required this.packageAccess,
     this.package = const Relation.unloaded(),
   });
 
@@ -29,6 +30,9 @@ final class PackageUsersRow {
 
   /// Value read from `accessCallback`.
   final schema.AccessLevel Function(schema.PackageUsers) accessCallback;
+
+  /// Value read from `packageAccess`.
+  final (schema.AccessLevel, schema.PackageUsers) packageAccess;
 
   /// Loaded or unloaded `package` relation.
   final Relation<schema.PackageUsersRow?> package;
@@ -51,8 +55,15 @@ final class _$PackageUsersDB
         definition.access as RivetColumn<Object?>,
         definition.accessRecord as RivetColumn<Object?>,
         definition.accessCallback as RivetColumn<Object?>,
+        definition.packageAccess as RivetColumn<Object?>,
       ],
-      columnNames: ['packageName', 'access', 'accessRecord', 'accessCallback'],
+      columnNames: [
+        'packageName',
+        'access',
+        'accessRecord',
+        'accessCallback',
+        'packageAccess',
+      ],
       decode: (values, sqlNulls) => PackageUsersRow(
         packageName: definition.packageName.decodeValue(
           values[0],
@@ -69,6 +80,10 @@ final class _$PackageUsersDB
         accessCallback: definition.accessCallback.decodeValue(
           values[3],
           isSqlNull: sqlNulls[3],
+        ),
+        packageAccess: definition.packageAccess.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
         ),
       ),
       relations: {

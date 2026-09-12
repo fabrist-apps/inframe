@@ -14,6 +14,18 @@ enum AccessLevel {
   owner,
 }
 
+typedef PackageAccess = (AccessLevel, PackageUsers);
+
+final class PackageAccessConverter implements RivetTypeConverter<PackageAccess, String> {
+  const PackageAccessConverter();
+
+  @override
+  PackageAccess fromSql(String value) => (AccessLevel.viewer, PackageUsers());
+
+  @override
+  String toSql(PackageAccess value) => value.$1.name;
+}
+
 @RivetTable(schema: 'fixture', name: 'packageUsers')
 final class PackageUsers extends RivetTableDefinition<PackageUsers> {
   static const db = _$PackageUsersDB();
