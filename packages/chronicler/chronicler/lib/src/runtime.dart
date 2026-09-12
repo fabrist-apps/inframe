@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:chronicler/src/codec.dart';
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/diagnostics.dart';
+import 'package:chronicler/src/lifecycle.dart';
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/record_validation.dart';
 import 'package:chronicler/src/transport.dart';
@@ -36,6 +37,10 @@ final class Chronicler {
   ChroniclerRecorder get recorder => ChroniclerRecorder._(_runtime);
 
   Map<DiagnosticReason, BigInt> get diagnosticCounts => _runtime.diagnosticCounts;
+
+  /// Waits for the records owned when this call begins to reach a disposition.
+  Future<DeliveryReport> flush({Duration? timeout}) =>
+      _runtime.flush(timeout ?? _runtime.options.delivery.flushTimeout);
 
   bool isCollectionEnabled(ChroniclerSignal signal) => _runtime.isCollectionEnabled(signal);
 
@@ -123,6 +128,8 @@ final class ChroniclerRuntime {
   final DiagnosticChannel diagnostics;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
+  final _flushWaiters = <_FlushWaiter>{};
+  final _flushFinalizations = Queue<List<ChroniclerRecord>>();
   final _elapsed = Stopwatch()..start();
   late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
   late bool _propagationEnabled = options.tracing.propagationEnabled;
@@ -133,8 +140,39 @@ final class ChroniclerRuntime {
   var _pumpScheduled = false;
   Timer? _wakeTimer;
   Duration Function(int attempt, Duration ceiling)? _retryDelayOverride;
+  final ChroniclerRuntimeState _state = ChroniclerRuntimeState.running;
 
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
+
+  Future<DeliveryReport> flush(Duration timeout) {
+    if (timeout <= Duration.zero) {
+      throw const ChroniclerConfigurationException('timeout', 'must be positive');
+    }
+    final finalizedByCall = <_RecordDisposition>[];
+    if (_state == ChroniclerRuntimeState.running && _flushFinalizations.isNotEmpty) {
+      for (final record in _flushFinalizations.removeFirst()) {
+        finalizedByCall.add(_finalizeForFlush(record));
+      }
+    }
+    final snapshot = <_RecordDisposition>{
+      for (final record in _pending) record.disposition,
+      for (final export in _active)
+        for (final record in export.records) record.disposition,
+      ...finalizedByCall,
+    };
+    if (_state != ChroniclerRuntimeState.running || snapshot.every((state) => state.isTerminal)) {
+      return Future.value(_report(snapshot, timedOut: false));
+    }
+    final now = _elapsed.elapsed;
+    for (final record in _pending) {
+      if (snapshot.contains(record.disposition)) record.readyAt = now;
+    }
+    final waiter = _FlushWaiter(snapshot);
+    _flushWaiters.add(waiter);
+    waiter.timer = Timer(timeout, () => _completeFlush(waiter, timedOut: true));
+    _schedulePump();
+    return waiter.completer.future;
+  }
 
   bool isCollectionEnabled(ChroniclerSignal signal) => _enabledSignals.contains(signal);
 
@@ -149,8 +187,7 @@ final class ChroniclerRuntime {
     _enabledSignals.remove(signal);
     for (final record in _pending.where((record) => _signalFor(record.record) == signal).toList()) {
       _pending.remove(record);
-      diagnostics.record(DiagnosticReason.collectionDisabled);
-      _finalize(record);
+      _drop(record, DropReason.collectionDisabled);
     }
     for (final export in _active) {
       for (final record in export.records) {
@@ -247,7 +284,17 @@ final class ChroniclerRuntime {
     ChroniclerSignalKind.metrics => ChroniclerSignal.metrics,
   };
 
-  void _finalizeAndEnqueue(ChroniclerRecord original) {
+  _RecordDisposition _finalizeForFlush(ChroniclerRecord record) {
+    if (!_enabledSignals.contains(_signalFor(record))) {
+      final disposition = _RecordDisposition();
+      _dropDisposition(disposition, DropReason.collectionDisabled);
+      return disposition;
+    }
+    return _finalizeAndEnqueue(record);
+  }
+
+  _RecordDisposition _finalizeAndEnqueue(ChroniclerRecord original) {
+    final disposition = _RecordDisposition();
     try {
       // Validate caller data before field-name rules can hide it.
       codec.encodeRecord(original);
@@ -259,43 +306,44 @@ final class ChroniclerRuntime {
         try {
           changed = hook(record);
         } on Object {
-          diagnostics.record(DiagnosticReason.hookFailed);
-          return;
+          _dropDisposition(disposition, DropReason.hookFailed);
+          return disposition;
         } finally {
           _insideHook = false;
         }
         if (changed == null) {
-          diagnostics.record(DiagnosticReason.hookDropped);
-          return;
+          _dropDisposition(disposition, DropReason.hookDropped);
+          return disposition;
         }
         if (!_preservesProtectedFields(original, changed)) {
-          diagnostics.record(DiagnosticReason.invalidRecord);
-          return;
+          _dropDisposition(disposition, DropReason.invalidRecord);
+          return disposition;
         }
         try {
           codec.encodeRecord(changed);
         } on Object {
-          diagnostics.record(DiagnosticReason.invalidRecord);
-          return;
+          _dropDisposition(disposition, DropReason.invalidRecord);
+          return disposition;
         }
         record = changed;
       }
       record = _redactRecord(record);
       final bytes = codec.encodeRecord(record);
       if (bytes.length > options.delivery.maxRecordBytes) {
-        diagnostics.record(DiagnosticReason.recordTooLarge);
-        return;
+        _dropDisposition(disposition, DropReason.recordTooLarge);
+        return disposition;
       }
       if (_pending.length + _activeRecordCount >= options.delivery.maxPendingRecords ||
           _pendingBytes + bytes.length > options.delivery.maxPendingBytes) {
-        diagnostics.record(DiagnosticReason.queueFull);
-        return;
+        _dropDisposition(disposition, DropReason.queueFull);
+        return disposition;
       }
       final pending = _PendingRecord(
         record,
         bytes.length,
         _nextSequence++,
         _elapsed.elapsed + options.delivery.batchInterval,
+        disposition,
       );
       _pending.add(pending);
       _pendingBytes += bytes.length;
@@ -308,13 +356,15 @@ final class ChroniclerRuntime {
       } else {
         _scheduleWakeup();
       }
+      return disposition;
     } on RecordValidationException {
-      diagnostics.record(DiagnosticReason.invalidRecord);
+      _dropDisposition(disposition, DropReason.invalidRecord);
     } on ChroniclerEncodingException {
-      diagnostics.record(DiagnosticReason.invalidRecord);
+      _dropDisposition(disposition, DropReason.invalidRecord);
     } on Object {
-      diagnostics.record(DiagnosticReason.invalidRecord);
+      _dropDisposition(disposition, DropReason.invalidRecord);
     }
+    return disposition;
   }
 
   ChroniclerRecord _redactRecord(ChroniclerRecord record) => switch (record) {
@@ -483,7 +533,7 @@ final class ChroniclerRuntime {
     if (!_active.contains(active) || active.timedOut) return;
     active.timedOut = true;
     for (final record in active.records) {
-      record.uncertain = true;
+      record.disposition.uncertain = true;
     }
     diagnostics.record(DiagnosticReason.exportTimedOut);
     try {
@@ -500,7 +550,7 @@ final class ChroniclerRuntime {
     if (outcomes == null) {
       diagnostics.record(DiagnosticReason.invalidExportResult);
       for (final record in active.records) {
-        record.uncertain = true;
+        record.disposition.uncertain = true;
         _retry(record);
       }
       _schedulePump();
@@ -509,12 +559,11 @@ final class ChroniclerRuntime {
     for (final record in active.records) {
       switch (outcomes[record.record.envelope.eventId]!) {
         case ExportDisposition.accepted:
-          _finalize(record);
+          _accept(record);
         case ExportDisposition.rejected:
-          diagnostics.record(DiagnosticReason.exportRejected);
-          _finalize(record);
+          _drop(record, DropReason.exportRejected);
         case ExportDisposition.retryable:
-          record.uncertain = true;
+          record.disposition.uncertain = true;
           _retry(record);
       }
     }
@@ -526,7 +575,7 @@ final class ChroniclerRuntime {
     active.timeout?.cancel();
     diagnostics.record(DiagnosticReason.exportFailed);
     for (final record in active.records) {
-      record.uncertain = true;
+      record.disposition.uncertain = true;
       _retry(record);
     }
     _schedulePump();
@@ -552,13 +601,11 @@ final class ChroniclerRuntime {
 
   void _retry(_PendingRecord record) {
     if (!record.retryEligible) {
-      diagnostics.record(DiagnosticReason.collectionDisabled);
-      _finalize(record);
+      _drop(record, DropReason.collectionDisabled);
       return;
     }
     if (record.attempts >= options.delivery.maxAttempts) {
-      diagnostics.record(DiagnosticReason.attemptsExhausted);
-      _finalize(record);
+      _drop(record, DropReason.attemptsExhausted);
       return;
     }
     final ceiling = _retryCeiling(record.attempts);
@@ -583,8 +630,75 @@ final class ChroniclerRuntime {
     return Duration(microseconds: ceilingMicros);
   }
 
-  void _finalize(_PendingRecord record) {
+  void _accept(_PendingRecord record) {
     _pendingBytes -= record.encodedBytes;
+    record.disposition.accepted = true;
+    _notifyFlushWaiters();
+  }
+
+  void _drop(_PendingRecord record, DropReason reason) {
+    _pendingBytes -= record.encodedBytes;
+    _dropDisposition(record.disposition, reason);
+  }
+
+  void _dropDisposition(_RecordDisposition disposition, DropReason reason) {
+    disposition.dropReason = reason;
+    diagnostics.record(_diagnosticFor(reason));
+    _notifyFlushWaiters();
+  }
+
+  DiagnosticReason _diagnosticFor(DropReason reason) => switch (reason) {
+    DropReason.invalidRecord => DiagnosticReason.invalidRecord,
+    DropReason.recordTooLarge => DiagnosticReason.recordTooLarge,
+    DropReason.queueFull => DiagnosticReason.queueFull,
+    DropReason.collectionDisabled => DiagnosticReason.collectionDisabled,
+    DropReason.sampledOut => DiagnosticReason.sampledOut,
+    DropReason.hookDropped => DiagnosticReason.hookDropped,
+    DropReason.hookFailed => DiagnosticReason.hookFailed,
+    DropReason.exportRejected => DiagnosticReason.exportRejected,
+    DropReason.attemptsExhausted => DiagnosticReason.attemptsExhausted,
+    DropReason.shutdown => DiagnosticReason.shutdown,
+    DropReason.runtimeClosed => DiagnosticReason.runtimeClosed,
+  };
+
+  void _notifyFlushWaiters() {
+    for (final waiter in _flushWaiters.toList()) {
+      if (waiter.snapshot.every((state) => state.isTerminal)) {
+        _completeFlush(waiter, timedOut: false);
+      }
+    }
+  }
+
+  void _completeFlush(_FlushWaiter waiter, {required bool timedOut}) {
+    if (!_flushWaiters.remove(waiter)) return;
+    waiter.timer?.cancel();
+    waiter.completer.complete(_report(waiter.snapshot, timedOut: timedOut));
+  }
+
+  DeliveryReport _report(Iterable<_RecordDisposition> snapshot, {required bool timedOut}) {
+    var accepted = 0;
+    var pending = 0;
+    var uncertainDropped = 0;
+    final dropped = <DropReason, int>{};
+    for (final disposition in snapshot) {
+      if (disposition.accepted) {
+        accepted++;
+      } else if (disposition.dropReason case final reason?) {
+        dropped.update(reason, (count) => count + 1, ifAbsent: () => 1);
+        if (disposition.uncertain) uncertainDropped++;
+      } else {
+        pending++;
+      }
+    }
+    return DeliveryReport(
+      accepted: accepted,
+      dropped: dropped,
+      pending: pending,
+      uncertainDropped: uncertainDropped,
+      timedOut: timedOut,
+      runtimeState: _state,
+      cleanupIncomplete: false,
+    );
   }
 
   void _scheduleWakeup() {
@@ -626,18 +740,49 @@ final class ChroniclerDeliveryFixture {
   }
 
   static bool propagationEnabled(Chronicler chronicler) => chronicler._runtime._propagationEnabled;
+
+  static void finalizeOnNextFlush(
+    Chronicler chronicler,
+    Iterable<ChroniclerRecord> records,
+  ) {
+    chronicler._runtime._flushFinalizations.add(List.unmodifiable(records));
+  }
+
+  static int activeFlushes(Chronicler chronicler) => chronicler._runtime._flushWaiters.length;
 }
 
 final class _PendingRecord {
-  _PendingRecord(this.record, this.encodedBytes, this.sequence, this.readyAt);
+  _PendingRecord(
+    this.record,
+    this.encodedBytes,
+    this.sequence,
+    this.readyAt,
+    this.disposition,
+  );
   final ChroniclerRecord record;
   final int encodedBytes;
   final int sequence;
+  final _RecordDisposition disposition;
   Duration readyAt;
   int attempts = 0;
   bool isRetry = false;
-  bool uncertain = false;
   bool retryEligible = true;
+}
+
+final class _RecordDisposition {
+  bool accepted = false;
+  DropReason? dropReason;
+  bool uncertain = false;
+
+  bool get isTerminal => accepted || dropReason != null;
+}
+
+final class _FlushWaiter {
+  _FlushWaiter(Set<_RecordDisposition> snapshot) : snapshot = Set.unmodifiable(snapshot);
+
+  final Set<_RecordDisposition> snapshot;
+  final completer = Completer<DeliveryReport>();
+  Timer? timer;
 }
 
 final class _ActiveExport {

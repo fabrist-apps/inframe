@@ -58,3 +58,16 @@ from the in-memory buffer and prevents retries for its in-flight records. Re-ena
 captures but does not revive discarded records or restore retry eligibility to records that were
 already in flight. Disabling collection cannot recall data that an exporter may already have sent.
 Tracing propagation has its own switch and does not change collection settings.
+
+## Flush reports
+
+`flush()` snapshots the records currently queued or in flight and asks the existing worker to drain
+that fixed set. Records captured after the call do not extend it. Concurrent calls keep separate
+snapshots and deadlines while sharing the same worker. If a flush deadline expires, unresolved
+records are reported as `pending` and remain under the normal queue, collection, and retry rules.
+
+`DeliveryReport.accepted` counts destination acknowledgements. `dropped` groups terminal discards by
+`DropReason`, and `uncertainDropped` counts the subset whose earlier attempt may have delivered data.
+`pending` remains a separate unresolved disposition. `timedOut` refers to the flush or close deadline,
+while `cleanupIncomplete` is reserved for incomplete shutdown cleanup. Every report is an immutable
+snapshot and does not change when a late exporter result arrives.
