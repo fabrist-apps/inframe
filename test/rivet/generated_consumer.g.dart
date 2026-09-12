@@ -239,6 +239,94 @@ final class _$VectorValuesDB extends RivetTableAccessor<VectorValues, VectorValu
   }
 }
 
+final class ArrayValuesRow {
+  const ArrayValuesRow({
+    required this.ints,
+    required this.nullableInts,
+    required this.optionalInts,
+    required this.optionalNullableInts,
+    required this.jsonValues,
+    required this.vectors,
+    required this.statuses,
+    required this.codes,
+  });
+
+  final List<int> ints;
+  final List<int?> nullableInts;
+  final List<int>? optionalInts;
+  final List<int?>? optionalNullableInts;
+  final List<JsonValue?> jsonValues;
+  final List<Float32List> vectors;
+  final List<WorkStatus> statuses;
+  final List<UserCode?> codes;
+}
+
+final class _$ArrayValuesDB extends RivetTableAccessor<ArrayValues, ArrayValuesRow> {
+  const _$ArrayValuesDB();
+
+  @override
+  RivetTableSchema<ArrayValues, ArrayValuesRow> buildSchema() {
+    final definition = ArrayValues();
+    definition.statuses.useCodec(RivetArrayCodec(WorkStatusRivetEnum.codec));
+    return RivetTableSchema<ArrayValues, ArrayValuesRow>(
+      schemaName: 'fbr122',
+      tableName: 'arrayValues',
+      definition: definition,
+      columns: [
+        definition.ints as RivetColumn<Object?>,
+        definition.nullableInts as RivetColumn<Object?>,
+        definition.optionalInts as RivetColumn<Object?>,
+        definition.optionalNullableInts as RivetColumn<Object?>,
+        definition.jsonValues as RivetColumn<Object?>,
+        definition.vectors as RivetColumn<Object?>,
+        definition.statuses as RivetColumn<Object?>,
+        definition.codes as RivetColumn<Object?>,
+      ],
+      columnNames: [
+        'ints',
+        'nullableInts',
+        'optionalInts',
+        'optionalNullableInts',
+        'jsonValues',
+        'vectors',
+        'statuses',
+        'codes',
+      ],
+      decode: (values, sqlNulls) => ArrayValuesRow(
+        ints: definition.ints.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        nullableInts: definition.nullableInts.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+        optionalInts: definition.optionalInts.decodeValue(
+          values[2],
+          isSqlNull: sqlNulls[2],
+        ),
+        optionalNullableInts: definition.optionalNullableInts.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
+        ),
+        jsonValues: definition.jsonValues.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+        vectors: definition.vectors.decodeValue(
+          values[5],
+          isSqlNull: sqlNulls[5],
+        ),
+        statuses: definition.statuses.decodeValue(
+          values[6],
+          isSqlNull: sqlNulls[6],
+        ),
+        codes: definition.codes.decodeValue(values[7], isSqlNull: sqlNulls[7]),
+      ),
+      indexes: const <RivetIndex>[],
+      constraints: const <RivetConstraint>[],
+      relations: {},
+    );
+  }
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -256,6 +344,7 @@ abstract class _$RivetTestDatabase {
       ScalarValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       EnumValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       VectorValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      ArrayValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:chrono_id/chrono_id.dart';
+import 'package:postgres/postgres.dart' as pg;
 
 import 'errors.dart';
 import 'relation.dart';
@@ -533,6 +534,9 @@ class RivetColumnBuilder<T> {
   RivetMappedColumnBuilder<Domain, T> map<Domain>(
     RivetTypeConverter<Domain, T> converter,
   ) => RivetMappedColumnBuilder(codec, converter, name: name, renamedFrom: renamedFrom);
+
+  RivetArrayColumnBuilder<T> array() =>
+      RivetArrayColumnBuilder(codec, name: name, renamedFrom: renamedFrom);
 }
 
 class RivetMappedColumn<Domain, Storage> extends RivetColumn<Domain> {
@@ -583,6 +587,12 @@ class RivetMappedColumnBuilder<Domain, Storage> {
     RivetMappedCodec(storageCodec, converter),
     RivetColumn(storageCodec, declaredName: name, renamedFrom: renamedFrom),
     declaredName: name,
+    renamedFrom: renamedFrom,
+  );
+
+  RivetArrayColumnBuilder<Domain> array() => RivetArrayColumnBuilder(
+    RivetMappedCodec(storageCodec, converter),
+    name: name,
     renamedFrom: renamedFrom,
   );
 }
@@ -718,6 +728,9 @@ class RivetOrderableColumnBuilder<T> {
     renamedFrom: renamedFrom,
   );
 
+  RivetArrayColumnBuilder<T> array() =>
+      RivetArrayColumnBuilder(codec, name: name, renamedFrom: renamedFrom);
+
   RivetOrderableColumnBuilder<T> primaryKey() {
     _primaryKey = true;
     return this;
@@ -754,6 +767,82 @@ class RivetOrderableColumnBuilder<T> {
         ..sqlDefault = _sqlDefault
         ..defaultFn = _defaultFn
         ..onUpdateFn = _onUpdateFn;
+}
+
+final class RivetArrayColumnBuilder<Element> {
+  RivetArrayColumnBuilder(this.elementCodec, {this.name, this.renamedFrom});
+
+  final RivetCodec<Element> elementCodec;
+  final String? name;
+  final String? renamedFrom;
+
+  RivetColumn<List<Element>> call() => RivetColumn(
+    RivetArrayCodec(elementCodec),
+    declaredName: name,
+    renamedFrom: renamedFrom,
+  );
+
+  RivetColumnBuilder<List<Element>?> nullable() => RivetColumnBuilder(
+    RivetNullableCodec(RivetArrayCodec(elementCodec)),
+    name: name,
+    renamedFrom: renamedFrom,
+  );
+}
+
+final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
+  const RivetArrayCodec(this.elementCodec);
+
+  final RivetCodec<Element> elementCodec;
+
+  @override
+  String get cast => '${elementCodec.cast}[]';
+
+  @override
+  String select(String columnSql) {
+    final elementSelection = elementCodec.select('"__rivet_element"');
+    if (elementSelection == '"__rivet_element"') return columnSql;
+    return 'CASE WHEN $columnSql IS NULL THEN NULL ELSE ARRAY('
+        'SELECT $elementSelection FROM unnest($columnSql) WITH ORDINALITY '
+        'AS "__rivet_array"("__rivet_element", "__rivet_order") '
+        'ORDER BY "__rivet_order") END';
+  }
+
+  @override
+  Object encode(List<Element> value) {
+    if (value.any((element) => element is List)) {
+      throw const FormatException('multidimensional arrays are not supported');
+    }
+    final encoded = [
+      for (final element in value)
+        if (element == null && elementCodec.cast == 'jsonb')
+          pg.TypedValue(pg.Type.jsonb, null, isSqlNull: true)
+        else
+          elementCodec.encode(element),
+    ];
+    if (elementCodec.cast == 'jsonb') {
+      return pg.TypedValue(pg.Type.jsonbArray, encoded);
+    }
+    if (elementCodec.select('"e"') != '"e"') {
+      return _arrayText(encoded);
+    }
+    return encoded;
+  }
+
+  @override
+  List<Element> decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull || value is! List)
+      throw const FormatException('expected a one-dimensional array');
+    return [
+      for (var index = 0; index < value.length; index++)
+        elementCodec.decode(
+          value[index],
+          isSqlNull: value is pg.JsonbListView ? value.isSqlNull(index) : value[index] == null,
+        ),
+    ];
+  }
+
+  String _arrayText(List<Object?> values) =>
+      '{${values.map((value) => value == null ? 'NULL' : '"${value.toString().replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"').join(',')}}';
 }
 
 enum NullsOrder { first, last }

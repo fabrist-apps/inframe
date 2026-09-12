@@ -80,8 +80,29 @@ final class VectorValues extends RivetTableDefinition<VectorValues> {
   late final optionalEmbedding = vector(dimensions: 3).nullable()();
 }
 
+@RivetTable(schema: 'fbr122')
+final class ArrayValues extends RivetTableDefinition<ArrayValues> {
+  static const db = _$ArrayValuesDB();
+
+  late final ints = integer().array()();
+  late final nullableInts = integer().nullable().array()();
+  late final optionalInts = integer().array().nullable()();
+  late final optionalNullableInts = integer().nullable().array().nullable()();
+  late final jsonValues = json().nullable().array()();
+  late final vectors = vector(dimensions: 3).array()();
+  late final statuses = enumText<WorkStatus>().array()();
+  late final codes = text().map(const UserCodeConverter()).nullable().array()();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
-  tables: [UserProfiles, Posts, ScalarValues, EnumValues, VectorValues],
+  tables: [
+    UserProfiles,
+    Posts,
+    ScalarValues,
+    EnumValues,
+    VectorValues,
+    ArrayValues,
+  ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

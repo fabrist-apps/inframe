@@ -88,7 +88,12 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
     final enumCodecs = columns
         .where(_isEnumColumn)
         .map((field) {
-          final enumName = columnValueType(field.type);
+          final valueType = (field.type as InterfaceType).typeArguments.first;
+          if (valueType is InterfaceType && valueType.element.displayName == 'List') {
+            final enumName = valueType.typeArguments.first.getDisplayString().replaceAll('?', '');
+            return 'definition.${field.displayName}.useCodec(RivetArrayCodec(${enumName}RivetEnum.codec));';
+          }
+          final enumName = valueType.getDisplayString().replaceAll('?', '');
           return 'definition.${field.displayName}.useCodec(${enumName}RivetEnum.codec);';
         })
         .join('\n    ');
@@ -130,7 +135,10 @@ final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
     final type = field.type;
     if (type is! InterfaceType || type.typeArguments.isEmpty) return false;
     final valueType = type.typeArguments.first;
-    final element = valueType.element;
+    final candidate = valueType is InterfaceType && valueType.element.displayName == 'List'
+        ? valueType.typeArguments.first
+        : valueType;
+    final element = candidate.element;
     return element != null &&
         const TypeChecker.typeNamed(RivetEnum, inPackage: 'rivet').hasAnnotationOf(element);
   }
