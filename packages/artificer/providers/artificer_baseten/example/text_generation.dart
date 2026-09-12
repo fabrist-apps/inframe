@@ -20,9 +20,18 @@ Future<void> main() async {
         .languageModel(servedModelId)
         .stream(request)
         .runCollect();
+    final embeddingOperation = provider
+        .deployment(baseUrl: deploymentBaseUrl)
+        .embeddingModel(servedModelId)
+        .embed(
+          EmbeddingRequest(
+            items: [EmbeddingInput.text('Deployment documentation')],
+          ),
+        );
     if (const bool.fromEnvironment('RUN_BASETEN_EXAMPLE')) {
       await catalogOperation.runFuture();
       await deploymentOperation.runFuture();
+      await embeddingOperation.runFuture();
     }
   } finally {
     await provider.close();

@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:artificer_baseten/src/chat/chat_resource.dart';
+import 'package:artificer_baseten/src/embeddings/embedding_models.dart';
+import 'package:artificer_baseten/src/embeddings/embeddings_resource.dart';
 import 'package:artificer_baseten/src/options.dart';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/transport.dart';
@@ -50,7 +52,10 @@ final class BasetenProvider {
   BasetenDeployment deployment({required Uri baseUrl}) {
     final client = _newClient(baseUrl, authorization: 'Api-Key $_apiKey');
     _clients.add(client);
-    return BasetenDeployment._(BasetenChatCompletionsResource(client));
+    return BasetenDeployment._(
+      BasetenChatCompletionsResource(client),
+      BasetenEmbeddingsResource(client),
+    );
   }
 
   ProviderHttpClient _newClient(
@@ -70,10 +75,13 @@ final class BasetenProvider {
 
 /// Compatible inference operations bound to one explicit deployment location.
 final class BasetenDeployment {
-  BasetenDeployment._(this.chatCompletions);
+  BasetenDeployment._(this.chatCompletions, this.embeddings);
 
   /// Typed native Chat Completions operations at this deployment.
   final BasetenChatCompletionsResource chatCompletions;
+
+  /// Typed native embedding operations at this dedicated deployment.
+  final BasetenEmbeddingsResource embeddings;
 
   /// Creates a common language model with a separate served model name.
   BasetenLanguageModel languageModel(
@@ -83,6 +91,16 @@ final class BasetenDeployment {
     chatCompletions,
     _nonEmpty(modelId, 'modelId'),
     options ?? BasetenModelOptions(),
+  );
+
+  /// Creates a common text embedding model with a separate served model name.
+  BasetenEmbeddingModel embeddingModel(
+    String modelId, {
+    BasetenEmbeddingOptions? options,
+  }) => BasetenEmbeddingModel(
+    embeddings,
+    _nonEmpty(modelId, 'modelId'),
+    options ?? BasetenEmbeddingOptions(),
   );
 }
 

@@ -62,3 +62,25 @@ Returned assistant messages carry compatible native replay data. Reusing that me
 same Baseten API and model preserves native message extensions, reasoning data, tool IDs, and
 malformed argument text. Replay against another provider, API, or model fails explicitly. The SDK
 never executes application tools or treats unknown native tool activity as an application call.
+
+Dedicated BEI/OpenAI-compatible deployments expose `embeddings` and `embeddingModel`; the catalog
+does not expose an embedding factory. A common embedding run sends one ordered text batch to the
+configured deployment's `embeddings` path and restores vectors by response index:
+
+```dart
+final catalogModel = provider.languageModel(catalogModelId);
+final dedicated = provider.deployment(baseUrl: deploymentBaseUrl);
+final embeddingModel = dedicated.embeddingModel(servedModelId);
+final vectors = await embeddingModel
+    .embed(
+      EmbeddingRequest(
+        items: [EmbeddingInput.text('Deployment documentation')],
+      ),
+    )
+    .runFuture();
+```
+
+The embedding adapter validates response count, indices, finite values, and dimensions. It accepts
+one text part per common input. It does not combine items, split batches, normalize vectors, retry,
+or infer a model name from the deployment URL. Native calls retain response extensions and HTTP
+metadata, and `BasetenEmbeddingsResource.normalize` can map an already-decoded result without I/O.
