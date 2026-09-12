@@ -6,6 +6,7 @@ environment:
 
 workspace:
   - packages/artificer/providers/artificer_core
+  - packages/artificer/providers/artificer_anthropic
   - packages/artificer/providers/artificer_openai
   - packages/context
   - packages/inlet
