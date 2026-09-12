@@ -848,6 +848,8 @@ final class AnthropicUsage {
   /// Creates decoded usage while retaining its full native object.
   const AnthropicUsage({
     required this.inputTokens,
+    required this.cacheCreationInputTokens,
+    required this.cacheReadInputTokens,
     required this.outputTokens,
     required this.raw,
   });
@@ -857,6 +859,8 @@ final class AnthropicUsage {
     final value = raw.toDart();
     return AnthropicUsage(
       inputTokens: _optionalInt(value, 'input_tokens'),
+      cacheCreationInputTokens: _optionalInt(value, 'cache_creation_input_tokens'),
+      cacheReadInputTokens: _optionalInt(value, 'cache_read_input_tokens'),
       outputTokens: _optionalInt(value, 'output_tokens'),
       raw: raw,
     );
@@ -864,6 +868,12 @@ final class AnthropicUsage {
 
   /// Input tokens, when reported.
   final int? inputTokens;
+
+  /// Input tokens written to prompt caches, when reported.
+  final int? cacheCreationInputTokens;
+
+  /// Input tokens read from prompt caches, when reported.
+  final int? cacheReadInputTokens;
 
   /// Output tokens, when reported.
   final int? outputTokens;

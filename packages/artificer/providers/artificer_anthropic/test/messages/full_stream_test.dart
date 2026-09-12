@@ -67,6 +67,10 @@ void main() {
       expect(streamed.finishReason, FinishReason.paused);
       expect(streamed.nativePayload.json.toDart(), _completeMessage);
       expect(streamed.metadata.requestId, 'stream-request');
+      expect(streamed.usage?.inputTokens, 125);
+      expect(streamed.usage?.outputTokens, 14);
+      expect(streamed.usage?.totalTokens, 139);
+      expect(nonstream.usage?.toDart(), streamed.usage?.toDart());
       expect(streamedEvents.whereType<PartStarted>().map((event) => event.index), [
         0,
         1,
@@ -84,7 +88,13 @@ void main() {
       );
       expect(streamedEvents.whereType<UsageUpdated>().map((event) => event.usage.outputTokens), [
         0,
+        7,
         14,
+      ]);
+      expect(streamedEvents.whereType<UsageUpdated>().map((event) => event.usage.inputTokens), [
+        110,
+        125,
+        125,
       ]);
       expect(
         streamedEvents.whereType<ProviderEvent>().map((event) => event.name),
@@ -166,8 +176,56 @@ void main() {
       expect((error.partialOutput! as AssistantMessage).text, 'Partial');
       expect(error.details!.toDart(), {'type': 'overloaded_error', 'message': 'busy'});
     });
+
+    test('should limit private data retained while assembling a stream', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        final padding = List.filled(80, 'x').join();
+        request.response.headers.contentType = ContentType('text', 'event-stream');
+        request.response.write(
+          _sse('message_start', {'type': 'message_start', 'message': _streamStart}),
+        );
+        for (var index = 0; index < 20; index++) {
+          request.response.write(
+            _sse('future_event', {
+              'type': 'future_event',
+              'index': index,
+              'detail': padding,
+            }),
+          );
+        }
+        await request.response.close();
+      });
+      final provider = AnthropicProvider(
+        apiKey: 'secret',
+        baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1'),
+      );
+      addTearDown(provider.close);
+
+      final exit = await provider.messages
+          .streamCommon(
+            AnthropicMessageRequest(
+              model: 'future-model',
+              maxTokens: 100,
+              messages: [AnthropicInputMessage.userText('hello')],
+            ),
+            maxAssembledBytes: 512,
+          )
+          .runCollect()
+          .runFutureExit();
+
+      expect(exit, _failedWith<ResponseLimitError>());
+    });
   });
 }
+
+Matcher _failedWith<E extends AiError>() => isA<Failed<Object?, AiError>>().having(
+  (failure) => failure.cause,
+  'cause',
+  isA<Expected<AiError>>().having((expected) => expected.error, 'error', isA<E>()),
+);
 
 String _sse(String event, Map<String, Object?> data) =>
     'event: $event\ndata: ${jsonEncode(data)}\n\n';
@@ -216,13 +274,28 @@ final String _completeStream = [
   }),
   _sse('message_delta', {
     'type': 'message_delta',
+    'delta': {'stop_reason': null, 'stop_sequence': null},
+    'usage': {
+      'input_tokens': 20,
+      'cache_creation_input_tokens': 5,
+      'cache_read_input_tokens': null,
+      'output_tokens': 7,
+    },
+  }),
+  _sse('message_delta', {
+    'type': 'message_delta',
     'delta': {
       'stop_reason': 'pause_turn',
       'stop_sequence': null,
       'stop_details': {'type': 'pause_turn', 'reason': 'provider work pending'},
       'container': {'id': 'container_1'},
     },
-    'usage': {'output_tokens': 14},
+    'usage': {
+      'input_tokens': null,
+      'cache_creation_input_tokens': null,
+      'cache_read_input_tokens': null,
+      'output_tokens': 14,
+    },
   }),
   _sse('message_stop', {'type': 'message_stop'}),
 ].join();
@@ -270,7 +343,12 @@ const _streamStart = <String, Object?>{
   'model': 'future-model',
   'stop_reason': null,
   'stop_sequence': null,
-  'usage': {'input_tokens': 10, 'output_tokens': 0},
+  'usage': {
+    'input_tokens': 10,
+    'cache_creation_input_tokens': null,
+    'cache_read_input_tokens': 100,
+    'output_tokens': 0,
+  },
   'future_start_field': {'keep': true},
 };
 
@@ -319,6 +397,11 @@ const _completeMessage = <String, Object?>{
   'stop_sequence': null,
   'stop_details': {'type': 'pause_turn', 'reason': 'provider work pending'},
   'container': {'id': 'container_1'},
-  'usage': {'input_tokens': 10, 'output_tokens': 14},
+  'usage': {
+    'input_tokens': 20,
+    'cache_creation_input_tokens': 5,
+    'cache_read_input_tokens': 100,
+    'output_tokens': 14,
+  },
   'future_start_field': {'keep': true},
 };

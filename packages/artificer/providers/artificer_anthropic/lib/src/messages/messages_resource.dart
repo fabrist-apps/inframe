@@ -193,9 +193,11 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
   final GenerationStreamAssembler assembler;
   final Map<int, _AnthropicBlockAssembly> _blocks = {};
   final List<ReplayItem> _unknownEvents = [];
+  final Map<String, Object?> _usage = {};
   AnthropicMessage? _startMessage;
   AnthropicMessageDeltaEvent? _lastDelta;
   ResponseMetadata? _metadata;
+  var _retainedBytes = 0;
   var _terminal = false;
 
   @override
@@ -221,7 +223,9 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
             partialOutput: partialOutput,
           );
         }
+        _retain(message.raw);
         _startMessage = message;
+        _mergeUsage(message.usage);
         assembler.setResponseId(message.id);
         yield assembler.updateUsage(_commonUsage(message.usage));
       case AnthropicContentBlockStartEvent(:final index, :final contentBlock):
@@ -237,6 +241,7 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
             partialOutput: partialOutput,
           );
         }
+        _retain(contentBlock.raw);
         final block = _AnthropicBlockAssembly(
           contentBlock,
           callerNativeToolNames: callerNativeToolNames,
@@ -255,6 +260,7 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
             partialOutput: partialOutput,
           );
         }
+        _retain(delta);
         final value = delta.toDart();
         switch (value['type']) {
           case 'text_delta':
@@ -320,17 +326,8 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
           );
         }
         _lastDelta = decoded;
-        final start = _startMessage;
-        yield assembler.updateUsage(
-          Usage(
-            inputTokens: decoded.usage.inputTokens ?? start?.usage.inputTokens,
-            outputTokens: decoded.usage.outputTokens,
-            totalTokens: _sum(
-              decoded.usage.inputTokens ?? start?.usage.inputTokens,
-              decoded.usage.outputTokens,
-            ),
-          ),
-        );
+        _mergeUsage(decoded.usage);
+        yield assembler.updateUsage(_commonUsage(AnthropicUsage.fromJson(JsonObject(_usage))));
       case AnthropicMessageStopEvent():
         if (_startMessage == null || _lastDelta == null) {
           throw ProtocolError(
@@ -342,6 +339,7 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
       case AnthropicPingEvent():
         yield assembler.providerEvent(decoded.type, decoded.raw);
       case AnthropicUnknownMessageEvent():
+        _retain(decoded.raw);
         _unknownEvents.add(ReplayItem(phase: 'unknown-event', data: decoded.raw));
         yield assembler.providerEvent(decoded.type, decoded.raw);
       case AnthropicErrorEvent(:final error):
@@ -374,10 +372,7 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
       ...start.raw.toDart(),
       'content': content,
       ...deltaValue,
-      'usage': {
-        ...start.usage.raw.toDart(),
-        ...delta.usage.raw.toDart(),
-      },
+      'usage': _usage,
     });
     final retainedBytes =
         utf8.encode(native.encode()).length +
@@ -410,6 +405,26 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
         ..._unknownEvents,
       ],
     );
+  }
+
+  void _mergeUsage(AnthropicUsage usage) {
+    for (final entry in usage.raw.toDart().entries) {
+      if (entry.value != null || !_usage.containsKey(entry.key)) {
+        _usage[entry.key] = entry.value;
+      }
+    }
+  }
+
+  void _retain(JsonObject value) {
+    _retainedBytes += utf8.encode(value.encode()).length;
+    if (_retainedBytes > _maxAssembledBytes) {
+      throw ResponseLimitError(
+        'Retained Messages stream state exceeded the configured byte limit.',
+        limit: _maxAssembledBytes,
+        actual: _retainedBytes,
+        partialOutput: partialOutput,
+      );
+    }
   }
 }
 
@@ -571,11 +586,23 @@ ProviderError _streamError(
   );
 }
 
-Usage _commonUsage(AnthropicUsage usage) => Usage(
-  inputTokens: usage.inputTokens,
-  outputTokens: usage.outputTokens,
-  totalTokens: _sum(usage.inputTokens, usage.outputTokens),
-);
+Usage _commonUsage(AnthropicUsage usage) {
+  final inputTokens = _sumAvailable([
+    usage.inputTokens,
+    usage.cacheCreationInputTokens,
+    usage.cacheReadInputTokens,
+  ]);
+  return Usage(
+    inputTokens: inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: _sum(inputTokens, usage.outputTokens),
+  );
+}
+
+int? _sumAvailable(Iterable<int?> values) {
+  if (values.every((value) => value == null)) return null;
+  return values.fold<int>(0, (total, value) => total + (value ?? 0));
+}
 
 int? _sum(int? left, int? right) => left == null || right == null ? null : left + right;
 
