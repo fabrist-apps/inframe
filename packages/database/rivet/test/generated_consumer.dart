@@ -30,6 +30,128 @@ final class Posts extends RivetTableDefinition<Posts> {
   )();
 }
 
+@RivetTable(schema: 'fbr146')
+final class RelationalUsers extends RivetTableDefinition<RelationalUsers> {
+  static const db = _$RelationalUsersDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final managerId = integer().nullable()();
+  late final authoredPosts = many<RelationalPosts>(relation: (post) => post.author)();
+  late final reviewedPosts = many<RelationalPosts>(relation: (post) => post.reviewer)();
+  late final manager = one<RelationalUsers>(
+    fields: [managerId],
+    references: (user) => [user.id],
+  )();
+  late final reports = many<RelationalUsers>(relation: (user) => user.manager)();
+}
+
+@RivetTable(schema: 'fbr146')
+final class RelationalPosts extends RivetTableDefinition<RelationalPosts> {
+  static const db = _$RelationalPostsDB();
+
+  late final id = integer().primaryKey()();
+  late final authorId = integer()();
+  late final reviewerId = integer().nullable()();
+  late final title = text()();
+  late final rank = integer()();
+  late final weight = real()();
+  late final quality = real().nullable()();
+  late final author = one<RelationalUsers>(
+    fields: [authorId],
+    references: (user) => [user.id],
+  )();
+  late final reviewer = one<RelationalUsers>(
+    fields: [reviewerId],
+    references: (user) => [user.id],
+  )();
+  late final comments = many<RelationalComments>()();
+}
+
+@RivetTable(schema: 'fbr146')
+final class RelationalComments extends RivetTableDefinition<RelationalComments> {
+  static const db = _$RelationalCommentsDB();
+
+  late final id = integer().primaryKey()();
+  late final postId = integer()();
+  late final body = text()();
+  late final post = one<RelationalPosts>(
+    fields: [postId],
+    references: (post) => [post.id],
+  )();
+}
+
+@RivetTable(schema: 'fbr147')
+final class ThroughBooks extends RivetTableDefinition<ThroughBooks> {
+  static const db = _$ThroughBooksDB();
+
+  late final tenant = integer()();
+  late final id = integer()();
+  late final title = text()();
+  late final tags = many<ThroughTags>().through<ThroughBookTags>(
+    source: (link) => link.book,
+    target: (link) => link.tag,
+  )();
+  late final reviews = many<ThroughReviews>()();
+}
+
+@RivetTable(schema: 'fbr147')
+final class ThroughTags extends RivetTableDefinition<ThroughTags> {
+  static const db = _$ThroughTagsDB();
+
+  late final namespace = text()();
+  late final code = text()();
+  late final name = text()();
+  late final notes = many<ThroughTagNotes>()();
+}
+
+@RivetTable(schema: 'fbr147', rowName: 'ThroughBookTagRecord')
+final class ThroughBookTags extends RivetTableDefinition<ThroughBookTags> {
+  static const db = _$ThroughBookTagsDB();
+
+  late final bookTenant = integer()();
+  late final bookId = integer()();
+  late final tagNamespace = text()();
+  late final tagCode = text()();
+  late final position = integer()();
+  late final book = one<ThroughBooks>(
+    fields: [bookId, bookTenant],
+    references: (book) => [book.id, book.tenant],
+  )();
+  late final tag = one<ThroughTags>(
+    fields: [tagCode, tagNamespace],
+    references: (tag) => [tag.code, tag.namespace],
+  )();
+}
+
+@RivetTable(schema: 'fbr147')
+final class ThroughReviews extends RivetTableDefinition<ThroughReviews> {
+  static const db = _$ThroughReviewsDB();
+
+  late final id = integer()();
+  late final bookTenant = integer()();
+  late final bookId = integer()();
+  late final body = text()();
+  late final book = one<ThroughBooks>(
+    fields: [bookTenant, bookId],
+    references: (book) => [book.tenant, book.id],
+  )();
+}
+
+@RivetTable(schema: 'fbr147')
+final class ThroughTagNotes extends RivetTableDefinition<ThroughTagNotes> {
+  static const db = _$ThroughTagNotesDB();
+
+  late final id = integer()();
+  late final tagNamespace = text()();
+  late final tagCode = text()();
+  late final body = text()();
+  late final tag = one<ThroughTags>(
+    fields: [tagNamespace, tagCode],
+    references: (tag) => [tag.namespace, tag.code],
+  )();
+}
+
 final class UserCode {
   const UserCode(this.value);
 
@@ -139,6 +261,58 @@ final class ArrayValues extends RivetTableDefinition<ArrayValues> {
   late final vectors = vector(dimensions: 3).array()();
   late final statuses = enumText<WorkStatus>().array()();
   late final codes = text().map(const UserCodeConverter()).nullable().array()();
+}
+
+@RivetTable(schema: 'fbr148')
+final class CodecParents extends RivetTableDefinition<CodecParents> {
+  static const db = _$CodecParentsDB();
+
+  late final id = integer()();
+  late final values = many<CodecValues>()();
+  late final linkedValues = many<CodecValues>().through<CodecLinks>(
+    source: (link) => link.owner,
+    target: (link) => link.value,
+  )();
+}
+
+@RivetTable(schema: 'fbr148', rowName: 'CodecRecord')
+final class CodecValues extends RivetTableDefinition<CodecValues> {
+  static const db = _$CodecValuesDB();
+
+  late final id = integer()();
+  late final ownerId = integer()();
+  late final payload = json()();
+  late final happenedAt = dateTime()();
+  late final status = enumText<WorkStatus>()();
+  late final score = real().nullable()();
+  late final embedding = vector(dimensions: 3)();
+  late final ints = integer().array()();
+  late final optionalInts = integer().array().nullable()();
+  late final nullableInts = integer().nullable().array()();
+  late final jsonValues = json().nullable().array()();
+  late final vectors = vector(dimensions: 3).array()();
+  late final statuses = enumText<WorkStatus>().array()();
+  late final codes = text().map(const UserCodeConverter()).nullable().array()();
+  late final owner = one<CodecParents>(
+    fields: [ownerId],
+    references: (parent) => [parent.id],
+  )();
+}
+
+@RivetTable(schema: 'fbr148')
+final class CodecLinks extends RivetTableDefinition<CodecLinks> {
+  static const db = _$CodecLinksDB();
+
+  late final ownerId = integer()();
+  late final valueId = integer()();
+  late final owner = one<CodecParents>(
+    fields: [ownerId],
+    references: (parent) => [parent.id],
+  )();
+  late final value = one<CodecValues>(
+    fields: [valueId],
+    references: (value) => [value.id],
+  )();
 }
 
 @RivetTable(schema: 'fbr122')
@@ -582,10 +756,21 @@ final class MutationAssignmentNames extends RivetTableDefinition<MutationAssignm
   tables: [
     UserProfiles,
     Posts,
+    RelationalUsers,
+    RelationalPosts,
+    RelationalComments,
+    ThroughBooks,
+    ThroughTags,
+    ThroughBookTags,
+    ThroughReviews,
+    ThroughTagNotes,
     ScalarValues,
     EnumValues,
     VectorValues,
     ArrayValues,
+    CodecParents,
+    CodecValues,
+    CodecLinks,
     MalformedArrays,
     MetadataColumns,
     ParameterNames,

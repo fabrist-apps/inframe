@@ -51,6 +51,102 @@ final class RivetApp extends _$RivetApp {}
       );
     });
 
+    test('should generate typed one-relation include scopes', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'one_include.rivet.dart';
+
+@RivetTable(rowName: 'User')
+final class Users extends RivetTableDefinition<Users> {
+  static const db = _$UsersDB();
+  late final id = integer()();
+  late final profile = one<Profiles>(
+    fields: [id],
+    references: (profile) => [profile.userId],
+  )();
+}
+
+@RivetTable(rowName: 'Profile')
+final class Profiles extends RivetTableDefinition<Profiles> {
+  static const db = _$ProfilesDB();
+  late final userId = integer()();
+  late final country = text()();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/one_include.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/one_include.rivet.dart': decodedMatches(
+            allOf(
+              contains('final class UsersInclude'),
+              contains('RivetInclude<Profiles, Profile> profile({'),
+              contains('RivetWhere<Profiles>? where,'),
+              contains('RivetFind<Users, User> find({'),
+              contains('RivetIncludes<UsersInclude>? include,'),
+              contains('decodeRelated:'),
+              contains("profile: relations.read('profile')"),
+            ),
+          ),
+        },
+      );
+    });
+
+    test('should generate typed through-relation include scopes', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'through_include.rivet.dart';
+
+@RivetTable()
+final class Books extends RivetTableDefinition<Books> {
+  static const db = _$BooksDB();
+  late final id = integer()();
+  late final tags = many<Tags>()
+      .through<BookTags>(source: (link) => link.book, target: (link) => link.tag)();
+}
+
+@RivetTable()
+final class Tags extends RivetTableDefinition<Tags> {
+  static const db = _$TagsDB();
+  late final id = integer()();
+}
+
+@RivetTable(rowName: 'BookTagRecord')
+final class BookTags extends RivetTableDefinition<BookTags> {
+  static const db = _$BookTagsDB();
+  late final bookId = integer()();
+  late final tagId = integer()();
+  late final book = one<Books>(fields: [bookId], references: (book) => [book.id])();
+  late final tag = one<Tags>(fields: [tagId], references: (tag) => [tag.id])();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/through_include.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/through_include.rivet.dart': decodedMatches(
+            allOf(
+              contains('RivetInclude<Tags, TagsRow> tags({'),
+              contains('final through = BookTags.db.buildSchema();'),
+              contains('throughSchema: through,'),
+              contains('final class BookTagRecord'),
+              contains('final Relation<List<TagsRow>> tags;'),
+            ),
+          ),
+        },
+      );
+    });
+
     test('should generate typed insert companions from column defaults', () async {
       final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
       await readerWriter.testing.loadIsolateSources();

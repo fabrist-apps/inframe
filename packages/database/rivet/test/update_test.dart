@@ -108,6 +108,24 @@ void main() {
       );
       expect(executor.queries, isEmpty);
     });
+
+    test('should clear relation aliases after compilation', () async {
+      late MutationUpdateUsers definition;
+
+      await MutationUpdateUsers.db
+          .update(
+            MutationUpdateUsersCompanion.update(
+              name: const RivetValue.present('Ada'),
+            ),
+            where: (users) {
+              definition = users;
+              return users.children.any((child) => child.id.equals(1));
+            },
+          )
+          .execute(executor);
+
+      expect(definition.id.qualifier, isNull);
+    });
   });
 }
 
