@@ -55,6 +55,9 @@ jobs:
           dart test packages/chrono_id/chrono_id/test --chain-stack-traces
           dart test packages/chrono_id/ack_chrono_id/test --chain-stack-traces
 
+      - name: Run Chronicler tests
+        run: dart test packages/chronicler/chronicler/test --chain-stack-traces
+
       - name: Run controlled HTTP tests
         run: dart test packages/database/clickhouse/test --exclude-tags integration --chain-stack-traces
 

@@ -1,0 +1,74 @@
+import 'dart:async';
+import 'dart:collection';
+
+import 'package:chronicler/src/configuration.dart';
+
+/// Counts runtime diagnostics and rate-limits payload-free notifications.
+final class DiagnosticChannel {
+  /// Creates a channel using [options].
+  DiagnosticChannel(this.options);
+
+  /// Notification behavior for this channel.
+  final DiagnosticOptions options;
+  final _counts = <DiagnosticReason, BigInt>{};
+  final _pending = <DiagnosticReason, BigInt>{};
+  final _lastNotification = <DiagnosticReason, Duration>{};
+  final _timers = <DiagnosticReason, Timer>{};
+  final _elapsed = Stopwatch()..start();
+
+  /// Whether the channel is currently invoking the application callback.
+  bool insideCallback = false;
+
+  /// Whether the channel has stopped scheduling notifications.
+  bool closed = false;
+
+  /// An immutable snapshot of exact lifetime counts by reason.
+  Map<DiagnosticReason, BigInt> get counts => UnmodifiableMapView(Map.of(_counts));
+
+  /// Increments [reason] and schedules an eligible notification.
+  void record(DiagnosticReason reason) {
+    _counts.update(reason, (count) => count + BigInt.one, ifAbsent: () => BigInt.one);
+    _pending.update(reason, (count) => count + BigInt.one, ifAbsent: () => BigInt.one);
+    if (options.onDiagnostic == null || closed || insideCallback || _timers.containsKey(reason)) {
+      return;
+    }
+    final last = _lastNotification[reason];
+    final elapsed = last == null ? options.notificationInterval : _elapsed.elapsed - last;
+    final delay = elapsed >= options.notificationInterval
+        ? Duration.zero
+        : options.notificationInterval - elapsed;
+    _timers[reason] = Timer(delay, () => _notify(reason));
+  }
+
+  /// Cancels delayed notifications and emits notifications already eligible.
+  void close() {
+    if (closed) return;
+    final now = _elapsed.elapsed;
+    final eligible = _timers.keys.where((reason) {
+      final last = _lastNotification[reason];
+      return last == null || now - last >= options.notificationInterval;
+    }).toList();
+    for (final timer in _timers.values) {
+      timer.cancel();
+    }
+    _timers.clear();
+    eligible.forEach(_notify);
+    closed = true;
+  }
+
+  void _notify(DiagnosticReason reason) {
+    _timers.remove(reason);
+    if (closed) return;
+    final count = _pending.remove(reason);
+    if (count == null) return;
+    _lastNotification[reason] = _elapsed.elapsed;
+    insideCallback = true;
+    try {
+      options.onDiagnostic?.call(ChroniclerDiagnostic(reason: reason, count: count));
+    } on Object {
+      // Diagnostics cannot diagnose their own callback.
+    } finally {
+      insideCallback = false;
+    }
+  }
+}
