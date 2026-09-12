@@ -255,7 +255,7 @@ final class _$PackageLabelsDB
       notes: relations.read('notes'),
     );
 
-    return RivetTableSchema<PackageLabels, PackageLabelRecord>(
+    final builtSchema = RivetTableSchema<PackageLabels, PackageLabelRecord>(
       schemaName: 'fixture',
       tableName: 'packageLabels',
       definition: definition,
@@ -283,6 +283,12 @@ final class _$PackageLabelsDB
         'notes': definition.notes as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.notes.bind(
+      name: 'notes',
+      ownerSchema: builtSchema,
+      targetSchema: () => PackageLabelNotes.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -469,34 +475,41 @@ final class _$PackageLabelNotesDB
       label: relations.read('label'),
     );
 
-    return RivetTableSchema<PackageLabelNotes, PackageLabelNotesRow>(
-      schemaName: 'fixture',
-      tableName: 'packageLabelNotes',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.labelCode as RivetColumn<Object?>,
-        definition.body as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'labelCode', 'body'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.labelCode as RivetColumn<Object?>,
-        definition.body as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<PackageLabelNotes, PackageLabelNotesRow>(
+          schemaName: 'fixture',
+          tableName: 'packageLabelNotes',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.labelCode as RivetColumn<Object?>,
+            definition.body as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'labelCode', 'body'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.labelCode as RivetColumn<Object?>,
+            definition.body as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'label': definition.label as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'label': definition.label as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.label.bind(
+      name: 'label',
+      ownerSchema: builtSchema,
+      targetSchema: () => PackageLabels.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.

@@ -115,7 +115,7 @@ final class _$UserProfilesDB
       posts: relations.read('posts'),
     );
 
-    return RivetTableSchema<UserProfiles, UserProfilesRow>(
+    final builtSchema = RivetTableSchema<UserProfiles, UserProfilesRow>(
       schemaName: 'fbr116',
       tableName: 'userProfiles',
       renamedFrom: 'profiles',
@@ -140,6 +140,12 @@ final class _$UserProfilesDB
         'posts': definition.posts as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.posts.bind(
+      name: 'posts',
+      ownerSchema: builtSchema,
+      targetSchema: () => Posts.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -288,7 +294,7 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
       author: relations.read('author'),
     );
 
-    return RivetTableSchema<Posts, PostsRow>(
+    final builtSchema = RivetTableSchema<Posts, PostsRow>(
       schemaName: 'fbr116',
       tableName: 'posts',
       definition: definition,
@@ -310,6 +316,12 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
         'author': definition.author as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.author.bind(
+      name: 'author',
+      ownerSchema: builtSchema,
+      targetSchema: () => UserProfiles.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -417,6 +429,56 @@ final class RelationalUsersInclude {
           const [],
     );
   }
+
+  /// Includes the [manager] relation.
+  RivetInclude<RelationalUsers, RelationalUsersRow> manager({
+    RivetWhere<RelationalUsers>? where,
+
+    RivetIncludes<RelationalUsersInclude>? include,
+  }) {
+    final target = RelationalUsers.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'manager' : '$path.manager';
+    return RivetInclude<RelationalUsers, RelationalUsersRow>(
+      name: 'manager',
+      path: relationPath,
+      relation: _schema.relations['manager']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(RelationalUsersInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [reports] relation.
+  RivetInclude<RelationalUsers, RelationalUsersRow> reports({
+    RivetWhere<RelationalUsers>? where,
+    RivetOrderBy<RelationalUsers>? orderBy,
+    int? limit,
+
+    RivetIncludes<RelationalUsersInclude>? include,
+  }) {
+    final target = RelationalUsers.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'reports' : '$path.reports';
+    return RivetInclude<RelationalUsers, RelationalUsersRow>(
+      name: 'reports',
+      path: relationPath,
+      relation: _schema.relations['reports']!,
+      targetSchema: target,
+
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(RelationalUsersInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr146.relationalUsers'.
@@ -425,8 +487,11 @@ final class RelationalUsersRow {
   const RelationalUsersRow({
     required this.id,
     required this.name,
+    required this.managerId,
     this.authoredPosts = const Relation.unloaded(),
     this.reviewedPosts = const Relation.unloaded(),
+    this.manager = const Relation.unloaded(),
+    this.reports = const Relation.unloaded(),
   });
 
   /// Value read from `id`.
@@ -435,30 +500,47 @@ final class RelationalUsersRow {
   /// Value read from `name`.
   final String name;
 
+  /// Value read from `managerId`.
+  final int? managerId;
+
   /// Loaded or unloaded `authoredPosts` relation.
   final Relation<List<RelationalPostsRow>> authoredPosts;
 
   /// Loaded or unloaded `reviewedPosts` relation.
   final Relation<List<RelationalPostsRow>> reviewedPosts;
+
+  /// Loaded or unloaded `manager` relation.
+  final Relation<RelationalUsersRow?> manager;
+
+  /// Loaded or unloaded `reports` relation.
+  final Relation<List<RelationalUsersRow>> reports;
 }
 
 /// Generated values accepted by mutations of 'fbr146.relationalUsers'.
 final class RelationalUsersCompanion
     implements RivetCompanion<RelationalUsers> {
-  const RelationalUsersCompanion._({required this.id, required this.name});
+  const RelationalUsersCompanion._({
+    required this.id,
+    required this.name,
+    required this.managerId,
+  });
 
   /// Creates values for an insert, leaving defaulted columns absent.
   factory RelationalUsersCompanion.insert({
     required RivetValue<RelationalUsers, int, int> id,
     required RivetValue<RelationalUsers, String, String> name,
-  }) => RelationalUsersCompanion._(id: id, name: name);
+    RivetValue<RelationalUsers, int?, int?> managerId =
+        const RivetValue.absent(),
+  }) => RelationalUsersCompanion._(id: id, name: name, managerId: managerId);
 
   /// Creates values for an update, leaving untouched columns absent.
   factory RelationalUsersCompanion.update({
     RivetValue<RelationalUsers, int, int> id = const RivetValue.absent(),
     RivetValue<RelationalUsers, String, String> name =
         const RivetValue.absent(),
-  }) => RelationalUsersCompanion._(id: id, name: name);
+    RivetValue<RelationalUsers, int?, int?> managerId =
+        const RivetValue.absent(),
+  }) => RelationalUsersCompanion._(id: id, name: name, managerId: managerId);
 
   /// Mutation value for `id`.
   final RivetValue<RelationalUsers, int, int> id;
@@ -466,11 +548,15 @@ final class RelationalUsersCompanion
   /// Mutation value for `name`.
   final RivetValue<RelationalUsers, String, String> name;
 
+  /// Mutation value for `managerId`.
+  final RivetValue<RelationalUsers, int?, int?> managerId;
+
   /// The generated column assignments in declaration order.
   @override
   List<RivetAssignment<RelationalUsers>> operator [](RivetCompanionKey key) => [
     RivetAssignment('id', id),
     RivetAssignment('name', name),
+    RivetAssignment('managerId', managerId),
   ];
 }
 
@@ -505,23 +591,33 @@ final class _$RelationalUsersDB
               isSqlNull: sqlNulls[1],
             )
           : definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      managerId: transport
+          ? definition.managerId.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.managerId.decodeValue(values[2], isSqlNull: sqlNulls[2]),
       authoredPosts: relations.read('authoredPosts'),
       reviewedPosts: relations.read('reviewedPosts'),
+      manager: relations.read('manager'),
+      reports: relations.read('reports'),
     );
 
-    return RivetTableSchema<RelationalUsers, RelationalUsersRow>(
+    final builtSchema = RivetTableSchema<RelationalUsers, RelationalUsersRow>(
       schemaName: 'fbr146',
       tableName: 'relationalUsers',
       definition: definition,
       columns: [
         definition.id as RivetColumn<Object?>,
         definition.name as RivetColumn<Object?>,
+        definition.managerId as RivetColumn<Object?>,
       ],
-      columnNames: ['id', 'name'],
+      columnNames: ['id', 'name', 'managerId'],
       createDefinition: createDefinition,
       columnsFor: (definition) => [
         definition.id as RivetColumn<Object?>,
         definition.name as RivetColumn<Object?>,
+        definition.managerId as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => decodeRow(
         values,
@@ -536,8 +632,31 @@ final class _$RelationalUsersDB
             definition.authoredPosts as RivetRelationDescriptor<Object?>,
         'reviewedPosts':
             definition.reviewedPosts as RivetRelationDescriptor<Object?>,
+        'manager': definition.manager as RivetRelationDescriptor<Object?>,
+        'reports': definition.reports as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.authoredPosts.bind(
+      name: 'authoredPosts',
+      ownerSchema: builtSchema,
+      targetSchema: () => RelationalPosts.db.buildSchema(),
+    );
+    definition.reviewedPosts.bind(
+      name: 'reviewedPosts',
+      ownerSchema: builtSchema,
+      targetSchema: () => RelationalPosts.db.buildSchema(),
+    );
+    definition.manager.bind(
+      name: 'manager',
+      ownerSchema: builtSchema,
+      targetSchema: () => RelationalUsers.db.buildSchema(),
+    );
+    definition.reports.bind(
+      name: 'reports',
+      ownerSchema: builtSchema,
+      targetSchema: () => RelationalUsers.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -835,7 +954,7 @@ final class _$RelationalPostsDB
       comments: relations.read('comments'),
     );
 
-    return RivetTableSchema<RelationalPosts, RelationalPostsRow>(
+    final builtSchema = RivetTableSchema<RelationalPosts, RelationalPostsRow>(
       schemaName: 'fbr146',
       tableName: 'relationalPosts',
       definition: definition,
@@ -869,6 +988,22 @@ final class _$RelationalPostsDB
         'comments': definition.comments as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.author.bind(
+      name: 'author',
+      ownerSchema: builtSchema,
+      targetSchema: () => RelationalUsers.db.buildSchema(),
+    );
+    definition.reviewer.bind(
+      name: 'reviewer',
+      ownerSchema: builtSchema,
+      targetSchema: () => RelationalUsers.db.buildSchema(),
+    );
+    definition.comments.bind(
+      name: 'comments',
+      ownerSchema: builtSchema,
+      targetSchema: () => RelationalComments.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -1055,32 +1190,41 @@ final class _$RelationalCommentsDB
       post: relations.read('post'),
     );
 
-    return RivetTableSchema<RelationalComments, RelationalCommentsRow>(
-      schemaName: 'fbr146',
-      tableName: 'relationalComments',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.postId as RivetColumn<Object?>,
-        definition.body as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'postId', 'body'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.postId as RivetColumn<Object?>,
-        definition.body as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<RelationalComments, RelationalCommentsRow>(
+          schemaName: 'fbr146',
+          tableName: 'relationalComments',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.postId as RivetColumn<Object?>,
+            definition.body as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'postId', 'body'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.postId as RivetColumn<Object?>,
+            definition.body as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {'post': definition.post as RivetRelationDescriptor<Object?>},
+          relations: {
+            'post': definition.post as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.post.bind(
+      name: 'post',
+      ownerSchema: builtSchema,
+      targetSchema: () => RelationalPosts.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -1301,7 +1445,7 @@ final class _$ThroughBooksDB
       reviews: relations.read('reviews'),
     );
 
-    return RivetTableSchema<ThroughBooks, ThroughBooksRow>(
+    final builtSchema = RivetTableSchema<ThroughBooks, ThroughBooksRow>(
       schemaName: 'fbr147',
       tableName: 'throughBooks',
       definition: definition,
@@ -1330,6 +1474,18 @@ final class _$ThroughBooksDB
         'reviews': definition.reviews as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.tags.bind(
+      name: 'tags',
+      ownerSchema: builtSchema,
+      targetSchema: () => ThroughTags.db.buildSchema(),
+      throughSchema: () => ThroughBookTags.db.buildSchema(),
+    );
+    definition.reviews.bind(
+      name: 'reviews',
+      ownerSchema: builtSchema,
+      targetSchema: () => ThroughReviews.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -1517,7 +1673,7 @@ final class _$ThroughTagsDB
       notes: relations.read('notes'),
     );
 
-    return RivetTableSchema<ThroughTags, ThroughTagsRow>(
+    final builtSchema = RivetTableSchema<ThroughTags, ThroughTagsRow>(
       schemaName: 'fbr147',
       tableName: 'throughTags',
       definition: definition,
@@ -1545,6 +1701,12 @@ final class _$ThroughTagsDB
         'notes': definition.notes as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.notes.bind(
+      name: 'notes',
+      ownerSchema: builtSchema,
+      targetSchema: () => ThroughTagNotes.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -1811,7 +1973,7 @@ final class _$ThroughBookTagsDB
       tag: relations.read('tag'),
     );
 
-    return RivetTableSchema<ThroughBookTags, ThroughBookTagRecord>(
+    final builtSchema = RivetTableSchema<ThroughBookTags, ThroughBookTagRecord>(
       schemaName: 'fbr147',
       tableName: 'throughBookTags',
       definition: definition,
@@ -1850,6 +2012,17 @@ final class _$ThroughBookTagsDB
         'tag': definition.tag as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.book.bind(
+      name: 'book',
+      ownerSchema: builtSchema,
+      targetSchema: () => ThroughBooks.db.buildSchema(),
+    );
+    definition.tag.bind(
+      name: 'tag',
+      ownerSchema: builtSchema,
+      targetSchema: () => ThroughTags.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -2062,7 +2235,7 @@ final class _$ThroughReviewsDB
       book: relations.read('book'),
     );
 
-    return RivetTableSchema<ThroughReviews, ThroughReviewsRow>(
+    final builtSchema = RivetTableSchema<ThroughReviews, ThroughReviewsRow>(
       schemaName: 'fbr147',
       tableName: 'throughReviews',
       definition: definition,
@@ -2090,6 +2263,12 @@ final class _$ThroughReviewsDB
 
       relations: {'book': definition.book as RivetRelationDescriptor<Object?>},
     );
+    definition.book.bind(
+      name: 'book',
+      ownerSchema: builtSchema,
+      targetSchema: () => ThroughBooks.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -2306,7 +2485,7 @@ final class _$ThroughTagNotesDB
       tag: relations.read('tag'),
     );
 
-    return RivetTableSchema<ThroughTagNotes, ThroughTagNotesRow>(
+    final builtSchema = RivetTableSchema<ThroughTagNotes, ThroughTagNotesRow>(
       schemaName: 'fbr147',
       tableName: 'throughTagNotes',
       definition: definition,
@@ -2334,6 +2513,12 @@ final class _$ThroughTagNotesDB
 
       relations: {'tag': definition.tag as RivetRelationDescriptor<Object?>},
     );
+    definition.tag.bind(
+      name: 'tag',
+      ownerSchema: builtSchema,
+      targetSchema: () => ThroughTags.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -3369,7 +3554,7 @@ final class _$CodecParentsDB
       linkedValues: relations.read('linkedValues'),
     );
 
-    return RivetTableSchema<CodecParents, CodecParentsRow>(
+    final builtSchema = RivetTableSchema<CodecParents, CodecParentsRow>(
       schemaName: 'fbr148',
       tableName: 'codecParents',
       definition: definition,
@@ -3391,6 +3576,18 @@ final class _$CodecParentsDB
             definition.linkedValues as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.values.bind(
+      name: 'values',
+      ownerSchema: builtSchema,
+      targetSchema: () => CodecValues.db.buildSchema(),
+    );
+    definition.linkedValues.bind(
+      name: 'linkedValues',
+      ownerSchema: builtSchema,
+      targetSchema: () => CodecValues.db.buildSchema(),
+      throughSchema: () => CodecLinks.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -3802,7 +3999,7 @@ final class _$CodecValuesDB
       owner: relations.read('owner'),
     );
 
-    return RivetTableSchema<CodecValues, CodecRecord>(
+    final builtSchema = RivetTableSchema<CodecValues, CodecRecord>(
       schemaName: 'fbr148',
       tableName: 'codecValues',
       definition: definition,
@@ -3864,6 +4061,12 @@ final class _$CodecValuesDB
         'owner': definition.owner as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.owner.bind(
+      name: 'owner',
+      ownerSchema: builtSchema,
+      targetSchema: () => CodecParents.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -4054,7 +4257,7 @@ final class _$CodecLinksDB
       value: relations.read('value'),
     );
 
-    return RivetTableSchema<CodecLinks, CodecLinksRow>(
+    final builtSchema = RivetTableSchema<CodecLinks, CodecLinksRow>(
       schemaName: 'fbr148',
       tableName: 'codecLinks',
       definition: definition,
@@ -4081,6 +4284,17 @@ final class _$CodecLinksDB
         'value': definition.value as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.owner.bind(
+      name: 'owner',
+      ownerSchema: builtSchema,
+      targetSchema: () => CodecParents.db.buildSchema(),
+    );
+    definition.value.bind(
+      name: 'value',
+      ownerSchema: builtSchema,
+      targetSchema: () => CodecValues.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -5507,7 +5721,7 @@ final class _$MutationParentsDB
       children: relations.read('children'),
     );
 
-    return RivetTableSchema<MutationParents, MutationParentsRow>(
+    final builtSchema = RivetTableSchema<MutationParents, MutationParentsRow>(
       schemaName: 'fbr138',
       tableName: 'mutationParents',
       definition: definition,
@@ -5533,6 +5747,12 @@ final class _$MutationParentsDB
         'children': definition.children as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.children.bind(
+      name: 'children',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationChildren.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -5694,7 +5914,7 @@ final class _$MutationChildrenDB
       parent: relations.read('parent'),
     );
 
-    return RivetTableSchema<MutationChildren, MutationChildrenRow>(
+    final builtSchema = RivetTableSchema<MutationChildren, MutationChildrenRow>(
       schemaName: 'fbr138',
       tableName: 'mutationChildren',
       definition: definition,
@@ -5720,6 +5940,12 @@ final class _$MutationChildrenDB
         'parent': definition.parent as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.parent.bind(
+      name: 'parent',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationParents.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -6034,53 +6260,60 @@ final class _$MutationUpdateUsersDB
       children: relations.read('children'),
     );
 
-    return RivetTableSchema<MutationUpdateUsers, MutationUpdateUsersRow>(
-      schemaName: 'fbr140',
-      tableName: 'mutationUpdateUsers',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.name as RivetColumn<Object?>,
-        definition.age as RivetColumn<Object?>,
-        definition.updatedAt as RivetColumn<Object?>,
-        definition.nullableNote as RivetColumn<Object?>,
-        definition.code as RivetColumn<Object?>,
-        definition.defaultOnly as RivetColumn<Object?>,
-        definition.serverOnly as RivetColumn<Object?>,
-      ],
-      columnNames: [
-        'id',
-        'name',
-        'age',
-        'updatedAt',
-        'nullableNote',
-        'code',
-        'defaultOnly',
-        'serverOnly',
-      ],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.name as RivetColumn<Object?>,
-        definition.age as RivetColumn<Object?>,
-        definition.updatedAt as RivetColumn<Object?>,
-        definition.nullableNote as RivetColumn<Object?>,
-        definition.code as RivetColumn<Object?>,
-        definition.defaultOnly as RivetColumn<Object?>,
-        definition.serverOnly as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationUpdateUsers, MutationUpdateUsersRow>(
+          schemaName: 'fbr140',
+          tableName: 'mutationUpdateUsers',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.name as RivetColumn<Object?>,
+            definition.age as RivetColumn<Object?>,
+            definition.updatedAt as RivetColumn<Object?>,
+            definition.nullableNote as RivetColumn<Object?>,
+            definition.code as RivetColumn<Object?>,
+            definition.defaultOnly as RivetColumn<Object?>,
+            definition.serverOnly as RivetColumn<Object?>,
+          ],
+          columnNames: [
+            'id',
+            'name',
+            'age',
+            'updatedAt',
+            'nullableNote',
+            'code',
+            'defaultOnly',
+            'serverOnly',
+          ],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.name as RivetColumn<Object?>,
+            definition.age as RivetColumn<Object?>,
+            definition.updatedAt as RivetColumn<Object?>,
+            definition.nullableNote as RivetColumn<Object?>,
+            definition.code as RivetColumn<Object?>,
+            definition.defaultOnly as RivetColumn<Object?>,
+            definition.serverOnly as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'children': definition.children as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'children': definition.children as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.children.bind(
+      name: 'children',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationUpdateChildren.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -6252,30 +6485,39 @@ final class _$MutationUpdateChildrenDB
       user: relations.read('user'),
     );
 
-    return RivetTableSchema<MutationUpdateChildren, MutationUpdateChildrenRow>(
-      schemaName: 'fbr140',
-      tableName: 'mutationUpdateChildren',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.userId as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'userId'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.userId as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationUpdateChildren, MutationUpdateChildrenRow>(
+          schemaName: 'fbr140',
+          tableName: 'mutationUpdateChildren',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.userId as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'userId'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.userId as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {'user': definition.user as RivetRelationDescriptor<Object?>},
+          relations: {
+            'user': definition.user as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.user.bind(
+      name: 'user',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationUpdateUsers.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -6492,35 +6734,47 @@ final class _$MutationDeleteParentsDB
       restrictChildren: relations.read('restrictChildren'),
     );
 
-    return RivetTableSchema<MutationDeleteParents, MutationDeleteParentsRow>(
-      schemaName: 'fbr141',
-      tableName: 'delete Parents',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.label as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'label'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.label as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationDeleteParents, MutationDeleteParentsRow>(
+          schemaName: 'fbr141',
+          tableName: 'delete Parents',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.label as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'label'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.label as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'cascadeChildren':
-            definition.cascadeChildren as RivetRelationDescriptor<Object?>,
-        'restrictChildren':
-            definition.restrictChildren as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'cascadeChildren':
+                definition.cascadeChildren as RivetRelationDescriptor<Object?>,
+            'restrictChildren':
+                definition.restrictChildren as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.cascadeChildren.bind(
+      name: 'cascadeChildren',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationCascadeChildren.db.buildSchema(),
     );
+    definition.restrictChildren.bind(
+      name: 'restrictChildren',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationRestrictChildren.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -6696,35 +6950,39 @@ final class _$MutationCascadeChildrenDB
       parent: relations.read('parent'),
     );
 
-    return RivetTableSchema<
-      MutationCascadeChildren,
-      MutationCascadeChildrenRow
-    >(
-      schemaName: 'fbr141',
-      tableName: 'cascade Children',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.parentId as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'parentId'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.parentId as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationCascadeChildren, MutationCascadeChildrenRow>(
+          schemaName: 'fbr141',
+          tableName: 'cascade Children',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.parentId as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'parentId'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.parentId as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'parent': definition.parent as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'parent': definition.parent as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.parent.bind(
+      name: 'parent',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationDeleteParents.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -6902,35 +7160,39 @@ final class _$MutationRestrictChildrenDB
       parent: relations.read('parent'),
     );
 
-    return RivetTableSchema<
-      MutationRestrictChildren,
-      MutationRestrictChildrenRow
-    >(
-      schemaName: 'fbr141',
-      tableName: 'restrict Children',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.parentId as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'parentId'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.parentId as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationRestrictChildren, MutationRestrictChildrenRow>(
+          schemaName: 'fbr141',
+          tableName: 'restrict Children',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.parentId as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'parentId'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.parentId as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'parent': definition.parent as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'parent': definition.parent as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.parent.bind(
+      name: 'parent',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationDeleteParents.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -7181,38 +7443,45 @@ final class _$MutationBatchParentsDB
       children: relations.read('children'),
     );
 
-    return RivetTableSchema<MutationBatchParents, MutationBatchParentsRow>(
-      schemaName: 'fbr142',
-      tableName: 'mutationBatchParents',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.name as RivetColumn<Object?>,
-        definition.createdAt as RivetColumn<Object?>,
-        definition.nickname as RivetColumn<Object?>,
-        definition.serverValue as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'name', 'createdAt', 'nickname', 'serverValue'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.name as RivetColumn<Object?>,
-        definition.createdAt as RivetColumn<Object?>,
-        definition.nickname as RivetColumn<Object?>,
-        definition.serverValue as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationBatchParents, MutationBatchParentsRow>(
+          schemaName: 'fbr142',
+          tableName: 'mutationBatchParents',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.name as RivetColumn<Object?>,
+            definition.createdAt as RivetColumn<Object?>,
+            definition.nickname as RivetColumn<Object?>,
+            definition.serverValue as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'name', 'createdAt', 'nickname', 'serverValue'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.name as RivetColumn<Object?>,
+            definition.createdAt as RivetColumn<Object?>,
+            definition.nickname as RivetColumn<Object?>,
+            definition.serverValue as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'children': definition.children as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'children': definition.children as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.children.bind(
+      name: 'children',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationBatchChildren.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -7384,32 +7653,39 @@ final class _$MutationBatchChildrenDB
       parent: relations.read('parent'),
     );
 
-    return RivetTableSchema<MutationBatchChildren, MutationBatchChildrenRow>(
-      schemaName: 'fbr142',
-      tableName: 'mutationBatchChildren',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.parentId as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'parentId'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.parentId as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationBatchChildren, MutationBatchChildrenRow>(
+          schemaName: 'fbr142',
+          tableName: 'mutationBatchChildren',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.parentId as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'parentId'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.parentId as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'parent': definition.parent as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'parent': definition.parent as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.parent.bind(
+      name: 'parent',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationBatchParents.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -7833,59 +8109,63 @@ final class _$MutationConflictParentsDB
       children: relations.read('children'),
     );
 
-    return RivetTableSchema<
-      MutationConflictParents,
-      MutationConflictParentsRow
-    >(
-      schemaName: 'fbr143',
-      tableName: 'mutationConflictParents',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.email as RivetColumn<Object?>,
-        definition.username as RivetColumn<Object?>,
-        definition.active as RivetColumn<Object?>,
-        definition.name as RivetColumn<Object?>,
-        definition.age as RivetColumn<Object?>,
-        definition.createdAt as RivetColumn<Object?>,
-        definition.requiredByDatabase as RivetColumn<Object?>,
-        definition.groupId as RivetColumn<Object?>,
-      ],
-      columnNames: [
-        'id',
-        'email',
-        'username',
-        'active',
-        'name',
-        'age',
-        'createdAt',
-        'requiredByDatabase',
-        'groupId',
-      ],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.email as RivetColumn<Object?>,
-        definition.username as RivetColumn<Object?>,
-        definition.active as RivetColumn<Object?>,
-        definition.name as RivetColumn<Object?>,
-        definition.age as RivetColumn<Object?>,
-        definition.createdAt as RivetColumn<Object?>,
-        definition.requiredByDatabase as RivetColumn<Object?>,
-        definition.groupId as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationConflictParents, MutationConflictParentsRow>(
+          schemaName: 'fbr143',
+          tableName: 'mutationConflictParents',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.email as RivetColumn<Object?>,
+            definition.username as RivetColumn<Object?>,
+            definition.active as RivetColumn<Object?>,
+            definition.name as RivetColumn<Object?>,
+            definition.age as RivetColumn<Object?>,
+            definition.createdAt as RivetColumn<Object?>,
+            definition.requiredByDatabase as RivetColumn<Object?>,
+            definition.groupId as RivetColumn<Object?>,
+          ],
+          columnNames: [
+            'id',
+            'email',
+            'username',
+            'active',
+            'name',
+            'age',
+            'createdAt',
+            'requiredByDatabase',
+            'groupId',
+          ],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.email as RivetColumn<Object?>,
+            definition.username as RivetColumn<Object?>,
+            definition.active as RivetColumn<Object?>,
+            definition.name as RivetColumn<Object?>,
+            definition.age as RivetColumn<Object?>,
+            definition.createdAt as RivetColumn<Object?>,
+            definition.requiredByDatabase as RivetColumn<Object?>,
+            definition.groupId as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'children': definition.children as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'children': definition.children as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.children.bind(
+      name: 'children',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationConflictChildren.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -8063,35 +8343,39 @@ final class _$MutationConflictChildrenDB
       parent: relations.read('parent'),
     );
 
-    return RivetTableSchema<
-      MutationConflictChildren,
-      MutationConflictChildrenRow
-    >(
-      schemaName: 'fbr143',
-      tableName: 'mutationConflictChildren',
-      definition: definition,
-      columns: [
-        definition.id as RivetColumn<Object?>,
-        definition.parentId as RivetColumn<Object?>,
-      ],
-      columnNames: ['id', 'parentId'],
-      createDefinition: createDefinition,
-      columnsFor: (definition) => [
-        definition.id as RivetColumn<Object?>,
-        definition.parentId as RivetColumn<Object?>,
-      ],
-      decode: (values, sqlNulls) => decodeRow(
-        values,
-        sqlNulls,
-        const RivetRelationValues(),
-        transport: false,
-      ),
-      decodeRelated: decodeRow,
+    final builtSchema =
+        RivetTableSchema<MutationConflictChildren, MutationConflictChildrenRow>(
+          schemaName: 'fbr143',
+          tableName: 'mutationConflictChildren',
+          definition: definition,
+          columns: [
+            definition.id as RivetColumn<Object?>,
+            definition.parentId as RivetColumn<Object?>,
+          ],
+          columnNames: ['id', 'parentId'],
+          createDefinition: createDefinition,
+          columnsFor: (definition) => [
+            definition.id as RivetColumn<Object?>,
+            definition.parentId as RivetColumn<Object?>,
+          ],
+          decode: (values, sqlNulls) => decodeRow(
+            values,
+            sqlNulls,
+            const RivetRelationValues(),
+            transport: false,
+          ),
+          decodeRelated: decodeRow,
 
-      relations: {
-        'parent': definition.parent as RivetRelationDescriptor<Object?>,
-      },
+          relations: {
+            'parent': definition.parent as RivetRelationDescriptor<Object?>,
+          },
+        );
+    definition.parent.bind(
+      name: 'parent',
+      ownerSchema: builtSchema,
+      targetSchema: () => MutationConflictParents.db.buildSchema(),
     );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.

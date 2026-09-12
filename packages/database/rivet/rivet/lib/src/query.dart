@@ -129,7 +129,9 @@ final class RivetFind<Definition, Row> {
   }
 
   RivetCompiledQuery _compile({int? terminalLimit}) {
-    if (_includes.isNotEmpty) return _compileRelational(terminalLimit: terminalLimit);
+    if (_includes.isNotEmpty || (_predicate?.usesRelations ?? false)) {
+      return _compileRelational(terminalLimit: terminalLimit);
+    }
     final columns = _schema.columns.indexed
         .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
         .join(', ');
@@ -179,19 +181,24 @@ final class RivetFind<Definition, Row> {
 
   RivetCompiledQuery _compileRelational({int? terminalLimit}) {
     var aliasIndex = 0;
-    final rootAlias = '__rivet_t${aliasIndex++}';
+    String nextAlias() => '__rivet_t${aliasIndex++}';
+    final rootAlias = nextAlias();
     _schema.qualify(rootAlias);
     final parameters = <Object?>[];
     final selections = <String>[
       for (final column in _schema.columns) column.selectionSql,
       for (var index = 0; index < _includes.length; index++)
-        '${_compileInclude(_includes[index], _schema, parameters, () => '__rivet_t${aliasIndex++}')} AS "__rivet_r$index"',
+        '${_compileInclude(_includes[index], _schema, parameters, nextAlias)} AS "__rivet_r$index"',
     ];
     final sql = StringBuffer(
       'SELECT ${selections.join(', ')} FROM ${_schema.qualifiedName} AS ${quoteIdentifier(rootAlias)}',
     );
     if (_predicate case final predicate?) {
-      sql.write(' WHERE ${predicate.renderParameters(startAt: parameters.length + 1)}');
+      final rendered = predicate.renderParameters(
+        startAt: parameters.length + 1,
+        nextAlias: nextAlias,
+      );
+      sql.write(' WHERE $rendered');
       parameters.addAll(predicate.parameters);
     }
     if (_orders.isNotEmpty) {
@@ -231,7 +238,12 @@ String _compileInclude(
   ];
   final predicates = [...join.predicates];
   if (include.predicate case final predicate?) {
-    predicates.add(predicate.renderParameters(startAt: parameters.length + 1));
+    predicates.add(
+      predicate.renderParameters(
+        startAt: parameters.length + 1,
+        nextAlias: nextAlias,
+      ),
+    );
     parameters.addAll(predicate.parameters);
   }
   final orderSql = include.orders.isEmpty ? '' : ' ORDER BY ${_renderOrders(include.orders)}';

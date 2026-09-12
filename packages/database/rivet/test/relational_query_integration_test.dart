@@ -21,7 +21,8 @@ void main() {
       await fixture.execute('''
         CREATE TABLE fbr146."relationalUsers" (
           id integer NOT NULL,
-          name text NOT NULL
+          name text NOT NULL,
+          "managerId" integer
         )
       ''');
       await fixture.execute('''
@@ -42,7 +43,7 @@ void main() {
       ''');
       await fixture.execute('''
         INSERT INTO fbr146."relationalUsers" VALUES
-          (1, 'Ada'), (2, 'Grace'), (3, 'Linus')
+          (1, 'Ada', NULL), (2, 'Grace', 1), (3, 'Linus', NULL)
       ''');
       await fixture.execute('''
         INSERT INTO fbr146."relationalPosts" VALUES
@@ -240,7 +241,7 @@ void main() {
       'should report the full path for duplicate nested one matches',
       () async {
         await fixture.execute('''
-          INSERT INTO fbr146."relationalUsers" VALUES (1, 'Ada duplicate')
+          INSERT INTO fbr146."relationalUsers" VALUES (1, 'Ada duplicate', NULL)
         ''');
 
         await expectLater(
@@ -263,6 +264,102 @@ void main() {
           ),
         );
         expect(statements, hasLength(1));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should filter roots with one matches and many any or none',
+      () async {
+        final authored = await RelationalPosts.db
+            .find(
+              where: (post) => post.author.matches((user) => user.name.equals('Ada')),
+              orderBy: (post) => [post.id.asc()],
+            )
+            .get(database);
+        expect(authored.map((post) => post.id), [11, 12, 13]);
+        expect(authored.every((post) => !post.author.isLoaded), isTrue);
+
+        final any = await RelationalUsers.db
+            .find(
+              where: (user) => user.authoredPosts.any(
+                (post) => post.title.equals('Ada second'),
+              ),
+              include: (include) => [
+                include.authoredPosts(
+                  where: (post) => post.title.equals('Ada first'),
+                  limit: 1,
+                ),
+              ],
+            )
+            .getSingle(database);
+        expect(any.name, 'Ada');
+        expect(
+          (any.authoredPosts as LoadedRelation<List<RelationalPostsRow>>).value.map(
+            (post) => post.id,
+          ),
+          [11],
+        );
+
+        final none = await RelationalUsers.db
+            .find(
+              where: (user) => user.reviewedPosts.none(
+                (post) => post.title.equals('Grace only'),
+              ),
+              orderBy: (user) => [user.id.asc()],
+            )
+            .get(database);
+        expect(none.map((user) => user.name), ['Grace', 'Linus']);
+        expect(none.every((user) => !user.reviewedPosts.isLoaded), isTrue);
+        expect(statements, hasLength(3));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should compose nested relation predicates in a transaction',
+      () async {
+        await database.transaction((tx) async {
+          final users = await RelationalUsers.db
+              .find(
+                where: (user) => user.authoredPosts.any(
+                  (post) => post.comments.any(
+                    (comment) => comment.body.equals('old'),
+                  ),
+                ),
+              )
+              .get(tx);
+          expect(users.map((user) => user.name), ['Ada']);
+          expect(users.single.authoredPosts.isLoaded, isFalse);
+        });
+        expect(statements, hasLength(1));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should traverse self relations in both directions',
+      () async {
+        final manager = await RelationalUsers.db
+            .find(
+              where: (user) => user.reports.any(
+                (report) => report.name.equals('Grace'),
+              ),
+            )
+            .getSingle(database);
+        final report = await RelationalUsers.db
+            .find(
+              where: (user) => user.manager.matches(
+                (manager) => manager.name.equals('Ada'),
+              ),
+            )
+            .getSingle(database);
+
+        expect(manager.name, 'Ada');
+        expect(report.name, 'Grace');
+        expect(manager.reports.isLoaded, isFalse);
+        expect(report.manager.isLoaded, isFalse);
+        expect(statements, hasLength(2));
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

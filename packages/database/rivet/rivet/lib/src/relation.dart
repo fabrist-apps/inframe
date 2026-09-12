@@ -66,6 +66,22 @@ final class RivetRelationDescriptor<Target> {
   final RivetRelationDescriptor<dynamic> Function(Target table)? inverse;
   List<RivetColumn<dynamic>> references = const [];
   RivetRelationDescriptor<dynamic>? inverseRelation;
+  String? _name;
+  RivetTableSchema<dynamic, dynamic>? _ownerSchema;
+  RivetTableSchema<Target, dynamic> Function()? _targetSchema;
+  RivetTableSchema<dynamic, dynamic> Function()? _throughSchema;
+
+  void bind({
+    required String name,
+    required RivetTableSchema<dynamic, dynamic> ownerSchema,
+    required RivetTableSchema<Target, dynamic> Function() targetSchema,
+    RivetTableSchema<dynamic, dynamic> Function()? throughSchema,
+  }) {
+    _name = name;
+    _ownerSchema = ownerSchema;
+    _targetSchema = targetSchema;
+    _throughSchema = throughSchema;
+  }
 
   void resolve(Target definition) {
     references = List.unmodifiable(reference?.call(definition) ?? const []);
@@ -83,6 +99,8 @@ final class RivetOneRelation<Target> extends RivetRelationDescriptor<Target> {
          targetTable: targetTable,
          reference: references,
        );
+
+  RivetPredicate matches(RivetWhere<Target> where) => _relationPredicate(this, where);
 }
 
 final class RivetManyRelation<Target> extends RivetRelationDescriptor<Target> {
@@ -94,6 +112,10 @@ final class RivetManyRelation<Target> extends RivetRelationDescriptor<Target> {
          targetTable: targetTable,
          inverse: relation,
        );
+
+  RivetPredicate any(RivetWhere<Target> where) => _relationPredicate(this, where);
+
+  RivetPredicate none(RivetWhere<Target> where) => _relationPredicate(this, where, negate: true);
 }
 
 final class RivetManyThroughRelation<Target, Junction, Source>
@@ -114,6 +136,10 @@ final class RivetManyThroughRelation<Target, Junction, Source>
     sourceRelation = source(definition);
     targetRelation = target(definition);
   }
+
+  RivetPredicate any(RivetWhere<Target> where) => _relationPredicate(this, where);
+
+  RivetPredicate none(RivetWhere<Target> where) => _relationPredicate(this, where, negate: true);
 }
 
 final class RivetRelationBuilder<Target, RelationType extends RivetRelationDescriptor<Target>> {
@@ -138,6 +164,184 @@ final class RivetManyRelationBuilder<Source, Target> {
   }) => RivetRelationBuilder(
     RivetManyThroughRelation<Target, Junction, Source>(source: source, target: target),
   );
+}
+
+RivetPredicate _relationPredicate<Target>(
+  RivetRelationDescriptor<Target> relation,
+  RivetWhere<Target> where, {
+  bool negate = false,
+}) {
+  final traversal = _RelationTraversal.create(relation);
+  final predicate = where(traversal.target.definition);
+  if (predicate.columns.any((column) => !column.belongsTo(traversal.target))) {
+    throw RivetUnsupportedQueryException(
+      'Relation predicate ${traversal.path} can only reference its related table.',
+    );
+  }
+  return RivetPredicate.relation(
+    renderSql: (placeholder, nextAlias) {
+      final targetAlias = nextAlias();
+      traversal.target.qualify(targetAlias);
+      var fromSql = '${traversal.target.qualifiedName} AS ${quoteIdentifier(targetAlias)}';
+      final predicates = <String>[];
+      if (traversal.through case final through?) {
+        final throughAlias = nextAlias();
+        through.qualify(throughAlias);
+        final targetJoin = [
+          for (var index = 0; index < traversal.targetJoinLeft.length; index++)
+            '${traversal.targetJoinLeft[index].sql} = '
+                '${traversal.targetJoinRight[index].sql}',
+        ].join(' AND ');
+        fromSql =
+            '$fromSql JOIN ${through.qualifiedName} AS '
+            '${quoteIdentifier(throughAlias)} ON $targetJoin';
+      }
+      for (var index = 0; index < traversal.correlationLeft.length; index++) {
+        predicates.add(
+          '${traversal.correlationLeft[index].sql} = '
+          '${traversal.correlationRight[index].sql}',
+        );
+      }
+      predicates.add('(${predicate.renderWith(placeholder, nextAlias)}) IS TRUE');
+      final exists = 'EXISTS (SELECT 1 FROM $fromSql WHERE ${predicates.join(' AND ')})';
+      return negate ? 'NOT $exists' : exists;
+    },
+    parameters: predicate.parameters,
+    columns: traversal.correlationRight,
+  );
+}
+
+final class _RelationTraversal<Target> {
+  const _RelationTraversal({
+    required this.path,
+    required this.target,
+    required this.correlationLeft,
+    required this.correlationRight,
+    this.through,
+    this.targetJoinLeft = const [],
+    this.targetJoinRight = const [],
+  });
+
+  factory _RelationTraversal.create(RivetRelationDescriptor<Target> relation) {
+    final owner = relation._ownerSchema;
+    final targetFactory = relation._targetSchema;
+    final path = relation._name;
+    if (owner == null || targetFactory == null || path == null) {
+      throw StateError('Generated relation metadata is not bound to its table schema.');
+    }
+    final target = targetFactory();
+    if (relation is RivetOneRelation<Target>) {
+      relation.resolve(target.definition);
+      _validateTraversalMapping(path, relation.fields, relation.references, owner, target);
+      return _RelationTraversal(
+        path: path,
+        target: target,
+        correlationLeft: relation.references,
+        correlationRight: relation.fields,
+      );
+    }
+    if (relation is RivetManyRelation<Target>) {
+      relation.resolve(target.definition);
+      final inverse = relation.inverseRelation ?? _inferTraversalInverse(relation, owner, target);
+      inverse.resolve(owner.definition);
+      _validateTraversalMapping(path, inverse.references, inverse.fields, owner, target);
+      return _RelationTraversal(
+        path: path,
+        target: target,
+        correlationLeft: inverse.fields,
+        correlationRight: inverse.references,
+      );
+    }
+    final throughRelation = relation as RivetManyThroughRelation<Target, dynamic, dynamic>;
+    final through = relation._throughSchema?.call();
+    if (through == null)
+      throw StateError('Through relation $path has no generated junction schema.');
+    throughRelation.resolveThrough(through.definition);
+    final sourceRelation = throughRelation.sourceRelation!;
+    final targetRelation = throughRelation.targetRelation!;
+    if (!through.relations.values.contains(sourceRelation) ||
+        !through.relations.values.contains(targetRelation) ||
+        sourceRelation.targetTable != owner.definition.runtimeType ||
+        targetRelation.targetTable != target.definition.runtimeType) {
+      throw ArgumentError(
+        'Through relation $path must select junction one-relations to its source and target.',
+      );
+    }
+    sourceRelation.resolve(owner.definition);
+    targetRelation.resolve(target.definition);
+    _validateTraversalMapping(
+      '$path.source',
+      sourceRelation.references,
+      sourceRelation.fields,
+      owner,
+      through,
+    );
+    _validateTraversalMapping(
+      '$path.target',
+      targetRelation.fields,
+      targetRelation.references,
+      through,
+      target,
+    );
+    return _RelationTraversal(
+      path: path,
+      target: target,
+      through: through,
+      correlationLeft: sourceRelation.fields,
+      correlationRight: sourceRelation.references,
+      targetJoinLeft: targetRelation.references,
+      targetJoinRight: targetRelation.fields,
+    );
+  }
+
+  final String path;
+  final RivetTableSchema<Target, dynamic> target;
+  final RivetTableSchema<dynamic, dynamic>? through;
+  final List<RivetColumn<dynamic>> correlationLeft;
+  final List<RivetColumn<dynamic>> correlationRight;
+  final List<RivetColumn<dynamic>> targetJoinLeft;
+  final List<RivetColumn<dynamic>> targetJoinRight;
+}
+
+RivetRelationDescriptor<dynamic> _inferTraversalInverse(
+  RivetRelationDescriptor<dynamic> relation,
+  RivetTableSchema<dynamic, dynamic> owner,
+  RivetTableSchema<dynamic, dynamic> target,
+) {
+  final candidates = target.relations.values
+      .where(
+        (candidate) =>
+            candidate.kind == RivetRelationKind.one &&
+            candidate.targetTable == owner.definition.runtimeType,
+      )
+      .toList(growable: false);
+  if (candidates.length != 1) {
+    throw ArgumentError(
+      'Relation ${relation._name} requires exactly one inverse; found ${candidates.length}.',
+    );
+  }
+  return candidates.single;
+}
+
+void _validateTraversalMapping(
+  String path,
+  List<RivetColumn<dynamic>> source,
+  List<RivetColumn<dynamic>> target,
+  RivetTableSchema<dynamic, dynamic> sourceSchema,
+  RivetTableSchema<dynamic, dynamic> targetSchema,
+) {
+  if (source.isEmpty || source.length != target.length) {
+    throw ArgumentError('Relation $path must map the same non-zero number of columns.');
+  }
+  if (source.any((column) => !sourceSchema.columns.contains(column)) ||
+      target.any((column) => !targetSchema.columns.contains(column))) {
+    throw ArgumentError('Relation $path maps columns outside its source or target table.');
+  }
+  for (var index = 0; index < source.length; index++) {
+    if (source[index].codec.cast != target[index].codec.cast) {
+      throw ArgumentError('Relation $path maps incompatible column storage types.');
+    }
+  }
 }
 
 final class RivetInclude<Definition, Row> {

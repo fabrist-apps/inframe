@@ -163,5 +163,23 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should filter roots across nested through paths without loading them',
+      () async {
+        final books = await ThroughBooks.db
+            .find(
+              where: (book) => book.tags.any(
+                (tag) => tag.notes.any((note) => note.body.equals('beta note')),
+              ),
+            )
+            .get(database);
+
+        expect(books.map((book) => book.title), ['First']);
+        expect(books.single.tags.isLoaded, isFalse);
+        expect(statements, hasLength(1));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }

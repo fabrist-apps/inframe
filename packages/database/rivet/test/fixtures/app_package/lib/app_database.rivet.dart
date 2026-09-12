@@ -275,7 +275,7 @@ final class _$PackageUsersDB
       projects: relations.read('projects'),
     );
 
-    return RivetTableSchema<PackageUsers, PackageUsersRow>(
+    final builtSchema = RivetTableSchema<PackageUsers, PackageUsersRow>(
       schemaName: 'fixture',
       tableName: 'appUsers',
       definition: definition,
@@ -314,6 +314,17 @@ final class _$PackageUsersDB
         'projects': definition.projects as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.package.bind(
+      name: 'package',
+      ownerSchema: builtSchema,
+      targetSchema: () => schema.PackageUsers.db.buildSchema(),
+    );
+    definition.projects.bind(
+      name: 'projects',
+      ownerSchema: builtSchema,
+      targetSchema: () => AppProjects.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -567,7 +578,7 @@ final class _$AppProjectsDB
       labels: relations.read('labels'),
     );
 
-    return RivetTableSchema<AppProjects, AppProjectsRow>(
+    final builtSchema = RivetTableSchema<AppProjects, AppProjectsRow>(
       schemaName: 'fixture',
       tableName: 'appProjects',
       definition: definition,
@@ -598,6 +609,23 @@ final class _$AppProjectsDB
         'labels': definition.labels as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.owner.bind(
+      name: 'owner',
+      ownerSchema: builtSchema,
+      targetSchema: () => PackageUsers.db.buildSchema(),
+    );
+    definition.packageOwner.bind(
+      name: 'packageOwner',
+      ownerSchema: builtSchema,
+      targetSchema: () => schema.PackageUsers.db.buildSchema(),
+    );
+    definition.labels.bind(
+      name: 'labels',
+      ownerSchema: builtSchema,
+      targetSchema: () => schema.PackageLabels.db.buildSchema(),
+      throughSchema: () => AppProjectLabels.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.
@@ -797,7 +825,7 @@ final class _$AppProjectLabelsDB
       label: relations.read('label'),
     );
 
-    return RivetTableSchema<AppProjectLabels, AppProjectLabelsRow>(
+    final builtSchema = RivetTableSchema<AppProjectLabels, AppProjectLabelsRow>(
       schemaName: 'fixture',
       tableName: 'appProjectLabels',
       definition: definition,
@@ -824,6 +852,17 @@ final class _$AppProjectLabelsDB
         'label': definition.label as RivetRelationDescriptor<Object?>,
       },
     );
+    definition.project.bind(
+      name: 'project',
+      ownerSchema: builtSchema,
+      targetSchema: () => AppProjects.db.buildSchema(),
+    );
+    definition.label.bind(
+      name: 'label',
+      ownerSchema: builtSchema,
+      targetSchema: () => schema.PackageLabels.db.buildSchema(),
+    );
+    return builtSchema;
   }
 
   /// Creates a reusable read plan with typed relation includes.

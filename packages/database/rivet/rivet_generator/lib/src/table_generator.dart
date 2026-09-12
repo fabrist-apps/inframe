@@ -116,6 +116,20 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
               '${literal(field.displayName)}: definition.${field.displayName} as RivetRelationDescriptor<Object?>',
         )
         .join(', ');
+    final relationBindings = relations
+        .map((field) {
+          final types = _relationTypes(field);
+          final throughFactory = types.through == null
+              ? ''
+              : '        throughSchema: () => ${types.through}.db.buildSchema(),\n';
+          return '''
+      definition.${field.displayName}.bind(
+        name: ${literal(field.displayName)},
+        ownerSchema: builtSchema,
+        targetSchema: () => ${types.target}.db.buildSchema(),
+$throughFactory      );''';
+        })
+        .join('\n');
     final includeMethods = relations
         .map((field) {
           final types = _relationTypes(field);
@@ -334,7 +348,7 @@ final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
     }
     final definition = createDefinition();
 $rowDecoder
-    return RivetTableSchema<$className, $rowName>(
+    ${relations.isEmpty ? 'return' : 'final builtSchema ='} RivetTableSchema<$className, $rowName>(
       schemaName: ${literal(schemaName)},
       tableName: ${literal(tableName)},
 $renameMetadata      definition: definition,
@@ -345,6 +359,7 @@ $renameMetadata      definition: definition,
 $schemaDecoders
 $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},\n'}
     );
+${relations.isEmpty ? '' : '$relationBindings\n    return builtSchema;'}
   }
 
 $findMethod

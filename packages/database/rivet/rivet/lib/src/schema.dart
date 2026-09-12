@@ -1324,9 +1324,9 @@ class RivetColumn<T> implements RivetExpression<T> {
   }
 
   RivetPredicate equals(T value) {
-    if (value == null) return RivetPredicate._raw('$sql IS NULL', [this]);
+    if (value == null) return RivetPredicate._raw(() => '$sql IS NULL', [this]);
     final encoded = _convert('encode', () => codec.encode(value));
-    return RivetPredicate._value('$sql = ', '::${codec.cast}', encoded, [this]);
+    return RivetPredicate._value(() => '$sql = ', '::${codec.cast}', encoded, [this]);
   }
 
   T decodeValue(Object? value, {required bool isSqlNull}) =>
@@ -1705,68 +1705,114 @@ final class RivetPredicate {
     this._renderSql,
     List<Object?> parameters,
     List<RivetColumn<dynamic>> columns,
+    this.usesRelations,
   ) : parameters = List.unmodifiable(parameters),
       columns = List.unmodifiable(columns);
 
-  RivetPredicate._raw(String sql, List<RivetColumn<dynamic>> columns)
-    : this._((_) => sql, const [], columns);
+  RivetPredicate._raw(String Function() sql, List<RivetColumn<dynamic>> columns)
+    : this._((_, _) => sql(), const [], columns, false);
 
   RivetPredicate._value(
-    String before,
+    String Function() before,
     String after,
     Object? parameter,
     List<RivetColumn<dynamic>> columns,
-  ) : this._((placeholder) => '$before${placeholder(0)}$after', [parameter], columns);
+  ) : this._(
+        (placeholder, _) => '${before()}${placeholder(0)}$after',
+        [parameter],
+        columns,
+        false,
+      );
+
+  RivetPredicate.relation({
+    required String Function(
+      String Function(int index) placeholder,
+      String Function() nextAlias,
+    )
+    renderSql,
+    required List<Object?> parameters,
+    required List<RivetColumn<dynamic>> columns,
+  }) : this._(
+         (placeholder, nextAlias) => renderSql(
+           placeholder,
+           nextAlias ??
+               (throw const RivetUnsupportedQueryException(
+                 'Relation predicates require an aliased query context.',
+               )),
+         ),
+         parameters,
+         columns,
+         true,
+       );
 
   RivetPredicate._comparison(
     RivetExpression<dynamic> left,
     String operator,
     RivetExpression<dynamic> right,
   ) : this._(
-        (placeholder) =>
+        (placeholder, _) =>
             '${left.renderPlaceholders(placeholder)} $operator '
             '${right.renderPlaceholders((index) => placeholder(left.parameters.length + index))}',
         [...left.parameters, ...right.parameters],
         [...left.columns, ...right.columns],
+        false,
       );
 
-  final String Function(String Function(int index) placeholder) _renderSql;
+  final String Function(
+    String Function(int index) placeholder,
+    String Function()? nextAlias,
+  )
+  _renderSql;
   final List<Object?> parameters;
   final List<RivetColumn<dynamic>> columns;
+  final bool usesRelations;
 
-  String get sql => _render((_) => '@value');
+  String get sql => _render((_) => '@value', null);
 
-  String renderParameters({int startAt = 1}) => _render(
+  String renderParameters({int startAt = 1, String Function()? nextAlias}) => _render(
     (index) => '\$${startAt + index}',
+    nextAlias,
   );
 
   String renderLiterals() => _render(
     (index) => _postgresLiteral(parameters[index]),
+    null,
   );
 
   RivetPredicate operator &(RivetPredicate other) => RivetPredicate._(
-    (placeholder) =>
-        '(${_renderSql(placeholder)}) AND '
-        '(${other._renderSql((index) => placeholder(parameters.length + index))})',
+    (placeholder, nextAlias) =>
+        '(${_renderSql(placeholder, nextAlias)}) AND '
+        '(${other._renderSql((index) => placeholder(parameters.length + index), nextAlias)})',
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
+    usesRelations || other.usesRelations,
   );
 
   RivetPredicate operator |(RivetPredicate other) => RivetPredicate._(
-    (placeholder) =>
-        '(${_renderSql(placeholder)}) OR '
-        '(${other._renderSql((index) => placeholder(parameters.length + index))})',
+    (placeholder, nextAlias) =>
+        '(${_renderSql(placeholder, nextAlias)}) OR '
+        '(${other._renderSql((index) => placeholder(parameters.length + index), nextAlias)})',
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
+    usesRelations || other.usesRelations,
   );
 
   RivetPredicate operator ~() => RivetPredicate._(
-    (placeholder) => 'NOT (${_renderSql(placeholder)})',
+    (placeholder, nextAlias) => 'NOT (${_renderSql(placeholder, nextAlias)})',
     parameters,
     columns,
+    usesRelations,
   );
 
-  String _render(String Function(int index) placeholder) => _renderSql(placeholder);
+  String renderWith(
+    String Function(int index) placeholder,
+    String Function() nextAlias,
+  ) => _renderSql(placeholder, nextAlias);
+
+  String _render(
+    String Function(int index) placeholder,
+    String Function()? nextAlias,
+  ) => _renderSql(placeholder, nextAlias);
 }
 
 String _postgresLiteral(Object? value) => switch (value) {

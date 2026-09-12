@@ -36,8 +36,14 @@ final class RelationalUsers extends RivetTableDefinition<RelationalUsers> {
 
   late final id = integer().primaryKey()();
   late final name = text()();
+  late final managerId = integer().nullable()();
   late final authoredPosts = many<RelationalPosts>(relation: (post) => post.author)();
   late final reviewedPosts = many<RelationalPosts>(relation: (post) => post.reviewer)();
+  late final manager = one<RelationalUsers>(
+    fields: [managerId],
+    references: (user) => [user.id],
+  )();
+  late final reports = many<RelationalUsers>(relation: (user) => user.manager)();
 }
 
 @RivetTable(schema: 'fbr146')
