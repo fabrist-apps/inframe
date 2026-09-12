@@ -508,31 +508,32 @@ RivetCompiledQuery _compileUpdate<Definition, Row>(
   var aliasIndex = 0;
   String nextAlias() => '__rivet_t${aliasIndex++}';
   final rootAlias = usesRelations ? nextAlias() : null;
-  if (rootAlias != null) schema.qualify(rootAlias);
-  final parameters = <Object?>[];
-  final assignments = _compileUpdateAssignments(schema, companion, parameters);
-  if (assignments.isEmpty) {
-    throw RivetEmptyUpdateException(
-      'Update ${schema.schemaName}.${schema.tableName} has no assignments.',
+  return _withSchemaQualifier(schema, rootAlias, () {
+    final parameters = <Object?>[];
+    final assignments = _compileUpdateAssignments(schema, companion, parameters);
+    if (assignments.isEmpty) {
+      throw RivetEmptyUpdateException(
+        'Update ${schema.schemaName}.${schema.tableName} has no assignments.',
+      );
+    }
+    final sql = StringBuffer(
+      'UPDATE ${schema.qualifiedName}'
+      '${rootAlias == null ? '' : ' AS ${quoteIdentifier(rootAlias)}'} '
+      'SET ${assignments.join(', ')}',
     );
-  }
-  final sql = StringBuffer(
-    'UPDATE ${schema.qualifiedName}'
-    '${rootAlias == null ? '' : ' AS ${quoteIdentifier(rootAlias)}'} '
-    'SET ${assignments.join(', ')}',
-  );
-  if (predicate != null) {
-    final rendered = predicate.renderParameters(
-      startAt: parameters.length + 1,
-      nextAlias: usesRelations ? nextAlias : null,
-    );
-    sql.write(' WHERE $rendered');
-    parameters.addAll(predicate.parameters);
-  }
-  if (returning) {
-    sql.write(_returning(schema));
-  }
-  return RivetCompiledQuery(sql.toString(), parameters);
+    if (predicate != null) {
+      final rendered = predicate.renderParameters(
+        startAt: parameters.length + 1,
+        nextAlias: usesRelations ? nextAlias : null,
+      );
+      sql.write(' WHERE $rendered');
+      parameters.addAll(predicate.parameters);
+    }
+    if (returning) {
+      sql.write(_returning(schema));
+    }
+    return RivetCompiledQuery(sql.toString(), parameters);
+  });
 }
 
 List<String> _compileUpdateAssignments<Definition, Row>(
@@ -597,23 +598,38 @@ RivetCompiledQuery _compileDelete<Definition, Row>(
   var aliasIndex = 0;
   String nextAlias() => '__rivet_t${aliasIndex++}';
   final rootAlias = usesRelations ? nextAlias() : null;
-  if (rootAlias != null) schema.qualify(rootAlias);
-  final sql = StringBuffer(
-    'DELETE FROM ${schema.qualifiedName}'
-    '${rootAlias == null ? '' : ' AS ${quoteIdentifier(rootAlias)}'}',
-  );
-  final parameters = <Object?>[];
-  if (predicate != null) {
-    final rendered = predicate.renderParameters(
-      nextAlias: usesRelations ? nextAlias : null,
+  return _withSchemaQualifier(schema, rootAlias, () {
+    final sql = StringBuffer(
+      'DELETE FROM ${schema.qualifiedName}'
+      '${rootAlias == null ? '' : ' AS ${quoteIdentifier(rootAlias)}'}',
     );
-    sql.write(' WHERE $rendered');
-    parameters.addAll(predicate.parameters);
+    final parameters = <Object?>[];
+    if (predicate != null) {
+      final rendered = predicate.renderParameters(
+        nextAlias: usesRelations ? nextAlias : null,
+      );
+      sql.write(' WHERE $rendered');
+      parameters.addAll(predicate.parameters);
+    }
+    if (returning) {
+      sql.write(_returning(schema));
+    }
+    return RivetCompiledQuery(sql.toString(), parameters);
+  });
+}
+
+Result _withSchemaQualifier<Definition, Row, Result>(
+  RivetTableSchema<Definition, Row> schema,
+  String? qualifier,
+  Result Function() compile,
+) {
+  if (qualifier == null) return compile();
+  schema.qualify(qualifier);
+  try {
+    return compile();
+  } finally {
+    schema.unqualify();
   }
-  if (returning) {
-    sql.write(_returning(schema));
-  }
-  return RivetCompiledQuery(sql.toString(), parameters);
 }
 
 String _returning<Definition, Row>(RivetTableSchema<Definition, Row> schema) =>

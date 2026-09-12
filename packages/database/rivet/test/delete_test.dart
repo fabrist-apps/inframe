@@ -61,6 +61,21 @@ void main() {
       );
       expect(executor.queries, isEmpty);
     });
+
+    test('should clear relation aliases after compilation', () async {
+      late MutationDeleteParents definition;
+
+      await MutationDeleteParents.db
+          .delete(
+            where: (parents) {
+              definition = parents;
+              return parents.cascadeChildren.any((child) => child.id.equals(1));
+            },
+          )
+          .execute(executor);
+
+      expect(definition.id.qualifier, isNull);
+    });
   });
 }
 
