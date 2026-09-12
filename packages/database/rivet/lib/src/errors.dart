@@ -45,3 +45,21 @@ final class RivetUnsupportedQueryException extends RivetException {
 final class RivetExecutorClosedException extends RivetException {
   const RivetExecutorClosedException(super.message);
 }
+
+final class AfterCommitFailure {
+  const AfterCommitFailure(this.error, this.stackTrace);
+
+  final Object error;
+  final StackTrace stackTrace;
+}
+
+final class AfterCommitException extends RivetException {
+  AfterCommitException(this.failures, {required this.alreadyCommitted})
+    : super(
+        '${failures.length} after-commit callback${failures.length == 1 ? '' : 's'} failed; '
+        'alreadyCommitted=$alreadyCommitted.',
+      );
+
+  final List<AfterCommitFailure> failures;
+  final bool alreadyCommitted;
+}

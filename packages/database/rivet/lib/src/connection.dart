@@ -109,10 +109,11 @@ final class RivetDb implements RivetExecutor {
   Future<T> transaction<T>(Future<T> Function(RivetTransaction transaction) callback) async {
     _acceptWork();
     Object? callbackFailure;
+    late RivetTransaction transaction;
     try {
-      return await _pool.withConnection(
+      final result = await _pool.withConnection(
         (connection) => connection.runTx((session) async {
-          final transaction = RivetTransaction._(session, _connection);
+          transaction = RivetTransaction._(session, _connection);
           try {
             return await runZoned(
               () async {
@@ -130,11 +131,30 @@ final class RivetDb implements RivetExecutor {
           }
         }),
       );
+      await _runAfterCommitCallbacks(this, transaction._callbacks);
+      return result;
     } on RivetException {
       rethrow;
     } catch (error) {
       if (identical(error, callbackFailure)) rethrow;
       throw RivetDatabaseException('PostgreSQL transaction failed.', error);
+    } finally {
+      _finishWork();
+    }
+  }
+
+  Future<void> afterCommit(FutureOr<void> Function() callback) async {
+    if (Zone.current[_transactionDatabaseZoneKey] == this) {
+      throw const RivetExecutorClosedException(
+        'Use transaction.afterCommit inside this database transaction.',
+      );
+    }
+    _acceptWork();
+    try {
+      await runZoned(
+        () => Future<void>.sync(callback),
+        zoneValues: {_afterCommitDatabaseZoneKey: this},
+      );
     } finally {
       _finishWork();
     }
@@ -180,7 +200,8 @@ final class RivetDb implements RivetExecutor {
   }
 
   Future<void> close() {
-    if (Zone.current[_transactionDatabaseZoneKey] == this) {
+    if (Zone.current[_transactionDatabaseZoneKey] == this ||
+        Zone.current[_afterCommitDatabaseZoneKey] == this) {
       throw const RivetExecutorClosedException(
         'Cannot close a database from its own transaction callback.',
       );
@@ -199,6 +220,27 @@ final class RivetDb implements RivetExecutor {
 }
 
 final _transactionDatabaseZoneKey = Object();
+final _afterCommitDatabaseZoneKey = Object();
+
+Future<void> _runAfterCommitCallbacks(
+  RivetDb database,
+  List<FutureOr<void> Function()> callbacks,
+) async {
+  final failures = <AfterCommitFailure>[];
+  for (final callback in callbacks) {
+    try {
+      await runZoned(
+        () => Future<void>.sync(callback),
+        zoneValues: {_afterCommitDatabaseZoneKey: database},
+      );
+    } catch (error, stackTrace) {
+      failures.add(AfterCommitFailure(error, stackTrace));
+    }
+  }
+  if (failures.isNotEmpty) {
+    throw AfterCommitException(List.unmodifiable(failures), alreadyCommitted: true);
+  }
+}
 
 final class RivetTransaction implements RivetExecutor {
   RivetTransaction._(this._session, this._connection);
@@ -206,6 +248,14 @@ final class RivetTransaction implements RivetExecutor {
   final pg.TxSession _session;
   final RivetConnection _connection;
   bool _active = true;
+  final List<FutureOr<void> Function()> _callbacks = [];
+
+  void afterCommit(FutureOr<void> Function() callback) {
+    if (!_active) {
+      throw const RivetExecutorClosedException('The transaction executor has expired.');
+    }
+    _callbacks.add(callback);
+  }
 
   @override
   Future<List<Row>> execute<Row>(
