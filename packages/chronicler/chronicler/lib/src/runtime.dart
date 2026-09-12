@@ -723,9 +723,14 @@ final class ChroniclerRuntime {
       throw const ChroniclerConfigurationException('timeout', 'must be positive');
     }
     final finalizedByCall = <_RecordDisposition>[];
-    if (_state == ChroniclerRuntimeState.running && _flushFinalizations.isNotEmpty) {
-      for (final record in _flushFinalizations.removeFirst()) {
+    if (_state == ChroniclerRuntimeState.running) {
+      for (final record in metrics.seal()) {
         finalizedByCall.add(_finalizeForFlush(record));
+      }
+      if (_flushFinalizations.isNotEmpty) {
+        for (final record in _flushFinalizations.removeFirst()) {
+          finalizedByCall.add(_finalizeForFlush(record));
+        }
       }
     }
     final snapshot = <_RecordDisposition>{
@@ -761,10 +766,12 @@ final class ChroniclerRuntime {
 
   void _beginClose(Completer<DeliveryReport> completer) {
     _state = ChroniclerRuntimeState.closing;
-    metrics.stop();
     diagnostics.close();
     final startedAt = _elapsed.elapsed;
     final finalizations = <_RecordDisposition>[];
+    for (final record in metrics.seal(scheduleNext: false)) {
+      finalizations.add(_finalizeForClose(record));
+    }
     while (_flushFinalizations.isNotEmpty) {
       for (final record in _flushFinalizations.removeFirst()) {
         finalizations.add(_finalizeForClose(record));
@@ -895,9 +902,11 @@ final class ChroniclerRuntime {
     if (enabled == _enabledSignals.contains(signal)) return;
     if (enabled) {
       _enabledSignals.add(signal);
+      if (signal == ChroniclerSignal.metrics) metrics.enable();
       return;
     }
     _enabledSignals.remove(signal);
+    if (signal == ChroniclerSignal.metrics) metrics.disable();
     if (signal == ChroniclerSignal.traces) {
       for (final span in _liveSpans) {
         span

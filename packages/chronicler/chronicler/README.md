@@ -109,6 +109,15 @@ different sensitive values replaced by `[REDACTED]` therefore intentionally shar
 configured total and per-instrument series limits reject new dimensions while existing series remain
 usable.
 
+`flush()` closes the current partial metric interval before taking its delivery snapshot. New
+measurements immediately enter a fresh full interval and cannot extend that flush. `close()` seals
+the final partial interval after blocking new recording, then sends it through the same bounded
+shutdown path. Retries keep the finalized aggregate ID, interval boundaries, and contents unchanged.
+
+Disabling metric collection discards queued metric records and unfinished aggregates. Existing
+instrument handles remain valid; re-enabling starts a fresh empty interval and accepts only new
+measurements. A timer superseded by a flush or collection change cannot finalize the old interval.
+
 ## Error occurrences
 
 Capture an error occurrence explicitly when an application boundary handles or observes it:

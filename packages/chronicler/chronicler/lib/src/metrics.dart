@@ -43,6 +43,7 @@ final class ChroniclerMetrics {
   late DateTime _intervalStart;
   late Duration _intervalElapsed;
   Timer? _timer;
+  var _generation = 0;
   var _seriesCount = 0;
 
   /// Returns a counter that records nonnegative interval changes.
@@ -161,17 +162,27 @@ final class ChroniclerMetrics {
   }
 
   void _scheduleInterval() {
-    _timer = Timer(_options.interval, _rotate);
+    final generation = _generation;
+    _timer = Timer(_options.interval, () => _onInterval(generation));
   }
 
-  void _rotate() {
+  void _onInterval(int generation) {
+    if (generation != _generation) return;
+    seal().forEach(_finalize);
+  }
+
+  /// Seals the current partial interval and begins a fresh interval.
+  List<MetricRecord> seal({bool scheduleNext = true}) {
+    _timer?.cancel();
+    _generation++;
     final intervalEnd = _now();
     final elapsedEnd = _elapsed();
     final durationMicros = (elapsedEnd - _intervalElapsed).inMicroseconds;
+    final records = <MetricRecord>[];
     for (final instrument in _instruments.values) {
       for (final series in instrument.series.values) {
         if (series.count == 0) continue;
-        _finalize(
+        records.add(
           _createRecord(
             MetricPayload(
               name: instrument.name,
@@ -194,18 +205,38 @@ final class ChroniclerMetrics {
     }
     _intervalStart = intervalEnd;
     _intervalElapsed = elapsedEnd;
+    if (scheduleNext) _scheduleInterval();
+    return records;
+  }
+
+  /// Discards unfinished aggregates and pauses interval scheduling.
+  void disable() {
+    _timer?.cancel();
+    _generation++;
+    for (final instrument in _instruments.values) {
+      instrument.series.clear();
+    }
+    _seriesCount = 0;
+  }
+
+  /// Starts a fresh empty interval while retaining instrument definitions.
+  void enable() {
+    _generation++;
+    _intervalStart = _now();
+    _intervalElapsed = _elapsed();
     _scheduleInterval();
   }
 
   /// Stops interval scheduling without finalizing current measurements.
   void stop() {
     _timer?.cancel();
+    _generation++;
     _timer = null;
   }
 
   /// Rotates once and stops the next timer for deterministic package tests.
   void rotateForTesting() {
-    _rotate();
+    seal().forEach(_finalize);
     stop();
   }
 
