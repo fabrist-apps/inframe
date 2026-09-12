@@ -2,24 +2,55 @@ import 'dart:collection';
 
 /// Why a lifecycle operation discarded a record.
 enum DropReason {
+  /// The record failed schema or field validation.
   invalidRecord,
+
+  /// The final encoded record exceeded its byte limit.
   recordTooLarge,
+
+  /// The bounded pending queue had no remaining capacity.
   queueFull,
+
+  /// Collection was disabled before the record became terminal.
   collectionDisabled,
+
+  /// The configured sampling policy excluded the record.
   sampledOut,
+
+  /// The capture hook explicitly returned no record.
   hookDropped,
+
+  /// The capture hook threw while processing the record.
   hookFailed,
+
+  /// The exporter permanently rejected the record.
   exportRejected,
+
+  /// The record consumed its configured delivery attempts.
   attemptsExhausted,
+
+  /// Shutdown ended before the record reached a destination outcome.
   shutdown,
+
+  /// Recording occurred after shutdown started.
   runtimeClosed,
 }
 
 /// The Chronicler lifecycle state when an operation completed.
-enum ChroniclerRuntimeState { running, closing, closed }
+enum ChroniclerRuntimeState {
+  /// The runtime accepts records and configuration changes.
+  running,
+
+  /// The runtime is draining final work and releasing its exporter.
+  closing,
+
+  /// The runtime has finished shutdown.
+  closed,
+}
 
 /// Immutable delivery accounting for one flush or close snapshot.
 final class DeliveryReport {
+  /// Creates immutable accounting for one lifecycle snapshot.
   DeliveryReport({
     required this.accepted,
     required Map<DropReason, int> dropped,

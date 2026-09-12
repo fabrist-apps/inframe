@@ -5,17 +5,27 @@ import 'package:chronicler/src/configuration.dart';
 
 const _maximumPortableInteger = 9007199254740991;
 
+/// Reports why caller-supplied record data is invalid.
 final class RecordValidationException implements Exception {
+  /// Creates a validation failure with a payload-free [reason].
   const RecordValidationException(this.reason);
+
+  /// The payload-free validation reason.
   final String reason;
 }
 
+/// Validates and snapshots JSON-compatible record attributes.
 final class RecordValidator {
+  /// Creates a validator with field [limits] and an optional snapshot budget.
   RecordValidator(this.limits, {this.maxSnapshotBytes});
 
+  /// Structural and string limits applied to caller data.
   final ChroniclerLimits limits;
+
+  /// Maximum encoded bytes copied during a snapshot, when configured.
   final int? maxSnapshotBytes;
 
+  /// Validates and deeply freezes [attributes].
   Map<String, Object?> snapshotAttributes(Map<String, Object?> attributes) {
     final activeContainers = HashSet<Object>.identity();
     final budget = switch (maxSnapshotBytes) {
@@ -126,6 +136,7 @@ final class RecordValidator {
     }
   }
 
+  /// Validates [value] as Unicode text within [maxBytes].
   String validateString(String value, int maxBytes, String name) {
     for (var index = 0; index < value.length; index++) {
       final codeUnit = value.codeUnitAt(index);

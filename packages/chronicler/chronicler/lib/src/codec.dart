@@ -6,36 +6,63 @@ import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/record_validation.dart';
 import 'package:chrono_id/chrono_id.dart';
 
+/// Thrown when a model cannot be encoded under the codec contract.
 final class ChroniclerEncodingException implements Exception {
+  /// Creates an encoding failure with a payload-free [reason].
   const ChroniclerEncodingException(this.reason);
+
+  /// The payload-free encoding failure reason.
   final String reason;
 }
 
+/// Result of decoding untrusted Chronicler bytes.
 sealed class DecodeResult<T> {
+  /// Creates the base type for a decode result.
   const DecodeResult();
 }
 
+/// A successfully decoded [value].
 final class Decoded<T> extends DecodeResult<T> {
+  /// Creates a successful decode result containing [value].
   const Decoded(this.value);
+
+  /// The decoded value.
   final T value;
 }
 
+/// A payload-free typed decoding failure.
 final class DecodeFailure<T> extends DecodeResult<T> {
+  /// Creates a failed decode result with [reason].
   const DecodeFailure(this.reason);
+
+  /// The failure category.
   final DecodeFailureReason reason;
 }
 
+/// Stable categories returned when decoding fails.
 enum DecodeFailureReason {
+  /// Input bytes are not valid UTF-8.
   invalidUtf8,
+
+  /// UTF-8 input is not valid JSON.
   invalidJson,
+
+  /// The declared schema version is unsupported.
   unsupportedVersion,
+
+  /// The record kind is not recognized.
   unknownKind,
+
+  /// A required field is missing or invalid.
   invalidField,
+
+  /// Input exceeds a configured count or byte limit.
   limitExceeded,
 }
 
 /// Canonical compact UTF-8 JSON codec for version-one records and batches.
 final class ChroniclerCodec {
+  /// Creates a version-one codec with explicit decode and encode limits.
   const ChroniclerCodec({
     this.limits = const ChroniclerLimits(),
     this.maxRecordBytes = 64 * 1024,
@@ -43,9 +70,16 @@ final class ChroniclerCodec {
     this.maxBatchRecords = 100,
   });
 
+  /// Record schema and caller-data limits.
   final ChroniclerLimits limits;
+
+  /// Maximum bytes accepted or produced for one record.
   final int maxRecordBytes;
+
+  /// Maximum bytes accepted or produced for one batch.
   final int maxBatchBytes;
+
+  /// Maximum records accepted or produced in one batch.
   final int maxBatchRecords;
 
   RecordValidator get _recordValidator => RecordValidator(limits, maxSnapshotBytes: maxRecordBytes);
@@ -61,6 +95,7 @@ final class ChroniclerCodec {
     }
   }
 
+  /// Encodes [record] as canonical compact version-one UTF-8 JSON.
   Uint8List encodeRecord(ChroniclerRecord record) {
     try {
       validateRecord(record);
@@ -76,6 +111,7 @@ final class ChroniclerCodec {
     }
   }
 
+  /// Encodes a nonempty [batch] as canonical compact version-one UTF-8 JSON.
   Uint8List encodeBatch(ChroniclerBatch batch) {
     if (batch.records.isEmpty || batch.records.length > maxBatchRecords) {
       throw const ChroniclerEncodingException('batch record count is invalid');
@@ -100,6 +136,7 @@ final class ChroniclerCodec {
     return encoded;
   }
 
+  /// Decodes one version-one record without throwing for malformed input.
   DecodeResult<ChroniclerRecord> decodeRecord(Uint8List bytes) {
     if (bytes.length > maxRecordBytes) {
       return const DecodeFailure(DecodeFailureReason.limitExceeded);
@@ -117,6 +154,7 @@ final class ChroniclerCodec {
     }
   }
 
+  /// Decodes one nonempty version-one batch atomically.
   DecodeResult<ChroniclerBatch> decodeBatch(Uint8List bytes) {
     if (bytes.length > maxBatchBytes) {
       return const DecodeFailure(DecodeFailureReason.limitExceeded);

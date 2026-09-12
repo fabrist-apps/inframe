@@ -13,6 +13,7 @@ import 'package:chrono_id/chrono_id.dart';
 
 /// Configured owner of capture and export resources.
 final class Chronicler {
+  /// Creates a runtime and transfers ownership of [exporter] to it.
   Chronicler({
     required String appId,
     required String release,
@@ -29,13 +30,16 @@ final class Chronicler {
          options: options,
        );
 
+  /// Default field-name terms replaced before buffering.
   static const Set<String> defaultSensitiveFieldTerms =
       ChroniclerOptions.defaultSensitiveFieldTerms;
 
   final ChroniclerRuntime _runtime;
 
+  /// A borrowed recorder suitable for binding to a request context.
   ChroniclerRecorder get recorder => ChroniclerRecorder._(_runtime);
 
+  /// An immutable snapshot of exact runtime diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => _runtime.diagnosticCounts;
 
   /// Waits for the records owned when this call begins to reach a disposition.
@@ -45,13 +49,16 @@ final class Chronicler {
   /// Stops recording, drains bounded work, and releases the owned exporter.
   Future<DeliveryReport> close() => _runtime.close();
 
+  /// Whether collection currently accepts [signal].
   bool isCollectionEnabled(ChroniclerSignal signal) => _runtime.isCollectionEnabled(signal);
 
+  /// Enables or disables collection for [signal] synchronously.
   // API contract uses a positional boolean for symmetric runtime toggles.
   // ignore: avoid_positional_boolean_parameters
   void setCollectionEnabled(ChroniclerSignal signal, bool enabled) =>
       _runtime.setCollectionEnabled(signal, enabled);
 
+  /// Enables or disables trace-context propagation independently of collection.
   // API contract uses a positional boolean for symmetric runtime toggles.
   // ignore: avoid_positional_boolean_parameters
   void setPropagationEnabled(bool enabled) => _runtime.setPropagationEnabled(enabled);
@@ -63,6 +70,7 @@ final class ChroniclerRecorder {
 
   final ChroniclerRuntime _runtime;
 
+  /// Records a structured log without waiting for transport work.
   void recordLog(
     LogSeverity severity,
     String message, {
@@ -78,6 +86,7 @@ final class ChroniclerRecorder {
   );
 }
 
+/// Internal owner of queue, delivery, and lifecycle state.
 final class ChroniclerRuntime {
   ChroniclerRuntime._({
     required this.appId,
@@ -98,6 +107,7 @@ final class ChroniclerRuntime {
        ),
        diagnostics = DiagnosticChannel(options.diagnostics);
 
+  /// Validates [options] and creates a running delivery state machine.
   factory ChroniclerRuntime.create({
     required String appId,
     required String release,
@@ -123,14 +133,31 @@ final class ChroniclerRuntime {
     );
   }
 
+  /// Application identifier copied into every record envelope.
   final String appId;
+
+  /// Application release copied into every record envelope.
   final String release;
+
+  /// Runtime source copied into every record envelope.
   final ChroniclerSource source;
+
+  /// Application exporter owned by this runtime.
   final ChroniclerExporter exporter;
+
+  /// Optional build identifier copied into every record envelope.
   final String? buildId;
+
+  /// Validated immutable runtime options.
   final ChroniclerOptions options;
+
+  /// Validator used before records enter delivery.
   final RecordValidator validator;
+
+  /// Canonical codec used for size accounting and transport values.
   final ChroniclerCodec codec;
+
+  /// Payload-free runtime diagnostic channel.
   final DiagnosticChannel diagnostics;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
@@ -153,8 +180,10 @@ final class ChroniclerRuntime {
   Completer<void>? _closeDeliveryResolved;
   Completer<void>? _activeDrained;
 
+  /// An immutable snapshot of exact diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
 
+  /// Flushes the current record snapshot within [timeout].
   Future<DeliveryReport> flush(Duration timeout) {
     _requireOutsideCallback('flush');
     if (timeout <= Duration.zero) {
@@ -186,6 +215,7 @@ final class ChroniclerRuntime {
     return waiter.completer.future;
   }
 
+  /// Stops recording and closes the owned exporter within one deadline.
   Future<DeliveryReport> close() {
     _requireOutsideCallback('close');
     final existing = _closeFuture;
@@ -320,8 +350,10 @@ final class ChroniclerRuntime {
     return result.future;
   }
 
+  /// Whether collection currently accepts [signal].
   bool isCollectionEnabled(ChroniclerSignal signal) => _enabledSignals.contains(signal);
 
+  /// Enables or disables collection for [signal].
   // API contract uses a positional boolean for symmetric runtime toggles.
   // ignore: avoid_positional_boolean_parameters
   void setCollectionEnabled(ChroniclerSignal signal, bool enabled) {
@@ -344,6 +376,7 @@ final class ChroniclerRuntime {
     _scheduleWakeup();
   }
 
+  /// Enables or disables trace-context propagation.
   // API contract uses a positional boolean for symmetric runtime toggles.
   // ignore: avoid_positional_boolean_parameters
   void setPropagationEnabled(bool enabled) {
@@ -370,6 +403,7 @@ final class ChroniclerRuntime {
     }
   }
 
+  /// Records a structured log through the runtime capture policy.
   void recordLog(
     LogSeverity severity,
     String message, {
@@ -1014,6 +1048,7 @@ final class ChroniclerRuntime {
 final class ChroniclerCaptureFixture {
   const ChroniclerCaptureFixture._();
 
+  /// Submits a finalized sibling-signal [record] through capture policy.
   static void capture(Chronicler chronicler, ChroniclerRecord record) =>
       chronicler._runtime._captureFixture(record);
 }
@@ -1022,6 +1057,7 @@ final class ChroniclerCaptureFixture {
 final class ChroniclerDeliveryFixture {
   const ChroniclerDeliveryFixture._();
 
+  /// Replaces retry jitter selection for deterministic delivery tests.
   static void selectRetryDelay(
     Chronicler chronicler,
     Duration Function(int attempt, Duration ceiling) selector,
@@ -1029,8 +1065,10 @@ final class ChroniclerDeliveryFixture {
     chronicler._runtime._retryDelayOverride = selector;
   }
 
+  /// Returns the current trace propagation switch.
   static bool propagationEnabled(Chronicler chronicler) => chronicler._runtime._propagationEnabled;
 
+  /// Queues [records] for internal finalization during the next flush.
   static void finalizeOnNextFlush(
     Chronicler chronicler,
     Iterable<ChroniclerRecord> records,
@@ -1038,6 +1076,7 @@ final class ChroniclerDeliveryFixture {
     chronicler._runtime._flushFinalizations.add(List.unmodifiable(records));
   }
 
+  /// Returns the number of flush calls waiting on record dispositions.
   static int activeFlushes(Chronicler chronicler) => chronicler._runtime._flushWaiters.length;
 }
 

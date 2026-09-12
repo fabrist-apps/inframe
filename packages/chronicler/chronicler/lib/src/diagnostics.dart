@@ -3,20 +3,29 @@ import 'dart:collection';
 
 import 'package:chronicler/src/configuration.dart';
 
+/// Counts runtime diagnostics and rate-limits payload-free notifications.
 final class DiagnosticChannel {
+  /// Creates a channel using [options].
   DiagnosticChannel(this.options);
 
+  /// Notification behavior for this channel.
   final DiagnosticOptions options;
   final _counts = <DiagnosticReason, BigInt>{};
   final _pending = <DiagnosticReason, BigInt>{};
   final _lastNotification = <DiagnosticReason, Duration>{};
   final _timers = <DiagnosticReason, Timer>{};
   final _elapsed = Stopwatch()..start();
+
+  /// Whether the channel is currently invoking the application callback.
   bool insideCallback = false;
+
+  /// Whether the channel has stopped scheduling notifications.
   bool closed = false;
 
+  /// An immutable snapshot of exact lifetime counts by reason.
   Map<DiagnosticReason, BigInt> get counts => UnmodifiableMapView(Map.of(_counts));
 
+  /// Increments [reason] and schedules an eligible notification.
   void record(DiagnosticReason reason) {
     _counts.update(reason, (count) => count + BigInt.one, ifAbsent: () => BigInt.one);
     _pending.update(reason, (count) => count + BigInt.one, ifAbsent: () => BigInt.one);
@@ -31,6 +40,7 @@ final class DiagnosticChannel {
     _timers[reason] = Timer(delay, () => _notify(reason));
   }
 
+  /// Cancels delayed notifications and emits notifications already eligible.
   void close() {
     if (closed) return;
     final now = _elapsed.elapsed;
