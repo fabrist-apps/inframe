@@ -32,6 +32,27 @@ void main() {
     expect(() => results.value(failed), throwsStateError);
   });
 
+  test('the documented typed command objects compose in a pipeline', () async {
+    final batch = RedisBatch.internal(
+      maxCommands: 2,
+      maxBytes: 1024,
+      reservedCommands: 0,
+      reservedBytes: 0,
+      defaultTimeout: const Duration(seconds: 1),
+      executor: (commands, timeout) async => const [
+        BatchSuccess<Object?>('Ada'),
+        BatchSuccess<Object?>(3),
+      ],
+    );
+    final name = batch.add(Get('user:42:name'));
+    final visits = batch.add(Incr('user:42:visits'));
+
+    final results = await batch.exec();
+
+    expect(results.value(name), 'Ada');
+    expect(results.value(visits), 3);
+  });
+
   test('references belong to their originating batch', () async {
     Future<List<BatchOutcome<Object?>>> executor(
       List<RedisCommand<Object?>> commands,

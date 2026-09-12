@@ -72,10 +72,17 @@ final class ScanPage {
 }
 
 /// Builds a typed GET command for strict UTF-8 text.
-RedisCommand<String?> getCommand(String key) => RedisCommand<String?>(
-  [RedisArgument.text('GET'), RedisArgument.text(key)],
-  _decodeNullableText,
-);
+RedisCommand<String?> getCommand(String key) => Get(key);
+
+/// A typed GET command for strict UTF-8 text.
+final class Get extends RedisCommand<String?> {
+  /// Creates a GET command for [key].
+  Get(String key)
+    : super(
+        [RedisArgument.text('GET'), RedisArgument.text(key)],
+        _decodeNullableText,
+      );
+}
 
 /// Builds a typed binary GET command.
 RedisCommand<Uint8List?> getBytesCommand(String key) => RedisCommand<Uint8List?>(
@@ -132,7 +139,17 @@ RedisCommand<void> msetCommand(Map<String, String> values) {
 }
 
 /// Builds an INCR command.
-RedisCommand<int> incrCommand(String key) => _integerCommand('INCR', [key]);
+RedisCommand<int> incrCommand(String key) => Incr(key);
+
+/// A typed INCR command.
+final class Incr extends RedisCommand<int> {
+  /// Creates an INCR command for [key].
+  Incr(String key)
+    : super(
+        [RedisArgument.text('INCR'), RedisArgument.text(key)],
+        _decodeInteger,
+      );
+}
 
 /// Builds an INCRBY command.
 RedisCommand<int> incrbyCommand(String key, int increment) =>

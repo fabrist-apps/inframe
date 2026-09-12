@@ -275,6 +275,52 @@ void main() {
       expect(peer.connectionCount, 1);
     });
 
+    test('should close every owned session and pending operation once', () async {
+      final peer = await _LifecyclePeer.start()
+        ..holdCommands = true;
+      addTearDown(peer.close);
+      final client = await Runnel.connect(
+        peer.endpoint,
+        shutdownTimeout: const Duration(milliseconds: 20),
+      );
+      final blocking = await client.blocking();
+      final pubSub = await client.openPubSub();
+
+      final ordinary = client.ping();
+      final transaction = (client.transaction()..add(_pingCommand())).exec();
+      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30));
+      final subscription = pubSub.subscribe(['orders']);
+      final ordinaryFailure = expectLater(ordinary, throwsA(isA<RedisClosedException>()));
+      final transactionFailure = expectLater(transaction, throwsA(isA<RunnelException>()));
+      final blockingFailure = expectLater(blocked, throwsA(isA<RedisClosedException>()));
+      final subscriptionFailure = expectLater(
+        subscription,
+        throwsA(isA<RedisClosedException>()),
+      );
+      await peer.waitForCommandCount('PING', 2);
+      await peer.waitForCommandCount('EXEC', 1);
+      await peer.waitForCommandCount('BLPOP', 1);
+      await peer.waitForCommandCount('SUBSCRIBE', 1);
+
+      final firstClose = client.close();
+      final secondClose = client.close();
+      expect(identical(firstClose, secondClose), isTrue);
+      await firstClose.timeout(const Duration(seconds: 1));
+      await Future.wait([
+        ordinaryFailure,
+        transactionFailure,
+        blockingFailure,
+        subscriptionFailure,
+      ]);
+      await secondClose;
+
+      expect(pubSub.state, PubSubState.closed);
+      final connectionsAfterClose = peer.connectionCount;
+      expect(connectionsAfterClose, 4);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(peer.connectionCount, connectionsAfterClose);
+    });
+
     test('should classify a server error without closing the connection', () async {
       final peer = await _LifecyclePeer.start()
         ..holdCommands = true;
@@ -356,6 +402,11 @@ void main() {
     });
   });
 }
+
+RedisCommand<bool> _pingCommand() => RedisCommand<bool>(
+  [RedisArgument.text('PING')],
+  (reply) => respText(reply) == 'PONG',
+);
 
 final class _LifecyclePeer {
   _LifecyclePeer._(this._server);

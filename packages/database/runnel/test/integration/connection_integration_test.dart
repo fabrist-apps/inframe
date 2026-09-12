@@ -9,6 +9,8 @@ import 'dart:typed_data';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
+import '../fixtures/herald_consumer_fixture.dart';
+
 void main() {
   final endpoints = <String, String?>{
     'Redis TCP': Platform.environment['RUNNEL_REDIS_URL'],
@@ -404,10 +406,34 @@ void main() {
             final channelTwo = 'runnel:integration:channel-two:$suffix';
             final publications = <PubSubMessage>[];
             final received = Completer<void>();
+            String? coordinatedChannel;
+            Completer<PubSubMessage>? coordinatedReceived;
+            Completer<PubSubInterrupted>? interrupted;
+            Completer<PubSubRestored>? restored;
+            Completer<PubSubMessage>? restoredPublication;
             final listener = pubSub.events.listen((event) {
               if (event is PubSubMessage) {
                 publications.add(event);
                 if (publications.length == 2 && !received.isCompleted) received.complete();
+                if (event.channel == coordinatedChannel) {
+                  final completer = coordinatedReceived;
+                  if (completer != null && !completer.isCompleted) completer.complete(event);
+                }
+                final recoveryCompleter = restoredPublication;
+                if (recoveryCompleter != null &&
+                    !recoveryCompleter.isCompleted &&
+                    event.channel == channelTwo &&
+                    event.text == 'after-recovery') {
+                  recoveryCompleter.complete(event);
+                }
+              }
+              if (event is PubSubInterrupted) {
+                final completer = interrupted;
+                if (completer != null && !completer.isCompleted) completer.complete(event);
+              }
+              if (event is PubSubRestored) {
+                final completer = restored;
+                if (completer != null && !completer.isCompleted) completer.complete(event);
               }
             });
             addTearDown(listener.cancel);
@@ -427,9 +453,125 @@ void main() {
             await pubSub.unsubscribe([channelOne]);
             expect(await client.publish(channelOne, 'suppressed'), 0);
             expect(pubSub.desiredChannels, {channelTwo});
+
+            final names = HeraldFixtureNames(appId: suffix, channel: 'orders');
+            coordinatedChannel = names.channelName;
+            coordinatedReceived = Completer<PubSubMessage>();
+            await pubSub.subscribe([names.channelName]);
+            final coordinated = await publishCoordinated(
+              client,
+              names,
+              receiptId: 'receipt-1',
+              payload: 'created',
+              publishedAtMilliseconds: DateTime.now().millisecondsSinceEpoch,
+              oldestRetainedMilliseconds: 0,
+              maximumHistoryCount: 10,
+            );
+            expect(coordinated.position, 1);
+            expect(coordinated.subscriberCount, 1);
+            expect(coordinated.duplicate, isFalse);
+            expect(
+              (await coordinatedReceived.future.timeout(const Duration(seconds: 2))).text,
+              '1|created',
+            );
+            final duplicate = await publishCoordinated(
+              client,
+              names,
+              receiptId: 'receipt-1',
+              payload: 'ignored',
+              publishedAtMilliseconds: DateTime.now().millisecondsSinceEpoch,
+              oldestRetainedMilliseconds: 0,
+              maximumHistoryCount: 10,
+            );
+            expect(duplicate.position, 1);
+            expect(duplicate.duplicate, isTrue);
+            expect(await client.xlen(names.historyKey), 1);
+            expect(await client.get(names.snapshotKey), '1|created');
+            expect(await client.hget(names.metadataKey, 'position'), '1');
+
+            expect(
+              await upsertPresenceLease(
+                client,
+                names,
+                connectionId: 'connection-a',
+                userId: 'user-1',
+                expiresAtMilliseconds: 1000,
+              ),
+              1,
+            );
+            await upsertPresenceLease(
+              client,
+              names,
+              connectionId: 'connection-b',
+              userId: 'user-1',
+              expiresAtMilliseconds: 2000,
+            );
+            await upsertPresenceLease(
+              client,
+              names,
+              connectionId: 'connection-c',
+              userId: 'user-2',
+              expiresAtMilliseconds: 3000,
+            );
+            final connections = await client.hgetall(names.presenceConnectionsKey);
+            expect(connections, hasLength(3));
+            expect(distinctPresenceUsers(connections), 2);
+            expect(
+              await removeExpiredPresenceLeases(
+                client,
+                names,
+                nowMilliseconds: 2000,
+              ),
+              2,
+            );
+            expect(await client.hlen(names.presenceConnectionsKey), 1);
+
+            interrupted = Completer<PubSubInterrupted>();
+            restored = Completer<PubSubRestored>();
+            restoredPublication = Completer<PubSubMessage>();
+            expect(await client.execute(_killPubSubClientsCommand()), greaterThanOrEqualTo(1));
+            final interruption = await interrupted.future.timeout(const Duration(seconds: 5));
+            final restoration = await restored.future.timeout(const Duration(seconds: 5));
+            expect(interruption.generation, 1);
+            expect(interruption.cause, PubSubInterruptionCause.networkLoss);
+            expect(restoration.generation, 2);
+            expect(restoration.channels, {channelTwo, names.channelName});
+            expect(pubSub.desiredChannels, {channelTwo, names.channelName});
+            expect(pubSub.acknowledgedChannels, {channelTwo, names.channelName});
+            expect(await client.publish(channelOne, 'still-suppressed'), 0);
+            expect(await client.publish(channelTwo, 'after-recovery'), 1);
+            expect(
+              (await restoredPublication.future.timeout(const Duration(seconds: 2))).generation,
+              2,
+            );
+
+            final probe = DeliveryPathProbe.forRunnel(publisher: client, subscriber: pubSub);
+            final probeResult = await probe.check(
+              channel: names.channelName,
+              token: 'probe',
+              awaitDelivery: (_, _) async => false,
+              deliveryTimeout: const Duration(milliseconds: 10),
+              reconnectTimeout: const Duration(seconds: 2),
+            );
+            expect(probeResult.healthBeforeRecovery, PubSubState.ready);
+            expect(probeResult.reconnectRequested, isTrue);
+            expect(pubSub.state, PubSubState.ready);
           },
         );
       }
     }
   });
 }
+
+RedisCommand<int> _killPubSubClientsCommand() => RedisCommand<int>(
+  [
+    RedisArgument.text('CLIENT'),
+    RedisArgument.text('KILL'),
+    RedisArgument.text('TYPE'),
+    RedisArgument.text('PUBSUB'),
+  ],
+  (reply) => switch (reply) {
+    RespInteger(:final value) => value,
+    _ => throw FormatException('CLIENT KILL returned $reply instead of an integer.'),
+  },
+);

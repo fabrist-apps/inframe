@@ -81,6 +81,9 @@ done
 docker exec "$RUNNEL_REDIS_CONTAINER" redis-cli -a test-password ping >/dev/null
 docker exec "$RUNNEL_VALKEY_CONTAINER" valkey-cli -a test-password ping >/dev/null
 
+RUNNEL_URL='redis://:test-password@127.0.0.1:16379' \
+  dart run packages/database/runnel/example/runnel_example.dart >/dev/null
+
 RUNNEL_REDIS_URL='redis://:test-password@127.0.0.1:16379' \
 RUNNEL_REDIS_TLS_URL='rediss://:test-password@localhost:16380' \
 RUNNEL_VALKEY_URL='redis://:test-password@127.0.0.1:17379' \

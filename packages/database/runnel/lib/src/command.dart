@@ -20,7 +20,7 @@ final class RedisArgument {
 }
 
 /// A typed ordinary one-command/one-reply operation.
-final class RedisCommand<T> {
+base class RedisCommand<T> {
   /// Creates a custom typed command from explicit arguments and a reply decoder.
   RedisCommand(List<RedisArgument> arguments, T Function(RespValue reply) decode)
     : arguments = List.unmodifiable(arguments),
