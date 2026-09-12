@@ -52,3 +52,9 @@ result fails or times out, a retry can duplicate delivery outside the process. D
 deduplicate on `eventId`. A timed-out attempt keeps its concurrency slot until `result` completes;
 `ExportAttempt.result` must therefore complete only after all transport work for that attempt has
 stopped. Cancellation is a prompt, idempotent request and does not itself release the slot.
+
+Collection switches apply synchronously per signal. Disabling a signal discards its queued records
+from the in-memory buffer and prevents retries for its in-flight records. Re-enabling permits new
+captures but does not revive discarded records or restore retry eligibility to records that were
+already in flight. Disabling collection cannot recall data that an exporter may already have sent.
+Tracing propagation has its own switch and does not change collection settings.

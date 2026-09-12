@@ -36,6 +36,17 @@ final class Chronicler {
   ChroniclerRecorder get recorder => ChroniclerRecorder._(_runtime);
 
   Map<DiagnosticReason, BigInt> get diagnosticCounts => _runtime.diagnosticCounts;
+
+  bool isCollectionEnabled(ChroniclerSignal signal) => _runtime.isCollectionEnabled(signal);
+
+  // API contract uses a positional boolean for symmetric runtime toggles.
+  // ignore: avoid_positional_boolean_parameters
+  void setCollectionEnabled(ChroniclerSignal signal, bool enabled) =>
+      _runtime.setCollectionEnabled(signal, enabled);
+
+  // API contract uses a positional boolean for symmetric runtime toggles.
+  // ignore: avoid_positional_boolean_parameters
+  void setPropagationEnabled(bool enabled) => _runtime.setPropagationEnabled(enabled);
 }
 
 /// Borrowed immutable attribution view over one Chronicler runtime.
@@ -114,6 +125,7 @@ final class ChroniclerRuntime {
   final _active = <_ActiveExport>{};
   final _elapsed = Stopwatch()..start();
   late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
+  late bool _propagationEnabled = options.tracing.propagationEnabled;
   late final Random _random = Random();
   var _insideHook = false;
   var _pendingBytes = 0;
@@ -123,6 +135,34 @@ final class ChroniclerRuntime {
   Duration Function(int attempt, Duration ceiling)? _retryDelayOverride;
 
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
+
+  bool isCollectionEnabled(ChroniclerSignal signal) => _enabledSignals.contains(signal);
+
+  // API contract uses a positional boolean for symmetric runtime toggles.
+  // ignore: avoid_positional_boolean_parameters
+  void setCollectionEnabled(ChroniclerSignal signal, bool enabled) {
+    if (enabled == _enabledSignals.contains(signal)) return;
+    if (enabled) {
+      _enabledSignals.add(signal);
+      return;
+    }
+    _enabledSignals.remove(signal);
+    for (final record in _pending.where((record) => _signalFor(record.record) == signal).toList()) {
+      _pending.remove(record);
+      diagnostics.record(DiagnosticReason.collectionDisabled);
+      _finalize(record);
+    }
+    for (final export in _active) {
+      for (final record in export.records) {
+        if (_signalFor(record.record) == signal) record.retryEligible = false;
+      }
+    }
+    _scheduleWakeup();
+  }
+
+  // API contract uses a method rather than property assignment.
+  // ignore: use_setters_to_change_properties, avoid_positional_boolean_parameters
+  void setPropagationEnabled(bool enabled) => _propagationEnabled = enabled;
 
   void recordLog(
     LogSeverity severity,
@@ -189,13 +229,7 @@ final class ChroniclerRuntime {
   }
 
   void _captureFixture(ChroniclerRecord record) {
-    final signal = switch (record.signalKind) {
-      ChroniclerSignalKind.logs => ChroniclerSignal.logs,
-      ChroniclerSignalKind.events => ChroniclerSignal.events,
-      ChroniclerSignalKind.traces => ChroniclerSignal.traces,
-      ChroniclerSignalKind.errors => ChroniclerSignal.errors,
-      ChroniclerSignalKind.metrics => ChroniclerSignal.metrics,
-    };
+    final signal = _signalFor(record);
     final sampleRate = switch (record) {
       LogRecord() => options.sampling.logs,
       ProductEventRecord() => options.sampling.events,
@@ -204,6 +238,14 @@ final class ChroniclerRuntime {
     };
     if (_allowsCapture(signal, sampleRate)) _finalizeAndEnqueue(record);
   }
+
+  ChroniclerSignal _signalFor(ChroniclerRecord record) => switch (record.signalKind) {
+    ChroniclerSignalKind.logs => ChroniclerSignal.logs,
+    ChroniclerSignalKind.events => ChroniclerSignal.events,
+    ChroniclerSignalKind.traces => ChroniclerSignal.traces,
+    ChroniclerSignalKind.errors => ChroniclerSignal.errors,
+    ChroniclerSignalKind.metrics => ChroniclerSignal.metrics,
+  };
 
   void _finalizeAndEnqueue(ChroniclerRecord original) {
     try {
@@ -440,6 +482,9 @@ final class ChroniclerRuntime {
   void _timeOut(_ActiveExport active) {
     if (!_active.contains(active) || active.timedOut) return;
     active.timedOut = true;
+    for (final record in active.records) {
+      record.uncertain = true;
+    }
     diagnostics.record(DiagnosticReason.exportTimedOut);
     try {
       active.attempt?.cancel();
@@ -506,6 +551,11 @@ final class ChroniclerRuntime {
   }
 
   void _retry(_PendingRecord record) {
+    if (!record.retryEligible) {
+      diagnostics.record(DiagnosticReason.collectionDisabled);
+      _finalize(record);
+      return;
+    }
     if (record.attempts >= options.delivery.maxAttempts) {
       diagnostics.record(DiagnosticReason.attemptsExhausted);
       _finalize(record);
@@ -538,7 +588,11 @@ final class ChroniclerRuntime {
   }
 
   void _scheduleWakeup() {
-    if (_pending.isEmpty || _active.length >= options.delivery.maxConcurrentExports) return;
+    if (_pending.isEmpty || _active.length >= options.delivery.maxConcurrentExports) {
+      _wakeTimer?.cancel();
+      _wakeTimer = null;
+      return;
+    }
     final next = _pending
         .map((record) => record.readyAt)
         .reduce((left, right) => left <= right ? left : right);
@@ -570,6 +624,8 @@ final class ChroniclerDeliveryFixture {
   ) {
     chronicler._runtime._retryDelayOverride = selector;
   }
+
+  static bool propagationEnabled(Chronicler chronicler) => chronicler._runtime._propagationEnabled;
 }
 
 final class _PendingRecord {
@@ -581,6 +637,7 @@ final class _PendingRecord {
   int attempts = 0;
   bool isRetry = false;
   bool uncertain = false;
+  bool retryEligible = true;
 }
 
 final class _ActiveExport {
