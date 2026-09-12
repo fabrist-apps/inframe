@@ -218,6 +218,51 @@ void main() {
 
       expect(exit, _failedWith<ResponseLimitError>());
     });
+
+    test('should limit cumulative usage extensions before stream completion', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        final padding = List.filled(80, 'x').join();
+        request.response.headers.contentType = ContentType('text', 'event-stream');
+        request.response.write(
+          _sse('message_start', {'type': 'message_start', 'message': _streamStart}),
+        );
+        for (var index = 0; index < 20; index++) {
+          request.response.write(
+            _sse('message_delta', {
+              'type': 'message_delta',
+              'delta': {'stop_reason': null, 'stop_sequence': null},
+              'usage': {
+                'output_tokens': index,
+                'future_usage_$index': padding,
+              },
+            }),
+          );
+        }
+        await request.response.close();
+      });
+      final provider = AnthropicProvider(
+        apiKey: 'secret',
+        baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1'),
+      );
+      addTearDown(provider.close);
+
+      final exit = await provider.messages
+          .streamCommon(
+            AnthropicMessageRequest(
+              model: 'future-model',
+              maxTokens: 100,
+              messages: [AnthropicInputMessage.userText('hello')],
+            ),
+            maxAssembledBytes: 512,
+          )
+          .runCollect()
+          .runFutureExit();
+
+      expect(exit, _failedWith<ResponseLimitError>());
+    });
   });
 }
 

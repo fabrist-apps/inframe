@@ -198,6 +198,8 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
   AnthropicMessageDeltaEvent? _lastDelta;
   ResponseMetadata? _metadata;
   var _retainedBytes = 0;
+  var _usageBytes = 0;
+  var _lastDeltaBytes = 0;
   var _terminal = false;
 
   @override
@@ -225,7 +227,7 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
         }
         _retain(message.raw);
         _startMessage = message;
-        _mergeUsage(message.usage);
+        _replaceMessageState(usage: _mergedUsage(message.usage));
         assembler.setResponseId(message.id);
         yield assembler.updateUsage(_commonUsage(message.usage));
       case AnthropicContentBlockStartEvent(:final index, :final contentBlock):
@@ -325,8 +327,10 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
             partialOutput: partialOutput,
           );
         }
-        _lastDelta = decoded;
-        _mergeUsage(decoded.usage);
+        _replaceMessageState(
+          usage: _mergedUsage(decoded.usage),
+          delta: decoded,
+        );
         yield assembler.updateUsage(_commonUsage(AnthropicUsage.fromJson(JsonObject(_usage))));
       case AnthropicMessageStopEvent():
         if (_startMessage == null || _lastDelta == null) {
@@ -407,12 +411,38 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
     );
   }
 
-  void _mergeUsage(AnthropicUsage usage) {
+  Map<String, Object?> _mergedUsage(AnthropicUsage usage) {
+    final merged = Map<String, Object?>.of(_usage);
     for (final entry in usage.raw.toDart().entries) {
-      if (entry.value != null || !_usage.containsKey(entry.key)) {
-        _usage[entry.key] = entry.value;
+      if (entry.value != null || !merged.containsKey(entry.key)) {
+        merged[entry.key] = entry.value;
       }
     }
+    return merged;
+  }
+
+  void _replaceMessageState({
+    required Map<String, Object?> usage,
+    AnthropicMessageDeltaEvent? delta,
+  }) {
+    final usageBytes = utf8.encode(JsonObject(usage).encode()).length;
+    final deltaBytes = delta == null ? 0 : utf8.encode(delta.raw.encode()).length;
+    final retainedBytes = _retainedBytes - _usageBytes - _lastDeltaBytes + usageBytes + deltaBytes;
+    if (retainedBytes > _maxAssembledBytes) {
+      throw ResponseLimitError(
+        'Retained Messages stream state exceeded the configured byte limit.',
+        limit: _maxAssembledBytes,
+        actual: retainedBytes,
+        partialOutput: partialOutput,
+      );
+    }
+    _retainedBytes = retainedBytes;
+    _usageBytes = usageBytes;
+    _lastDeltaBytes = deltaBytes;
+    _usage
+      ..clear()
+      ..addAll(usage);
+    _lastDelta = delta;
   }
 
   void _retain(JsonObject value) {
