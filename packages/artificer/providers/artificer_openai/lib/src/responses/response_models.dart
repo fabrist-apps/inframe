@@ -8,6 +8,38 @@ sealed class OpenAIResponseInputItem {
   Map<String, Object?> toDart();
 }
 
+/// An exact native item replayed from a previous response.
+final class OpenAIRawResponseInputItem extends OpenAIResponseInputItem {
+  /// Creates a lossless replay item.
+  const OpenAIRawResponseInputItem(this.raw);
+
+  /// Complete native input item.
+  final JsonObject raw;
+
+  @override
+  Map<String, Object?> toDart() => raw.toDart();
+}
+
+/// A result for an application function call.
+final class OpenAIFunctionCallOutputItem extends OpenAIResponseInputItem {
+  /// Creates a function result item.
+  OpenAIFunctionCallOutputItem({required String callId, required this.output})
+    : callId = _nonEmpty(callId, 'callId');
+
+  /// Native call ID.
+  final String callId;
+
+  /// Serialized result accepted by Responses.
+  final String output;
+
+  @override
+  Map<String, Object?> toDart() => {
+    'type': 'function_call_output',
+    'call_id': callId,
+    'output': output,
+  };
+}
+
 /// A Responses input message.
 final class OpenAIResponseInputMessage extends OpenAIResponseInputItem {
   /// Creates an input message.
@@ -72,6 +104,223 @@ final class OpenAITextInputPart extends OpenAIResponseInputPart {
   Map<String, Object?> toDart() => {'type': 'input_text', 'text': text};
 }
 
+/// An image supplied by URL, data URL, or provider file ID.
+final class OpenAIImageInputPart extends OpenAIResponseInputPart {
+  /// Creates an image input with exactly one native source.
+  OpenAIImageInputPart({this.imageUrl, this.fileId}) {
+    if ((imageUrl == null) == (fileId == null)) {
+      throw ArgumentError('Exactly one image source is required.');
+    }
+  }
+
+  /// HTTP(S) or data URL.
+  final String? imageUrl;
+
+  /// OpenAI file ID.
+  final String? fileId;
+
+  @override
+  Map<String, Object?> toDart() => {
+    'type': 'input_image',
+    'image_url': ?imageUrl,
+    'file_id': ?fileId,
+  };
+}
+
+/// A document supplied through an OpenAI file ID.
+final class OpenAIFileInputPart extends OpenAIResponseInputPart {
+  /// Creates a file input.
+  OpenAIFileInputPart(String fileId) : fileId = _nonEmpty(fileId, 'fileId');
+
+  /// OpenAI file ID.
+  final String fileId;
+
+  @override
+  Map<String, Object?> toDart() => {'type': 'input_file', 'file_id': fileId};
+}
+
+/// Inline native audio input.
+final class OpenAIAudioInputPart extends OpenAIResponseInputPart {
+  /// Creates inline base64 audio input.
+  OpenAIAudioInputPart({required String data, required String format})
+    : data = _nonEmpty(data, 'data'),
+      format = _nonEmpty(format, 'format');
+
+  /// Base64 audio bytes.
+  final String data;
+
+  /// Native audio format such as `wav` or `mp3`.
+  final String format;
+
+  @override
+  Map<String, Object?> toDart() => {
+    'type': 'input_audio',
+    'input_audio': {'data': data, 'format': format},
+  };
+}
+
+/// A typed provider tool definition for Responses.
+sealed class OpenAIToolDefinition {
+  const OpenAIToolDefinition();
+
+  /// Native type discriminator.
+  String get type;
+
+  /// Optional namespace used to reject collisions with application functions.
+  String? get name => null;
+
+  /// Encodes the native tool.
+  Map<String, Object?> toDart();
+}
+
+/// An application function declaration.
+final class OpenAIFunctionTool extends OpenAIToolDefinition {
+  /// Creates a strict function tool.
+  OpenAIFunctionTool({
+    required String functionName,
+    required this.parameters,
+    this.description,
+    this.strict = true,
+  }) : functionName = _nonEmpty(functionName, 'functionName');
+
+  /// Function name.
+  final String functionName;
+
+  /// Function description.
+  final String? description;
+
+  /// JSON Schema parameters.
+  final JsonObject parameters;
+
+  /// Whether the provider should enforce strict schema output.
+  final bool strict;
+
+  @override
+  String get type => 'function';
+
+  @override
+  String get name => functionName;
+
+  @override
+  Map<String, Object?> toDart() => {
+    'type': type,
+    'name': functionName,
+    'description': ?description,
+    'parameters': parameters.toDart(),
+    'strict': strict,
+  };
+}
+
+/// Provider-hosted web search.
+final class OpenAIWebSearchTool extends OpenAIToolDefinition {
+  /// Creates a web-search tool.
+  const OpenAIWebSearchTool();
+
+  @override
+  String get type => 'web_search';
+
+  @override
+  Map<String, Object?> toDart() => {'type': type};
+}
+
+/// Provider-hosted file search over existing vector stores.
+final class OpenAIFileSearchTool extends OpenAIToolDefinition {
+  /// Creates file search over [vectorStoreIds].
+  OpenAIFileSearchTool({required Iterable<String> vectorStoreIds})
+    : vectorStoreIds = List.unmodifiable(vectorStoreIds) {
+    if (this.vectorStoreIds.isEmpty || this.vectorStoreIds.any((id) => id.isEmpty)) {
+      throw ArgumentError.value(vectorStoreIds, 'vectorStoreIds', 'must contain nonempty IDs');
+    }
+  }
+
+  /// Existing vector-store IDs.
+  final List<String> vectorStoreIds;
+
+  @override
+  String get type => 'file_search';
+
+  @override
+  Map<String, Object?> toDart() => {'type': type, 'vector_store_ids': vectorStoreIds};
+}
+
+/// Provider-hosted code interpreter.
+final class OpenAICodeInterpreterTool extends OpenAIToolDefinition {
+  /// Creates a code-interpreter tool using an automatic container.
+  const OpenAICodeInterpreterTool();
+
+  @override
+  String get type => 'code_interpreter';
+
+  @override
+  Map<String, Object?> toDart() => {
+    'type': type,
+    'container': {'type': 'auto'},
+  };
+}
+
+/// Provider-hosted remote MCP access.
+final class OpenAIRemoteMcpTool extends OpenAIToolDefinition {
+  /// Creates a remote MCP tool.
+  OpenAIRemoteMcpTool({required String serverLabel, required this.serverUrl})
+    : serverLabel = _nonEmpty(serverLabel, 'serverLabel') {
+    if (!serverUrl.isAbsolute || serverUrl.scheme != 'https') {
+      throw ArgumentError.value(serverUrl, 'serverUrl', 'must be an absolute HTTPS URL');
+    }
+  }
+
+  /// Label shown to the model.
+  final String serverLabel;
+
+  /// Remote MCP server URL.
+  final Uri serverUrl;
+
+  @override
+  String get type => 'mcp';
+
+  @override
+  Map<String, Object?> toDart() => {
+    'type': type,
+    'server_label': serverLabel,
+    'server_url': serverUrl.toString(),
+  };
+}
+
+/// Provider-defined caller-executed computer tool.
+final class OpenAIComputerTool extends OpenAIToolDefinition {
+  /// Creates a computer tool.
+  const OpenAIComputerTool();
+
+  @override
+  String get type => 'computer';
+
+  @override
+  Map<String, Object?> toDart() => {'type': type};
+}
+
+/// Provider-defined caller-executed shell tool.
+final class OpenAIShellTool extends OpenAIToolDefinition {
+  /// Creates a shell tool.
+  const OpenAIShellTool();
+
+  @override
+  String get type => 'shell';
+
+  @override
+  Map<String, Object?> toDart() => {'type': type};
+}
+
+/// Provider-defined caller-executed patch tool.
+final class OpenAIApplyPatchTool extends OpenAIToolDefinition {
+  /// Creates an apply-patch tool.
+  const OpenAIApplyPatchTool();
+
+  @override
+  String get type => 'apply_patch';
+
+  @override
+  Map<String, Object?> toDart() => {'type': type};
+}
+
 /// A typed native request for `POST /responses`.
 final class OpenAIResponseRequest {
   /// Creates a Responses request.
@@ -84,9 +333,21 @@ final class OpenAIResponseRequest {
     this.topP,
     this.store,
     this.stream,
+    this.reasoning,
+    this.promptCacheKey,
+    this.promptCacheRetention,
+    this.serviceTier,
+    Iterable<String>? include,
+    Iterable<OpenAIToolDefinition>? tools,
+    this.toolChoice,
+    this.text,
+    this.previousResponseId,
+    this.background,
     JsonObject? extraBody,
   }) : model = _nonEmpty(model, 'model'),
        input = List.unmodifiable(input),
+       include = include == null ? null : List.unmodifiable(include),
+       tools = tools == null ? null : List.unmodifiable(tools),
        extraBody = extraBody ?? JsonObject({}) {
     if (this.input.isEmpty) throw ArgumentError.value(input, 'input', 'must not be empty');
     if (maxOutputTokens != null && maxOutputTokens! <= 0) {
@@ -122,6 +383,36 @@ final class OpenAIResponseRequest {
   /// Whether to stream the response.
   final bool? stream;
 
+  /// Native reasoning configuration.
+  final JsonObject? reasoning;
+
+  /// Stable prompt-cache identifier.
+  final String? promptCacheKey;
+
+  /// Prompt-cache retention policy.
+  final String? promptCacheRetention;
+
+  /// Native service tier.
+  final String? serviceTier;
+
+  /// Additional native response fields requested by the caller.
+  final List<String>? include;
+
+  /// Native and application tool definitions.
+  final List<OpenAIToolDefinition>? tools;
+
+  /// Native tool selection value.
+  final JsonValue? toolChoice;
+
+  /// Native text-output configuration.
+  final JsonObject? text;
+
+  /// Explicit stored response to continue from in native calls.
+  final String? previousResponseId;
+
+  /// Whether this native request runs in the background.
+  final bool? background;
+
   /// Forward-compatible fields outside this pinned typed snapshot.
   final JsonObject extraBody;
 
@@ -138,6 +429,16 @@ final class OpenAIResponseRequest {
       'top_p': ?topP,
       'store': ?store,
       'stream': ?stream,
+      if (reasoning case final value?) 'reasoning': value.toDart(),
+      'prompt_cache_key': ?promptCacheKey,
+      'prompt_cache_retention': ?promptCacheRetention,
+      'service_tier': ?serviceTier,
+      'include': ?include,
+      if (tools case final value?) 'tools': value.map((tool) => tool.toDart()).toList(),
+      if (toolChoice case final value?) 'tool_choice': value.toDart(),
+      if (text case final value?) 'text': value.toDart(),
+      'previous_response_id': ?previousResponseId,
+      'background': ?background,
     });
   }
 }
@@ -238,6 +539,49 @@ sealed class OpenAIResponseOutputItem {
         raw: raw,
         extensions: JsonObject(_without(value, {'type', 'id', 'status', 'role', 'content'})),
       ),
+      'reasoning' => OpenAIReasoningOutputItem._(
+        id: value['id'] as String?,
+        status: value['status'] as String?,
+        summaries: _optionalList(
+          value,
+          'summary',
+        ).map((summary) => _string(_object(summary, 'reasoning summary'), 'text')),
+        raw: raw,
+        extensions: JsonObject(_without(value, {'type', 'id', 'status', 'summary'})),
+      ),
+      'function_call' || 'custom_tool_call' => OpenAICallerToolOutputItem._(
+        type: type,
+        id: value['id'] as String?,
+        callId: _string(value, 'call_id'),
+        name: _string(value, 'name'),
+        input: type == 'function_call' ? _string(value, 'arguments') : _string(value, 'input'),
+        status: value['status'] as String?,
+        raw: raw,
+        extensions: JsonObject(
+          _without(value, {'type', 'id', 'call_id', 'name', 'arguments', 'input', 'status'}),
+        ),
+      ),
+      'computer_call' || 'shell_call' || 'apply_patch_call' => OpenAICallerToolOutputItem._(
+        type: type,
+        id: value['id'] as String?,
+        callId: _string(value, 'call_id'),
+        name: type.replaceFirst('_call', ''),
+        input: JsonObject(_without(value, {'type', 'id', 'call_id', 'status'})).encode(),
+        status: value['status'] as String?,
+        raw: raw,
+        extensions: JsonObject(_without(value, {'type', 'id', 'call_id', 'status'})),
+      ),
+      'web_search_call' ||
+      'file_search_call' ||
+      'code_interpreter_call' ||
+      'mcp_call' ||
+      'mcp_list_tools' => OpenAIProviderToolOutputItem._(
+        type: type,
+        id: value['id'] as String?,
+        status: value['status'] as String?,
+        raw: raw,
+        extensions: JsonObject(_without(value, {'type', 'id', 'status'})),
+      ),
       _ => OpenAIUnknownOutputItem._(
         type: type,
         id: value['id'] as String?,
@@ -258,6 +602,64 @@ sealed class OpenAIResponseOutputItem {
 
   /// Unknown fields on the item.
   final JsonObject extensions;
+}
+
+/// A native reasoning item with public summaries and opaque replay data.
+final class OpenAIReasoningOutputItem extends OpenAIResponseOutputItem {
+  OpenAIReasoningOutputItem._({
+    required super.id,
+    required this.status,
+    required Iterable<String> summaries,
+    required super.raw,
+    required super.extensions,
+  }) : summaries = List.unmodifiable(summaries),
+       super(type: 'reasoning');
+
+  /// Native item status.
+  final String? status;
+
+  /// Provider-supplied reasoning summaries.
+  final List<String> summaries;
+}
+
+/// A function, custom, computer, shell, or patch call owned by the caller.
+final class OpenAICallerToolOutputItem extends OpenAIResponseOutputItem {
+  OpenAICallerToolOutputItem._({
+    required super.type,
+    required super.id,
+    required this.callId,
+    required this.name,
+    required this.input,
+    required this.status,
+    required super.raw,
+    required super.extensions,
+  });
+
+  /// Stable call ID referenced by the result.
+  final String callId;
+
+  /// Tool name.
+  final String name;
+
+  /// Native arguments or input text.
+  final String input;
+
+  /// Native item status.
+  final String? status;
+}
+
+/// A provider-hosted tool record that callers never execute.
+final class OpenAIProviderToolOutputItem extends OpenAIResponseOutputItem {
+  OpenAIProviderToolOutputItem._({
+    required super.type,
+    required super.id,
+    required this.status,
+    required super.raw,
+    required super.extensions,
+  });
+
+  /// Native item status.
+  final String? status;
 }
 
 /// A native assistant message item.
@@ -408,6 +810,13 @@ List<Object?> _list(Map<String, Object?> value, String key) {
   return field;
 }
 
+List<Object?> _optionalList(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field == null) return const [];
+  if (field is! List<Object?>) throw FormatException('$key must be an array.');
+  return field;
+}
+
 String _string(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! String) throw FormatException('$key must be a string.');
@@ -443,4 +852,14 @@ const _typedResponseFields = {
   'top_p',
   'store',
   'stream',
+  'reasoning',
+  'prompt_cache_key',
+  'prompt_cache_retention',
+  'service_tier',
+  'include',
+  'tools',
+  'tool_choice',
+  'text',
+  'previous_response_id',
+  'background',
 };

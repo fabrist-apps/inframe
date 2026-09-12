@@ -55,7 +55,7 @@ final class OpenAIResponsesResource {
         for (final part in content) {
           switch (part) {
             case OpenAIOutputTextContent(:final text):
-              parts.add(TextOutputPart(text));
+              parts.add(TextOutputPart(text, citations: _citations(part)));
             case OpenAIRefusalContent(:final refusal):
               parts.add(RefusalPart(refusal));
             case OpenAIUnknownOutputContent():
@@ -69,6 +69,37 @@ final class OpenAIResponsesResource {
               );
           }
         }
+      } else if (item case OpenAIReasoningOutputItem(:final summaries)) {
+        if (summaries.isEmpty) {
+          parts.add(
+            OpaqueOutputPart(
+              providerId: _providerId,
+              api: _api,
+              kind: item.type,
+              data: item.raw,
+            ),
+          );
+        } else {
+          parts.add(ReasoningSummaryPart(summaries.join('\n')));
+        }
+      } else if (item case OpenAICallerToolOutputItem()) {
+        parts.add(
+          ApplicationToolCallPart(
+            id: item.callId,
+            name: item.name,
+            arguments: _toolArguments(item),
+          ),
+        );
+      } else if (item case OpenAIProviderToolOutputItem()) {
+        parts.add(
+          ProviderToolRecordPart(
+            id: item.id ?? item.type,
+            name: item.type.replaceFirst('_call', ''),
+            owner: ToolExecutionOwner.provider,
+            status: _providerToolStatus(item.status),
+            details: item.raw,
+          ),
+        );
       } else {
         parts.add(
           OpaqueOutputPart(
@@ -119,9 +150,24 @@ final class OpenAIResponsesResource {
 
   Effect<NativeResponse<OpenAIResponse>, AiError> _decode(NativeResponse<JsonObject> response) {
     try {
+      final value = OpenAIResponse.fromJson(response.value);
+      if (value.status == OpenAIResponseStatus.failed) {
+        final error = value.raw.toDart()['error'];
+        final details = error is Map<String, Object?> ? JsonObject(error) : value.raw;
+        return Effect.fail(
+          ProviderError(
+            error is Map<String, Object?> && error['message'] is String
+                ? error['message']! as String
+                : 'OpenAI response failed.',
+            code: error is Map<String, Object?> ? error['code'] as String? : null,
+            details: details,
+            requestId: response.metadata.requestId,
+          ),
+        );
+      }
       return Effect.succeed(
         NativeResponse(
-          value: OpenAIResponse.fromJson(response.value),
+          value: value,
           payload: response.payload,
           metadata: response.metadata,
         ),
@@ -374,8 +420,51 @@ FinishReason _finishReason(OpenAIResponse response) {
       .any((part) => part is OpenAIRefusalContent)) {
     return FinishReason.refusal;
   }
+  if (response.output.any((item) => item is OpenAICallerToolOutputItem)) {
+    return FinishReason.toolCalls;
+  }
   return FinishReason.stop;
 }
+
+Iterable<Citation> _citations(OpenAIOutputTextContent part) sync* {
+  final annotations = part.raw.toDart()['annotations'];
+  if (annotations is! List<Object?>) return;
+  for (final annotation in annotations) {
+    if (annotation is! Map<String, Object?>) continue;
+    final url = annotation['url'];
+    if (url is! String) continue;
+    yield Citation(
+      uri: Uri.parse(url),
+      title: annotation['title'] as String?,
+      documentReference: annotation['file_id'] as String?,
+      nativeMetadata: JsonObject(annotation),
+    );
+  }
+}
+
+ToolArguments _toolArguments(OpenAICallerToolOutputItem item) {
+  if (item.type == 'custom_tool_call') return TextToolArguments(item.input);
+  if (item.type != 'function_call') {
+    return NativeToolArguments(
+      providerId: _providerId,
+      api: _api,
+      action: item.extensions,
+    );
+  }
+  try {
+    return JsonToolArguments(JsonObject.parse(item.input), originalText: item.input);
+  } on FormatException catch (error) {
+    return MalformedToolArguments(originalText: item.input, issue: error.message);
+  }
+}
+
+ProviderToolStatus _providerToolStatus(String? status) => switch (status) {
+  'pending' => ProviderToolStatus.pending,
+  'in_progress' || 'searching' || 'interpreting' => ProviderToolStatus.running,
+  'completed' => ProviderToolStatus.completed,
+  'failed' => ProviderToolStatus.failed,
+  _ => ProviderToolStatus.unknown,
+};
 
 String _string(Map<String, Object?> value, String key) {
   final field = value[key];

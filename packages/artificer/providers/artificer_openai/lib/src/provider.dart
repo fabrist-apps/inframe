@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:artificer_openai/src/options.dart';
 import 'package:artificer_openai/src/responses/response_models.dart';
@@ -79,7 +82,7 @@ final class OpenAILanguageModel implements LanguageModel {
     GenerationRequest request, {
     OpenAIModelOptions? options,
   }) {
-    final native = _encodeCommon(request, options ?? this.options, stream: false);
+    final native = _encodeCommon(request, options, stream: false);
     return switch (native) {
       AiError() => Effect.fail(native),
       OpenAIResponseRequest() => _responses.create(native).map(_responses.normalize),
@@ -92,7 +95,7 @@ final class OpenAILanguageModel implements LanguageModel {
     GenerationRequest request, {
     OpenAIModelOptions? options,
   }) {
-    final native = _encodeCommon(request, options ?? this.options, stream: true);
+    final native = _encodeCommon(request, options, stream: true);
     return switch (native) {
       AiError() => Effect.fail<GenerationEvent, AiError>(native).asFlow(),
       OpenAIResponseRequest() => _responses.streamCommon(native),
@@ -102,7 +105,7 @@ final class OpenAILanguageModel implements LanguageModel {
 
   Object _encodeCommon(
     GenerationRequest request,
-    OpenAIModelOptions options, {
+    OpenAIModelOptions? callOptions, {
     required bool stream,
   }) {
     final replayError = request.validateReplayTarget(
@@ -111,31 +114,32 @@ final class OpenAILanguageModel implements LanguageModel {
       modelId: modelId,
     );
     if (replayError != null) return replayError;
-    if (request.tools.isNotEmpty || request.output is! TextOutputFormat) {
-      return const UnsupportedFeatureError(
-        'This OpenAI slice currently supports text Responses without tools.',
-      );
+    if (request.options.stopSequences.isNotEmpty) {
+      return const UnsupportedFeatureError('OpenAI Responses does not support stop sequences.');
     }
     final input = <OpenAIResponseInputItem>[];
     for (final message in request.messages) {
       if (message case UserMessage(:final parts)) {
-        if (parts.any((part) => part is! TextInputPart)) {
-          return const UnsupportedFeatureError(
-            'This OpenAI slice currently supports text message parts.',
-          );
+        final content = <OpenAIResponseInputPart>[];
+        for (final part in parts) {
+          final encoded = _encodeInputPart(part);
+          if (encoded is AiError) return encoded;
+          content.add(encoded as OpenAIResponseInputPart);
         }
         input.add(
           OpenAIResponseInputMessage(
             role: OpenAIResponseInputRole.user,
-            content: [
-              for (final part in parts.cast<TextInputPart>()) OpenAITextInputPart(part.text),
-            ],
+            content: content,
           ),
         );
-      } else if (message case AssistantMessage(:final parts)) {
+      } else if (message case AssistantMessage(:final parts, :final replay)) {
+        if (replay != null) {
+          input.addAll(replay.items.map((item) => OpenAIRawResponseInputItem(item.data)));
+          continue;
+        }
         if (parts.any((part) => part is! TextOutputPart)) {
           return const UnsupportedFeatureError(
-            'This OpenAI slice currently supports text assistant history.',
+            'Edited assistant history supports portable text only.',
           );
         }
         input.add(
@@ -146,11 +150,42 @@ final class OpenAILanguageModel implements LanguageModel {
             ],
           ),
         );
-      } else {
-        return const UnsupportedFeatureError(
-          'This OpenAI slice currently supports user and assistant text messages.',
-        );
+      } else if (message case ToolMessage(:final results)) {
+        for (final result in results) {
+          input.add(
+            OpenAIFunctionCallOutputItem(callId: result.callId, output: _toolOutput(result)),
+          );
+        }
       }
+    }
+    final applicationTools = [
+      for (final tool in request.tools)
+        OpenAIFunctionTool(
+          functionName: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema,
+        ),
+    ];
+    final nativeTools = options.resolveTools(callOptions) ?? const <OpenAIToolDefinition>[];
+    final names = applicationTools.map((tool) => tool.name).whereType<String>().toSet();
+    final collision = nativeTools
+        .map((tool) => tool.name)
+        .whereType<String>()
+        .where(names.contains)
+        .firstOrNull;
+    if (collision != null) {
+      return InvalidRequestError('Native and application tools both declare $collision.');
+    }
+    final reasoning = options.resolveReasoning(callOptions);
+    final include = options.resolveInclude(callOptions);
+    final serviceTier = options.resolveServiceTier(callOptions);
+    final extraBody = JsonObject({
+      ...options.extraBody.toDart(),
+      ...?callOptions?.extraBody.toDart(),
+    });
+    final reserved = extraBody.toDart().keys.where(_commonResponseFields.contains).firstOrNull;
+    if (reserved != null) {
+      return InvalidRequestError('extraBody field $reserved conflicts with common generation.');
     }
     return OpenAIResponseRequest(
       model: modelId,
@@ -161,12 +196,121 @@ final class OpenAILanguageModel implements LanguageModel {
       topP: request.options.topP,
       store: false,
       stream: stream,
-      extraBody: options.extraBody,
+      reasoning: reasoning?.toJson(),
+      promptCacheKey: options.resolvePromptCacheKey(callOptions),
+      promptCacheRetention: options.resolvePromptCacheRetention(callOptions),
+      serviceTier: serviceTier?.wireValue,
+      include: include?.map((value) => value.wireValue),
+      tools: applicationTools.isEmpty && nativeTools.isEmpty
+          ? null
+          : [...applicationTools, ...nativeTools],
+      toolChoice:
+          applicationTools.isEmpty && nativeTools.isEmpty && request.toolChoice is AutoToolChoice
+          ? null
+          : _encodeToolChoice(request.toolChoice),
+      text: request.output is TextOutputFormat ? null : _encodeOutput(request.output),
+      extraBody: extraBody,
     );
   }
+
+  Object _encodeInputPart(InputPart part) => switch (part) {
+    TextInputPart(:final text) => OpenAITextInputPart(text),
+    MediaInputPart(:final kind, :final mimeType, :final source) => switch (kind) {
+      MediaKind.image => switch (source) {
+        BytesMediaSource(:final bytes) => OpenAIImageInputPart(
+          imageUrl: 'data:$mimeType;base64,${base64Encode(bytes)}',
+        ),
+        UrlMediaSource(:final url) => OpenAIImageInputPart(imageUrl: url.toString()),
+        ProviderFileSource(:final providerId, :final api, :final reference)
+            when providerId == _providerId && api == _responsesApi =>
+          OpenAIImageInputPart(fileId: reference),
+        ProviderFileSource() => const InvalidRequestError(
+          'OpenAI file input must match the openai/responses context.',
+        ),
+      },
+      MediaKind.document => switch (source) {
+        ProviderFileSource(:final providerId, :final api, :final reference)
+            when providerId == _providerId && api == _responsesApi =>
+          OpenAIFileInputPart(reference),
+        _ => const UnsupportedFeatureError(
+          'OpenAI document input requires an explicit OpenAI file ID.',
+        ),
+      },
+      MediaKind.audio => switch (source) {
+        BytesMediaSource(:final bytes) => _encodeAudio(bytes, mimeType),
+        _ => const UnsupportedFeatureError('OpenAI audio input requires inline bytes.'),
+      },
+      MediaKind.video => const UnsupportedFeatureError(
+        'Video input is unavailable in the pinned OpenAI Responses schema.',
+      ),
+    },
+  };
+
+  Object _encodeAudio(List<int> bytes, String mimeType) {
+    final format = switch (mimeType) {
+      'audio/wav' || 'audio/x-wav' => 'wav',
+      'audio/mpeg' || 'audio/mp3' => 'mp3',
+      _ => null,
+    };
+    return format == null
+        ? UnsupportedFeatureError('OpenAI does not support common audio MIME type $mimeType.')
+        : OpenAIAudioInputPart(data: base64Encode(bytes), format: format);
+  }
+
+  JsonValue _encodeToolChoice(ToolChoice choice) => JsonValue.fromDart(switch (choice) {
+    AutoToolChoice() => 'auto',
+    NoToolChoice() => 'none',
+    RequiredToolChoice() => 'required',
+    FunctionToolChoice(:final name) => {'type': 'function', 'name': name},
+  });
+
+  JsonObject _encodeOutput(OutputFormat output) => JsonObject({
+    'format': switch (output) {
+      TextOutputFormat() => {'type': 'text'},
+      JsonObjectOutputFormat() => {'type': 'json_object'},
+      JsonSchemaOutputFormat(:final name, :final description, :final schema) => {
+        'type': 'json_schema',
+        'name': name,
+        'description': ?description,
+        'schema': schema.toDart(),
+        'strict': true,
+      },
+    },
+  });
+
+  String _toolOutput(ToolResult result) => switch (result) {
+    JsonToolResult(:final value) => jsonEncode(value.toDart()),
+    TextToolResult(:final content) => jsonEncode(content.map((part) => part.toDart()).toList()),
+    NativeToolResult(:final value) => value.encode(),
+    ApplicationErrorToolResult(:final message, :final details) => jsonEncode({
+      'error': message,
+      if (details != null) 'details': details.toDart(),
+    }),
+  };
 }
 
 String _nonEmpty(String value, String name) {
   if (value.isEmpty) throw ArgumentError.value(value, name, 'must not be empty');
   return value;
 }
+
+const _commonResponseFields = {
+  'model',
+  'input',
+  'instructions',
+  'max_output_tokens',
+  'temperature',
+  'top_p',
+  'store',
+  'stream',
+  'reasoning',
+  'prompt_cache_key',
+  'prompt_cache_retention',
+  'service_tier',
+  'include',
+  'tools',
+  'tool_choice',
+  'text',
+  'previous_response_id',
+  'background',
+};

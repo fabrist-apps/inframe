@@ -19,3 +19,30 @@ try {
   await provider.close();
 }
 ```
+
+Returned assistant messages carry the exact native output items required for a stateless second
+turn. Append the message and explicit tool results to caller-owned history:
+
+```dart
+final first = await model.generate(request).runFuture();
+final call = first.message.parts.whereType<ApplicationToolCallPart>().single;
+final second = await model
+    .generate(
+      GenerationRequest(
+        messages: [
+          ...request.messages,
+          first.message,
+          ToolMessage([
+            JsonToolResult(callId: call.id, value: JsonObject({'temperature': 18})),
+          ]),
+        ],
+        tools: request.tools,
+      ),
+    )
+    .runFuture();
+```
+
+The SDK preserves provider-hosted tool records as provider-owned output. Computer, shell, patch,
+custom, and function calls remain caller-owned. It never executes either family. Common generation
+always uses explicit history and `store: false`; native callers use `OpenAIResponseRequest` when they
+need background or stored continuation fields.
