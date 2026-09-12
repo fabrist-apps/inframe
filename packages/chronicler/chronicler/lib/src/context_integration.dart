@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/runtime.dart';
+import 'package:chronicler/src/trace_propagation.dart';
 import 'package:context/context.dart';
 
 final _chroniclerKey = ContextKey<ChroniclerRecorder>('chronicler');
@@ -52,10 +53,12 @@ extension ChroniclerContextTracing on Context {
   Future<T> trace<T>(
     String name, {
     required FutureOr<T> Function(Context context) run,
+    RemoteTraceParent? parent,
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => require(_chroniclerKey).trace(
     name,
+    parent: parent,
     kind: kind,
     attributes: attributes,
     run: (recorder) => run(withChronicler(recorder)),
@@ -65,10 +68,12 @@ extension ChroniclerContextTracing on Context {
   T traceSync<T>(
     String name, {
     required T Function(Context context) run,
+    RemoteTraceParent? parent,
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => require(_chroniclerKey).traceSync(
     name,
+    parent: parent,
     kind: kind,
     attributes: attributes,
     run: (recorder) => run(withChronicler(recorder)),
@@ -116,6 +121,9 @@ final class ChroniclerTracing {
 
   /// Atomically merges [attributes] into the active span.
   void setAttributes(Map<String, Object?> attributes) => _recorder.setSpanAttributes(attributes);
+
+  /// Returns a new carrier with stale tracing headers replaced for this span.
+  Map<String, String> inject(Map<String, String> headers) => _recorder.injectTrace(headers);
 }
 
 /// Records product events without waiting for transport work.

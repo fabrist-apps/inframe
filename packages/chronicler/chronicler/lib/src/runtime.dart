@@ -8,6 +8,7 @@ import 'package:chronicler/src/diagnostics.dart';
 import 'package:chronicler/src/lifecycle.dart';
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/record_validation.dart';
+import 'package:chronicler/src/trace_propagation.dart';
 import 'package:chronicler/src/transport.dart';
 import 'package:chrono_id/chrono_id.dart';
 
@@ -80,6 +81,7 @@ final class ChroniclerRecorder {
   Future<T> trace<T>(
     String name, {
     required FutureOr<T> Function(ChroniclerRecorder recorder) run,
+    RemoteTraceParent? parent,
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => _runtime._runSpan(
@@ -88,6 +90,7 @@ final class ChroniclerRecorder {
     kind: kind,
     attributes: attributes,
     forceRoot: true,
+    remoteParent: parent,
     run: run,
   );
 
@@ -95,6 +98,7 @@ final class ChroniclerRecorder {
   T traceSync<T>(
     String name, {
     required T Function(ChroniclerRecorder recorder) run,
+    RemoteTraceParent? parent,
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => _runtime._runSpanSync(
@@ -103,6 +107,7 @@ final class ChroniclerRecorder {
     kind: kind,
     attributes: attributes,
     forceRoot: true,
+    remoteParent: parent,
     run: run,
   );
 
@@ -118,6 +123,7 @@ final class ChroniclerRecorder {
     kind: kind,
     attributes: attributes,
     forceRoot: false,
+    remoteParent: null,
     run: run,
   );
 
@@ -133,6 +139,7 @@ final class ChroniclerRecorder {
     kind: kind,
     attributes: attributes,
     forceRoot: false,
+    remoteParent: null,
     run: run,
   );
 
@@ -146,6 +153,10 @@ final class ChroniclerRecorder {
   /// Atomically merges [attributes] into the active callback-managed span.
   void setSpanAttributes(Map<String, Object?> attributes) =>
       _runtime._setSpanAttributes(_attribution.span, attributes);
+
+  /// Returns a cleaned carrier containing this active span's W3C metadata.
+  Map<String, String> injectTrace(Map<String, String> headers) =>
+      _runtime._injectTrace(_attribution.span, headers);
 
   /// Returns a recorder whose analytics identity is exactly the supplied IDs.
   ///
@@ -375,6 +386,7 @@ final class ChroniclerRuntime {
     required SpanKind kind,
     required Map<String, Object?> attributes,
     required bool forceRoot,
+    required RemoteTraceParent? remoteParent,
     required FutureOr<T> Function(ChroniclerRecorder recorder) run,
   }) async {
     final started = _startSpan(
@@ -383,6 +395,7 @@ final class ChroniclerRuntime {
       kind: kind,
       attributes: attributes,
       forceRoot: forceRoot,
+      remoteParent: remoteParent,
     );
     try {
       final result = run(started.recorder);
@@ -401,6 +414,7 @@ final class ChroniclerRuntime {
     required SpanKind kind,
     required Map<String, Object?> attributes,
     required bool forceRoot,
+    required RemoteTraceParent? remoteParent,
     required T Function(ChroniclerRecorder recorder) run,
   }) {
     final started = _startSpan(
@@ -409,6 +423,7 @@ final class ChroniclerRuntime {
       kind: kind,
       attributes: attributes,
       forceRoot: forceRoot,
+      remoteParent: remoteParent,
     );
     try {
       final result = run(started.recorder);
@@ -440,13 +455,15 @@ final class ChroniclerRuntime {
     required SpanKind kind,
     required Map<String, Object?> attributes,
     required bool forceRoot,
+    required RemoteTraceParent? remoteParent,
   }) {
+    final acceptedRemote = forceRoot && _propagationEnabled ? remoteParent : null;
     final current = recorder._attribution.span;
     final activeParent = !forceRoot && current != null && !current.ended ? current : null;
     late final String traceId;
     late final String spanId;
     try {
-      traceId = activeParent?.traceId ?? _traceId();
+      traceId = acceptedRemote?.traceId ?? activeParent?.traceId ?? _traceId();
       spanId = _spanId();
     } on Object {
       diagnostics.record(DiagnosticReason.invalidRecord);
@@ -465,13 +482,14 @@ final class ChroniclerRuntime {
       diagnostics.record(DiagnosticReason.invalidRecord);
     }
     final collectionEnabled = _enabledSignals.contains(ChroniclerSignal.traces);
-    final sampled = activeParent?.sampled ?? collectionEnabled && _selectLocalTraceSampling();
+    final sampled =
+        activeParent?.sampled ?? _selectBoundarySampling(acceptedRemote, collectionEnabled);
     final lineageRecording = activeParent?.lineageRecording ?? (collectionEnabled && sampled);
     final state = _SpanState(
       eventId: ChronoID.generate(prefix: 'evt'),
       traceId: traceId,
       spanId: spanId,
-      parentSpanId: activeParent?.spanId,
+      parentSpanId: acceptedRemote?.parentSpanId ?? activeParent?.spanId,
       name: name,
       kind: kind,
       attributes: _redactMap(snapshot),
@@ -480,6 +498,7 @@ final class ChroniclerRuntime {
       recordPayload: payloadValid && lineageRecording,
       lineageRecording: lineageRecording,
       sampled: sampled,
+      tracestate: acceptedRemote?.tracestate ?? activeParent?.tracestate ?? const [],
       attribution: recorder._attribution,
     );
     return _StartedSpan(
@@ -614,6 +633,26 @@ final class ChroniclerRuntime {
     final sampled = rate == 1 || rate > 0 && _random.nextDouble() < rate;
     if (!sampled) diagnostics.record(DiagnosticReason.sampledOut);
     return sampled;
+  }
+
+  bool _selectBoundarySampling(RemoteTraceParent? parent, bool collectionEnabled) {
+    if (!collectionEnabled) return false;
+    if (parent == null || !options.tracing.honorRemoteSampling) {
+      return _selectLocalTraceSampling();
+    }
+    if (!parent.sampled) diagnostics.record(DiagnosticReason.sampledOut);
+    return parent.sampled;
+  }
+
+  Map<String, String> _injectTrace(_SpanState? span, Map<String, String> headers) {
+    final result = <String, String>{
+      for (final MapEntry(:key, :value) in headers.entries)
+        if (key.toLowerCase() != 'traceparent' && key.toLowerCase() != 'tracestate') key: value,
+    };
+    if (!_propagationEnabled || span == null || span.ended) return result;
+    result['traceparent'] = '00-${span.traceId}-${span.spanId}-${span.sampled ? '01' : '00'}';
+    if (span.tracestate.isNotEmpty) result['tracestate'] = span.tracestate.join(',');
+    return result;
   }
 
   String _randomHex(int byteCount) {
@@ -1687,6 +1726,7 @@ final class _SpanState {
     required this.recordPayload,
     required this.lineageRecording,
     required this.sampled,
+    required this.tracestate,
     required this.attribution,
   });
 
@@ -1702,6 +1742,7 @@ final class _SpanState {
   final bool recordPayload;
   final bool lineageRecording;
   final bool sampled;
+  final List<String> tracestate;
   final _RecorderAttribution attribution;
   bool ended = false;
   bool explicitError = false;
