@@ -310,6 +310,12 @@ final class AppExportAttempt implements ExportAttempt {
 }
 ```
 
+Cancellation must abort transport work and settle the attempt's result. Until settlement, the attempt
+retains its concurrency slot and record capacity so a retry cannot overlap it. An exporter that never
+settles can therefore exhaust delivery capacity; `flush()` reports pending records within its timeout.
+The SDK cannot forcibly stop application I/O. The exporter must also support `close()` while attempts
+are unresolved, and Chronicler bounds the cleanup wait with its total shutdown deadline.
+
 The component that creates Chronicler also calls `close()`. Closing blocks new application records,
 seals internal finalization state, attempts final delivery, and invokes the exporter cleanup exactly
 once. Repeated calls return the same future. The default ten-second total budget reserves two seconds

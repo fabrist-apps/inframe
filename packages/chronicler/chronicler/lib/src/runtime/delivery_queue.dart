@@ -359,6 +359,8 @@ final class DeliveryQueue {
 
   void _timeOut(_ActiveExport active) {
     if (!_active.contains(active) || active.timedOut) return;
+    // Cancellation is a request, not proof that transport stopped. Retain the
+    // slot and capacity until settlement; close bounds a stuck exporter's wait.
     active.timedOut = true;
     for (final record in active.records) {
       record.disposition._uncertain = true;
