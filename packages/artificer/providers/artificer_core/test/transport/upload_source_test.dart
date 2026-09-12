@@ -174,6 +174,25 @@ void main() {
       expect((error as InvalidRequestError).remoteResourceId, 'upload-1');
     });
 
+    test('should reject upload metadata that could alter MIME headers', () {
+      expect(
+        () => UploadSource.bytes(
+          [1],
+          filename: 'data.bin',
+          mimeType: 'application/octet-stream\r\nx-injected: true',
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => UploadSource.bytes(
+          [256],
+          filename: 'data.bin',
+          mimeType: 'application/octet-stream',
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('should cancel a stream after its first invalid byte error', () async {
       var sourceCancelled = false;
       final source = StreamController<List<int>>(

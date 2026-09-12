@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:artificer_core/src/errors.dart';
@@ -13,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
 part 'sse_transport.dart';
+part 'byte_transport.dart';
 
 /// One immutable HTTP request issued by a provider operation.
 final class ProviderHttpRequest {
@@ -57,6 +59,43 @@ final class ProviderUploadRequest {
   final Map<String, String> headers;
 
   /// The remote resource allocated before the failure, when known.
+  final String? remoteResourceId;
+}
+
+/// One multipart upload request with a single streamed file field.
+final class ProviderMultipartRequest {
+  /// Creates a multipart request.
+  ProviderMultipartRequest({
+    required this.path,
+    this.method = 'POST',
+    Map<String, String> headers = const {},
+    Map<String, String> fields = const {},
+    this.fileField = 'file',
+    this.remoteResourceId,
+  }) : headers = Map.unmodifiable(headers),
+       fields = Map.unmodifiable(fields) {
+    _multipartName(fileField, 'fileField');
+    for (final name in this.fields.keys) {
+      _multipartName(name, 'fields');
+    }
+  }
+
+  /// The path resolved against the provider base URI.
+  final String path;
+
+  /// The HTTP method.
+  final String method;
+
+  /// Immutable request headers.
+  final Map<String, String> headers;
+
+  /// UTF-8 text form fields emitted before the file.
+  final Map<String, String> fields;
+
+  /// Multipart name of the streamed file field.
+  final String fileField;
+
+  /// A known remote resource retained on failure, when any.
   final String? remoteResourceId;
 }
 
@@ -166,6 +205,66 @@ final class ProviderHttpClient {
     );
   }
 
+  /// Uploads one repeatable source as a multipart file field.
+  Effect<NativeResponse<JsonObject>, AiError> sendMultipart(
+    ProviderMultipartRequest request,
+    UploadSource source, {
+    required String providerId,
+    required String api,
+    String modelId = 'files',
+  }) {
+    return _execute(
+      (lifetime) => _sendMultipart(
+        lifetime,
+        request,
+        source,
+        providerId: providerId,
+        api: api,
+        modelId: modelId,
+      ),
+    );
+  }
+
+  /// Streams immutable response byte chunks with bounded backpressure.
+  Flow<List<int>, AiError> sendBytes(
+    ProviderHttpRequest request, {
+    int decodedChunkCapacity = 16,
+    int? maxResponseBytes,
+  }) {
+    if (decodedChunkCapacity <= 0) {
+      throw ArgumentError.value(
+        decodedChunkCapacity,
+        'decodedChunkCapacity',
+        'must be positive',
+      );
+    }
+    final responseLimit = maxResponseBytes ?? this.maxResponseBytes;
+    if (responseLimit <= 0) {
+      throw ArgumentError.value(responseLimit, 'maxResponseBytes', 'must be positive');
+    }
+    return Flow.fromStream<List<int>, _SseSignal>(
+          () => _openByteStream(request, maxResponseBytes: responseLimit),
+          onError: (error, stackTrace) => switch (error) {
+            _SseSignal() => error,
+            AiError() => _SseExpected(error),
+            _ => _SseTerminal(Defect(error, stackTrace)),
+          },
+          capacity: decodedChunkCapacity,
+        )
+        .catchError(
+          (signal) => switch (signal) {
+            _SseExpected() => Flow.fail<List<int>, _SseSignal>(signal),
+            _SseTerminal(:final cause) => Effect.failCause<List<int>, _SseSignal>(cause).asFlow(),
+          },
+        )
+        .mapError(
+          (signal) => switch (signal) {
+            _SseExpected(:final error) => error,
+            _SseTerminal() => throw StateError('A byte-stream terminal cause was not expanded.'),
+          },
+        );
+  }
+
   /// Sends one cold SSE request through a fresh protocol decoder per consumption.
   Flow<A, AiError> sendSse<A>(
     ProviderHttpRequest request, {
@@ -236,6 +335,29 @@ final class ProviderHttpClient {
       protocol: protocol,
       maxEventBytes: maxEventBytes,
       maxStreamBytes: maxStreamBytes,
+      release: () {
+        _active.remove(lifetime);
+        lifetime.complete();
+      },
+    ).stream;
+  }
+
+  Stream<List<int>> _openByteStream(
+    ProviderHttpRequest request, {
+    required int maxResponseBytes,
+  }) {
+    if (_state != _ClientState.open) {
+      return Stream<List<int>>.error(const ClientClosedError());
+    }
+    final lifetime = _RequestLifetime();
+    _active.add(lifetime);
+    return _BytePump(
+      client: _client,
+      url: baseUrl.resolve(request.path),
+      request: request,
+      headers: headers,
+      lifetime: lifetime,
+      maxResponseBytes: maxResponseBytes,
       release: () {
         _active.remove(lifetime);
         lifetime.complete();
@@ -397,11 +519,13 @@ final class ProviderHttpClient {
             ..contentLength = source.length
             ..headers.addAll(headers)
             ..headers.addAll(request.headers)
-            ..headers.putIfAbsent('content-type', () => source.mimeType)
-            ..headers.putIfAbsent(
-              'content-disposition',
-              () => "attachment; filename*=UTF-8''${Uri.encodeComponent(source.filename)}",
-            );
+            ..headers.putIfAbsent('content-type', () => source.mimeType);
+      if (!nativeRequest.headers['content-type']!.startsWith('multipart/')) {
+        nativeRequest.headers.putIfAbsent(
+          'content-disposition',
+          () => "attachment; filename*=UTF-8''${Uri.encodeComponent(source.filename)}",
+        );
+      }
 
       deliveryState = RequestDeliveryState.mayHaveReachedProvider;
       final acquisition = _client.send(nativeRequest);
@@ -494,6 +618,45 @@ final class ProviderHttpClient {
         metadata: metadata,
       );
     });
+  }
+
+  Effect<NativeResponse<JsonObject>, AiError> _sendMultipart(
+    _RequestLifetime lifetime,
+    ProviderMultipartRequest request,
+    UploadSource source, {
+    required String providerId,
+    required String api,
+    required String modelId,
+  }) {
+    final boundary = _multipartBoundary();
+    final prefix = _multipartPrefix(request, source, boundary);
+    final suffix = utf8.encode('\r\n--$boundary--\r\n');
+    final body = UploadSource.stream(
+      () async* {
+        yield prefix;
+        yield* source.openRead();
+        yield suffix;
+      },
+      length: prefix.length + source.length + suffix.length,
+      filename: source.filename,
+      mimeType: 'multipart/form-data; boundary=$boundary',
+    );
+    return _sendUpload(
+      lifetime,
+      ProviderUploadRequest(
+        path: request.path,
+        method: request.method,
+        headers: {
+          ...request.headers,
+          'content-type': 'multipart/form-data; boundary=$boundary',
+        },
+        remoteResourceId: request.remoteResourceId,
+      ),
+      body,
+      providerId: providerId,
+      api: api,
+      modelId: modelId,
+    );
   }
 
   /// Interrupts this provider's operations and releases only owned resources.
@@ -716,3 +879,39 @@ String _safeForeignMessage(Object error) => switch (error) {
   http.ClientException(:final message) => message,
   _ => 'The HTTP operation failed.',
 };
+
+final _multipartRandom = Random.secure();
+
+String _multipartBoundary() =>
+    'artificer-${base64Url.encode(List.generate(24, (_) => _multipartRandom.nextInt(256)))}';
+
+List<int> _multipartPrefix(
+  ProviderMultipartRequest request,
+  UploadSource source,
+  String boundary,
+) {
+  final text = StringBuffer();
+  for (final field in request.fields.entries) {
+    text
+      ..write('--$boundary\r\n')
+      ..write('Content-Disposition: form-data; name="${field.key}"\r\n\r\n')
+      ..write(field.value)
+      ..write('\r\n');
+  }
+  text
+    ..write('--$boundary\r\n')
+    ..write(
+      'Content-Disposition: form-data; name="${request.fileField}"; '
+      'filename="${_quotedFilename(source.filename)}"\r\n',
+    )
+    ..write('Content-Type: ${source.mimeType}\r\n\r\n');
+  return utf8.encode(text.toString());
+}
+
+String _quotedFilename(String value) => value.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+
+void _multipartName(String value, String name) {
+  if (value.isEmpty || value.contains('"') || value.contains('\r') || value.contains('\n')) {
+    throw ArgumentError.value(value, name, 'must be a safe nonempty multipart field name');
+  }
+}

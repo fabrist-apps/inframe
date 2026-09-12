@@ -10,6 +10,9 @@ sealed class UploadSource {
     if (filename.contains('\n') || filename.contains('\r')) {
       throw ArgumentError.value(filename, 'filename', 'must not contain line breaks');
     }
+    if (mimeType.contains('\n') || mimeType.contains('\r')) {
+      throw ArgumentError.value(mimeType, 'mimeType', 'must not contain line breaks');
+    }
   }
 
   factory UploadSource.bytes(
@@ -46,7 +49,11 @@ final class BytesUploadSource extends UploadSource {
     required String filename,
     required String mimeType,
   }) {
-    final copy = Uint8List.fromList(bytes.toList(growable: false)).asUnmodifiableView();
+    final values = bytes.toList(growable: false);
+    if (values.any((byte) => byte < 0 || byte > 255)) {
+      throw ArgumentError.value(bytes, 'bytes', 'must contain values from 0 through 255');
+    }
+    final copy = Uint8List.fromList(values).asUnmodifiableView();
     return BytesUploadSource._(copy, filename: filename, mimeType: mimeType);
   }
 
