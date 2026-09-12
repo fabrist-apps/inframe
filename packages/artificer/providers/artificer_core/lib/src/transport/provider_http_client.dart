@@ -62,6 +62,40 @@ final class ProviderUploadRequest {
   final String? remoteResourceId;
 }
 
+/// One two-exchange resumable upload performed as a single provider operation.
+final class ProviderResumableUploadRequest {
+  /// Creates a resumable upload request.
+  ProviderResumableUploadRequest({
+    required this.startRequest,
+    Map<String, String> uploadHeaders = const {},
+    this.uploadMethod = 'POST',
+    this.uploadUrlHeader = 'x-goog-upload-url',
+    this.remoteResourceIdHeader,
+  }) : uploadHeaders = Map.unmodifiable(uploadHeaders) {
+    _headerName(uploadUrlHeader, 'uploadUrlHeader');
+    if (remoteResourceIdHeader case final value?) {
+      _headerName(value, 'remoteResourceIdHeader');
+    }
+  }
+
+  /// The authenticated request that starts the resumable session.
+  final ProviderHttpRequest startRequest;
+
+  /// Headers sent to the returned upload URL.
+  ///
+  /// Provider client headers are deliberately not inherited by this exchange.
+  final Map<String, String> uploadHeaders;
+
+  /// HTTP method used for the byte transfer and finalization exchange.
+  final String uploadMethod;
+
+  /// Response header containing the absolute upload URL.
+  final String uploadUrlHeader;
+
+  /// Optional response header containing a safe allocated upload identifier.
+  final String? remoteResourceIdHeader;
+}
+
 /// One multipart upload request with a single streamed file field.
 final class ProviderMultipartRequest {
   /// Creates a multipart request.
@@ -173,11 +207,37 @@ final class ProviderHttpClient {
     required String providerId,
     required String api,
     required String modelId,
+    bool allowEmptySuccess = false,
   }) {
     return _execute(
       (lifetime) => _sendJson(
         lifetime,
         request,
+        providerId: providerId,
+        api: api,
+        modelId: modelId,
+        allowEmptySuccess: allowEmptySuccess,
+      ),
+    );
+  }
+
+  /// Starts, transfers, and finalizes one resumable upload without retries.
+  ///
+  /// The returned upload URL must be absolute HTTP(S). Only [request]'s
+  /// [ProviderResumableUploadRequest.uploadHeaders] are sent to that URL, so
+  /// provider credentials cannot be forwarded to a different origin.
+  Effect<NativeResponse<JsonObject>, AiError> sendResumableUpload(
+    ProviderResumableUploadRequest request,
+    UploadSource source, {
+    required String providerId,
+    required String api,
+    String modelId = 'files',
+  }) {
+    return _execute(
+      (lifetime) => _sendResumableUpload(
+        lifetime,
+        request,
+        source,
         providerId: providerId,
         api: api,
         modelId: modelId,
@@ -391,9 +451,13 @@ final class ProviderHttpClient {
     required String providerId,
     required String api,
     required String modelId,
+    bool allowEmptySuccess = false,
   }) {
     var deliveryState = RequestDeliveryState.notSent;
     return Effect.build(($) async {
+      if (lifetime.isCancelled) {
+        return $(Effect.failCause(Interrupted(lifetime.cancellationReason)));
+      }
       final url = baseUrl.resolve(request.path);
       final nativeRequest =
           http.AbortableRequest(
@@ -412,7 +476,7 @@ final class ProviderHttpClient {
 
       deliveryState = RequestDeliveryState.mayHaveReachedProvider;
       final acquisition = _client.send(nativeRequest);
-      lifetime._acquisition = acquisition;
+      lifetime.startExchange(acquisition);
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
           () => lifetime.waitFor(acquisition),
@@ -453,19 +517,24 @@ final class ProviderHttpClient {
       }
       final bytes = (body as _WaitValue<List<int>>).value;
 
-      final JsonObject payload;
-      try {
-        payload = JsonObject.parse(utf8.decode(bytes));
-      } on Object {
-        return $(Effect.fail(const ProtocolError('The response was not a JSON object.')));
-      }
       final requestId = response.headers['x-request-id'] ?? response.headers['request-id'];
       final metadata = ResponseMetadata(
         statusCode: response.statusCode,
         requestId: requestId,
         headers: response.headers,
       );
-      if (response.statusCode < 200 || response.statusCode >= 300) {
+      final successful = response.statusCode >= 200 && response.statusCode < 300;
+      final JsonObject payload;
+      if (successful && allowEmptySuccess && bytes.isEmpty) {
+        payload = JsonObject({});
+      } else {
+        try {
+          payload = JsonObject.parse(utf8.decode(bytes));
+        } on Object {
+          return $(Effect.fail(const ProtocolError('The response was not a JSON object.')));
+        }
+      }
+      if (!successful) {
         return $(Effect.fail(_providerError(response, payload, requestId)));
       }
       return NativeResponse(
@@ -481,6 +550,72 @@ final class ProviderHttpClient {
     });
   }
 
+  Effect<NativeResponse<JsonObject>, AiError> _sendResumableUpload(
+    _RequestLifetime lifetime,
+    ProviderResumableUploadRequest request,
+    UploadSource source, {
+    required String providerId,
+    required String api,
+    required String modelId,
+  }) {
+    return Effect.build(($) async {
+      final started = await $(
+        _sendJson(
+          lifetime,
+          request.startRequest,
+          providerId: providerId,
+          api: api,
+          modelId: modelId,
+          allowEmptySuccess: true,
+        ),
+      );
+      final remoteResourceId = request.remoteResourceIdHeader == null
+          ? null
+          : _responseHeader(started.metadata.headers, request.remoteResourceIdHeader!);
+      final rawUploadUrl = _responseHeader(started.metadata.headers, request.uploadUrlHeader);
+      if (rawUploadUrl == null || rawUploadUrl.isEmpty) {
+        return $(
+          Effect.fail(
+            ProtocolError(
+              'The resumable upload response did not include ${request.uploadUrlHeader}.',
+              remoteResourceId: remoteResourceId,
+            ),
+          ),
+        );
+      }
+      final uploadUrl = Uri.tryParse(rawUploadUrl);
+      if (uploadUrl == null ||
+          !uploadUrl.isAbsolute ||
+          (uploadUrl.scheme != 'http' && uploadUrl.scheme != 'https')) {
+        return $(
+          Effect.fail(
+            ProtocolError(
+              'The resumable upload URL was not an absolute HTTP(S) URL.',
+              remoteResourceId: remoteResourceId,
+            ),
+          ),
+        );
+      }
+      return $(
+        _sendUpload(
+          lifetime,
+          ProviderUploadRequest(
+            path: '',
+            method: request.uploadMethod,
+            headers: request.uploadHeaders,
+            remoteResourceId: remoteResourceId,
+          ),
+          source,
+          providerId: providerId,
+          api: api,
+          modelId: modelId,
+          url: uploadUrl,
+          inheritClientHeaders: false,
+        ),
+      );
+    });
+  }
+
   Effect<NativeResponse<JsonObject>, AiError> _sendUpload(
     _RequestLifetime lifetime,
     ProviderUploadRequest request,
@@ -488,9 +623,14 @@ final class ProviderHttpClient {
     required String providerId,
     required String api,
     required String modelId,
+    Uri? url,
+    bool inheritClientHeaders = true,
   }) {
     var deliveryState = RequestDeliveryState.notSent;
     return Effect.build(($) async {
+      if (lifetime.isCancelled) {
+        return $(Effect.failCause(Interrupted(lifetime.cancellationReason)));
+      }
       final sourceStream = await $(
         Effect.tryFuture<Stream<List<int>>, AiError>(
           () => Future.sync(source.openRead),
@@ -511,13 +651,13 @@ final class ProviderHttpClient {
       final nativeRequest =
           _AbortableBodyRequest(
               request.method,
-              baseUrl.resolve(request.path),
+              url ?? baseUrl.resolve(request.path),
               _trackedUpload(sourceStream, lifetime),
               abortTrigger: lifetime.abortTrigger,
             )
             ..followRedirects = false
             ..contentLength = source.length
-            ..headers.addAll(headers)
+            ..headers.addAll(inheritClientHeaders ? headers : const {})
             ..headers.addAll(request.headers)
             ..headers.putIfAbsent('content-type', () => source.mimeType);
       if (!nativeRequest.headers['content-type']!.startsWith('multipart/')) {
@@ -529,7 +669,7 @@ final class ProviderHttpClient {
 
       deliveryState = RequestDeliveryState.mayHaveReachedProvider;
       final acquisition = _client.send(nativeRequest);
-      lifetime._acquisition = acquisition;
+      lifetime.startExchange(acquisition);
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
           () => lifetime.waitFor(acquisition),
@@ -700,10 +840,13 @@ final class _RequestLifetime {
   StreamSubscription<List<int>>? _bodySubscription;
   Future<void> Function()? _uploadCleanup;
   Future<void>? _cleanupFuture;
+  Object? _cancellationReason;
 
   Future<void> get abortTrigger => _abort.future;
   Future<Object?> get cancellation => _cancelled.future;
   Future<void> get done => _done.future;
+  bool get isCancelled => _cancelled.isCompleted;
+  Object? get cancellationReason => _cancellationReason;
 
   Future<_WaitResult<T>> waitFor<T extends Object>(Future<T> future) {
     return Future.any([
@@ -712,13 +855,23 @@ final class _RequestLifetime {
     ]);
   }
 
+  void startExchange(Future<http.StreamedResponse> acquisition) {
+    _acquisition = acquisition;
+    _response = null;
+    _bodySubscription = null;
+    _uploadCleanup = null;
+  }
+
   void trackUpload(Future<void> Function() cleanup) {
     _uploadCleanup = cleanup;
     if (_cancelled.isCompleted) unawaited(cleanup());
   }
 
   void cancel(Object? reason) {
-    if (!_cancelled.isCompleted) _cancelled.complete(reason);
+    if (!_cancelled.isCompleted) {
+      _cancellationReason = reason;
+      _cancelled.complete(reason);
+    }
     if (!_abort.isCompleted) _abort.complete();
   }
 
@@ -914,4 +1067,18 @@ void _multipartName(String value, String name) {
   if (value.isEmpty || value.contains('"') || value.contains('\r') || value.contains('\n')) {
     throw ArgumentError.value(value, name, 'must be a safe nonempty multipart field name');
   }
+}
+
+void _headerName(String value, String name) {
+  if (value.isEmpty || value.contains('\r') || value.contains('\n') || value.contains(':')) {
+    throw ArgumentError.value(value, name, 'must be a valid nonempty header name');
+  }
+}
+
+String? _responseHeader(Map<String, String> headers, String name) {
+  final normalized = name.toLowerCase();
+  for (final entry in headers.entries) {
+    if (entry.key.toLowerCase() == normalized) return entry.value;
+  }
+  return null;
 }

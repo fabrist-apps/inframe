@@ -3,6 +3,8 @@ library;
 
 export 'src/embeddings/embedding_models.dart';
 export 'src/embeddings/embeddings_resource.dart';
+export 'src/files/files_resource.dart';
+export 'src/files/google_file.dart';
 export 'src/generate_content/generate_content_models.dart';
 export 'src/generate_content/generate_content_resource.dart';
 export 'src/generate_content/tool_models.dart';

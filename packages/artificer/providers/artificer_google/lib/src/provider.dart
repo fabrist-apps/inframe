@@ -3,6 +3,7 @@ import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:artificer_google/src/embeddings/embedding_models.dart';
 import 'package:artificer_google/src/embeddings/embeddings_resource.dart';
+import 'package:artificer_google/src/files/files_resource.dart';
 import 'package:artificer_google/src/generate_content/generate_content_models.dart';
 import 'package:artificer_google/src/generate_content/generate_content_resource.dart';
 import 'package:artificer_google/src/generate_content/tool_models.dart';
@@ -26,6 +27,7 @@ final class GoogleProvider {
     generateContent = GoogleGenerateContentResource(_client);
     models = GoogleModelsResource(_client, generateContent);
     embeddings = GoogleEmbeddingsResource(_client);
+    files = GoogleFilesResource(_client);
   }
 
   final ProviderHttpClient _client;
@@ -38,6 +40,9 @@ final class GoogleProvider {
 
   /// Typed native embedding operations.
   late final GoogleEmbeddingsResource embeddings;
+
+  /// Explicit Google Files upload and lifecycle operations.
+  late final GoogleFilesResource files;
 
   /// Creates a common explicit-history language model without discovery.
   GoogleLanguageModel languageModel(String modelId, {GoogleModelOptions? options}) {
