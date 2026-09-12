@@ -40,6 +40,8 @@ final class VoxelRelationDescriptor<Target> {
     this.fields = const [],
     this.reference,
     this.inverse,
+    this.source,
+    this.target,
   });
 
   final VoxelRelationKind kind;
@@ -48,6 +50,8 @@ final class VoxelRelationDescriptor<Target> {
   final List<VoxelColumn<dynamic>> fields;
   final List<VoxelColumn<dynamic>> Function(Target table)? reference;
   final VoxelRelationDescriptor<dynamic> Function(Target table)? inverse;
+  final VoxelRelationDescriptor<dynamic> Function(Object table)? source;
+  final VoxelRelationDescriptor<dynamic> Function(Object table)? target;
   List<VoxelColumn<dynamic>> references = const [];
   VoxelRelationDescriptor<dynamic>? inverseRelation;
 
@@ -74,6 +78,8 @@ final class VoxelManyRelation<Target> extends VoxelRelationDescriptor<Target> {
     Type targetTable, {
     super.through,
     VoxelRelationDescriptor<dynamic> Function(Target table)? relation,
+    super.source,
+    super.target,
   }) : super(
          kind: through == null ? VoxelRelationKind.many : VoxelRelationKind.manyThrough,
          targetTable: targetTable,
@@ -87,4 +93,25 @@ final class VoxelRelationBuilder<Target, RelationType extends VoxelRelationDescr
   final RelationType descriptor;
 
   RelationType call() => descriptor;
+}
+
+/// Builds a direct or junction-backed many relation.
+final class VoxelManyRelationBuilder<Target> {
+  const VoxelManyRelationBuilder(this.descriptor);
+
+  final VoxelManyRelation<Target> descriptor;
+
+  VoxelManyRelation<Target> call() => descriptor;
+
+  VoxelRelationBuilder<Target, VoxelManyRelation<Target>> through<Through>({
+    required VoxelRelationDescriptor<dynamic> Function(Through table) source,
+    required VoxelRelationDescriptor<dynamic> Function(Through table) target,
+  }) => VoxelRelationBuilder(
+    VoxelManyRelation<Target>(
+      descriptor.targetTable,
+      through: Through,
+      source: (table) => source(table as Through),
+      target: (table) => target(table as Through),
+    ),
+  );
 }

@@ -24,6 +24,8 @@ final class VoxelTableSchema<Definition, Row> {
     required List<VoxelColumn<Object?>> columns,
     required List<String> columnNames,
     required this.decode,
+    this.definitionType = Object,
+    this.rowType = Object,
     this.createDefinition,
     this.columnsFor,
     this.renamedFrom,
@@ -79,6 +81,8 @@ final class VoxelTableSchema<Definition, Row> {
   final Definition Function()? createDefinition;
   final List<VoxelColumn<Object?>> Function(Definition definition)? columnsFor;
   final VoxelRowDecoder<Row> decode;
+  final Type definitionType;
+  final Type rowType;
   final int formatVersion;
   late final List<VoxelIndex> indexes;
   late final List<VoxelConstraint> constraints;
@@ -117,10 +121,147 @@ final class VoxelDatabaseSchema {
     required List<VoxelTableSchema<Object?, Object?>> tables,
   }) : tables = List.unmodifiable(tables) {
     if (name.isEmpty) throw ArgumentError.value(name, 'name', 'must not be empty');
+    _validateVoxelSchemas(this.tables);
   }
 
   final String name;
   final List<VoxelTableSchema<Object?, Object?>> tables;
+  final int formatVersion = 1;
+}
+
+const _reservedVoxelTables = {
+  '_voxel_identity',
+  '_voxel_files',
+  '_voxel_migrations',
+  '_voxel_phases',
+};
+
+void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
+  final physicalNames = <String>{};
+  final registered = <Type, VoxelTableSchema<Object?, Object?>>{};
+  for (final table in tables) {
+    final definition = table.definition;
+    if (definition == null) {
+      throw ArgumentError(
+        'Voxel table ${table.schemaName}.${table.tableName} has a null definition.',
+      );
+    }
+    if (_reservedVoxelTables.contains(table.tableName)) {
+      throw ArgumentError('Voxel table name ${table.tableName} is reserved for migration state.');
+    }
+    if (!physicalNames.add('${table.schemaName}.${table.tableName}')) {
+      throw ArgumentError(
+        'Duplicate Voxel table registration: ${table.schemaName}.${table.tableName}.',
+      );
+    }
+    if (registered[definition.runtimeType] != null) {
+      throw ArgumentError('Duplicate Voxel table type registration: ${definition.runtimeType}.');
+    }
+    registered[definition.runtimeType] = table;
+  }
+  for (final table in tables) {
+    for (final column in table.columns) {
+      final foreignKey = column.foreignKey;
+      if (foreignKey == null) continue;
+      final target = registered[foreignKey.targetTable];
+      if (target == null) {
+        throw ArgumentError(
+          'Foreign key ${table.schemaName}.${table.tableName}.${column.physicalName} targets '
+          '${foreignKey.targetTable}, which is not registered.',
+        );
+      }
+      if (table.schemaName != target.schemaName) {
+        throw ArgumentError(
+          'Voxel foreign keys cannot cross schemas: ${table.schemaName} to ${target.schemaName}.',
+        );
+      }
+      final referenced = foreignKey.reference(target.definition!);
+      if (!target.columns.contains(referenced)) {
+        throw ArgumentError(
+          'Foreign key ${table.tableName}.${column.physicalName} selects a foreign column.',
+        );
+      }
+      if (column.codec.cast != referenced.codec.cast) {
+        throw ArgumentError(
+          'Foreign key ${table.tableName}.${column.physicalName} maps ${column.codec.cast} '
+          'to incompatible ${referenced.codec.cast}.',
+        );
+      }
+      foreignKey.referencedColumn = referenced;
+    }
+    for (final entry in table.relations.entries) {
+      final relation = entry.value;
+      final target = registered[relation.targetTable];
+      if (target == null) {
+        throw ArgumentError(
+          'Relation ${table.tableName}.${entry.key} targets an unregistered table.',
+        );
+      }
+      relation.resolve(target.definition);
+      if (relation.kind == VoxelRelationKind.manyThrough) {
+        final through = registered[relation.through];
+        if (through == null) {
+          throw ArgumentError(
+            'Relation ${table.tableName}.${entry.key} uses an unregistered through table.',
+          );
+        }
+        final source = relation.source?.call(through.definition!);
+        final destination = relation.target?.call(through.definition!);
+        if (source == null ||
+            destination == null ||
+            source.kind != VoxelRelationKind.one ||
+            destination.kind != VoxelRelationKind.one ||
+            source.targetTable != table.definition.runtimeType ||
+            destination.targetTable != target.definition.runtimeType) {
+          throw ArgumentError(
+            'Relation ${table.tableName}.${entry.key} has incompatible through selectors.',
+          );
+        }
+        continue;
+      }
+      if (relation.kind == VoxelRelationKind.many && relation.inverseRelation == null) {
+        final candidates = target.relations.values
+            .where(
+              (candidate) =>
+                  candidate.kind == VoxelRelationKind.one &&
+                  candidate.targetTable == table.definition.runtimeType,
+            )
+            .toList(growable: false);
+        if (candidates.length != 1) {
+          throw ArgumentError(
+            'Relation ${table.tableName}.${entry.key} requires exactly one inverse relation; '
+            'found ${candidates.length}.',
+          );
+        }
+        relation.inverseRelation = candidates.single;
+      }
+      if (relation.kind == VoxelRelationKind.one) {
+        if (relation.fields.isEmpty ||
+            relation.fields.length != relation.references.length ||
+            relation.fields.any((column) => !table.columns.contains(column)) ||
+            relation.references.any((column) => !target.columns.contains(column))) {
+          throw ArgumentError(
+            'Relation ${table.tableName}.${entry.key} has an invalid column mapping.',
+          );
+        }
+        for (var index = 0; index < relation.fields.length; index++) {
+          if (relation.fields[index].codec.cast != relation.references[index].codec.cast) {
+            throw ArgumentError(
+              'Relation ${table.tableName}.${entry.key} maps incompatible storage types.',
+            );
+          }
+        }
+      }
+      final inverse = relation.inverseRelation;
+      if (inverse != null &&
+          (!target.relations.values.contains(inverse) ||
+              inverse.targetTable != table.definition.runtimeType)) {
+        throw ArgumentError(
+          'Relation ${table.tableName}.${entry.key} selects an invalid inverse relation.',
+        );
+      }
+    }
+  }
 }
 
 /// Base class used by annotated table declarations.
@@ -180,10 +321,9 @@ abstract class VoxelTableDefinition<Self> {
     VoxelOneRelation(Target, fields: List.unmodifiable(fields), references: references),
   );
 
-  VoxelRelationBuilder<Target, VoxelManyRelation<Target>> many<Target>({
+  VoxelManyRelationBuilder<Target> many<Target>({
     VoxelRelationDescriptor<dynamic> Function(Target table)? relation,
-    Type? through,
-  }) => VoxelRelationBuilder(VoxelManyRelation(Target, relation: relation, through: through));
+  }) => VoxelManyRelationBuilder(VoxelManyRelation(Target, relation: relation));
 
   VoxelIndexBuilder index(String name) => VoxelIndexBuilder(name, unique: false);
   VoxelIndexBuilder uniqueIndex(String name) => VoxelIndexBuilder(name, unique: true);

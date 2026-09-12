@@ -8,6 +8,8 @@ environment:
 workspace:
   - voxel
   - voxel_generator
+  - test/fixtures/schema_package
+  - test/fixtures/app_package
 
 dev_dependencies:
   build_runner: ^2.16.1

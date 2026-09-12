@@ -209,6 +209,8 @@ final class _\$${className}DB extends VoxelTableAccessor<$className, $rowName> {
       schemaName: ${literal(schemaName)},
       tableName: ${literal(tableName)},
 $renameMetadata      definition: definition,
+      definitionType: $className,
+      rowType: $rowName,
       columns: [$descriptorList],
       columnNames: [$names],
       createDefinition: createDefinition,
@@ -340,12 +342,18 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     final target = type.typeArguments.first;
     final targetElement = target.element;
     var targetReference = target.getDisplayString();
+    if (targetElement == null || targetReference == 'InvalidType') {
+      targetReference = _relationTargetFromAst(field) ?? targetReference;
+    }
     if (targetElement != null) {
       targetReference = referenceTo(targetElement, field.library);
     }
     final separator = targetReference.lastIndexOf('.');
     final prefix = separator < 0 ? '' : targetReference.substring(0, separator + 1);
-    final defaultRowName = '${targetElement?.displayName ?? targetReference}Row';
+    final unprefixedTarget = separator < 0
+        ? targetReference
+        : targetReference.substring(separator + 1);
+    final defaultRowName = '${targetElement?.displayName ?? unprefixedTarget}Row';
     var targetRow = '$prefix$defaultRowName';
     if (targetElement != null) {
       final value = const TypeChecker.typeNamed(
@@ -362,6 +370,16 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
         ).isAssignableFromType(type)
         ? 'Relation<$targetRow?>'
         : 'Relation<List<$targetRow>>';
+  }
+
+  String? _relationTargetFromAst(FieldElement field) {
+    final parsed = field.library.session.getParsedLibraryByElement(field.library);
+    if (parsed is! ParsedLibraryResult) return null;
+    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
+    if (declaration is! VariableDeclaration || declaration.initializer == null) return null;
+    final visitor = _RelationTargetVisitor();
+    declaration.initializer!.accept(visitor);
+    return visitor.target;
   }
 }
 
@@ -403,6 +421,19 @@ final class _EnumTextVisitor extends RecursiveAstVisitor<void> {
       if (arguments != null && arguments.length == 1) {
         enumType = arguments.single.toSource();
       }
+    }
+    super.visitMethodInvocation(node);
+  }
+}
+
+final class _RelationTargetVisitor extends RecursiveAstVisitor<void> {
+  String? target;
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    if (target == null && (node.methodName.name == 'one' || node.methodName.name == 'many')) {
+      final arguments = node.typeArguments?.arguments;
+      if (arguments != null && arguments.length == 1) target = arguments.single.toSource();
     }
     super.visitMethodInvocation(node);
   }
