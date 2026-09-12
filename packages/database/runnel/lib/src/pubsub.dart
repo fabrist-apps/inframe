@@ -658,7 +658,7 @@ final class PubSubSession {
           ? RedisDeliveryStatus.outcomeUnknown
           : RedisDeliveryStatus.notSent,
     );
-    if (operation.submitted) {
+    if (operation.submitted || operation.kind == _ControlKind.unsubscribe) {
       _terminateForControlFailure(PubSubInterruptionCause.subscriptionTimeout, failure);
     } else {
       operation.result.completeError(failure, StackTrace.current);
@@ -1057,7 +1057,7 @@ final class PubSubSession {
     _drainEvents();
     final transport = _transport;
     _transport = null;
-    final release = transport?.close() ?? Future<void>.value();
+    final release = _releaseTerminalResources(_openingTransport, transport);
     _closing ??= release.whenComplete(_notifyClosed);
   }
 
@@ -1110,8 +1110,17 @@ final class PubSubSession {
     _drainEvents();
     final transport = _transport;
     _transport = null;
-    final release = transport?.close() ?? Future<void>.value();
+    final release = _releaseTerminalResources(_openingTransport, transport);
     _closing ??= release.whenComplete(_notifyClosed);
+  }
+
+  Future<void> _releaseTerminalResources(
+    ConnectionAttempt? opening,
+    _PubSubTransport? transport,
+  ) async {
+    await opening?.cancel();
+    await transport?.close();
+    await opening?.settled;
   }
 
   void _cancelReconnectDelay() {
@@ -1333,7 +1342,7 @@ final class _PubSubTransport {
     );
   }
 
-  final Socket _socket;
+  final ConnectionSocket _socket;
   final RespParser _parser;
   final void Function(RespValue value) _onFrame;
   final void Function(Object error) _onTerminated;

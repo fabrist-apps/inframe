@@ -146,6 +146,43 @@ void main() {
       expect(session.acknowledgedChannels, {'first', ...channels});
     });
 
+    test('should reset the socket when a queued unsubscribe expires', () async {
+      final peer = await _RecoveryPeer.start();
+      addTearDown(peer.close);
+      final session = await _connect(
+        peer,
+        controlTimeout: const Duration(seconds: 1),
+      );
+      addTearDown(session.close);
+      await session.subscribe(['established']);
+      peer.holdAcknowledgementsFromConnection = 1;
+
+      final preceding = session.subscribe(['retained']);
+      final precedingFailure = expectLater(preceding, throwsA(isA<RedisTimeoutException>()));
+      await peer.waitForCommandCount('SUBSCRIBE', 2);
+      final removal = session.unsubscribe(
+        ['established'],
+        timeout: const Duration(milliseconds: 20),
+      );
+
+      await expectLater(removal, throwsA(isA<RedisTimeoutException>()));
+      await precedingFailure;
+      await peer.waitForConnections(2);
+      await _eventually(() => session.state == PubSubState.ready);
+
+      expect(session.desiredChannels, {'retained'});
+      expect(session.acknowledgedChannels, {'retained'});
+      expect(
+        peer.commands
+            .where((command) => command.connection == 2)
+            .map((command) => command.arguments),
+        [
+          ['3'],
+          ['retained'],
+        ],
+      );
+    });
+
     test('should keep removals when unsubscribe is rejected and reset the socket', () async {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
@@ -267,6 +304,8 @@ void main() {
       );
 
       expect(session.state, PubSubState.closed);
+      await peer.waitForConnectionClosed(2);
+      await session.close().timeout(const Duration(seconds: 1));
       final connectionsAfterTimeout = peer.connectionCount;
       await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(peer.connectionCount, connectionsAfterTimeout);
@@ -381,6 +420,9 @@ final class _RecoveryPeer {
 
   Future<void> waitForConnections(int count) => _eventually(() => connectionCount >= count);
 
+  Future<void> waitForConnectionClosed(int connection) =>
+      _connections[connection - 1].closed.future.timeout(const Duration(seconds: 1));
+
   Future<void> waitForCommandCount(String name, int count) =>
       _eventually(() => commandCount(name) >= count);
 
@@ -427,7 +469,7 @@ final class _RecoveryPeer {
         connection.buffer = connection.buffer.sublist(parsed.consumed);
         _handle(connection, parsed.arguments);
       }
-    });
+    }, onDone: connection.closed.complete);
   }
 
   void _handle(_PeerConnection connection, List<Uint8List> rawArguments) {
@@ -497,6 +539,7 @@ final class _PeerConnection {
 
   final Socket socket;
   final int number;
+  final Completer<void> closed = Completer<void>();
   List<int> buffer = [];
 }
 

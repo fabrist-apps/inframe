@@ -2,14 +2,19 @@
 // ignore_for_file: public_member_api_docs
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:runnel/src/errors.dart';
 
 final class ConnectionAttempt {
+  final Completer<void> _settled = Completer<void>();
   void Function()? _cancelConnect;
   Future<void> Function()? _closeResource;
   bool _cancelled = false;
+
+  Future<void> get settled => _settled.future;
 
   bool attachConnect(void Function() cancel) {
     if (_cancelled) {
@@ -33,6 +38,7 @@ final class ConnectionAttempt {
   void finish() {
     _cancelConnect = null;
     _closeResource = null;
+    if (!_settled.isCompleted) _settled.complete();
   }
 
   Future<void> cancel() async {
@@ -46,62 +52,255 @@ final class ConnectionAttempt {
   }
 }
 
-Future<Socket> openSocket({
+abstract class ConnectionSocket extends Stream<Uint8List> {
+  void add(List<int> bytes);
+
+  void destroy();
+
+  Future<void> close();
+}
+
+Future<ConnectionSocket> openSocket({
   required String host,
   required int port,
   required bool tls,
   required SecurityContext? securityContext,
   required Duration timeout,
   ConnectionAttempt? attempt,
-}) async {
+}) {
   final elapsed = Stopwatch()..start();
-  final pending = tls
-      ? await _startSecureConnect(host, port, securityContext)
-      : await _startPlainConnect(host, port);
-  if (!(attempt?.attachConnect(pending.cancel) ?? true)) {
+  return tls
+      ? _openSecureSocket(host, port, securityContext, timeout, elapsed, attempt)
+      : _openPlainSocket(host, port, timeout, elapsed, attempt);
+}
+
+Future<ConnectionSocket> _openPlainSocket(
+  String host,
+  int port,
+  Duration timeout,
+  Stopwatch elapsed,
+  ConnectionAttempt? attempt,
+) async {
+  final task = await Socket.startConnect(host, port);
+  if (!(attempt?.attachConnect(task.cancel) ?? true)) {
     try {
-      await pending.socket;
+      await task.socket;
     } on Object {
       // Cancellation is represented to the caller by RedisClosedException below.
     }
     throw const RedisClosedException(message: 'The connection attempt was cancelled.');
   }
   try {
-    final remaining = timeout - elapsed.elapsed;
-    if (remaining <= Duration.zero) {
-      pending.cancel();
-      throw TimeoutException('The socket connection deadline expired.');
-    }
-    final socket = await pending.socket.timeout(
-      remaining,
+    final socket = await task.socket.timeout(
+      _remaining(timeout, elapsed),
       onTimeout: () {
-        pending.cancel();
+        task.cancel();
         throw TimeoutException('The socket connection deadline expired.');
       },
     );
-    if (!(attempt?.attachResource(() async => socket.destroy()) ?? true)) {
-      socket.destroy();
+    final connection = _IoConnectionSocket(socket);
+    if (!(attempt?.attachResource(() async => connection.destroy()) ?? true)) {
+      connection.destroy();
       throw const RedisClosedException(message: 'The connection attempt was cancelled.');
     }
-    return socket;
+    return connection;
   } finally {
-    attempt?.detachConnect(pending.cancel);
+    attempt?.detachConnect(task.cancel);
   }
 }
 
-Future<({Future<Socket> socket, void Function() cancel})> _startPlainConnect(
-  String host,
-  int port,
-) async {
-  final task = await Socket.startConnect(host, port);
-  return (socket: task.socket, cancel: task.cancel);
-}
-
-Future<({Future<Socket> socket, void Function() cancel})> _startSecureConnect(
+Future<ConnectionSocket> _openSecureSocket(
   String host,
   int port,
   SecurityContext? securityContext,
+  Duration timeout,
+  Stopwatch elapsed,
+  ConnectionAttempt? attempt,
 ) async {
-  final task = await SecureSocket.startConnect(host, port, context: securityContext);
-  return (socket: task.socket, cancel: task.cancel);
+  final task = await RawSocket.startConnect(host, port);
+  if (!(attempt?.attachConnect(task.cancel) ?? true)) {
+    try {
+      await task.socket;
+    } on Object {
+      // Cancellation is represented to the caller by RedisClosedException below.
+    }
+    throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+  }
+  late final RawSocket plainSocket;
+  try {
+    plainSocket = await task.socket.timeout(
+      _remaining(timeout, elapsed),
+      onTimeout: () {
+        task.cancel();
+        throw TimeoutException('The socket connection deadline expired.');
+      },
+    );
+  } finally {
+    attempt?.detachConnect(task.cancel);
+  }
+
+  var abandoned = false;
+  Future<void> closeHandshake() async {
+    abandoned = true;
+    await plainSocket.close();
+  }
+
+  if (!(attempt?.attachResource(closeHandshake) ?? true)) {
+    await closeHandshake();
+    throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+  }
+  final securing = RawSecureSocket.secure(
+    plainSocket,
+    host: host,
+    context: securityContext,
+  );
+  unawaited(
+    securing.then<void>(
+      (socket) {
+        if (abandoned) unawaited(socket.close());
+      },
+      onError: (_, _) {},
+    ),
+  );
+  try {
+    final socket = await securing.timeout(
+      _remaining(timeout, elapsed),
+      onTimeout: () {
+        unawaited(closeHandshake());
+        throw TimeoutException('The socket connection deadline expired.');
+      },
+    );
+    final connection = _RawSecureConnectionSocket(socket);
+    if (abandoned || !(attempt?.attachResource(() async => connection.destroy()) ?? true)) {
+      connection.destroy();
+      throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+    }
+    return connection;
+  } on Object {
+    await closeHandshake();
+    rethrow;
+  }
+}
+
+Duration _remaining(Duration timeout, Stopwatch elapsed) {
+  final remaining = timeout - elapsed.elapsed;
+  if (remaining <= Duration.zero) {
+    throw TimeoutException('The socket connection deadline expired.');
+  }
+  return remaining;
+}
+
+final class _IoConnectionSocket extends ConnectionSocket {
+  _IoConnectionSocket(this._socket);
+
+  final Socket _socket;
+
+  @override
+  void add(List<int> bytes) => _socket.add(bytes);
+
+  @override
+  Future<void> close() => _socket.close();
+
+  @override
+  void destroy() => _socket.destroy();
+
+  @override
+  StreamSubscription<Uint8List> listen(
+    void Function(Uint8List event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => _socket.listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+}
+
+final class _RawSecureConnectionSocket extends ConnectionSocket {
+  _RawSecureConnectionSocket(this._socket) {
+    _subscription = _socket.listen(
+      _onEvent,
+      onError: _controller.addError,
+      onDone: _closeController,
+      cancelOnError: true,
+    );
+  }
+
+  final RawSecureSocket _socket;
+  final StreamController<Uint8List> _controller = StreamController(sync: true);
+  final Queue<Uint8List> _writes = Queue();
+  late final StreamSubscription<RawSocketEvent> _subscription;
+  var _writeOffset = 0;
+  var _closed = false;
+
+  @override
+  void add(List<int> bytes) {
+    if (_closed) throw StateError('The socket is closed.');
+    _writes.add(Uint8List.fromList(bytes));
+    _drainWrites();
+  }
+
+  void _onEvent(RawSocketEvent event) {
+    if (event == RawSocketEvent.read) {
+      Uint8List? bytes;
+      while ((bytes = _socket.read()) != null) {
+        _controller.add(bytes!);
+      }
+    } else if (event == RawSocketEvent.write) {
+      _drainWrites();
+    } else if (event == RawSocketEvent.readClosed || event == RawSocketEvent.closed) {
+      _closeController();
+    }
+  }
+
+  void _drainWrites() {
+    while (_writes.isNotEmpty) {
+      final bytes = _writes.first;
+      _writeOffset += _socket.write(bytes, _writeOffset);
+      if (_writeOffset != bytes.length) {
+        _socket.writeEventsEnabled = true;
+        return;
+      }
+      _writes.removeFirst();
+      _writeOffset = 0;
+    }
+  }
+
+  void _closeController() {
+    if (!_controller.isClosed) unawaited(_controller.close());
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    await _socket.close();
+    await _subscription.cancel();
+    await _controller.close();
+  }
+
+  @override
+  void destroy() {
+    if (_closed) return;
+    _closed = true;
+    _socket.shutdown(SocketDirection.both);
+    unawaited(_socket.close());
+    unawaited(_subscription.cancel());
+    _closeController();
+  }
+
+  @override
+  StreamSubscription<Uint8List> listen(
+    void Function(Uint8List event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => _controller.stream.listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
 }

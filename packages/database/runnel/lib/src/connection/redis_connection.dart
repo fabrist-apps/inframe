@@ -33,7 +33,7 @@ final class RedisConnection {
     );
   }
 
-  final Socket _socket;
+  final ConnectionSocket _socket;
   final RunnelLimits _limits;
   final ConnectionTerminated _onTerminated;
   final RespParser _parser;
