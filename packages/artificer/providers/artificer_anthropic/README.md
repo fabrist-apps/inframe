@@ -55,3 +55,39 @@ final next = GenerationRequest(
 JSON Schema output maps to Anthropic's native `output_config.format`. Plain JSON-object output has
 no faithful Messages representation and fails before I/O. The SDK forwards the schema as supplied;
 it does not validate generated values, repair output, or retry.
+
+Model defaults and per-call `AnthropicModelOptions` use `Setting`, so a call can inherit, replace,
+or clear thinking, effort, service tier, beta headers, native tools, remote MCP servers, and the
+top-level cache breakpoint. Native tools pin the inspected schema's versioned discriminators:
+web search `20260318`, web fetch `20260318`, code execution `20260521`, tool search `20251119`,
+computer `20251124`, bash `20250124`, text editor `20250728`, and memory `20250818`.
+
+```dart
+final model = provider.languageModel(
+  modelId,
+  options: AnthropicModelOptions(
+    thinking: const Setting.set(AnthropicAdaptiveThinking()),
+    effort: const Setting.set(AnthropicEffort.high),
+    betaFeatures: const Setting.set([AnthropicBeta.mcpClient20251120]),
+    nativeTools: Setting.set([AnthropicWebSearchTool()]),
+    remoteMcpServers: Setting.set([
+      AnthropicRemoteMcpServer(
+        name: 'docs',
+        url: Uri.parse('https://mcp.example.com/sse'),
+        allowedTools: const ['search'],
+      ),
+    ]),
+  ),
+);
+```
+
+Remote MCP definitions are forwarded to Anthropic; this SDK does not connect to the server.
+Hosted tool work remains provider-owned and may be pending when a response pauses. Computer, bash,
+text-editor, and memory calls are caller-owned `ApplicationToolCallPart` values whose arguments are
+tagged `NativeToolArguments`. The caller submits a matching `NativeToolResult`; no tool runs,
+software is installed, sandbox is administered, or paused turn is resumed automatically. Thinking
+signatures, redacted thinking, citations, provider tool blocks, artifacts, and unknown content stay
+in `ProviderReplay` unchanged.
+
+The pinned scope excludes Message Batches, managed Agents, Skills and organization administration,
+cloud authentication adapters, local MCP execution, schema validation, retries, and fallback.

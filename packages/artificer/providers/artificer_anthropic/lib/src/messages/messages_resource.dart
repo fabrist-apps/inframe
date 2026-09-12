@@ -22,6 +22,7 @@ final class AnthropicMessagesResource {
             ProviderHttpRequest(
               method: 'POST',
               path: 'messages',
+              headers: _requestHeaders(request),
               body: request.toJson(stream: false),
             ),
             providerId: _providerId,
@@ -40,6 +41,7 @@ final class AnthropicMessagesResource {
     ProviderHttpRequest(
       method: 'POST',
       path: 'messages',
+      headers: _requestHeaders(request),
       body: request.toJson(stream: true),
     ),
     createProtocol: _AnthropicNativeProtocol.new,
@@ -59,6 +61,7 @@ final class AnthropicMessagesResource {
     ProviderHttpRequest(
       method: 'POST',
       path: 'messages',
+      headers: _requestHeaders(request),
       body: request.toJson(stream: true),
     ),
     createProtocol: () => _AnthropicCommonProtocol(
@@ -74,9 +77,16 @@ final class AnthropicMessagesResource {
   GenerationResult normalize(NativeResponse<AnthropicMessage> response) {
     final value = response.value;
     final usage = _commonUsage(value.usage);
+    final parts = value.content.map(_commonPart).toList();
+    if (value.stopReason == 'refusal' && value.stopDetails != null) {
+      final details = value.stopDetails!;
+      final raw = details.toDart();
+      final explanation = raw['message'] as String? ?? raw['reason'] as String? ?? details.encode();
+      parts.add(RefusalPart(explanation));
+    }
     return GenerationResult(
       message: AssistantMessage(
-        value.content.map(_commonPart),
+        parts,
         replay: ProviderReplay(
           providerId: _providerId,
           api: _api,
@@ -96,6 +106,10 @@ final class AnthropicMessagesResource {
     );
   }
 }
+
+Map<String, String> _requestHeaders(AnthropicMessageRequest request) => {
+  if (request.betaFeatures.isNotEmpty) 'anthropic-beta': request.betaFeatures.join(','),
+};
 
 Effect<NativeResponse<AnthropicMessage>, AiError> _decodeMessage(
   NativeResponse<JsonObject> response,
@@ -342,11 +356,34 @@ OutputPart _commonPart(AnthropicContentBlock block) => switch (block) {
     id: id,
     name: name,
     arguments: input is JsonObject
-        ? JsonToolArguments(input, originalText: input.encode())
+        ? _callerNativeToolNames.contains(name)
+              ? NativeToolArguments(providerId: _providerId, api: _api, action: input)
+              : JsonToolArguments(input, originalText: input.encode())
         : MalformedToolArguments(
             originalText: input.encode(),
             issue: 'Anthropic client-tool input must be a JSON object.',
           ),
+  ),
+  AnthropicThinkingBlock(:final thinking) => ReasoningSummaryPart(thinking),
+  AnthropicRedactedThinkingBlock() => OpaqueOutputPart(
+    providerId: _providerId,
+    api: _api,
+    kind: block.type,
+    data: block.raw,
+  ),
+  AnthropicServerToolUseBlock(:final id, :final name) => ProviderToolRecordPart(
+    id: id,
+    name: name,
+    owner: ToolExecutionOwner.provider,
+    status: _providerToolStatus(block.raw, fallback: ProviderToolStatus.pending),
+    details: block.raw,
+  ),
+  AnthropicProviderToolResultBlock(:final toolUseId) => ProviderToolRecordPart(
+    id: toolUseId,
+    name: _providerResultName(block.type),
+    owner: ToolExecutionOwner.provider,
+    status: _providerToolStatus(block.raw, fallback: _providerResultStatus(block)),
+    details: block.raw,
   ),
   AnthropicImageBlock() ||
   AnthropicDocumentBlock() ||
@@ -357,6 +394,45 @@ OutputPart _commonPart(AnthropicContentBlock block) => switch (block) {
     kind: block.type,
     data: block.raw,
   ),
+};
+
+ProviderToolStatus _providerToolStatus(
+  JsonObject raw, {
+  required ProviderToolStatus fallback,
+}) => switch (raw.toDart()['status']) {
+  'pending' => ProviderToolStatus.pending,
+  'running' => ProviderToolStatus.running,
+  'completed' => ProviderToolStatus.completed,
+  'failed' => ProviderToolStatus.failed,
+  null => fallback,
+  _ => ProviderToolStatus.unknown,
+};
+
+ProviderToolStatus _providerResultStatus(AnthropicProviderToolResultBlock block) {
+  final content = block.content.toDart();
+  if (content case final Map<String, Object?> value) {
+    if (value['type'] case final String type when type.endsWith('_error')) {
+      return ProviderToolStatus.failed;
+    }
+  }
+  return ProviderToolStatus.completed;
+}
+
+String _providerResultName(String type) => switch (type) {
+  'web_search_tool_result' => 'web_search',
+  'web_fetch_tool_result' => 'web_fetch',
+  'code_execution_tool_result' => 'code_execution',
+  'bash_code_execution_tool_result' => 'bash_code_execution',
+  'text_editor_code_execution_tool_result' => 'text_editor_code_execution',
+  'tool_search_tool_result' => 'tool_search',
+  _ => type,
+};
+
+const _callerNativeToolNames = {
+  'computer',
+  'bash',
+  'str_replace_based_edit_tool',
+  'memory',
 };
 
 FinishReason _finishReason(String? reason) => switch (reason) {

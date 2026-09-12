@@ -97,6 +97,27 @@ sealed class AnthropicContentBlock {
         raw: raw,
       ),
       'tool_result' => AnthropicToolResultBlock._(raw),
+      'thinking' => AnthropicThinkingBlock._(
+        thinking: _string(value, 'thinking'),
+        signature: _string(value, 'signature'),
+        raw: raw,
+      ),
+      'redacted_thinking' => AnthropicRedactedThinkingBlock._(
+        data: _string(value, 'data'),
+        raw: raw,
+      ),
+      'server_tool_use' => AnthropicServerToolUseBlock._(
+        id: _string(value, 'id'),
+        name: _string(value, 'name'),
+        input: JsonValue.fromDart(value['input']),
+        raw: raw,
+      ),
+      final type when _providerResultTypes.contains(type) => AnthropicProviderToolResultBlock._(
+        type: type,
+        toolUseId: _string(value, 'tool_use_id'),
+        content: JsonValue.fromDart(value['content']),
+        raw: raw,
+      ),
       final type => AnthropicUnknownContentBlock._(type: type, raw: raw),
     };
   }
@@ -289,6 +310,88 @@ final class AnthropicToolResultBlock extends AnthropicContentBlock {
   final JsonObject raw;
 }
 
+/// A signed reasoning summary returned by Anthropic.
+final class AnthropicThinkingBlock extends AnthropicContentBlock {
+  AnthropicThinkingBlock._({
+    required this.thinking,
+    required this.signature,
+    required this.raw,
+  });
+
+  /// Provider-supplied reasoning text suitable for display.
+  final String thinking;
+
+  /// Opaque signature required for exact multi-turn replay.
+  final String signature;
+
+  @override
+  String get type => 'thinking';
+
+  @override
+  final JsonObject raw;
+}
+
+/// Opaque safety-redacted thinking that must be replayed unchanged.
+final class AnthropicRedactedThinkingBlock extends AnthropicContentBlock {
+  AnthropicRedactedThinkingBlock._({required this.data, required this.raw});
+
+  /// Opaque encrypted provider data.
+  final String data;
+
+  @override
+  String get type => 'redacted_thinking';
+
+  @override
+  final JsonObject raw;
+}
+
+/// A provider-owned tool invocation that may still be pending.
+final class AnthropicServerToolUseBlock extends AnthropicContentBlock {
+  AnthropicServerToolUseBlock._({
+    required this.id,
+    required this.name,
+    required this.input,
+    required this.raw,
+  });
+
+  /// Native tool-use identifier.
+  final String id;
+
+  /// Native hosted-tool name.
+  final String name;
+
+  /// Complete provider input.
+  final JsonValue input;
+
+  @override
+  String get type => 'server_tool_use';
+
+  @override
+  final JsonObject raw;
+}
+
+/// A native result produced by an Anthropic-owned tool.
+final class AnthropicProviderToolResultBlock extends AnthropicContentBlock {
+  AnthropicProviderToolResultBlock._({
+    required this.type,
+    required this.toolUseId,
+    required this.content,
+    required this.raw,
+  });
+
+  @override
+  final String type;
+
+  /// Identifier of the corresponding provider-owned invocation.
+  final String toolUseId;
+
+  /// Complete native result content.
+  final JsonValue content;
+
+  @override
+  final JsonObject raw;
+}
+
 /// A typed definition accepted by the Messages tools array.
 abstract interface class AnthropicToolDefinition {
   /// Tool name used for collision checks and selection.
@@ -400,17 +503,173 @@ final class AnthropicOutputConfig {
   const AnthropicOutputConfig.jsonSchema(this.schema) : effort = null;
 
   /// Native effort level.
-  final String? effort;
+  final AnthropicEffort? effort;
 
   /// Output JSON Schema, when selected.
   final JsonObject? schema;
 
   /// Encodes this configuration.
   JsonObject toJson() => JsonObject({
-    'effort': ?effort,
+    'effort': ?effort?.name,
     if (schema case final value?) 'format': {'type': 'json_schema', 'schema': value.toDart()},
   });
 }
+
+/// Controls the amount of model effort requested from Anthropic.
+enum AnthropicEffort {
+  /// Minimize cost and latency.
+  low,
+
+  /// Use moderate effort.
+  medium,
+
+  /// Use high effort.
+  high,
+
+  /// Use extra-high effort.
+  xhigh,
+
+  /// Use the maximum supported effort.
+  max,
+}
+
+/// Controls which Anthropic service capacity a request may use.
+enum AnthropicServiceTier {
+  /// Use priority capacity when available and standard capacity otherwise.
+  auto('auto'),
+
+  /// Use standard capacity only.
+  standardOnly('standard_only');
+
+  const AnthropicServiceTier(this.wireValue);
+
+  /// Native request value.
+  final String wireValue;
+}
+
+/// Controls whether summarized thinking is returned.
+enum AnthropicThinkingDisplay {
+  /// Return the provider's summarized thinking.
+  summarized,
+
+  /// Omit visible thinking while retaining signed continuity data.
+  omitted,
+}
+
+/// Native Anthropic thinking configuration.
+sealed class AnthropicThinkingConfig {
+  const AnthropicThinkingConfig();
+
+  /// Encodes this configuration.
+  JsonObject toJson();
+}
+
+/// Lets the model choose its reasoning budget.
+final class AnthropicAdaptiveThinking extends AnthropicThinkingConfig {
+  /// Creates adaptive thinking configuration.
+  const AnthropicAdaptiveThinking({this.display});
+
+  /// Controls visible reasoning summaries.
+  final AnthropicThinkingDisplay? display;
+
+  @override
+  JsonObject toJson() => JsonObject({
+    'type': 'adaptive',
+    'display': ?display?.name,
+  });
+}
+
+/// Enables thinking with an explicit token budget.
+final class AnthropicEnabledThinking extends AnthropicThinkingConfig {
+  /// Creates enabled thinking configuration.
+  AnthropicEnabledThinking({required this.budgetTokens, this.display}) {
+    if (budgetTokens < 1024) {
+      throw ArgumentError.value(budgetTokens, 'budgetTokens', 'must be at least 1024');
+    }
+  }
+
+  /// Maximum tokens available to thinking.
+  final int budgetTokens;
+
+  /// Controls visible reasoning summaries.
+  final AnthropicThinkingDisplay? display;
+
+  @override
+  JsonObject toJson() => JsonObject({
+    'type': 'enabled',
+    'budget_tokens': budgetTokens,
+    'display': ?display?.name,
+  });
+}
+
+/// Disables thinking explicitly.
+final class AnthropicDisabledThinking extends AnthropicThinkingConfig {
+  /// Creates disabled thinking configuration.
+  const AnthropicDisabledThinking();
+
+  @override
+  JsonObject toJson() => JsonObject({'type': 'disabled'});
+}
+
+/// One remote MCP server forwarded to Anthropic's beta Messages API.
+final class AnthropicRemoteMcpServer {
+  /// Creates a remote URL MCP server definition.
+  AnthropicRemoteMcpServer({
+    required String name,
+    required this.url,
+    this.authorizationToken,
+    Iterable<String>? allowedTools,
+    this.enabled,
+  }) : name = _nonEmpty(name, 'name'),
+       allowedTools = allowedTools == null ? null : List.unmodifiable(allowedTools) {
+    if (url.scheme != 'https' || url.host.isEmpty) {
+      throw ArgumentError.value(url, 'url', 'must be an absolute HTTPS URL');
+    }
+    if (authorizationToken != null && authorizationToken!.isEmpty) {
+      throw ArgumentError.value(authorizationToken, 'authorizationToken', 'must not be empty');
+    }
+    if (this.allowedTools?.any((tool) => tool.isEmpty) ?? false) {
+      throw ArgumentError.value(allowedTools, 'allowedTools', 'must not contain empty values');
+    }
+  }
+
+  /// Server name visible to Anthropic.
+  final String name;
+
+  /// Remote MCP endpoint.
+  final Uri url;
+
+  /// Optional bearer credential forwarded only to Anthropic.
+  final String? authorizationToken;
+
+  /// Optional allowlist for tools exposed by the server.
+  final List<String>? allowedTools;
+
+  /// Whether tools from this server are enabled.
+  final bool? enabled;
+
+  /// Encodes this definition.
+  JsonObject toJson() => JsonObject({
+    'type': 'url',
+    'name': name,
+    'url': url.toString(),
+    'authorization_token': ?authorizationToken,
+    if (allowedTools != null || enabled != null)
+      'tool_configuration': {
+        'allowed_tools': ?allowedTools,
+        'enabled': ?enabled,
+      },
+  });
+}
+
+const _providerResultTypes = {
+  'web_search_tool_result',
+  'web_fetch_tool_result',
+  'code_execution_tool_result',
+  'bash_code_execution_tool_result',
+  'text_editor_code_execution_tool_result',
+  'tool_search_tool_result',
+};
 
 /// A content type outside this pinned snapshot, retained without loss.
 final class AnthropicUnknownContentBlock extends AnthropicContentBlock {
@@ -437,6 +696,10 @@ final class AnthropicMessageRequest {
     Iterable<AnthropicToolDefinition> tools = const [],
     this.toolChoice,
     this.outputConfig,
+    this.thinking,
+    this.serviceTier,
+    Iterable<AnthropicRemoteMcpServer> mcpServers = const [],
+    Iterable<String> betaFeatures = const [],
     this.cacheControl,
     JsonObject? extraBody,
   }) : model = _nonEmpty(model, 'model'),
@@ -444,6 +707,8 @@ final class AnthropicMessageRequest {
        system = List.unmodifiable(system),
        stopSequences = List.unmodifiable(stopSequences),
        tools = List.unmodifiable(tools),
+       mcpServers = List.unmodifiable(mcpServers),
+       betaFeatures = List.unmodifiable(betaFeatures),
        extraBody = extraBody ?? JsonObject({}) {
     if (maxTokens < 0) {
       throw ArgumentError.value(maxTokens, 'maxTokens', 'must not be negative');
@@ -458,6 +723,24 @@ final class AnthropicMessageRequest {
     for (final tool in this.tools) {
       if (!names.add(tool.name)) {
         throw ArgumentError.value(tool.name, 'tools', 'contains a duplicate name');
+      }
+    }
+    final serverNames = <String>{};
+    for (final server in this.mcpServers) {
+      if (!serverNames.add(server.name)) {
+        throw ArgumentError.value(server.name, 'mcpServers', 'contains a duplicate name');
+      }
+    }
+    if (this.betaFeatures.any((value) => value.isEmpty)) {
+      throw ArgumentError.value(betaFeatures, 'betaFeatures', 'must not contain empty values');
+    }
+    if (thinking case AnthropicEnabledThinking(:final budgetTokens)) {
+      if (budgetTokens >= maxTokens) {
+        throw ArgumentError.value(
+          budgetTokens,
+          'thinking',
+          'budgetTokens must be less than maxTokens',
+        );
       }
     }
   }
@@ -492,6 +775,18 @@ final class AnthropicMessageRequest {
   /// Native output settings.
   final AnthropicOutputConfig? outputConfig;
 
+  /// Native thinking configuration.
+  final AnthropicThinkingConfig? thinking;
+
+  /// Requested Anthropic capacity tier.
+  final AnthropicServiceTier? serviceTier;
+
+  /// Remote MCP servers forwarded to Anthropic.
+  final List<AnthropicRemoteMcpServer> mcpServers;
+
+  /// Per-request beta header values, excluded from the JSON body.
+  final List<String> betaFeatures;
+
   /// Top-level prompt-cache breakpoint.
   final AnthropicCacheControl? cacheControl;
 
@@ -511,6 +806,9 @@ final class AnthropicMessageRequest {
       'tools',
       'tool_choice',
       'output_config',
+      'thinking',
+      'service_tier',
+      'mcp_servers',
       'cache_control',
       'stream',
     };
@@ -530,6 +828,10 @@ final class AnthropicMessageRequest {
       if (tools.isNotEmpty) 'tools': tools.map((tool) => tool.toJson().toDart()).toList(),
       if (toolChoice case final value?) 'tool_choice': value.toJson().toDart(),
       if (outputConfig case final value?) 'output_config': value.toJson().toDart(),
+      if (thinking case final value?) 'thinking': value.toJson().toDart(),
+      'service_tier': ?serviceTier?.wireValue,
+      if (mcpServers.isNotEmpty)
+        'mcp_servers': mcpServers.map((server) => server.toJson().toDart()).toList(),
       if (cacheControl case final value?) 'cache_control': value.toDart(),
       'stream': stream,
     });

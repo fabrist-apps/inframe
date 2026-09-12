@@ -119,16 +119,26 @@ final class AnthropicLanguageModel implements LanguageModel {
     );
     if (replayError != null) return replayError;
     final messages = <AnthropicInputMessage>[];
+    final nativeCallerCalls = <String, String>{};
     for (final message in request.messages) {
       final encoded = switch (message) {
         UserMessage(:final parts) => _userMessage(parts),
         AssistantMessage() => _assistantMessage(message),
-        ToolMessage(:final results) => _toolMessage(results),
+        ToolMessage(:final results) => _toolMessage(results, nativeCallerCalls),
       };
       if (encoded is AiError) return encoded;
-      messages.add(encoded as AnthropicInputMessage);
+      final nativeMessage = encoded as AnthropicInputMessage;
+      messages.add(nativeMessage);
+      if (nativeMessage.role == AnthropicMessageRole.assistant) {
+        for (final block in nativeMessage.content) {
+          if (block case AnthropicToolUseBlock(:final id, :final name)
+              when _callerNativeToolNames.contains(name)) {
+            nativeCallerCalls[id] = name;
+          }
+        }
+      }
     }
-    final tools = request.tools
+    final commonTools = request.tools
         .map(
           (tool) => AnthropicClientTool(
             name: tool.name,
@@ -137,15 +147,31 @@ final class AnthropicLanguageModel implements LanguageModel {
           ),
         )
         .toList();
+    final nativeTools = options.resolveNativeTools(callOptions);
+    final duplicateNames = <String>{};
+    final seenNames = <String>{};
+    for (final tool in <AnthropicToolDefinition>[...commonTools, ...nativeTools]) {
+      if (!seenNames.add(tool.name)) duplicateNames.add(tool.name);
+    }
+    if (duplicateNames.isNotEmpty) {
+      return InvalidRequestError(
+        'Anthropic tool names must be unique: ${(duplicateNames.toList()..sort()).join(', ')}.',
+      );
+    }
+    final tools = <AnthropicToolDefinition>[...commonTools, ...nativeTools];
     final toolChoice = switch (request.toolChoice) {
       AutoToolChoice() => tools.isEmpty ? null : const AnthropicAutoToolChoice(),
       NoToolChoice() => const AnthropicNoToolChoice(),
       RequiredToolChoice() => const AnthropicAnyToolChoice(),
       FunctionToolChoice(:final name) => AnthropicNamedToolChoice(name),
     };
+    final effort = options.resolveEffort(callOptions);
     final outputConfig = switch (request.output) {
-      TextOutputFormat() => null,
-      JsonSchemaOutputFormat(:final schema) => AnthropicOutputConfig.jsonSchema(schema),
+      TextOutputFormat() => effort == null ? null : AnthropicOutputConfig(effort: effort),
+      JsonSchemaOutputFormat(:final schema) => AnthropicOutputConfig(
+        effort: effort,
+        schema: schema,
+      ),
       JsonObjectOutputFormat() => const UnsupportedFeatureError(
         'Anthropic Messages requires a JSON Schema for structured output.',
       ),
@@ -163,6 +189,10 @@ final class AnthropicLanguageModel implements LanguageModel {
       tools: tools,
       toolChoice: toolChoice,
       outputConfig: outputConfig as AnthropicOutputConfig?,
+      thinking: options.resolveThinking(callOptions),
+      serviceTier: options.resolveServiceTier(callOptions),
+      mcpServers: options.resolveRemoteMcpServers(callOptions),
+      betaFeatures: options.resolveBetaFeatures(callOptions).map((feature) => feature.headerValue),
       cacheControl: options.resolveCacheControl(callOptions),
       extraBody: extra,
     );
@@ -263,6 +293,9 @@ Object _assistantMessage(AssistantMessage message) {
         name,
         arguments,
       ),
+      ReasoningSummaryPart() => const UnsupportedFeatureError(
+        'Anthropic reasoning must be continued through retained signed replay blocks.',
+      ),
       OpaqueOutputPart(:final providerId, :final api, :final data)
           when providerId == _providerId && api == _messagesApi =>
         AnthropicContentBlock.fromJson(data),
@@ -283,6 +316,9 @@ Object _assistantMessage(AssistantMessage message) {
 
 Object _toolUse(String id, String name, ToolArguments arguments) => switch (arguments) {
   JsonToolArguments(:final value) => AnthropicToolUseBlock(id: id, name: name, input: value),
+  NativeToolArguments(:final providerId, :final api, :final action)
+      when providerId == _providerId && api == _messagesApi =>
+    AnthropicToolUseBlock(id: id, name: name, input: action),
   MalformedToolArguments() => const UnsupportedFeatureError(
     'Malformed tool arguments can only be replayed from retained native blocks.',
   ),
@@ -291,17 +327,17 @@ Object _toolUse(String id, String name, ToolArguments arguments) => switch (argu
   ),
 };
 
-Object _toolMessage(Iterable<ToolResult> results) {
+Object _toolMessage(Iterable<ToolResult> results, Map<String, String> nativeCallerCalls) {
   final content = <AnthropicContentBlock>[];
   for (final result in results) {
-    final native = _toolResult(result);
+    final native = _toolResult(result, nativeCallerCalls);
     if (native is AiError) return native;
     content.add(native as AnthropicContentBlock);
   }
   return AnthropicInputMessage(role: AnthropicMessageRole.user, content: content);
 }
 
-Object _toolResult(ToolResult result) => switch (result) {
+Object _toolResult(ToolResult result, Map<String, String> nativeCallerCalls) => switch (result) {
   JsonToolResult(:final callId, :final value) => AnthropicToolResultBlock(
     toolUseId: callId,
     content: value.encode(),
@@ -314,10 +350,32 @@ Object _toolResult(ToolResult result) => switch (result) {
           .encode(),
       isError: true,
     ),
-  NativeToolResult() => const UnsupportedFeatureError(
-    'Native Anthropic action results require a matching typed native tool call.',
-  ),
+  NativeToolResult() => _nativeToolResult(result, nativeCallerCalls),
 };
+
+Object _nativeToolResult(NativeToolResult result, Map<String, String> nativeCallerCalls) {
+  if (result.providerId != _providerId || result.api != _messagesApi) {
+    return const InvalidRequestError(
+      'A native tool result must target Anthropic Messages.',
+    );
+  }
+  if (!nativeCallerCalls.containsKey(result.callId)) {
+    return InvalidRequestError(
+      'Native tool result ${result.callId} has no matching caller-owned Anthropic tool call.',
+    );
+  }
+  final value = result.value.toDart();
+  if (value['type'] != 'tool_result' || value['tool_use_id'] != result.callId) {
+    return const InvalidRequestError(
+      'A native caller-tool result must be a tool_result with the matching tool_use_id.',
+    );
+  }
+  try {
+    return AnthropicContentBlock.fromJson(result.value);
+  } on FormatException catch (error) {
+    return InvalidRequestError(error.message);
+  }
+}
 
 Object _contentToolResult(String callId, Iterable<InputPart> parts) {
   final content = <Object?>[];
@@ -336,3 +394,10 @@ String _nonEmpty(String value, String name) {
 
 Uri _directoryBaseUrl(Uri value) =>
     value.path.endsWith('/') ? value : value.replace(path: '${value.path}/');
+
+const _callerNativeToolNames = {
+  'computer',
+  'bash',
+  'str_replace_based_edit_tool',
+  'memory',
+};
