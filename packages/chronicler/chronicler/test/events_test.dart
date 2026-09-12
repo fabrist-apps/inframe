@@ -140,6 +140,38 @@ void main() {
       expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.one);
     });
 
+    test('should reject a property removal expanded beyond limits by a hook', () async {
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: ChroniclerOptions(
+          delivery: const DeliveryOptions(maxBatchRecords: 1),
+          redaction: RedactionOptions(
+            beforeRecord: (record) {
+              final update = record as UserPropertiesUnsetRecord;
+              return update.copyWith(
+                payload: update.payload.copyWith(
+                  keys: List.generate(129, (index) => 'key$index'),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      Context()
+          .withChronicler(chronicler.recorder)
+          .events
+          .unsetUserProperties(userId: 'user', keys: const ['plan']);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(exporter.batches, isEmpty);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+    });
+
     test('should emit explicit user properties without changing Context identity', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter, maxBatchRecords: 2);
