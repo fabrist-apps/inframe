@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -95,6 +96,18 @@ void main() {
       ]);
     });
 
+    test('should release the socket when the handshake is rejected', () async {
+      final peer = await _RespPeer.start()
+        ..rejectHandshake = true;
+      addTearDown(peer.close);
+
+      await expectLater(
+        Runnel.connect('redis://:wrong@127.0.0.1:${peer.port}'),
+        throwsA(isA<RedisServerException>()),
+      );
+      await peer.socketClosed.future.timeout(const Duration(seconds: 1));
+    });
+
     test('should keep reply alignment after a command decoder fails', () async {
       final peer = await _RespPeer.start();
       addTearDown(peer.close);
@@ -157,6 +170,8 @@ final class _RespPeer {
   final Map<String, Uint8List> _values = {};
   bool pushBeforeNextReply = false;
   bool malformNextReply = false;
+  bool rejectHandshake = false;
+  final Completer<void> socketClosed = Completer<void>();
 
   int get port => _server.port;
 
@@ -170,23 +185,32 @@ final class _RespPeer {
   void _accept(Socket socket) {
     _socket = socket;
     var buffer = <int>[];
-    socket.listen((bytes) {
-      buffer.addAll(bytes);
-      while (true) {
-        final parsed = _parseCommand(buffer);
-        if (parsed == null) return;
-        buffer = buffer.sublist(parsed.consumed);
-        final display = parsed.arguments
-            .map((bytes) => utf8.decode(bytes, allowMalformed: true))
-            .toList(growable: false);
-        commands.add(display);
-        _reply(socket, parsed.arguments);
-      }
-    });
+    socket.listen(
+      (bytes) {
+        buffer.addAll(bytes);
+        while (true) {
+          final parsed = _parseCommand(buffer);
+          if (parsed == null) return;
+          buffer = buffer.sublist(parsed.consumed);
+          final display = parsed.arguments
+              .map((bytes) => utf8.decode(bytes, allowMalformed: true))
+              .toList(growable: false);
+          commands.add(display);
+          _reply(socket, parsed.arguments);
+        }
+      },
+      onDone: () {
+        if (!socketClosed.isCompleted) socketClosed.complete();
+      },
+    );
   }
 
   void _reply(Socket socket, List<Uint8List> arguments) {
     final command = ascii.decode(arguments.first).toUpperCase();
+    if (rejectHandshake && command == 'HELLO') {
+      socket.add(ascii.encode('-WRONGPASS invalid credentials\r\n'));
+      return;
+    }
     if (pushBeforeNextReply && command != 'HELLO') {
       pushBeforeNextReply = false;
       socket.add(ascii.encode('|1\r\n+source\r\n+peer\r\n>2\r\n+notice\r\n+value\r\n'));
