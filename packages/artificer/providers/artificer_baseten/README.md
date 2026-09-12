@@ -84,3 +84,24 @@ The embedding adapter validates response count, indices, finite values, and dime
 one text part per common input. It does not combine items, split batches, normalize vectors, retry,
 or infer a model name from the deployment URL. Native calls retain response extensions and HTTP
 metadata, and `BasetenEmbeddingsResource.normalize` can map an already-decoded result without I/O.
+
+`provider.messages` exposes Baseten's beta native Messages API. It uses `Authorization: Api-Key`
+and Baseten's endpoint schema rather than Anthropic SDK defaults:
+
+```dart
+final response = await provider.messages
+    .create(
+      BasetenMessageRequest(
+        model: catalogModelId,
+        maxTokens: 1024,
+        messages: [BasetenInputMessage.userText('Explain gradient descent.')],
+      ),
+    )
+    .runFuture();
+```
+
+Native content and tool blocks are immutable `JsonObject` values within typed request, response,
+and event envelopes. This preserves beta additions without claiming a stable exhaustive schema.
+Streaming requires `message_stop`; unknown event kinds remain inspectable, while error events,
+premature EOF, malformed payloads, and configured limits fail through `AiError`. Common catalog
+generation continues to use Chat Completions.

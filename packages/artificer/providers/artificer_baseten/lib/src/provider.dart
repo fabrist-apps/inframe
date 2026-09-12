@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:artificer_baseten/src/chat/chat_resource.dart';
 import 'package:artificer_baseten/src/embeddings/embedding_models.dart';
 import 'package:artificer_baseten/src/embeddings/embeddings_resource.dart';
+import 'package:artificer_baseten/src/messages/messages_resource.dart';
 import 'package:artificer_baseten/src/options.dart';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/transport.dart';
@@ -28,6 +29,12 @@ final class BasetenProvider {
     );
     _clients.add(client);
     chatCompletions = BasetenChatCompletionsResource(client);
+    final messagesClient = _newClient(
+      catalogBaseUrl ?? Uri.parse('https://inference.baseten.co/v1'),
+      authorization: 'Api-Key $_apiKey',
+    );
+    _clients.add(messagesClient);
+    messages = BasetenMessagesResource(messagesClient);
   }
 
   final String _apiKey;
@@ -37,6 +44,9 @@ final class BasetenProvider {
 
   /// Typed native catalog Chat Completions operations.
   late final BasetenChatCompletionsResource chatCompletions;
+
+  /// Typed native beta Messages operations using Baseten authentication.
+  late final BasetenMessagesResource messages;
 
   /// Creates a common catalog language model.
   BasetenLanguageModel languageModel(
