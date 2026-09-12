@@ -7,6 +7,7 @@ final class TestExporter implements ChroniclerExporter {
   TestExporter({this.acceptImmediately = false});
 
   final bool acceptImmediately;
+  bool _acceptRemaining = false;
   final batches = <ChroniclerBatch>[];
   final attempts = <TestExportAttempt>[];
   final _nextBatch = StreamController<ChroniclerBatch>.broadcast(sync: true);
@@ -26,10 +27,20 @@ final class TestExporter implements ChroniclerExporter {
     if (_exportFailures.isNotEmpty) throw _exportFailures.removeFirst();
     final attempt = TestExportAttempt();
     attempts.add(attempt);
-    if (acceptImmediately) {
+    if (acceptImmediately || _acceptRemaining) {
       attempt.completer.complete(const ExportResult.accepted());
     }
     return attempt;
+  }
+
+  /// Resolves deliberate test backpressure before teardown closes the runtime.
+  void acceptRemaining() {
+    _acceptRemaining = true;
+    for (final attempt in attempts) {
+      if (!attempt.completer.isCompleted) {
+        attempt.completer.complete(const ExportResult.accepted());
+      }
+    }
   }
 
   @override

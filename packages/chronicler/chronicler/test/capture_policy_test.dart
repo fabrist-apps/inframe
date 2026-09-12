@@ -5,6 +5,7 @@ import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/exporter.dart';
+import 'support/runtime.dart';
 
 void main() {
   group('Chronicler capture policy', () {
@@ -413,17 +414,20 @@ Chronicler _chronicler({
   SamplingOptions sampling = const SamplingOptions(),
   int maxBatchRecords = 1,
   int maxRecordBytes = 64 * 1024,
-}) => Chronicler(
-  appId: 'app',
-  release: 'release',
-  source: ChroniclerSource.server,
-  exporter: exporter,
-  options: ChroniclerOptions(
-    delivery: DeliveryOptions(
-      maxBatchRecords: maxBatchRecords,
-      maxRecordBytes: maxRecordBytes,
+}) => closeAfterTest(
+  Chronicler(
+    appId: 'app',
+    release: 'release',
+    source: ChroniclerSource.server,
+    exporter: exporter,
+    options: ChroniclerOptions(
+      delivery: DeliveryOptions(
+        maxBatchRecords: maxBatchRecords,
+        maxRecordBytes: maxRecordBytes,
+      ),
+      redaction: redaction,
+      sampling: sampling,
     ),
-    redaction: redaction,
-    sampling: sampling,
   ),
+  exporter,
 );
