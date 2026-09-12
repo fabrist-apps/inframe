@@ -125,10 +125,7 @@ void main() {
       expect(reads, hasLength(1));
       expect(reads.single.key, 'history');
       expect(reads.single.entries.single.id, StreamId(BigInt.two, BigInt.zero));
-      final resp2Reads = await client.xread({'history': StreamId(BigInt.two, BigInt.zero)});
-      expect(resp2Reads.single.key, 'history');
-      expect(resp2Reads.single.entries.single.id, StreamId(BigInt.from(3), BigInt.zero));
-      expect(await client.xread({'history': StreamId(BigInt.from(3), BigInt.zero)}), isEmpty);
+      expect(await client.xread({'history': StreamId(BigInt.two, BigInt.zero)}), isEmpty);
 
       expect(peer.commands.skip(1), [
         [
@@ -195,12 +192,6 @@ void main() {
           ascii.encode('STREAMS'),
           ascii.encode('history'),
           ascii.encode('2-0'),
-        ],
-        [
-          ascii.encode('XREAD'),
-          ascii.encode('STREAMS'),
-          ascii.encode('history'),
-          ascii.encode('3-0'),
         ],
       ]);
     });
@@ -302,12 +293,6 @@ final class _StreamPeer {
             ...ascii.encode('%1\r\n'),
             ..._blob('history'),
             ..._entriesReply(id: '2-0'),
-          ]);
-        } else if (_xreadCount == 2) {
-          socket.add([
-            ...ascii.encode('*1\r\n*2\r\n'),
-            ..._blob('history'),
-            ..._entriesReply(id: '3-0'),
           ]);
         } else {
           socket.add(ascii.encode('_\r\n'));

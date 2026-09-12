@@ -400,17 +400,8 @@ List<StreamRead> _streamReadsReply(RespValue reply) => switch (reply) {
       (entry) => StreamRead(key: respText(entry.key), entries: _entriesReply(entry.value)),
     ),
   ),
-  RespArray(:final values) => List.unmodifiable(values.map(_streamReadArray)),
   _ => throw FormatException('Expected an XREAD reply, received ${reply.runtimeType}.'),
 };
-
-StreamRead _streamReadArray(RespValue reply) {
-  final read = _arrayValues(reply, 'XREAD key result');
-  if (read.length != 2) {
-    throw const FormatException('Expected an XREAD key and its entries.');
-  }
-  return StreamRead(key: respText(read[0]), entries: _entriesReply(read[1]));
-}
 
 List<RespValue> _arrayValues(RespValue reply, String name) => switch (reply) {
   RespArray(:final values) => values,

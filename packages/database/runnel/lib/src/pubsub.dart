@@ -10,7 +10,6 @@ import 'package:runnel/src/connection/connection_attempt.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
-import 'package:runnel/src/protocol.dart';
 import 'package:runnel/src/resp/resp_parser.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
@@ -49,7 +48,6 @@ final class PubSubConnectionConfiguration {
     required this.host,
     required this.port,
     required this.tls,
-    required this.protocol,
     required this.connectTimeout,
     required this.connectionLimits,
     this.securityContext,
@@ -69,9 +67,6 @@ final class PubSubConnectionConfiguration {
 
   /// TLS trust and client-certificate configuration.
   final SecurityContext? securityContext;
-
-  /// RESP version negotiated by HELLO.
-  final RedisProtocol protocol;
 
   /// Selected logical database.
   final int database;
@@ -710,8 +705,7 @@ final class PubSubSession {
       }
       final parts = switch (value) {
         RespPush(:final values) => values,
-        RespArray(:final values) => values,
-        _ => throw const FormatException('Expected a Pub/Sub array or push frame.'),
+        _ => throw const FormatException('Expected a Pub/Sub push frame.'),
       };
       if (parts.isEmpty) throw const FormatException('Received an empty Pub/Sub frame.');
       final type = respText(parts.first).toLowerCase();
@@ -1207,7 +1201,7 @@ final class PubSubSession {
 
   RedisCommand<Object?> _helloCommand() => RedisCommand<Object?>([
     RedisArgument.text('HELLO'),
-    RedisArgument.text('${_configuration.protocol.version}'),
+    RedisArgument.text('3'),
     if (_configuration.password case final password?) ...[
       RedisArgument.text('AUTH'),
       RedisArgument.text(_configuration.username ?? 'default'),

@@ -85,13 +85,12 @@ void main() {
 
       final connecting = Runnel.connect(
         'redis://user:p%40ss@127.0.0.1:${peer.port}/2',
-        protocol: RedisProtocol.resp2,
       );
       final client = await connecting;
       addTearDown(client.close);
 
       expect(peer.commands.take(2), [
-        ['HELLO', '2', 'AUTH', 'user', 'p@ss'],
+        ['HELLO', '3', 'AUTH', 'user', 'p@ss'],
         ['SELECT', '2'],
       ]);
     });

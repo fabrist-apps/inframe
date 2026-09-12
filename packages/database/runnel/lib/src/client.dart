@@ -10,7 +10,6 @@ import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
-import 'package:runnel/src/protocol.dart';
 import 'package:runnel/src/pubsub.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 import 'package:runnel/src/scripts.dart';
@@ -19,7 +18,6 @@ import 'package:runnel/src/scripts.dart';
 final class Runnel {
   Runnel._(
     this._endpoint,
-    this._protocol,
     this._securityContext,
     this._connectTimeout,
     this._commandTimeout,
@@ -28,7 +26,6 @@ final class Runnel {
   );
 
   final _Endpoint _endpoint;
-  final RedisProtocol _protocol;
   final SecurityContext? _securityContext;
   final Duration _connectTimeout;
   final Duration _commandTimeout;
@@ -46,10 +43,9 @@ final class Runnel {
   Future<void>? _closing;
   _ClientState _state = _ClientState.connecting;
 
-  /// Connects and completes the configured authentication, protocol, and database handshake.
+  /// Connects and completes the configured authentication, RESP3, and database handshake.
   static Future<Runnel> connect(
     String endpoint, {
-    RedisProtocol protocol = RedisProtocol.resp3,
     SecurityContext? securityContext,
     Duration connectTimeout = const Duration(seconds: 5),
     Duration commandTimeout = const Duration(seconds: 5),
@@ -63,7 +59,6 @@ final class Runnel {
     limits.validate();
     final client = Runnel._(
       configuration,
-      protocol,
       securityContext,
       connectTimeout,
       commandTimeout,
@@ -102,7 +97,7 @@ final class Runnel {
       await connection.execute(
         RedisCommand<Object?>([
           RedisArgument.text('HELLO'),
-          RedisArgument.text('${_protocol.version}'),
+          RedisArgument.text('3'),
           if (_endpoint.password case final password?) ...[
             RedisArgument.text('AUTH'),
             RedisArgument.text(_endpoint.username ?? 'default'),
@@ -285,7 +280,6 @@ final class Runnel {
         host: _endpoint.host,
         port: _endpoint.port,
         tls: _endpoint.tls,
-        protocol: _protocol,
         connectTimeout: _connectTimeout,
         connectionLimits: _limits,
         securityContext: _securityContext,

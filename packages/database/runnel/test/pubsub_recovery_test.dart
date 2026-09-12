@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
-import 'package:runnel/src/protocol.dart';
 import 'package:runnel/src/pubsub.dart';
 import 'package:test/test.dart';
 
@@ -370,7 +369,6 @@ Future<PubSubSession> _connect(
     host: InternetAddress.loopbackIPv4.address,
     port: peer.port,
     tls: false,
-    protocol: RedisProtocol.resp3,
     connectTimeout: const Duration(milliseconds: 200),
     connectionLimits: connectionLimits,
   ),

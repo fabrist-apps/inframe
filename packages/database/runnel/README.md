@@ -1,7 +1,7 @@
 # Runnel
 
 Runnel is Inframe's internal pure Dart client for one standalone Redis or Valkey primary endpoint.
-It supports TCP, trusted TLS, ACL credentials, RESP3 by default, and explicit RESP2.
+It supports RESP3 over TCP and trusted TLS, with ACL credentials.
 
 ## Quick start
 
@@ -97,7 +97,7 @@ incoming frame, and 64 aggregate nesting levels. Pub/Sub defaults allow 1,024 un
 8 MiB of undelivered event data, and 16,384 desired channels. Exact boundaries are accepted.
 
 Runnel reconnects ordinary and Pub/Sub connections with capped full-jitter backoff and repeats the
-complete authentication, protocol, and database handshake. It never replays uncertain operations.
+complete authentication, RESP3, and database handshake. It never replays uncertain operations.
 
 ## Topology
 
@@ -107,7 +107,7 @@ Flutter/browser transport. Deployments must provide primary routing and failover
 
 ## Tested compatibility
 
-The integration suite verifies TCP and TLS with RESP2 and RESP3 against:
+The integration suite verifies RESP3 over TCP and TLS against:
 
 - Redis 8.2.1, image index digest
   `sha256:5fa2edb1e408fa8235e6db8fab01d1afaaae96c9403ba67b70feceb8661e8621`.

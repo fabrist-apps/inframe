@@ -5,7 +5,7 @@ import 'package:test/test.dart';
 
 void main() {
   group('RespParser', () {
-    test('should decode fragmented and coalesced RESP2 and RESP3 values', () {
+    test('should decode fragmented and coalesced RESP3 values', () {
       final parser = RespParser(maxFrameBytes: 1024, maxNestingDepth: 4);
 
       expect(
@@ -115,6 +115,8 @@ void main() {
         '_x\r\n',
         '?unknown\r\n',
         '%-1\r\n',
+        '\$-1\r\n',
+        '*-1\r\n',
       ]) {
         expect(
           () => RespParser(maxFrameBytes: 64, maxNestingDepth: 4).add(ascii.encode(frame)),

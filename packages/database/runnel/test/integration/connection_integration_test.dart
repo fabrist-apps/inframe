@@ -21,9 +21,9 @@ void main() {
 
   group('Runnel integration', () {
     for (final MapEntry(key: name, value: endpoint) in endpoints.entries) {
-      for (final protocol in RedisProtocol.values) {
+      group('RESP3', () {
         test(
-          'should round-trip text and binary through $name using ${protocol.name}',
+          'should round-trip text and binary through $name',
           () async {
             if (endpoint == null) {
               markTestSkipped('Set the Runnel integration endpoint environment variables.');
@@ -37,11 +37,10 @@ void main() {
                 : null;
             final client = await Runnel.connect(
               endpoint,
-              protocol: protocol,
               securityContext: securityContext,
             );
             addTearDown(client.close);
-            final suffix = '${DateTime.now().microsecondsSinceEpoch}-${protocol.name}';
+            final suffix = '${DateTime.now().microsecondsSinceEpoch}-resp3';
             final textKey = 'runnel:integration:text:$suffix';
             final bytesKey = 'runnel:integration:bytes:$suffix';
 
@@ -558,7 +557,7 @@ void main() {
             expect(pubSub.state, PubSubState.ready);
           },
         );
-      }
+      });
     }
   });
 }

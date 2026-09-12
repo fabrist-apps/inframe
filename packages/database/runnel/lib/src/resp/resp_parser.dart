@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
-/// Incrementally decodes complete RESP2 and RESP3 top-level frames.
+/// Incrementally decodes complete RESP3 top-level frames.
 final class RespParser {
   /// Creates an incremental parser with per-frame byte and nesting limits.
   RespParser({required this.maxFrameBytes, required this.maxNestingDepth});
@@ -114,7 +114,6 @@ final class RespParser {
 
   _Parsed _blob(int offset, bool error) {
     final blob = _readBlob(offset);
-    if (blob.isNull) return _Parsed(const RespNull(), blob.next);
     if (error) {
       return _Parsed(RespError.parse(_strictText(blob.bytes), blob: true), blob.next);
     }
@@ -124,7 +123,6 @@ final class RespParser {
   _Blob _readBlob(int offset) {
     final line = _line(offset + 1);
     final length = _integer(line.bytes);
-    if (length == -1) return _Blob(Uint8List(0), line.next, isNull: true);
     if (length < 0) _malformed('RESP blob length cannot be negative.');
     if (length > maxFrameBytes || line.next - offset + length + 2 > maxFrameBytes) _limit();
     final end = line.next + length;
@@ -140,9 +138,6 @@ final class RespParser {
     if (aggregateDepth > maxNestingDepth) _limit(depth: true);
     final line = _line(offset + 1);
     final count = _integer(line.bytes);
-    if (count == -1 && type == _Aggregate.array) {
-      return _Parsed(const RespNull(), line.next);
-    }
     if (count < 0) _malformed('RESP aggregate length cannot be negative.');
     final itemCount = type == _Aggregate.map ? count * 2 : count;
     if (itemCount > maxFrameBytes) _limit();
@@ -216,10 +211,9 @@ final class _Line {
 }
 
 final class _Blob {
-  const _Blob(this.bytes, this.next, {this.isNull = false});
+  const _Blob(this.bytes, this.next);
   final Uint8List bytes;
   final int next;
-  final bool isNull;
 }
 
 final class _NeedMore implements Exception {

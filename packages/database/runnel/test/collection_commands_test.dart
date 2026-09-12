@@ -157,38 +157,9 @@ void main() {
       ]);
     });
 
-    test('should decode RESP2 aggregates and missing scalar values', () {
-      final hash = hgetallCommand('hash').decode(
-        RespArray([
-          const RespSimpleString('name'),
-          const RespSimpleString('Bhaswanth'),
-          const RespSimpleString('plan'),
-          const RespSimpleString('pro'),
-        ]),
-      );
-      final set = smembersCommand('set').decode(
-        RespArray([
-          const RespSimpleString('alpha'),
-          const RespSimpleString('beta'),
-        ]),
-      );
-      final scored = zrangeWithScoresCommand('sorted', 0, -1).decode(
-        RespArray([
-          const RespSimpleString('first'),
-          const RespSimpleString('1.25'),
-          const RespSimpleString('second'),
-          const RespSimpleString('2.5'),
-        ]),
-      );
-
-      expect(hash, {'name': 'Bhaswanth', 'plan': 'pro'});
-      expect(set, {'alpha', 'beta'});
-      expect(scored, [(member: 'first', score: 1.25), (member: 'second', score: 2.5)]);
+    test('should decode missing scalar values', () {
       expect(hgetCommand('hash', 'missing').decode(const RespNull()), isNull);
       expect(zscoreCommand('sorted', 'missing').decode(const RespNull()), isNull);
-      expect(() => hash['name'] = 'changed', throwsUnsupportedError);
-      expect(() => set.add('changed'), throwsUnsupportedError);
-      expect(scored.clear, throwsUnsupportedError);
     });
 
     test('should reject malformed collection replies', () {
@@ -205,6 +176,18 @@ void main() {
           'sorted',
           0,
           -1,
+        ).decode(RespArray([const RespSimpleString('member')])),
+        throwsFormatException,
+      );
+      expect(
+        () => hgetallCommand(
+          'hash',
+        ).decode(RespArray([const RespSimpleString('field'), const RespSimpleString('value')])),
+        throwsFormatException,
+      );
+      expect(
+        () => smembersCommand(
+          'set',
         ).decode(RespArray([const RespSimpleString('member')])),
         throwsFormatException,
       );

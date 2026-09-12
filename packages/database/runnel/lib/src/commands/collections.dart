@@ -415,54 +415,31 @@ List<String> _textList(RespValue reply) => List<String>.unmodifiable(_array(repl
 Set<String> _textSet(RespValue reply) {
   final values = switch (reply) {
     RespSet(:final values) => values,
-    RespArray(:final values) => values,
     _ => throw FormatException('Expected a set reply, received ${reply.runtimeType}.'),
   };
   return Set<String>.unmodifiable(values.map(respText));
 }
 
 Map<String, String> _textMap(RespValue reply) {
-  final entries = switch (reply) {
-    RespMap(:final entries) =>
-      entries
-          .map((entry) => MapEntry(respText(entry.key), respText(entry.value)))
-          .toList(growable: false),
-    RespArray(:final values) => _alternatingMapEntries(values),
-    _ => throw FormatException('Expected a map reply, received ${reply.runtimeType}.'),
-  };
-  return Map<String, String>.unmodifiable(Map.fromEntries(entries));
-}
-
-List<MapEntry<String, String>> _alternatingMapEntries(List<RespValue> values) {
-  if (values.length.isOdd) {
-    throw const FormatException('Expected alternating hash field and value replies.');
+  if (reply is! RespMap) {
+    throw FormatException('Expected a map reply, received ${reply.runtimeType}.');
   }
-  return [
-    for (var index = 0; index < values.length; index += 2)
-      MapEntry(respText(values[index]), respText(values[index + 1])),
-  ];
+  final entries = reply.entries
+      .map((entry) => MapEntry(respText(entry.key), respText(entry.value)))
+      .toList(growable: false);
+  return Map<String, String>.unmodifiable(Map.fromEntries(entries));
 }
 
 List<ScoredMember> _scoredMembers(RespValue reply) {
   final values = _array(reply);
-  if (values.every((value) => value is RespArray)) {
-    return List<ScoredMember>.unmodifiable(
-      values.map((value) {
-        final pair = (value as RespArray).values;
-        if (pair.length != 2) {
-          throw const FormatException('Expected a member and score pair.');
-        }
-        return (member: respText(pair[0]), score: _double(pair[1]));
-      }),
-    );
-  }
-  if (values.length.isOdd) {
-    throw const FormatException('Expected alternating member and score replies.');
-  }
-  return List<ScoredMember>.unmodifiable([
-    for (var index = 0; index < values.length; index += 2)
-      (member: respText(values[index]), score: _double(values[index + 1])),
-  ]);
+  return List<ScoredMember>.unmodifiable(
+    values.map((value) {
+      if (value is! RespArray || value.values.length != 2) {
+        throw const FormatException('Expected a member and score pair.');
+      }
+      return (member: respText(value.values[0]), score: _double(value.values[1]));
+    }),
+  );
 }
 
 List<RespValue> _array(RespValue reply) => switch (reply) {

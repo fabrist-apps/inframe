@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// A value decoded from RESP2 or RESP3.
+/// A value decoded from RESP3.
 sealed class RespValue {
   const RespValue();
 }

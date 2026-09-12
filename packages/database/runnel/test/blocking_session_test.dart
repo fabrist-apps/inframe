@@ -73,7 +73,7 @@ void main() {
       );
       final command = await peer.nextCommand();
       command.reply(
-        '*1\r\n*2\r\n\$6\r\nevents\r\n*1\r\n*2\r\n\$3\r\n1-2\r\n*4\r\n'
+        '%1\r\n\$6\r\nevents\r\n*1\r\n*2\r\n\$3\r\n1-2\r\n*4\r\n'
         '\$1\r\nf\r\n\$1\r\na\r\n\$1\r\nf\r\n\$2\r\n\u0000\u0001\r\n',
       );
 
