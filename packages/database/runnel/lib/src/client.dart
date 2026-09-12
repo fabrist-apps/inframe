@@ -10,6 +10,7 @@ import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/protocol.dart';
 import 'package:runnel/src/resp/resp_value.dart';
+import 'package:runnel/src/scripts.dart';
 
 /// A client for one externally managed standalone Redis or Valkey endpoint.
 final class Runnel {
@@ -180,6 +181,35 @@ final class Runnel {
     return connection.execute(command, timeout: deadline);
   }
 
+  /// Executes a typed Lua script, falling back to source only after NOSCRIPT.
+  ///
+  /// Both attempts share one deadline. The fallback is a later command, so callers
+  /// should await script dependencies before submitting independent work.
+  Future<T> runScript<T>(
+    RedisScript<T> script, {
+    required List<String> keys,
+    required List<RedisArgument> arguments,
+    Duration? timeout,
+  }) async {
+    final duration = timeout ?? _commandTimeout;
+    _positive(duration, 'timeout');
+    final acceptedAt = Stopwatch()..start();
+    final ownedKeys = List<String>.unmodifiable(keys);
+    final ownedArguments = List<RedisArgument>.unmodifiable(arguments);
+    try {
+      return await execute(
+        evalshaCommand(script, keys: ownedKeys, arguments: ownedArguments),
+        timeout: _scriptTimeRemaining(duration, acceptedAt),
+      );
+    } on RedisServerException catch (error) {
+      if (error.code.toUpperCase() != 'NOSCRIPT') rethrow;
+    }
+    return execute(
+      evalCommand(script, keys: ownedKeys, arguments: ownedArguments),
+      timeout: _scriptTimeRemaining(duration, acceptedAt),
+    );
+  }
+
   /// Creates a typed, ordered pipeline builder without performing I/O.
   RedisBatch pipeline() => RedisBatch.internal(
     maxCommands: _limits.maxPendingCommands,
@@ -310,6 +340,17 @@ final class Runnel {
     }
     _state = _ClientState.closed;
   }
+}
+
+Duration _scriptTimeRemaining(Duration timeout, Stopwatch stopwatch) {
+  final remaining = timeout - stopwatch.elapsed;
+  if (remaining <= Duration.zero) {
+    throw const RedisTimeoutException(
+      message: 'The Redis script deadline expired before submission.',
+      deliveryStatus: RedisDeliveryStatus.notSent,
+    );
+  }
+  return remaining;
 }
 
 RedisCommand<Object?> _transactionFrame(String name) => RedisCommand<Object?>(

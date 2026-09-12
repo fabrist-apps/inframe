@@ -11,3 +11,4 @@ export 'src/errors.dart';
 export 'src/limits.dart';
 export 'src/protocol.dart';
 export 'src/resp/resp.dart';
+export 'src/scripts.dart';

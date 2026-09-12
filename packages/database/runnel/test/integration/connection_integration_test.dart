@@ -265,6 +265,86 @@ void main() {
               rejectedTransaction.exec(),
               throwsA(isA<RedisTransactionException>()),
             );
+
+            final binaryScript = RedisScript<Uint8List>(
+              'return ARGV[1]',
+              (reply) => switch (reply) {
+                RespBlobString(:final value) => Uint8List.fromList(value),
+                _ => throw const FormatException('Expected a binary script reply.'),
+              },
+            );
+            final scriptBytes = Uint8List.fromList([0, 255, 13, 10]);
+            expect(
+              await client.runScript(
+                binaryScript,
+                keys: [pipelineKey],
+                arguments: [RedisArgument.bytes(scriptBytes)],
+              ),
+              scriptBytes,
+            );
+            expect(
+              await client.runScript(
+                binaryScript,
+                keys: [pipelineKey],
+                arguments: [RedisArgument.bytes(scriptBytes)],
+              ),
+              scriptBytes,
+            );
+
+            final incrementScript = RedisScript<int>(
+              "return redis.call('INCR', KEYS[1])",
+              (reply) => (reply as RespInteger).value,
+            );
+            final pipelineScriptKey = 'runnel:integration:pipeline-script:$suffix';
+            final scriptPipeline = client.pipeline();
+            final beforeScript = scriptPipeline.add(setCommand(pipelineScriptKey, '0'));
+            final scriptResult = scriptPipeline.add(
+              evalCommand(
+                incrementScript,
+                keys: [pipelineScriptKey],
+                arguments: const [],
+              ),
+            );
+            final afterScript = scriptPipeline.add(getCommand(pipelineScriptKey));
+            final scriptPipelineResults = await scriptPipeline.exec();
+            expect(scriptPipelineResults.value(beforeScript), isTrue);
+            expect(scriptPipelineResults.value(scriptResult), 1);
+            expect(scriptPipelineResults.value(afterScript), '1');
+
+            final transactionScriptKey = 'runnel:integration:transaction-script:$suffix';
+            final scriptTransaction = client.transaction();
+            final transactionSetup = scriptTransaction.add(
+              setCommand(transactionScriptKey, '0'),
+            );
+            final transactionScript = scriptTransaction.add(
+              evalCommand(
+                incrementScript,
+                keys: [transactionScriptKey],
+                arguments: const [],
+              ),
+            );
+            final transactionAfterScript = scriptTransaction.add(
+              getCommand(transactionScriptKey),
+            );
+            final scriptTransactionResults = await scriptTransaction.exec();
+            expect(scriptTransactionResults.value(transactionSetup), isTrue);
+            expect(scriptTransactionResults.value(transactionScript), 1);
+            expect(scriptTransactionResults.value(transactionAfterScript), '1');
+
+            final partialWriteKey = 'runnel:integration:partial-script:$suffix';
+            final runtimeErrorScript = RedisScript<void>(
+              "redis.call('SET', KEYS[1], 'written'); return redis.call('NO-SUCH-COMMAND')",
+              (_) {},
+            );
+            await expectLater(
+              client.runScript(
+                runtimeErrorScript,
+                keys: [partialWriteKey],
+                arguments: const [],
+              ),
+              throwsA(isA<RedisServerException>()),
+            );
+            expect(await client.get(partialWriteKey), 'written');
           },
         );
       }
