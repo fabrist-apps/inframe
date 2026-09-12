@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:artificer_anthropic/src/messages/message_models.dart';
 import 'package:artificer_anthropic/src/messages/messages_resource.dart';
+import 'package:artificer_anthropic/src/models/models_resource.dart';
 import 'package:artificer_anthropic/src/options.dart';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
@@ -39,12 +40,16 @@ final class AnthropicProvider {
          },
        ) {
     messages = AnthropicMessagesResource(_client);
+    models = AnthropicModelsResource(_client);
   }
 
   final ProviderHttpClient _client;
 
   /// Typed native Messages operations.
   late final AnthropicMessagesResource messages;
+
+  /// Typed native model discovery operations.
+  late final AnthropicModelsResource models;
 
   /// Creates a common language model backed by Messages.
   AnthropicLanguageModel languageModel(String modelId, {AnthropicModelOptions? options}) =>

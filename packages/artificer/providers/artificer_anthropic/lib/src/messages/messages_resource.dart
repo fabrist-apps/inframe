@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:artificer_anthropic/src/messages/message_models.dart';
+import 'package:artificer_anthropic/src/messages/token_models.dart';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/protocols.dart';
@@ -17,6 +18,23 @@ final class AnthropicMessagesResource {
 
   final ProviderHttpClient _client;
 
+  /// Counts input tokens for the supplied native Messages fields.
+  Effect<NativeResponse<AnthropicMessageTokensCount>, AiError> countTokens(
+    AnthropicMessageTokensRequest request,
+  ) => _client
+      .sendJson(
+        ProviderHttpRequest(
+          method: 'POST',
+          path: 'messages/count_tokens',
+          headers: _betaHeaders(request.betaFeatures),
+          body: request.toJson(),
+        ),
+        providerId: _providerId,
+        api: 'messages.count_tokens',
+        modelId: request.model,
+      )
+      .flatMap(_decodeTokenCount);
+
   /// Creates one native Message.
   Effect<NativeResponse<AnthropicMessage>, AiError> create(AnthropicMessageRequest request) =>
       _client
@@ -24,7 +42,7 @@ final class AnthropicMessagesResource {
             ProviderHttpRequest(
               method: 'POST',
               path: 'messages',
-              headers: _requestHeaders(request),
+              headers: _betaHeaders(request.betaFeatures),
               body: request.toJson(stream: false),
             ),
             providerId: _providerId,
@@ -43,7 +61,7 @@ final class AnthropicMessagesResource {
     ProviderHttpRequest(
       method: 'POST',
       path: 'messages',
-      headers: _requestHeaders(request),
+      headers: _betaHeaders(request.betaFeatures),
       body: request.toJson(stream: true),
     ),
     createProtocol: _AnthropicNativeProtocol.new,
@@ -63,7 +81,7 @@ final class AnthropicMessagesResource {
     ProviderHttpRequest(
       method: 'POST',
       path: 'messages',
-      headers: _requestHeaders(request),
+      headers: _betaHeaders(request.betaFeatures),
       body: request.toJson(stream: true),
     ),
     createProtocol: () => _AnthropicCommonProtocol(
@@ -106,9 +124,25 @@ final class AnthropicMessagesResource {
   }
 }
 
-Map<String, String> _requestHeaders(AnthropicMessageRequest request) => {
-  if (request.betaFeatures.isNotEmpty) 'anthropic-beta': request.betaFeatures.join(','),
+Map<String, String> _betaHeaders(List<String> betaFeatures) => {
+  if (betaFeatures.isNotEmpty) 'anthropic-beta': betaFeatures.join(','),
 };
+
+Effect<NativeResponse<AnthropicMessageTokensCount>, AiError> _decodeTokenCount(
+  NativeResponse<JsonObject> response,
+) {
+  try {
+    return Effect.succeed(
+      NativeResponse(
+        value: AnthropicMessageTokensCount.fromJson(response.value),
+        payload: response.payload,
+        metadata: response.metadata,
+      ),
+    );
+  } on FormatException catch (error) {
+    return Effect.fail(ProtocolError(error.message));
+  }
+}
 
 Effect<NativeResponse<AnthropicMessage>, AiError> _decodeMessage(
   NativeResponse<JsonObject> response,

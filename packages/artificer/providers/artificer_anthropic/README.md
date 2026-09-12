@@ -99,3 +99,11 @@ in `ProviderReplay` unchanged.
 
 The pinned scope excludes Message Batches, managed Agents, Skills and organization administration,
 cloud authentication adapters, local MCP execution, schema validation, retries, and fallback.
+
+`provider.messages.countTokens(request)` performs one explicit `POST /messages/count_tokens` and
+accepts the endpoint's own typed system, thinking, output, cache, tool-choice, and tool-definition
+fields. Generation never counts tokens implicitly. `provider.models.list(...)` fetches one page and
+returns its native cursors; it does not follow them. `provider.models.retrieve(id)` fetches one exact
+model ID. Model discovery does not gate `languageModel`, so callers can use future model IDs without
+an extra request. All three operations are lazy, use the provider's shared headers and lifecycle,
+and retain native response fields and HTTP metadata.
