@@ -40,3 +40,31 @@ final class PostTags extends VoxelTableDefinition<PostTags> {
   late final post = one<Posts>(fields: [postID], references: (post) => [post.id])();
   late final tag = one<Tags>(fields: [tagID], references: (tag) => [tag.id])();
 }
+
+@VoxelTable(schema: 'content')
+final class Locales extends VoxelTableDefinition<Locales> {
+  static const db = _$LocalesDB();
+
+  late final language = text()();
+  late final key = text()();
+  late final _constraints = [
+    primaryKey('locales_pk', [language, key]),
+  ];
+}
+
+@VoxelTable(schema: 'content')
+final class Translations extends VoxelTableDefinition<Translations> {
+  static const db = _$TranslationsDB();
+
+  late final language = text()();
+  late final key = text()();
+  late final value = text()();
+  late final _constraints = [
+    foreignKey<Locales>(
+      'translations_locale_fk',
+      fields: [language, key],
+      references: (locale) => [locale.language, locale.key],
+      onDelete: VoxelReferentialAction.cascade,
+    ),
+  ];
+}

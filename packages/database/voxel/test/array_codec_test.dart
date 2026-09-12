@@ -14,6 +14,7 @@ void main() {
     final row = schema.decode(
       [
         '[]',
+        '[]',
         '[null,"value"]',
         null,
         null,
@@ -31,6 +32,7 @@ void main() {
         '[]',
       ],
       [
+        false,
         false,
         false,
         true,
@@ -51,6 +53,7 @@ void main() {
     );
 
     expect(row.texts, <String>[]);
+    expect(row.chronoIDs, <String>[]);
     expect(row.nullableElements, [null, 'value']);
     expect(row.nullableArray, isNull);
     expect(row.nullableElementsAndArray, isNull);
@@ -59,6 +62,11 @@ void main() {
 
   test('encodes each catalog storage type using version 1 JSON framing', () {
     expect(table.texts.codec.encode(['a']), '["a"]');
+    expect(
+      table.chronoIDs.codec.encode(['arr_000000000000000000000000']),
+      '["arr_000000000000000000000000"]',
+    );
+    expect(table.chronoIDs.defaultFn, isNull);
     expect(table.integers.codec.encode([-2147483648, 2147483647]), '[-2147483648,2147483647]');
     expect(table.reals.codec.encode([1.5]), '[1.5]');
     expect(table.booleans.codec.encode([true, false]), '[true,false]');

@@ -32,6 +32,8 @@ void main() {
     expect(decoded.microsecond, 0);
     expect(decoded.millisecond, 789);
     expect(encoded, greaterThan(BigInt.from(2147483647)));
+    final runtimeDefault = table.createdAt.defaultFn!()! as DateTime;
+    expect(table.createdAt.codec.encode(runtimeDefault), BigInt.from(-1));
   });
 
   test('checks real and boolean storage encodings', () {

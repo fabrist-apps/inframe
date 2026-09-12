@@ -20,7 +20,7 @@ final class Authors extends VoxelTableDefinition<Authors> {
   late final id = text().primaryKey()();
   late final name = text()();
   late final _indexes = [
-    uniqueIndex('authors_name').on([name]),
+    uniqueIndex('authors_name').on([name]).where(~name.equals('')),
   ];
-  late final _constraints = [check('authors_name_present', ~name.equals(''))];
+  late final _constraints = [check('authors_name_present', name.greaterThan(''))];
 }

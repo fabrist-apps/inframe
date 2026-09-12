@@ -7,5 +7,8 @@ import 'package:voxel_fixture_schema/authors.dart';
 
 part 'app_database.voxel.dart';
 
-@VoxelDatabase(name: 'fixture_app', tables: [Authors, Posts, Tags, PostTags])
+@VoxelDatabase(
+  name: 'fixture_app',
+  tables: [Authors, Posts, Tags, PostTags, Locales, Translations],
+)
 final class FixtureAppDatabase extends _$FixtureAppDatabase {}

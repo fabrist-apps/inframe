@@ -16,6 +16,8 @@ abstract class _$FixtureAppDatabase {
       Posts.db.buildSchema() as VoxelTableSchema<Object?, Object?>,
       Tags.db.buildSchema() as VoxelTableSchema<Object?, Object?>,
       PostTags.db.buildSchema() as VoxelTableSchema<Object?, Object?>,
+      Locales.db.buildSchema() as VoxelTableSchema<Object?, Object?>,
+      Translations.db.buildSchema() as VoxelTableSchema<Object?, Object?>,
     ],
   );
 }

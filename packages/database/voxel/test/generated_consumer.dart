@@ -37,7 +37,7 @@ final class UserCode {
   final String value;
 }
 
-final class UserCodeConverter implements VoxelTypeConverter<UserCode, String> {
+final class UserCodeConverter extends VoxelTypeConverter<UserCode, String> {
   const UserCodeConverter();
 
   @override
@@ -98,7 +98,9 @@ final class ScalarValues extends VoxelTableDefinition<ScalarValues> {
   late final count = integer()();
   late final score = real()();
   late final active = boolean()();
-  late final createdAt = dateTime()();
+  late final createdAt = dateTime().defaultValue(
+    () => DateTime.parse('1969-12-31T23:59:59.999999Z'),
+  )();
   late final payload = json()();
   late final optionalPayload = json().nullable()();
   late final code = text().map(const UserCodeConverter())();
@@ -119,6 +121,7 @@ final class ArrayValues extends VoxelTableDefinition<ArrayValues> {
   static const db = _$ArrayValuesDB();
 
   late final texts = text().array()();
+  late final chronoIDs = chronoID(prefix: 'arr').array()();
   late final nullableElements = text().nullable().array()();
   late final nullableArray = text().array().nullable()();
   late final nullableElementsAndArray = text().nullable().array().nullable()();

@@ -43,6 +43,7 @@ jobs:
           dart format .
           git diff --exit-code
           dart test --chain-stack-traces
+          dart test voxel_generator/test --chain-stack-traces
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -169,6 +170,7 @@ jobs:
           dart format .
           git diff --exit-code
           dart test --chain-stack-traces
+          dart test voxel_generator/test --chain-stack-traces
 
       - name: Verify packaged iOS SDK artifacts
         run: |

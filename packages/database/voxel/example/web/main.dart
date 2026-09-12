@@ -34,6 +34,7 @@ Future<void> _verifyArrayStorage() async {
     );
     final parameters = <Object?>[
       table.texts.codec.encode([]),
+      table.chronoIDs.codec.encode(['arr_000000000000000000000000']),
       table.nullableElements.codec.encode([null, 'value']),
       table.nullableArray.codec.encode(['present']),
       table.nullableElementsAndArray.codec.encode(null),
@@ -64,6 +65,7 @@ Future<void> _verifyArrayStorage() async {
     final row = schema.decode(values, [for (final value in values) value == null]);
     _expect(
       row.texts.isEmpty &&
+          row.chronoIDs.single == 'arr_000000000000000000000000' &&
           row.nullableElements[0] == null &&
           row.nullableArray!.single == 'present' &&
           row.nullableElementsAndArray == null &&
@@ -83,39 +85,56 @@ Future<void> _verifyArrayStorage() async {
     for (final column in schema.columns) {
       _expectFailure(() => column.decodeValue('{}', isSqlNull: false));
     }
+    _expectFailure(() => table.chronoIDs.decodeValue('["invalid"]', isSqlNull: false));
+    _expectFailure(() => table.integers.decodeValue('[2147483648]', isSqlNull: false));
+    _expectFailure(() => table.reals.decodeValue('["invalid"]', isSqlNull: false));
+    _expectFailure(() => table.booleans.decodeValue('[2]', isSqlNull: false));
+    _expectFailure(() => table.timestamps.decodeValue('["invalid"]', isSqlNull: false));
+    _expectFailure(() => table.jsonValues.decodeValue('[null]', isSqlNull: false));
+    _expectFailure(() => table.statuses.decodeValue('["unknown"]', isSqlNull: false));
+    _expectFailure(() => table.vectors.decodeValue('[[1,2]]', isSqlNull: false));
+    _expectFailure(() => table.codes.decodeValue('["secret"]', isSqlNull: false));
+    _expectFailure(() => table.preferencesList.decodeValue('[[{}]]', isSqlNull: false));
   } finally {
     await database.close();
   }
 }
 
 Future<void> _verifyVectorStorage() async {
-  final table = VectorValues.db.buildSchema().definition;
+  final schema = VectorValues.db.buildSchema();
+  final table = schema.definition;
   final database = await TursoDatabase.open(
     TursoLocation.memory(),
     web: TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js')),
   );
   try {
     _expect(database.capabilities.vectorFunctions, 'vector functions unavailable');
-    await database.execute('CREATE TABLE vectorValues (embedding F32_BLOB(3))');
+    await database.execute(
+      'CREATE TABLE vectorValues (embedding F32_BLOB(3), optionalEmbedding F32_BLOB(3))',
+    );
     final value = Float32List.fromList([0.1, -2.5, 3.25]);
     await database.execute(
-      'INSERT INTO vectorValues VALUES (vector32(?))',
+      'INSERT INTO vectorValues VALUES (vector32(?), NULL)',
       parameters: [table.embedding.codec.encode(value)],
     );
     final stored = (await database.query(
-      'SELECT vector_extract(embedding) AS embedding FROM vectorValues',
+      'SELECT ${table.embedding.selectionSql} AS embedding, '
+      '${table.optionalEmbedding.selectionSql} AS optionalEmbedding FROM vectorValues',
     )).rows.single;
+    final row = schema.decode(
+      [stored.value('embedding'), stored.value('optionalEmbedding')],
+      [false, true],
+    );
     _expect(
-      _listEquals(
-        table.embedding.codec.decode(stored.value('embedding'), isSqlNull: false),
-        value,
-      ),
+      _listEquals(row.embedding, value) && row.optionalEmbedding == null,
       'vector row mismatch',
     );
     _expectFailure(() => table.embedding.codec.encode(Float32List(2)));
     _expectFailure(
       () => table.embedding.codec.encode(Float32List.fromList([1, double.nan, 3])),
     );
+    _expectFailure(() => table.embedding.decodeValue('[1,2]', isSqlNull: false));
+    _expectFailure(() => table.embedding.decodeValue('[1,NaN,3]', isSqlNull: false));
   } finally {
     await database.close();
   }

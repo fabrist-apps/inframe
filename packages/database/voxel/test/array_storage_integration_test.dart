@@ -19,6 +19,7 @@ void main() {
     final timestamp = DateTime.fromMicrosecondsSinceEpoch(-1);
     final parameters = <Object?>[
       table.texts.codec.encode([]),
+      table.chronoIDs.codec.encode(['arr_000000000000000000000000']),
       table.nullableElements.codec.encode([null, 'value']),
       table.nullableArray.codec.encode(['present']),
       table.nullableElementsAndArray.codec.encode(null),
@@ -49,6 +50,7 @@ void main() {
     final row = schema.decode(values, [for (final value in values) value == null]);
 
     expect(row.texts, isEmpty);
+    expect(row.chronoIDs, ['arr_000000000000000000000000']);
     expect(row.nullableElements, [null, 'value']);
     expect(row.nullableArray, ['present']);
     expect(row.nullableElementsAndArray, isNull);
@@ -77,5 +79,21 @@ void main() {
         ),
       );
     }
+    expect(
+      () => table.chronoIDs.decodeValue('["invalid"]', isSqlNull: false),
+      throwsA(isA<VoxelConversionException>()),
+    );
+    expect(
+      () => table.booleans.decodeValue('[2]', isSqlNull: false),
+      throwsA(isA<VoxelConversionException>()),
+    );
+    expect(
+      () => table.statuses.decodeValue('["unknown"]', isSqlNull: false),
+      throwsA(isA<VoxelConversionException>()),
+    );
+    expect(
+      () => table.vectors.decodeValue('[[1,2]]', isSqlNull: false),
+      throwsA(isA<VoxelConversionException>()),
+    );
   });
 }

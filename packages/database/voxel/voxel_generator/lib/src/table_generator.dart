@@ -251,6 +251,7 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
       inPackage: 'voxel',
     ).isAssignableFromType(type);
     if (isMapped) _validateMappedHookOrder(field);
+    _validateArrayHookOrder(field);
     final defaults = _columnDefaults(field);
     final domainType = referenceToType(domain, field.library);
     final recoveredDomainType = domainType == 'InvalidType' ? _columnValueType(field) : domainType;
@@ -292,7 +293,9 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     final methods = <String>[];
     _collectColumnMethods(declaration.initializer!, methods);
     return _ColumnDefaults(
-      hasDefaultFn: methods.contains('defaultValue') || methods.contains('chronoID'),
+      hasDefaultFn:
+          methods.contains('defaultValue') ||
+          (methods.contains('chronoID') && !methods.contains('array')),
       hasOnUpdateFn: methods.contains('onUpdate'),
       hasSqlDefault: methods.contains('defaultSql'),
     );
@@ -315,6 +318,28 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     if (storageHook) {
       throw InvalidGenerationSourceError(
         'Mapped runtime hooks must be declared after map() so they return the domain type.',
+        element: field,
+      );
+    }
+  }
+
+  void _validateArrayHookOrder(FieldElement field) {
+    final parsed = field.library.session.getParsedLibraryByElement(field.library);
+    if (parsed is! ParsedLibraryResult) return;
+    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
+    if (declaration is! VariableDeclaration || declaration.initializer == null) return;
+    final methods = <String>[];
+    _collectColumnMethods(declaration.initializer!, methods);
+    final arrayIndex = methods.indexOf('array');
+    if (arrayIndex < 0) return;
+    final scalarHook = methods
+        .take(arrayIndex)
+        .any(
+          (method) => method == 'defaultValue' || method == 'onUpdate',
+        );
+    if (scalarHook) {
+      throw InvalidGenerationSourceError(
+        'Array runtime hooks must be declared after array() so they return the list type.',
         element: field,
       );
     }

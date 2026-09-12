@@ -282,3 +282,189 @@ final class _$PostTagsDB extends VoxelTableAccessor<PostTags, PostTagsRow> {
     );
   }
 }
+
+/// Generated row returned by reads from 'content.locales'.
+final class LocalesRow {
+  /// Creates a row from decoded column and relation values.
+  const LocalesRow({required this.language, required this.key});
+
+  /// Value read from `language`.
+  final String language;
+
+  /// Value read from `key`.
+  final String key;
+}
+
+/// Generated values accepted by mutations of 'content.locales'.
+final class LocalesCompanion implements VoxelCompanion<Locales> {
+  const LocalesCompanion._({required this.language, required this.key});
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory LocalesCompanion.insert({
+    required VoxelValue<Locales, String, String> language,
+    required VoxelValue<Locales, String, String> key,
+  }) => LocalesCompanion._(language: language, key: key);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory LocalesCompanion.update({
+    VoxelValue<Locales, String, String> language = const VoxelValue.absent(),
+    VoxelValue<Locales, String, String> key = const VoxelValue.absent(),
+  }) => LocalesCompanion._(language: language, key: key);
+
+  /// Mutation value for `language`.
+  final VoxelValue<Locales, String, String> language;
+
+  /// Mutation value for `key`.
+  final VoxelValue<Locales, String, String> key;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<VoxelAssignment<Locales>> operator [](VoxelCompanionKey key) => [
+    VoxelAssignment('language', language),
+    VoxelAssignment('key', this.key),
+  ];
+}
+
+final class _$LocalesDB extends VoxelTableAccessor<Locales, LocalesRow> {
+  const _$LocalesDB();
+
+  @override
+  VoxelTableSchema<Locales, LocalesRow> buildSchema() {
+    Locales createDefinition() {
+      final definition = Locales();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    return VoxelTableSchema<Locales, LocalesRow>(
+      schemaName: 'content',
+      tableName: 'locales',
+      definition: definition,
+      definitionType: Locales,
+      rowType: LocalesRow,
+      columns: [
+        definition.language as VoxelColumn<Object?>,
+        definition.key as VoxelColumn<Object?>,
+      ],
+      columnNames: ['language', 'key'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.language as VoxelColumn<Object?>,
+        definition.key as VoxelColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => LocalesRow(
+        language: definition.language.decodeValue(
+          values[0],
+          isSqlNull: sqlNulls[0],
+        ),
+        key: definition.key.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      ),
+      constraints: () => definition._constraints,
+    );
+  }
+}
+
+/// Generated row returned by reads from 'content.translations'.
+final class TranslationsRow {
+  /// Creates a row from decoded column and relation values.
+  const TranslationsRow({
+    required this.language,
+    required this.key,
+    required this.value,
+  });
+
+  /// Value read from `language`.
+  final String language;
+
+  /// Value read from `key`.
+  final String key;
+
+  /// Value read from `value`.
+  final String value;
+}
+
+/// Generated values accepted by mutations of 'content.translations'.
+final class TranslationsCompanion implements VoxelCompanion<Translations> {
+  const TranslationsCompanion._({
+    required this.language,
+    required this.key,
+    required this.value,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory TranslationsCompanion.insert({
+    required VoxelValue<Translations, String, String> language,
+    required VoxelValue<Translations, String, String> key,
+    required VoxelValue<Translations, String, String> value,
+  }) => TranslationsCompanion._(language: language, key: key, value: value);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory TranslationsCompanion.update({
+    VoxelValue<Translations, String, String> language =
+        const VoxelValue.absent(),
+    VoxelValue<Translations, String, String> key = const VoxelValue.absent(),
+    VoxelValue<Translations, String, String> value = const VoxelValue.absent(),
+  }) => TranslationsCompanion._(language: language, key: key, value: value);
+
+  /// Mutation value for `language`.
+  final VoxelValue<Translations, String, String> language;
+
+  /// Mutation value for `key`.
+  final VoxelValue<Translations, String, String> key;
+
+  /// Mutation value for `value`.
+  final VoxelValue<Translations, String, String> value;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<VoxelAssignment<Translations>> operator [](VoxelCompanionKey key) => [
+    VoxelAssignment('language', language),
+    VoxelAssignment('key', this.key),
+    VoxelAssignment('value', value),
+  ];
+}
+
+final class _$TranslationsDB
+    extends VoxelTableAccessor<Translations, TranslationsRow> {
+  const _$TranslationsDB();
+
+  @override
+  VoxelTableSchema<Translations, TranslationsRow> buildSchema() {
+    Translations createDefinition() {
+      final definition = Translations();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    return VoxelTableSchema<Translations, TranslationsRow>(
+      schemaName: 'content',
+      tableName: 'translations',
+      definition: definition,
+      definitionType: Translations,
+      rowType: TranslationsRow,
+      columns: [
+        definition.language as VoxelColumn<Object?>,
+        definition.key as VoxelColumn<Object?>,
+        definition.value as VoxelColumn<Object?>,
+      ],
+      columnNames: ['language', 'key', 'value'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.language as VoxelColumn<Object?>,
+        definition.key as VoxelColumn<Object?>,
+        definition.value as VoxelColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => TranslationsRow(
+        language: definition.language.decodeValue(
+          values[0],
+          isSqlNull: sqlNulls[0],
+        ),
+        key: definition.key.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+        value: definition.value.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      ),
+      constraints: () => definition._constraints,
+    );
+  }
+}

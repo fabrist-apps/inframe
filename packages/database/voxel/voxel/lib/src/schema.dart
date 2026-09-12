@@ -24,8 +24,8 @@ final class VoxelTableSchema<Definition, Row> {
     required List<VoxelColumn<Object?>> columns,
     required List<String> columnNames,
     required this.decode,
-    this.definitionType = Object,
-    this.rowType = Object,
+    required this.definitionType,
+    required this.rowType,
     this.createDefinition,
     this.columnsFor,
     this.renamedFrom,
@@ -35,22 +35,53 @@ final class VoxelTableSchema<Definition, Row> {
     Map<String, VoxelRelationDescriptor<Object?>> relations = const {},
   }) : columns = List.unmodifiable(columns),
        relations = Map.unmodifiable(relations) {
+    _validateIdentifier(schemaName, 'schema name');
+    _validateIdentifier(tableName, 'table name');
+    if (renamedFrom case final previous?) _validateIdentifier(previous, 'renamed table name');
+    if (formatVersion != 1) {
+      throw ArgumentError(
+        'Table $schemaName.$tableName uses unsupported metadata format version $formatVersion.',
+      );
+    }
+    if (definition.runtimeType != definitionType) {
+      throw ArgumentError(
+        'Table $schemaName.$tableName declares $definitionType metadata for '
+        '${definition.runtimeType}.',
+      );
+    }
+    if (columns.isEmpty) {
+      throw ArgumentError('Table $schemaName.$tableName must contain at least one column.');
+    }
     if (columns.length != columnNames.length) {
       throw ArgumentError('Column descriptors and generated names must have equal lengths.');
     }
     for (var index = 0; index < columns.length; index++) {
       columns[index].attach(this, dartName: columnNames[index]);
+      _validateIdentifier(columns[index].physicalName, 'column name');
+      if (columns[index].codec.codecVersion != 1) {
+        throw ArgumentError(
+          'Column $schemaName.$tableName.${columns[index].physicalName} uses unsupported codec '
+          'version ${columns[index].codec.codecVersion}.',
+        );
+      }
     }
     this.indexes = List.unmodifiable(indexes?.call() ?? const []);
     this.constraints = List.unmodifiable(constraints?.call() ?? const []);
-    final physicalNames = columns.map((column) => column.physicalName).toSet();
+    final physicalNames = columns.map((column) => _identifierKey(column.physicalName)).toSet();
     if (physicalNames.length != columns.length) {
       throw ArgumentError('Table $schemaName.$tableName has duplicate physical column names.');
     }
-    if (this.indexes.map((index) => index.name).toSet().length != this.indexes.length) {
+    for (final index in this.indexes) {
+      _validateIdentifier(index.name, 'index name');
+    }
+    if (this.indexes.map((index) => _identifierKey(index.name)).toSet().length !=
+        this.indexes.length) {
       throw ArgumentError('Table $schemaName.$tableName has duplicate index names.');
     }
-    if (this.constraints.map((constraint) => constraint.name).toSet().length !=
+    for (final constraint in this.constraints) {
+      _validateIdentifier(constraint.name, 'constraint name');
+    }
+    if (this.constraints.map((constraint) => _identifierKey(constraint.name)).toSet().length !=
         this.constraints.length) {
       throw ArgumentError('Table $schemaName.$tableName has duplicate constraint names.');
     }
@@ -70,6 +101,26 @@ final class VoxelTableSchema<Definition, Row> {
           'Constraint $schemaName.$tableName.${constraint.name} has an invalid expression.',
         );
       }
+      if (constraint.kind != VoxelConstraintKind.check &&
+          (constraint.columns.isEmpty ||
+              constraint.columns.any((column) => !columns.contains(column)))) {
+        throw ArgumentError(
+          'Constraint $schemaName.$tableName.${constraint.name} has invalid columns.',
+        );
+      }
+      if (constraint.kind == VoxelConstraintKind.foreignKey &&
+          (constraint.targetTable == null || constraint.reference == null)) {
+        throw ArgumentError(
+          'Foreign key $schemaName.$tableName.${constraint.name} is incomplete.',
+        );
+      }
+    }
+    final primaryKeys = this.constraints
+        .where((constraint) => constraint.kind == VoxelConstraintKind.primaryKey)
+        .toList(growable: false);
+    if (primaryKeys.length > 1 ||
+        (primaryKeys.isNotEmpty && columns.any((column) => column.isPrimaryKey))) {
+      throw ArgumentError('Table $schemaName.$tableName has conflicting primary keys.');
     }
   }
 
@@ -121,6 +172,7 @@ final class VoxelDatabaseSchema {
     required List<VoxelTableSchema<Object?, Object?>> tables,
   }) : tables = List.unmodifiable(tables) {
     if (name.isEmpty) throw ArgumentError.value(name, 'name', 'must not be empty');
+    if (tables.isEmpty) throw ArgumentError.value(tables, 'tables', 'must not be empty');
     _validateVoxelSchemas(this.tables);
   }
 
@@ -136,8 +188,17 @@ const _reservedVoxelTables = {
   '_voxel_phases',
 };
 
+String _identifierKey(String identifier) => identifier.toLowerCase();
+
+void _validateIdentifier(String identifier, String label) {
+  if (identifier.isEmpty || identifier.contains('\u0000')) {
+    throw ArgumentError.value(identifier, label, 'must be a nonempty Turso identifier');
+  }
+}
+
 void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
   final physicalNames = <String>{};
+  final indexNames = <String>{};
   final registered = <Type, VoxelTableSchema<Object?, Object?>>{};
   for (final table in tables) {
     final definition = table.definition;
@@ -146,18 +207,28 @@ void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
         'Voxel table ${table.schemaName}.${table.tableName} has a null definition.',
       );
     }
-    if (_reservedVoxelTables.contains(table.tableName)) {
+    if (_reservedVoxelTables.contains(_identifierKey(table.tableName))) {
       throw ArgumentError('Voxel table name ${table.tableName} is reserved for migration state.');
     }
-    if (!physicalNames.add('${table.schemaName}.${table.tableName}')) {
+    if (!physicalNames.add(
+      '${_identifierKey(table.schemaName)}.${_identifierKey(table.tableName)}',
+    )) {
       throw ArgumentError(
         'Duplicate Voxel table registration: ${table.schemaName}.${table.tableName}.',
       );
     }
-    if (registered[definition.runtimeType] != null) {
-      throw ArgumentError('Duplicate Voxel table type registration: ${definition.runtimeType}.');
+    if (registered[table.definitionType] != null) {
+      throw ArgumentError('Duplicate Voxel table type registration: ${table.definitionType}.');
     }
-    registered[definition.runtimeType] = table;
+    registered[table.definitionType] = table;
+    for (final index in table.indexes) {
+      final key = '${_identifierKey(table.schemaName)}.${_identifierKey(index.name)}';
+      if (!indexNames.add(key)) {
+        throw ArgumentError(
+          'Duplicate Voxel index registration: ${table.schemaName}.${index.name}.',
+        );
+      }
+    }
   }
   for (final table in tables) {
     for (final column in table.columns) {
@@ -170,7 +241,7 @@ void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
           '${foreignKey.targetTable}, which is not registered.',
         );
       }
-      if (table.schemaName != target.schemaName) {
+      if (_identifierKey(table.schemaName) != _identifierKey(target.schemaName)) {
         throw ArgumentError(
           'Voxel foreign keys cannot cross schemas: ${table.schemaName} to ${target.schemaName}.',
         );
@@ -181,13 +252,43 @@ void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
           'Foreign key ${table.tableName}.${column.physicalName} selects a foreign column.',
         );
       }
-      if (column.codec.cast != referenced.codec.cast) {
+      if (column.codec.storageSignature != referenced.codec.storageSignature) {
         throw ArgumentError(
           'Foreign key ${table.tableName}.${column.physicalName} maps ${column.codec.cast} '
           'to incompatible ${referenced.codec.cast}.',
         );
       }
       foreignKey.referencedColumn = referenced;
+    }
+    for (final constraint in table.constraints) {
+      if (constraint.kind != VoxelConstraintKind.foreignKey) continue;
+      final target = registered[constraint.targetTable];
+      if (target == null) {
+        throw ArgumentError(
+          'Foreign key ${table.tableName}.${constraint.name} targets an unregistered table.',
+        );
+      }
+      if (_identifierKey(table.schemaName) != _identifierKey(target.schemaName)) {
+        throw ArgumentError(
+          'Voxel foreign keys cannot cross schemas: ${table.schemaName} to ${target.schemaName}.',
+        );
+      }
+      final references = constraint.reference!(target.definition!);
+      if (references.length != constraint.columns.length ||
+          references.any((column) => !target.columns.contains(column))) {
+        throw ArgumentError(
+          'Foreign key ${table.tableName}.${constraint.name} has an invalid ordered mapping.',
+        );
+      }
+      for (var index = 0; index < references.length; index++) {
+        if (constraint.columns[index].codec.storageSignature !=
+            references[index].codec.storageSignature) {
+          throw ArgumentError(
+            'Foreign key ${table.tableName}.${constraint.name} maps incompatible storage types.',
+          );
+        }
+      }
+      constraint.referencedColumns = List.unmodifiable(references);
     }
     for (final entry in table.relations.entries) {
       final relation = entry.value;
@@ -245,7 +346,8 @@ void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
           );
         }
         for (var index = 0; index < relation.fields.length; index++) {
-          if (relation.fields[index].codec.cast != relation.references[index].codec.cast) {
+          if (relation.fields[index].codec.storageSignature !=
+              relation.references[index].codec.storageSignature) {
             throw ArgumentError(
               'Relation ${table.tableName}.${entry.key} maps incompatible storage types.',
             );
@@ -333,6 +435,25 @@ abstract class VoxelTableDefinition<Self> {
     expression: predicate.sql,
     predicate: predicate,
   );
+
+  VoxelConstraint primaryKey(String name, List<VoxelColumn<dynamic>> columns) =>
+      VoxelConstraint(name: name, kind: VoxelConstraintKind.primaryKey, columns: columns);
+
+  VoxelConstraint foreignKey<Target>(
+    String name, {
+    required List<VoxelColumn<dynamic>> fields,
+    required List<VoxelColumn<dynamic>> Function(Target table) references,
+    VoxelReferentialAction onDelete = VoxelReferentialAction.noAction,
+    VoxelReferentialAction onUpdate = VoxelReferentialAction.noAction,
+  }) => VoxelConstraint(
+    name: name,
+    kind: VoxelConstraintKind.foreignKey,
+    columns: fields,
+    targetTable: Target,
+    reference: (table) => references(table as Target),
+    onDelete: onDelete,
+    onUpdate: onUpdate,
+  );
 }
 
 enum VoxelReferentialAction { noAction, restrict, cascade, setNull, setDefault }
@@ -355,26 +476,45 @@ final class VoxelForeignKey {
 }
 
 final class VoxelConstraint {
-  const VoxelConstraint({
+  VoxelConstraint({
     required this.name,
     required this.kind,
+    List<VoxelColumn<dynamic>> columns = const [],
     this.expression,
     this.predicate,
-  });
+    this.targetTable,
+    this.reference,
+    this.onDelete = VoxelReferentialAction.noAction,
+    this.onUpdate = VoxelReferentialAction.noAction,
+  }) : columns = List.unmodifiable(columns);
 
   final String name;
   final VoxelConstraintKind kind;
+  final List<VoxelColumn<dynamic>> columns;
   final String? expression;
   final VoxelPredicate? predicate;
+  final Type? targetTable;
+  final List<VoxelColumn<dynamic>> Function(Object table)? reference;
+  final VoxelReferentialAction onDelete;
+  final VoxelReferentialAction onUpdate;
+  List<VoxelColumn<dynamic>> referencedColumns = const [];
 }
 
 final class VoxelIndex {
-  const VoxelIndex({required this.name, required this.unique, required this.terms, this.predicate});
+  VoxelIndex({
+    required this.name,
+    required this.unique,
+    required List<VoxelIndexTerm> terms,
+    this.predicate,
+  }) : terms = List.unmodifiable(terms);
 
   final String name;
   final bool unique;
   final List<VoxelIndexTerm> terms;
   final VoxelPredicate? predicate;
+
+  VoxelIndex where(VoxelPredicate value) =>
+      VoxelIndex(name: name, unique: unique, terms: terms, predicate: value);
 }
 
 final class VoxelIndexTerm {
@@ -424,6 +564,7 @@ abstract class VoxelCodec<T> {
   const VoxelCodec();
 
   String get cast;
+  String get storageSignature => cast;
   int get codecVersion => 1;
   bool get acceptsNull => false;
   bool get encodesJsonValue => false;
@@ -472,6 +613,9 @@ final class VoxelNullableCodec<T> extends VoxelCodec<T?> {
 
   @override
   String get cast => inner.cast;
+
+  @override
+  String get storageSignature => inner.storageSignature;
 
   @override
   bool get acceptsNull => true;
@@ -734,6 +878,9 @@ final class VoxelEnumCodec<E extends Enum> extends VoxelCodec<E> {
   String get cast => 'text';
 
   @override
+  String get storageSignature => 'enum:$schemaName.$typeName';
+
+  @override
   Object encode(E value) {
     final index = values.indexOf(value);
     if (index < 0) throw ArgumentError.value(value, 'value', 'is not registered');
@@ -760,7 +907,11 @@ final class VoxelVectorCodec extends VoxelCodec<Float32List> {
   String get cast => 'f32_blob';
 
   @override
-  String select(String columnSql) => 'vector_extract($columnSql)';
+  String get storageSignature => 'f32_blob($dimensions)';
+
+  @override
+  String select(String columnSql) =>
+      'CASE WHEN $columnSql IS NULL THEN NULL ELSE vector_extract($columnSql) END';
 
   @override
   Object encode(Float32List value) {
@@ -857,7 +1008,9 @@ int _jsonHash(Object? value) => switch (value) {
   _ => value.hashCode,
 };
 
-abstract interface class VoxelTypeConverter<Domain, Storage> {
+abstract class VoxelTypeConverter<Domain, Storage> {
+  const VoxelTypeConverter();
+
   Domain fromSql(Storage value);
   Storage toSql(Domain value);
 }
@@ -870,6 +1023,9 @@ final class VoxelMappedCodec<Domain, Storage> extends VoxelCodec<Domain> {
 
   @override
   String get cast => storage.cast;
+
+  @override
+  String get storageSignature => storage.storageSignature;
 
   @override
   bool get acceptsNull => storage.acceptsNull;
@@ -925,6 +1081,12 @@ final class _VoxelColumnMetadata {
     sqlDefault: sqlDefault,
     defaultFn: defaultFn,
     onUpdateFn: onUpdateFn,
+  );
+
+  _VoxelColumnMetadata forArray() => _VoxelColumnMetadata(
+    isPrimaryKey: isPrimaryKey,
+    foreignKey: foreignKey,
+    sqlDefault: sqlDefault,
   );
 
   _VoxelColumnMetadata mapped<Domain, Storage>(
@@ -997,7 +1159,7 @@ class VoxelColumnBuilder<T> {
     codec,
     name: name,
     renamedFrom: renamedFrom,
-    metadata: _metadata.copy(),
+    metadata: _metadata.forArray(),
   );
 
   VoxelColumnBuilder<T> primaryKey() {
@@ -1106,7 +1268,7 @@ class VoxelMappedColumnBuilder<Domain, Storage> {
     converter,
     name: name,
     renamedFrom: renamedFrom,
-    metadata: _metadata.copy(),
+    metadata: _metadata.forArray(),
   );
 
   VoxelMappedColumnBuilder<Domain, Storage> primaryKey() {
@@ -1544,6 +1706,9 @@ final class VoxelOrderableColumn<T> extends VoxelColumn<T> {
       VoxelOrder(this, descending: false, nulls: nulls);
   VoxelOrder desc({NullsOrder nulls = NullsOrder.last}) =>
       VoxelOrder(this, descending: true, nulls: nulls);
+
+  VoxelPredicate greaterThan(T value) =>
+      VoxelPredicate._value('$sql > ', '', encodeValue(value), [this]);
 }
 
 extension VoxelIntegerExpression on VoxelExpression<int> {
@@ -1592,7 +1757,7 @@ class VoxelOrderableColumnBuilder<T> {
     codec,
     name: name,
     renamedFrom: renamedFrom,
-    metadata: _metadata.copy(),
+    metadata: _metadata.forArray(),
   );
 
   VoxelOrderableColumnBuilder<T> primaryKey() {
@@ -1763,6 +1928,10 @@ final class VoxelArrayCodec<Element> extends VoxelCodec<List<Element>> {
 
   @override
   String get cast => 'text';
+
+  @override
+  String get storageSignature =>
+      'array:v$codecVersion:${elementCodec.storageSignature}:nullable=${elementCodec.acceptsNull}';
 
   @override
   Object encode(List<Element> value) {

@@ -306,10 +306,11 @@ final class ScalarValuesCompanion implements VoxelCompanion<ScalarValues> {
     required VoxelValue<ScalarValues, int, int> count,
     required VoxelValue<ScalarValues, double, double> score,
     required VoxelValue<ScalarValues, bool, bool> active,
-    required VoxelValue<ScalarValues, DateTime, DateTime> createdAt,
     required VoxelValue<ScalarValues, JsonValue, JsonValue> payload,
     required VoxelValue<ScalarValues, UserCode, String> code,
     required VoxelValue<ScalarValues, Preferences, JsonValue> preferences,
+    VoxelValue<ScalarValues, DateTime, DateTime> createdAt =
+        const VoxelValue.absent(),
     VoxelValue<ScalarValues, JsonValue?, JsonValue?> optionalPayload =
         const VoxelValue.absent(),
     VoxelValue<ScalarValues, UserCode?, String?> optionalCode =
@@ -587,6 +588,7 @@ final class ArrayValuesRow {
   /// Creates a row from decoded column and relation values.
   const ArrayValuesRow({
     required this.texts,
+    required this.chronoIDs,
     required this.nullableElements,
     required this.nullableArray,
     required this.nullableElementsAndArray,
@@ -606,6 +608,9 @@ final class ArrayValuesRow {
 
   /// Value read from `texts`.
   final List<String> texts;
+
+  /// Value read from `chronoIDs`.
+  final List<String> chronoIDs;
 
   /// Value read from `nullableElements`.
   final List<String?> nullableElements;
@@ -657,6 +662,7 @@ final class ArrayValuesRow {
 final class ArrayValuesCompanion implements VoxelCompanion<ArrayValues> {
   const ArrayValuesCompanion._({
     required this.texts,
+    required this.chronoIDs,
     required this.nullableElements,
     required this.nullableArray,
     required this.nullableElementsAndArray,
@@ -677,6 +683,7 @@ final class ArrayValuesCompanion implements VoxelCompanion<ArrayValues> {
   /// Creates values for an insert, leaving defaulted columns absent.
   factory ArrayValuesCompanion.insert({
     required VoxelValue<ArrayValues, List<String>, List<String>> texts,
+    required VoxelValue<ArrayValues, List<String>, List<String>> chronoIDs,
     required VoxelValue<ArrayValues, List<String?>, List<String?>>
     nullableElements,
     required VoxelValue<ArrayValues, List<int>, List<int>> integers,
@@ -705,6 +712,7 @@ final class ArrayValuesCompanion implements VoxelCompanion<ArrayValues> {
         const VoxelValue.absent(),
   }) => ArrayValuesCompanion._(
     texts: texts,
+    chronoIDs: chronoIDs,
     nullableElements: nullableElements,
     nullableArray: nullableArray,
     nullableElementsAndArray: nullableElementsAndArray,
@@ -725,6 +733,8 @@ final class ArrayValuesCompanion implements VoxelCompanion<ArrayValues> {
   /// Creates values for an update, leaving untouched columns absent.
   factory ArrayValuesCompanion.update({
     VoxelValue<ArrayValues, List<String>, List<String>> texts =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<String>, List<String>> chronoIDs =
         const VoxelValue.absent(),
     VoxelValue<ArrayValues, List<String?>, List<String?>> nullableElements =
         const VoxelValue.absent(),
@@ -762,6 +772,7 @@ final class ArrayValuesCompanion implements VoxelCompanion<ArrayValues> {
         const VoxelValue.absent(),
   }) => ArrayValuesCompanion._(
     texts: texts,
+    chronoIDs: chronoIDs,
     nullableElements: nullableElements,
     nullableArray: nullableArray,
     nullableElementsAndArray: nullableElementsAndArray,
@@ -781,6 +792,9 @@ final class ArrayValuesCompanion implements VoxelCompanion<ArrayValues> {
 
   /// Mutation value for `texts`.
   final VoxelValue<ArrayValues, List<String>, List<String>> texts;
+
+  /// Mutation value for `chronoIDs`.
+  final VoxelValue<ArrayValues, List<String>, List<String>> chronoIDs;
 
   /// Mutation value for `nullableElements`.
   final VoxelValue<ArrayValues, List<String?>, List<String?>> nullableElements;
@@ -839,6 +853,7 @@ final class ArrayValuesCompanion implements VoxelCompanion<ArrayValues> {
   @override
   List<VoxelAssignment<ArrayValues>> operator [](VoxelCompanionKey key) => [
     VoxelAssignment('texts', texts),
+    VoxelAssignment('chronoIDs', chronoIDs),
     VoxelAssignment('nullableElements', nullableElements),
     VoxelAssignment('nullableArray', nullableArray),
     VoxelAssignment('nullableElementsAndArray', nullableElementsAndArray),
@@ -878,6 +893,7 @@ final class _$ArrayValuesDB
       rowType: ArrayValuesRow,
       columns: [
         definition.texts as VoxelColumn<Object?>,
+        definition.chronoIDs as VoxelColumn<Object?>,
         definition.nullableElements as VoxelColumn<Object?>,
         definition.nullableArray as VoxelColumn<Object?>,
         definition.nullableElementsAndArray as VoxelColumn<Object?>,
@@ -896,6 +912,7 @@ final class _$ArrayValuesDB
       ],
       columnNames: [
         'texts',
+        'chronoIDs',
         'nullableElements',
         'nullableArray',
         'nullableElementsAndArray',
@@ -915,6 +932,7 @@ final class _$ArrayValuesDB
       createDefinition: createDefinition,
       columnsFor: (definition) => [
         definition.texts as VoxelColumn<Object?>,
+        definition.chronoIDs as VoxelColumn<Object?>,
         definition.nullableElements as VoxelColumn<Object?>,
         definition.nullableArray as VoxelColumn<Object?>,
         definition.nullableElementsAndArray as VoxelColumn<Object?>,
@@ -933,60 +951,64 @@ final class _$ArrayValuesDB
       ],
       decode: (values, sqlNulls) => ArrayValuesRow(
         texts: definition.texts.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        nullableElements: definition.nullableElements.decodeValue(
+        chronoIDs: definition.chronoIDs.decodeValue(
           values[1],
           isSqlNull: sqlNulls[1],
         ),
-        nullableArray: definition.nullableArray.decodeValue(
+        nullableElements: definition.nullableElements.decodeValue(
           values[2],
           isSqlNull: sqlNulls[2],
         ),
+        nullableArray: definition.nullableArray.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
+        ),
         nullableElementsAndArray: definition.nullableElementsAndArray
-            .decodeValue(values[3], isSqlNull: sqlNulls[3]),
+            .decodeValue(values[4], isSqlNull: sqlNulls[4]),
         integers: definition.integers.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
+          values[5],
+          isSqlNull: sqlNulls[5],
         ),
-        reals: definition.reals.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+        reals: definition.reals.decodeValue(values[6], isSqlNull: sqlNulls[6]),
         booleans: definition.booleans.decodeValue(
-          values[6],
-          isSqlNull: sqlNulls[6],
-        ),
-        timestamps: definition.timestamps.decodeValue(
           values[7],
           isSqlNull: sqlNulls[7],
         ),
-        jsonValues: definition.jsonValues.decodeValue(
+        timestamps: definition.timestamps.decodeValue(
           values[8],
           isSqlNull: sqlNulls[8],
         ),
-        nullableJsonValues: definition.nullableJsonValues.decodeValue(
+        jsonValues: definition.jsonValues.decodeValue(
           values[9],
           isSqlNull: sqlNulls[9],
         ),
-        statuses: definition.statuses.decodeValue(
+        nullableJsonValues: definition.nullableJsonValues.decodeValue(
           values[10],
           isSqlNull: sqlNulls[10],
         ),
-        vectors: definition.vectors.decodeValue(
+        statuses: definition.statuses.decodeValue(
           values[11],
           isSqlNull: sqlNulls[11],
         ),
-        codes: definition.codes.decodeValue(
+        vectors: definition.vectors.decodeValue(
           values[12],
           isSqlNull: sqlNulls[12],
         ),
-        nullableCodes: definition.nullableCodes.decodeValue(
+        codes: definition.codes.decodeValue(
           values[13],
           isSqlNull: sqlNulls[13],
         ),
-        counts: definition.counts.decodeValue(
+        nullableCodes: definition.nullableCodes.decodeValue(
           values[14],
           isSqlNull: sqlNulls[14],
         ),
-        preferencesList: definition.preferencesList.decodeValue(
+        counts: definition.counts.decodeValue(
           values[15],
           isSqlNull: sqlNulls[15],
+        ),
+        preferencesList: definition.preferencesList.decodeValue(
+          values[16],
+          isSqlNull: sqlNulls[16],
         ),
       ),
     );

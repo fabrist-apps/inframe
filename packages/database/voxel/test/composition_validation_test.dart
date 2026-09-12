@@ -17,12 +17,15 @@ void main() {
 
   test('rejects colliding physical table names', () {
     final first = Users.db.buildSchema() as VoxelTableSchema<Object?, Object?>;
+    final column = VoxelColumn<String>(VoxelTextCodec());
     final second = VoxelTableSchema<Object?, Object?>(
       schemaName: first.schemaName,
       tableName: first.tableName,
       definition: Object(),
-      columns: const [],
-      columnNames: const [],
+      definitionType: Object,
+      rowType: Object,
+      columns: [column as VoxelColumn<Object?>],
+      columnNames: const ['value'],
       decode: (_, _) => Object(),
     );
     expect(

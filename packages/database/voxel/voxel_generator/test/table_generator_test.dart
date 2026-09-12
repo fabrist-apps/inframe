@@ -115,6 +115,8 @@ enum Status {
       expect(duplicate.succeeded, isFalse);
       expect(duplicate.errors.single, contains('enum labels must be unique'));
 
+      final ambiguousReaderWriter = TestReaderWriter(rootPackage: 'voxel_generator');
+      await ambiguousReaderWriter.testing.loadIsolateSources();
       final ambiguous = await testBuilder(
         voxelBuilder(BuilderOptions.empty),
         {
@@ -128,10 +130,32 @@ enum Status {
 }
 ''',
         },
-        readerWriter: readerWriter,
+        readerWriter: ambiguousReaderWriter,
       );
       expect(ambiguous.succeeded, isFalse);
       expect(ambiguous.errors.single, contains('rename hints must identify unambiguous'));
+    });
+
+    test('rejects scalar runtime hooks before array conversion', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'voxel_generator');
+      await readerWriter.testing.loadIsolateSources();
+      final result = await testBuilder(
+        voxelBuilder(BuilderOptions.empty),
+        {
+          'voxel_generator|lib/invalid_array_hook.dart': r'''
+import 'package:voxel/voxel.dart';
+part 'invalid_array_hook.voxel.dart';
+@VoxelTable()
+final class Values extends VoxelTableDefinition<Values> {
+  static const db = _$ValuesDB();
+  late final values = text().defaultValue(() => 'scalar').array()();
+}
+''',
+        },
+        readerWriter: readerWriter,
+      );
+      expect(result.succeeded, isFalse);
+      expect(result.errors.single, contains('Array runtime hooks must be declared after array'));
     });
   });
 }

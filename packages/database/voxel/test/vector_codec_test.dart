@@ -36,7 +36,10 @@ void main() {
     final decoded = table.embedding.codec.decode(encoded, isSqlNull: false);
     expect(decoded, value);
     expect(table.embedding.codec.cast, 'f32_blob');
-    expect(table.embedding.selectionSql, 'vector_extract("embedding")');
+    expect(
+      table.embedding.selectionSql,
+      'CASE WHEN "embedding" IS NULL THEN NULL ELSE vector_extract("embedding") END',
+    );
     expect(table.optionalEmbedding.codec.decode(null, isSqlNull: true), isNull);
   });
 }
