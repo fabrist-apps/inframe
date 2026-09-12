@@ -8,12 +8,51 @@ final _chroniclerKey = ContextKey<ChroniclerRecorder>('chronicler');
 extension ChroniclerContextBinding on Context {
   /// Returns a child context bound to [recorder].
   Context withChronicler(ChroniclerRecorder recorder) => withBinding(_chroniclerKey.bind(recorder));
+
+  /// Returns a child context with complete replacement analytics identity.
+  ///
+  /// Omitted fields are absent on records captured through the returned
+  /// context. This affects telemetry attribution only; callers remain
+  /// responsible for authentication and identity lifecycle.
+  Context withIdentity({
+    String? userId,
+    String? anonymousId,
+    String? sessionId,
+  }) => withBinding(
+    _chroniclerKey.bind(
+      require(_chroniclerKey).withIdentity(
+        userId: userId,
+        anonymousId: anonymousId,
+        sessionId: sessionId,
+      ),
+    ),
+  );
 }
 
 /// Exposes structured log capture from a configured [Context].
 extension ChroniclerContextLogs on Context {
   /// Structured logging backed by the recorder bound to this context.
   ChroniclerLogs get logs => ChroniclerLogs(require(_chroniclerKey));
+}
+
+/// Exposes product-event capture from a configured [Context].
+extension ChroniclerContextEvents on Context {
+  /// Product events backed by the recorder bound to this context.
+  ChroniclerEvents get events => ChroniclerEvents(require(_chroniclerKey));
+}
+
+/// Records product events without waiting for transport work.
+final class ChroniclerEvents {
+  /// Creates an event view over a borrowed recorder.
+  const ChroniclerEvents(this._recorder);
+
+  final ChroniclerRecorder _recorder;
+
+  /// Records a named product event with an immutable property snapshot.
+  void track(
+    String name, {
+    Map<String, Object?> properties = const {},
+  }) => _recorder.recordEvent(name, properties: properties);
 }
 
 /// Records structured logs without waiting for transport work.

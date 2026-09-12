@@ -16,6 +16,14 @@ final chronicler = Chronicler(
 final context = Context().withChronicler(chronicler.recorder);
 
 context.logs.info('Order created', attributes: {'orderId': 'order_123'});
+final request = context.withIdentity(
+  userId: authenticatedUser.id,
+  sessionId: clientSessionId,
+);
+request.events.track(
+  'purchase_completed',
+  properties: {'orderId': 'order_123', 'amountMinor': 1200},
+);
 final report = await chronicler.flush();
 await chronicler.close();
 ```
@@ -24,6 +32,13 @@ The application creates the exporter and gives Chronicler exclusive ownership of
 synchronous: Chronicler validates and snapshots the payload, then schedules transport work. It never
 retains live request objects. The queue is bounded by record count and canonical encoded bytes, and
 in-flight records continue to consume that capacity.
+
+`withIdentity` derives a new Context for analytics attribution. It replaces the complete identity,
+so omitted user, anonymous, and session IDs are cleared. The original Context and sibling request
+contexts remain unchanged. Pass the returned Context downstream. Chronicler accepts caller-supplied
+IDs without generating, persisting, expiring, or authenticating them; authentication remains an
+application concern. Calling `withIdentity()` clears attribution on the derived Context and emits no
+record.
 
 The defaults retain up to 5,000 records or 8 MiB, export batches of up to 100 records or 512 KiB
 within five seconds, run one export at a time, and make five total attempts. An attempt times out
