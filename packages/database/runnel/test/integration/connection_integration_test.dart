@@ -77,6 +77,22 @@ void main() {
             expect(await client.pttl(conditionalKey), inInclusiveRange(1, 5000));
             expect(await client.set(conditionalKey, 'without-expiry'), isTrue);
             expect(await client.pttl(conditionalKey), -1);
+            expect(
+              await client.set(
+                conditionalKey,
+                'absolute-expiry',
+                expiry: Expiry.at(
+                  DateTime.fromMillisecondsSinceEpoch(
+                    DateTime.now().millisecondsSinceEpoch + 10000,
+                    isUtc: true,
+                  ),
+                ),
+              ),
+              isTrue,
+            );
+            expect(await client.pttl(conditionalKey), inInclusiveRange(1, 10000));
+            expect(await client.persist(conditionalKey), isTrue);
+            expect(await client.pttl(conditionalKey), -1);
 
             final first = 'runnel:integration:scalar:$suffix:first';
             final second = 'runnel:integration:scalar:$suffix:second';
@@ -86,12 +102,21 @@ void main() {
             expect(await client.type(first), 'string');
             expect(await client.expire(second, Duration.zero), isTrue);
             expect(await client.pttl(second), -2);
+            final counter = 'runnel:integration:counter:$suffix';
+            expect(await client.incr(counter), 1);
+            expect(await client.incrby(counter, 4), 5);
+            expect(await client.decr(counter), 4);
+            expect(await client.decrby(counter, 2), 2);
 
-            final scanned = await client.scan(
-              match: 'runnel:integration:scalar:$suffix:*',
-              count: 1,
-            ).toSet();
+            final scanned = await client
+                .scan(
+                  match: 'runnel:integration:scalar:$suffix:*',
+                  count: 1,
+                )
+                .toSet();
             expect(scanned, contains(first));
+            expect(await client.del([first]), 1);
+            expect(await client.unlink([conditionalKey]), 1);
 
             expect(
               await client.execute(
