@@ -27,3 +27,62 @@ final class CrossSchemaSources extends VoxelTableDefinition<CrossSchemaSources> 
 
   late final targetID = text().references<ExternalTargets>((target) => target.id)();
 }
+
+final class UserCode {
+  const UserCode(this.value);
+
+  final String value;
+}
+
+final class UserCodeConverter implements VoxelTypeConverter<UserCode, String> {
+  const UserCodeConverter();
+
+  @override
+  UserCode fromSql(String value) {
+    if (value == 'secret') throw FormatException('invalid domain value $value');
+    return UserCode(value);
+  }
+
+  @override
+  String toSql(UserCode value) {
+    if (value.value == 'secret') throw FormatException('invalid domain value ${value.value}');
+    return value.value;
+  }
+}
+
+final class Preferences {
+  const Preferences({required this.darkMode});
+
+  final bool darkMode;
+}
+
+final class PreferencesConverter implements VoxelTypeConverter<Preferences, JsonValue> {
+  const PreferencesConverter();
+
+  @override
+  Preferences fromSql(JsonValue value) {
+    final data = value.toDart();
+    if (data is! Map<String, Object?> || data['darkMode'] is! bool) {
+      throw const FormatException('invalid preferences');
+    }
+    return Preferences(darkMode: data['darkMode']! as bool);
+  }
+
+  @override
+  JsonValue toSql(Preferences value) => JsonValue.from({'darkMode': value.darkMode});
+}
+
+@VoxelTable(schema: 'codec')
+final class ScalarValues extends VoxelTableDefinition<ScalarValues> {
+  static const db = _$ScalarValuesDB();
+
+  late final count = integer()();
+  late final score = real()();
+  late final active = boolean()();
+  late final createdAt = dateTime()();
+  late final payload = json()();
+  late final optionalPayload = json().nullable()();
+  late final code = text().map(const UserCodeConverter())();
+  late final optionalCode = text().map(const UserCodeConverter()).nullable()();
+  late final preferences = json().map(const PreferencesConverter())();
+}

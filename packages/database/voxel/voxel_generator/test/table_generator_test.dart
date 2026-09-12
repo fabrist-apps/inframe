@@ -65,5 +65,33 @@ final class Users extends VoxelTableDefinition<Users> {
       expect(result.succeeded, isFalse);
       expect(result.errors.single, contains('rowName `ExistingRow` is invalid or collides'));
     });
+
+    test('rejects mapped runtime hooks declared with the storage type', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'voxel_generator');
+      await readerWriter.testing.loadIsolateSources();
+      final result = await testBuilder(
+        voxelBuilder(BuilderOptions.empty),
+        {
+          'voxel_generator|lib/invalid_hook.dart': r'''
+import 'package:voxel/voxel.dart';
+part 'invalid_hook.voxel.dart';
+final class Code { const Code(this.value); final String value; }
+final class CodeConverter implements VoxelTypeConverter<Code, String> {
+  const CodeConverter();
+  @override Code fromSql(String value) => Code(value);
+  @override String toSql(Code value) => value.value;
+}
+@VoxelTable()
+final class Values extends VoxelTableDefinition<Values> {
+  static const db = _$ValuesDB();
+  late final code = text().defaultValue(() => 'storage').map(const CodeConverter())();
+}
+''',
+        },
+        readerWriter: readerWriter,
+      );
+      expect(result.succeeded, isFalse);
+      expect(result.errors.single, contains('Mapped runtime hooks must be declared after map'));
+    });
   });
 }

@@ -243,3 +243,241 @@ final class _$CrossSchemaSourcesDB
     );
   }
 }
+
+/// Generated row returned by reads from 'codec.scalarValues'.
+final class ScalarValuesRow {
+  /// Creates a row from decoded column and relation values.
+  const ScalarValuesRow({
+    required this.count,
+    required this.score,
+    required this.active,
+    required this.createdAt,
+    required this.payload,
+    required this.optionalPayload,
+    required this.code,
+    required this.optionalCode,
+    required this.preferences,
+  });
+
+  /// Value read from `count`.
+  final int count;
+
+  /// Value read from `score`.
+  final double score;
+
+  /// Value read from `active`.
+  final bool active;
+
+  /// Value read from `createdAt`.
+  final DateTime createdAt;
+
+  /// Value read from `payload`.
+  final JsonValue payload;
+
+  /// Value read from `optionalPayload`.
+  final JsonValue? optionalPayload;
+
+  /// Value read from `code`.
+  final UserCode code;
+
+  /// Value read from `optionalCode`.
+  final UserCode? optionalCode;
+
+  /// Value read from `preferences`.
+  final Preferences preferences;
+}
+
+/// Generated values accepted by mutations of 'codec.scalarValues'.
+final class ScalarValuesCompanion implements VoxelCompanion<ScalarValues> {
+  const ScalarValuesCompanion._({
+    required this.count,
+    required this.score,
+    required this.active,
+    required this.createdAt,
+    required this.payload,
+    required this.optionalPayload,
+    required this.code,
+    required this.optionalCode,
+    required this.preferences,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory ScalarValuesCompanion.insert({
+    required VoxelValue<ScalarValues, int, int> count,
+    required VoxelValue<ScalarValues, double, double> score,
+    required VoxelValue<ScalarValues, bool, bool> active,
+    required VoxelValue<ScalarValues, DateTime, DateTime> createdAt,
+    required VoxelValue<ScalarValues, JsonValue, JsonValue> payload,
+    required VoxelValue<ScalarValues, UserCode, String> code,
+    required VoxelValue<ScalarValues, Preferences, JsonValue> preferences,
+    VoxelValue<ScalarValues, JsonValue?, JsonValue?> optionalPayload =
+        const VoxelValue.absent(),
+    VoxelValue<ScalarValues, UserCode?, String?> optionalCode =
+        const VoxelValue.absent(),
+  }) => ScalarValuesCompanion._(
+    count: count,
+    score: score,
+    active: active,
+    createdAt: createdAt,
+    payload: payload,
+    optionalPayload: optionalPayload,
+    code: code,
+    optionalCode: optionalCode,
+    preferences: preferences,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ScalarValuesCompanion.update({
+    VoxelValue<ScalarValues, int, int> count = const VoxelValue.absent(),
+    VoxelValue<ScalarValues, double, double> score = const VoxelValue.absent(),
+    VoxelValue<ScalarValues, bool, bool> active = const VoxelValue.absent(),
+    VoxelValue<ScalarValues, DateTime, DateTime> createdAt =
+        const VoxelValue.absent(),
+    VoxelValue<ScalarValues, JsonValue, JsonValue> payload =
+        const VoxelValue.absent(),
+    VoxelValue<ScalarValues, JsonValue?, JsonValue?> optionalPayload =
+        const VoxelValue.absent(),
+    VoxelValue<ScalarValues, UserCode, String> code = const VoxelValue.absent(),
+    VoxelValue<ScalarValues, UserCode?, String?> optionalCode =
+        const VoxelValue.absent(),
+    VoxelValue<ScalarValues, Preferences, JsonValue> preferences =
+        const VoxelValue.absent(),
+  }) => ScalarValuesCompanion._(
+    count: count,
+    score: score,
+    active: active,
+    createdAt: createdAt,
+    payload: payload,
+    optionalPayload: optionalPayload,
+    code: code,
+    optionalCode: optionalCode,
+    preferences: preferences,
+  );
+
+  /// Mutation value for `count`.
+  final VoxelValue<ScalarValues, int, int> count;
+
+  /// Mutation value for `score`.
+  final VoxelValue<ScalarValues, double, double> score;
+
+  /// Mutation value for `active`.
+  final VoxelValue<ScalarValues, bool, bool> active;
+
+  /// Mutation value for `createdAt`.
+  final VoxelValue<ScalarValues, DateTime, DateTime> createdAt;
+
+  /// Mutation value for `payload`.
+  final VoxelValue<ScalarValues, JsonValue, JsonValue> payload;
+
+  /// Mutation value for `optionalPayload`.
+  final VoxelValue<ScalarValues, JsonValue?, JsonValue?> optionalPayload;
+
+  /// Mutation value for `code`.
+  final VoxelValue<ScalarValues, UserCode, String> code;
+
+  /// Mutation value for `optionalCode`.
+  final VoxelValue<ScalarValues, UserCode?, String?> optionalCode;
+
+  /// Mutation value for `preferences`.
+  final VoxelValue<ScalarValues, Preferences, JsonValue> preferences;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<VoxelAssignment<ScalarValues>> operator [](VoxelCompanionKey key) => [
+    VoxelAssignment('count', count),
+    VoxelAssignment('score', score),
+    VoxelAssignment('active', active),
+    VoxelAssignment('createdAt', createdAt),
+    VoxelAssignment('payload', payload),
+    VoxelAssignment('optionalPayload', optionalPayload),
+    VoxelAssignment('code', code),
+    VoxelAssignment('optionalCode', optionalCode),
+    VoxelAssignment('preferences', preferences),
+  ];
+}
+
+final class _$ScalarValuesDB
+    extends VoxelTableAccessor<ScalarValues, ScalarValuesRow> {
+  const _$ScalarValuesDB();
+
+  @override
+  VoxelTableSchema<ScalarValues, ScalarValuesRow> buildSchema() {
+    ScalarValues createDefinition() {
+      final definition = ScalarValues();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    return VoxelTableSchema<ScalarValues, ScalarValuesRow>(
+      schemaName: 'codec',
+      tableName: 'scalarValues',
+      definition: definition,
+      definitionType: ScalarValues,
+      rowType: ScalarValuesRow,
+      columns: [
+        definition.count as VoxelColumn<Object?>,
+        definition.score as VoxelColumn<Object?>,
+        definition.active as VoxelColumn<Object?>,
+        definition.createdAt as VoxelColumn<Object?>,
+        definition.payload as VoxelColumn<Object?>,
+        definition.optionalPayload as VoxelColumn<Object?>,
+        definition.code as VoxelColumn<Object?>,
+        definition.optionalCode as VoxelColumn<Object?>,
+        definition.preferences as VoxelColumn<Object?>,
+      ],
+      columnNames: [
+        'count',
+        'score',
+        'active',
+        'createdAt',
+        'payload',
+        'optionalPayload',
+        'code',
+        'optionalCode',
+        'preferences',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.count as VoxelColumn<Object?>,
+        definition.score as VoxelColumn<Object?>,
+        definition.active as VoxelColumn<Object?>,
+        definition.createdAt as VoxelColumn<Object?>,
+        definition.payload as VoxelColumn<Object?>,
+        definition.optionalPayload as VoxelColumn<Object?>,
+        definition.code as VoxelColumn<Object?>,
+        definition.optionalCode as VoxelColumn<Object?>,
+        definition.preferences as VoxelColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => ScalarValuesRow(
+        count: definition.count.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        score: definition.score.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+        active: definition.active.decodeValue(
+          values[2],
+          isSqlNull: sqlNulls[2],
+        ),
+        createdAt: definition.createdAt.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
+        ),
+        payload: definition.payload.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+        optionalPayload: definition.optionalPayload.decodeValue(
+          values[5],
+          isSqlNull: sqlNulls[5],
+        ),
+        code: definition.code.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+        optionalCode: definition.optionalCode.decodeValue(
+          values[7],
+          isSqlNull: sqlNulls[7],
+        ),
+        preferences: definition.preferences.decodeValue(
+          values[8],
+          isSqlNull: sqlNulls[8],
+        ),
+      ),
+    );
+  }
+}

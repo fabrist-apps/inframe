@@ -1441,7 +1441,7 @@ class VoxelColumn<T> implements VoxelExpression<T> {
   VoxelPredicate equals(T value) {
     if (value == null) return VoxelPredicate._raw('$sql IS NULL', [this]);
     final encoded = _convert('encode', () => codec.encode(value));
-    return VoxelPredicate._value('$sql = ', '::${codec.cast}', encoded, [this]);
+    return VoxelPredicate._value('$sql = ', '', encoded, [this]);
   }
 
   T decodeValue(Object? value, {required bool isSqlNull}) =>
@@ -1459,12 +1459,11 @@ class VoxelColumn<T> implements VoxelExpression<T> {
       return convert();
     } on VoxelException {
       rethrow;
-    } on Object catch (error) {
+    } on Object {
       throw VoxelConversionException(
         table: '${_table.schemaName}.${_table.tableName}',
         column: physicalName,
         message: 'Failed to $operation value.',
-        cause: error,
       );
     }
   }
