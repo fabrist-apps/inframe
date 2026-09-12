@@ -34,3 +34,11 @@ An `EmbeddingInput` is one semantic input even when it contains multiple text or
 request, restore native indices, and use `EmbeddingResult.fromIndexed` to reject missing, duplicate,
 empty, nonfinite, or inconsistent vectors. The common contract does not split, parallelize, cache,
 normalize, or retry embedding work.
+
+`UploadSource.bytes` copies its input immediately. `UploadSource.stream` opens a fresh stream for
+each execution and checks its declared length. `ProviderHttpClient.sendUpload` forwards that length,
+filename, and media type, and it cancels both the source and transport before interruption or provider
+close completes. If a remote resource ID is already known, upload failures retain it for diagnostics.
+The core client does not retry uploads or delete remote files, so executing an upload again may create
+another remote file. Generation media accepts explicit bytes or URLs; it never reads an upload source
+or filesystem path implicitly.

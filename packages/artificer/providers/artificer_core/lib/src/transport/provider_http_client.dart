@@ -9,6 +9,7 @@ import 'package:http/io_client.dart';
 import '../errors.dart';
 import '../json/json_value.dart';
 import '../native.dart';
+import 'upload_source.dart';
 
 /// One immutable HTTP request issued by a provider operation.
 final class ProviderHttpRequest {
@@ -23,6 +24,21 @@ final class ProviderHttpRequest {
   final String path;
   final Map<String, String> headers;
   final JsonObject? body;
+}
+
+/// One native file upload request.
+final class ProviderUploadRequest {
+  ProviderUploadRequest({
+    required this.path,
+    this.method = 'POST',
+    Map<String, String> headers = const {},
+    this.remoteResourceId,
+  }) : headers = Map.unmodifiable(headers);
+
+  final String path;
+  final String method;
+  final Map<String, String> headers;
+  final String? remoteResourceId;
 }
 
 enum _ClientState { open, closing, closed }
@@ -65,17 +81,45 @@ final class ProviderHttpClient {
     required String api,
     required String modelId,
   }) {
-    return Effect.defer(() {
-      if (_state != _ClientState.open) return Effect.fail(const ClientClosedError());
-      final lifetime = _RequestLifetime();
-      _active.add(lifetime);
-      return _sendJson(
+    return _execute(
+      (lifetime) => _sendJson(
         lifetime,
         request,
         providerId: providerId,
         api: api,
         modelId: modelId,
-      ).ensuring(
+      ),
+    );
+  }
+
+  /// Uploads one repeatable source without retry, polling, or remote deletion.
+  Effect<NativeResponse<JsonObject>, AiError> sendUpload(
+    ProviderUploadRequest request,
+    UploadSource source, {
+    required String providerId,
+    required String api,
+    String modelId = 'files',
+  }) {
+    return _execute(
+      (lifetime) => _sendUpload(
+        lifetime,
+        request,
+        source,
+        providerId: providerId,
+        api: api,
+        modelId: modelId,
+      ),
+    );
+  }
+
+  Effect<A, AiError> _execute<A>(
+    Effect<A, AiError> Function(_RequestLifetime lifetime) operation,
+  ) {
+    return Effect.defer(() {
+      if (_state != _ClientState.open) return Effect.fail(const ClientClosedError());
+      final lifetime = _RequestLifetime();
+      _active.add(lifetime);
+      return operation(lifetime).ensuring(
         Effect.build<void, Never>((_) async {
           try {
             await lifetime.cleanup();
@@ -184,6 +228,143 @@ final class ProviderHttpClient {
     });
   }
 
+  Effect<NativeResponse<JsonObject>, AiError> _sendUpload(
+    _RequestLifetime lifetime,
+    ProviderUploadRequest request,
+    UploadSource source, {
+    required String providerId,
+    required String api,
+    required String modelId,
+  }) {
+    var deliveryState = RequestDeliveryState.notSent;
+    return Effect.build(($) async {
+      final sourceStream = await $(
+        Effect.tryFuture<Stream<List<int>>, AiError>(
+          () => Future.sync(source.openRead),
+          onError: (error, _) => switch (error) {
+            UploadSourceError(:final message) => InvalidRequestError(
+              message,
+              remoteResourceId: request.remoteResourceId,
+            ),
+            _ => TransportError(
+              _safeForeignMessage(error),
+              deliveryState: RequestDeliveryState.notSent,
+              remoteResourceId: request.remoteResourceId,
+            ),
+          },
+          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+        ),
+      );
+      final nativeRequest =
+          _AbortableBodyRequest(
+              request.method,
+              baseUrl.resolve(request.path),
+              _trackedUpload(sourceStream, lifetime),
+              abortTrigger: lifetime.abortTrigger,
+            )
+            ..followRedirects = false
+            ..contentLength = source.length
+            ..headers.addAll(headers)
+            ..headers.addAll(request.headers)
+            ..headers.putIfAbsent('content-type', () => source.mimeType)
+            ..headers.putIfAbsent(
+              'content-disposition',
+              () => "attachment; filename*=UTF-8''${Uri.encodeComponent(source.filename)}",
+            );
+
+      deliveryState = RequestDeliveryState.mayHaveReachedProvider;
+      final acquisition = _client.send(nativeRequest);
+      lifetime.trackAcquisition(acquisition);
+      final acquired = await $(
+        Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
+          () => lifetime.waitFor(acquisition),
+          onError: (error, _) => switch (error) {
+            UploadSourceError(:final message) => InvalidRequestError(
+              message,
+              remoteResourceId: request.remoteResourceId,
+            ),
+            _ => TransportError(
+              _safeForeignMessage(error),
+              deliveryState: deliveryState,
+              remoteResourceId: request.remoteResourceId,
+            ),
+          },
+          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+        ),
+      );
+      if (acquired case _WaitClosed<http.StreamedResponse>(:final reason)) {
+        return await $(Effect.failCause(Interrupted(reason)));
+      }
+      final response = (acquired as _WaitValue<http.StreamedResponse>).value;
+      lifetime.trackResponse(response);
+      deliveryState = RequestDeliveryState.responseStarted;
+      final body = await $(
+        Effect.tryFuture<_WaitResult<List<int>>, AiError>(
+          () => lifetime.waitFor(_readBody(response, lifetime, maxResponseBytes)),
+          onError: (error, _) => switch (error) {
+            _ResponseTooLarge(:final actual) => ResponseLimitError(
+              'The response exceeded the configured byte limit.',
+              limit: maxResponseBytes,
+              actual: actual,
+              remoteResourceId: request.remoteResourceId,
+            ),
+            _ => TransportError(
+              _safeForeignMessage(error),
+              deliveryState: deliveryState,
+              remoteResourceId: request.remoteResourceId,
+            ),
+          },
+          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+        ),
+      );
+      if (body case _WaitClosed<List<int>>(:final reason)) {
+        return await $(Effect.failCause(Interrupted(reason)));
+      }
+      final bytes = (body as _WaitValue<List<int>>).value;
+      final JsonObject payload;
+      try {
+        payload = JsonObject.parse(utf8.decode(bytes));
+      } on Object {
+        return await $(
+          Effect.fail(
+            ProtocolError(
+              'The response was not a JSON object.',
+              remoteResourceId: request.remoteResourceId,
+            ),
+          ),
+        );
+      }
+      final requestId = response.headers['x-request-id'] ?? response.headers['request-id'];
+      final metadata = ResponseMetadata(
+        statusCode: response.statusCode,
+        requestId: requestId,
+        headers: response.headers,
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return await $(
+          Effect.fail(
+            _providerError(
+              response,
+              payload,
+              requestId,
+              remoteResourceId: request.remoteResourceId,
+            ),
+          ),
+        );
+      }
+      return NativeResponse(
+        value: payload,
+        payload: NativePayload(
+          providerId: providerId,
+          api: api,
+          modelId: modelId,
+          json: payload,
+        ),
+        metadata: metadata,
+      );
+    });
+  }
+
   /// Interrupts this provider's operations and releases only owned resources.
   Future<void> close() => _closeFuture ??= _beginClose();
 
@@ -223,6 +404,7 @@ final class _RequestLifetime {
   Future<http.StreamedResponse>? _acquisition;
   http.StreamedResponse? _response;
   StreamSubscription<List<int>>? _bodySubscription;
+  Future<void> Function()? _uploadCleanup;
   Future<void>? _cleanupFuture;
 
   Future<void> get abortTrigger => _abort.future;
@@ -247,6 +429,11 @@ final class _RequestLifetime {
     _bodySubscription = subscription;
   }
 
+  void trackUpload(Future<void> Function() cleanup) {
+    _uploadCleanup = cleanup;
+    if (_cancelled.isCompleted) unawaited(cleanup());
+  }
+
   void cancel(Object? reason) {
     if (!_cancelled.isCompleted) _cancelled.complete(reason);
     if (!_abort.isCompleted) _abort.complete();
@@ -260,6 +447,7 @@ final class _RequestLifetime {
   Future<void> cleanup() => _cleanupFuture ??= _cleanUp();
 
   Future<void> _cleanUp() async {
+    await _uploadCleanup?.call();
     if (_cancelled.isCompleted && _response == null) {
       try {
         _response = await _acquisition;
@@ -279,6 +467,53 @@ final class _RequestLifetime {
   void complete() {
     if (!_done.isCompleted) _done.complete();
   }
+}
+
+final class _AbortableBodyRequest extends http.BaseRequest with http.Abortable {
+  _AbortableBodyRequest(
+    super.method,
+    super.url,
+    this.body, {
+    this.abortTrigger,
+  });
+
+  final Stream<List<int>> body;
+
+  @override
+  final Future<void>? abortTrigger;
+
+  @override
+  http.ByteStream finalize() {
+    super.finalize();
+    return http.ByteStream(body);
+  }
+}
+
+Stream<List<int>> _trackedUpload(Stream<List<int>> source, _RequestLifetime lifetime) {
+  late final StreamController<List<int>> controller;
+  StreamSubscription<List<int>>? subscription;
+  Future<void>? cleanupFuture;
+
+  Future<void> cleanup() => cleanupFuture ??= () async {
+    await subscription?.cancel();
+    if (!controller.isClosed) unawaited(controller.close());
+  }();
+
+  controller = StreamController<List<int>>(
+    sync: true,
+    onListen: () {
+      subscription = source.listen(
+        controller.add,
+        onError: controller.addError,
+        onDone: controller.close,
+      );
+      lifetime.trackUpload(cleanup);
+    },
+    onPause: () => subscription?.pause(),
+    onResume: () => subscription?.resume(),
+    onCancel: cleanup,
+  );
+  return controller.stream;
 }
 
 Future<List<int>> _readBody(
@@ -323,8 +558,9 @@ IOClient _ownedClient(Duration connectionTimeout) {
 ProviderError _providerError(
   http.StreamedResponse response,
   JsonObject payload,
-  String? requestId,
-) {
+  String? requestId, {
+  String? remoteResourceId,
+}) {
   final dart = payload.toDart();
   final error = dart['error'];
   final errorObject = error is Map<String, Object?> ? error : dart;
@@ -339,6 +575,7 @@ ProviderError _providerError(
     requestId: requestId,
     retryAfter: _parseRetryAfter(rawRetryAfter),
     rawRetryAfter: rawRetryAfter,
+    remoteResourceId: remoteResourceId,
   );
 }
 

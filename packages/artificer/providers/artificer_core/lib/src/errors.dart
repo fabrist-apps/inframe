@@ -12,7 +12,9 @@ sealed class AiError {
 
 /// The caller supplied an invalid request.
 final class InvalidRequestError extends AiError {
-  const InvalidRequestError(super.message);
+  const InvalidRequestError(super.message, {this.remoteResourceId});
+
+  final String? remoteResourceId;
 }
 
 /// The selected model is known not to support a requested feature.
@@ -33,6 +35,7 @@ final class ProviderError extends AiError {
     this.retryAfter,
     this.rawRetryAfter,
     this.partialOutput,
+    this.remoteResourceId,
   });
 
   final int? statusCode;
@@ -42,6 +45,7 @@ final class ProviderError extends AiError {
   final Duration? retryAfter;
   final String? rawRetryAfter;
   final Object? partialOutput;
+  final String? remoteResourceId;
 }
 
 /// How far an HTTP request may have progressed before transport failure.
@@ -49,16 +53,22 @@ enum RequestDeliveryState { notSent, mayHaveReachedProvider, responseStarted }
 
 /// A network or HTTP client failure.
 final class TransportError extends AiError {
-  const TransportError(super.message, {required this.deliveryState});
+  const TransportError(
+    super.message, {
+    required this.deliveryState,
+    this.remoteResourceId,
+  });
 
   final RequestDeliveryState deliveryState;
+  final String? remoteResourceId;
 }
 
 /// A native payload did not satisfy its protocol.
 final class ProtocolError extends AiError {
-  const ProtocolError(super.message, {this.partialOutput});
+  const ProtocolError(super.message, {this.partialOutput, this.remoteResourceId});
 
   final Object? partialOutput;
+  final String? remoteResourceId;
 }
 
 /// A configured response or event byte limit was exceeded.
@@ -68,11 +78,13 @@ final class ResponseLimitError extends AiError {
     required this.limit,
     required this.actual,
     this.partialOutput,
+    this.remoteResourceId,
   });
 
   final int limit;
   final int actual;
   final Object? partialOutput;
+  final String? remoteResourceId;
 }
 
 /// A provider client is closing or closed.
