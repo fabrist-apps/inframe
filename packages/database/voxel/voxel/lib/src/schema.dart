@@ -1615,9 +1615,10 @@ final class _VoxelBinaryExpression<T> implements VoxelExpression<T> {
   String get sql => renderPlaceholders((_) => '@value');
 
   @override
-  String renderPlaceholders(String Function(int index) placeholder) =>
-      '(${left.renderPlaceholders(placeholder)} $operator '
-      'CAST(${placeholder(left.parameters.length)} AS ${codec.cast}))';
+  String renderPlaceholders(String Function(int index) placeholder) {
+    final right = 'CAST(${placeholder(left.parameters.length)} AS ${codec.cast})';
+    return '(${left.renderPlaceholders(placeholder)} $operator $right)';
+  }
 
   @override
   String renderParameters({int startAt = 1}) =>
