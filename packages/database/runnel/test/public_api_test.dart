@@ -203,6 +203,10 @@ final class _RespPeer {
       onDone: () {
         if (!socketClosed.isCompleted) socketClosed.complete();
       },
+      onError: (_, _) {
+        if (!socketClosed.isCompleted) socketClosed.complete();
+      },
+      cancelOnError: true,
     );
   }
 
@@ -249,7 +253,7 @@ final class _RespPeer {
   }
 
   Future<void> close() async {
-    await _socket?.close();
+    _socket?.destroy();
     await _server.close();
   }
 }
