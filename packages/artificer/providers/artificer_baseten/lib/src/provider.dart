@@ -108,12 +108,17 @@ final class BasetenProvider {
     Uri baseUrl, {
     required String authorization,
     int maxResponseBytes = 64 * 1024 * 1024,
-  }) => ProviderHttpClient(
-    baseUrl: _directoryUri(baseUrl),
-    client: _httpClient,
-    headers: {'authorization': authorization},
-    maxResponseBytes: maxResponseBytes,
-  );
+  }) {
+    if (_closeFuture != null) {
+      throw StateError('The Baseten provider is closing or closed.');
+    }
+    return ProviderHttpClient(
+      baseUrl: _directoryUri(baseUrl),
+      client: _httpClient,
+      headers: {'authorization': authorization},
+      maxResponseBytes: maxResponseBytes,
+    );
+  }
 
   /// Interrupts provider-owned work and releases all owned HTTP resources.
   Future<void> close() => _closeFuture ??= Future.wait(

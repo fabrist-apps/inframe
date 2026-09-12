@@ -304,7 +304,7 @@ final class ProviderHttpClient {
   }
 
   /// Streams immutable response byte chunks with bounded backpressure.
-  Flow<List<int>, AiError> sendBytes(
+  Flow<Uint8List, AiError> sendBytes(
     ProviderHttpRequest request, {
     int decodedChunkCapacity = 16,
     int? maxResponseBytes,
@@ -320,7 +320,7 @@ final class ProviderHttpClient {
     if (responseLimit <= 0) {
       throw ArgumentError.value(responseLimit, 'maxResponseBytes', 'must be positive');
     }
-    return Flow.fromStream<List<int>, _SseSignal>(
+    return Flow.fromStream<Uint8List, _SseSignal>(
           () => _openByteStream(request, maxResponseBytes: responseLimit),
           onError: (error, stackTrace) => switch (error) {
             _SseSignal() => error,
@@ -331,8 +331,8 @@ final class ProviderHttpClient {
         )
         .catchError(
           (signal) => switch (signal) {
-            _SseExpected() => Flow.fail<List<int>, _SseSignal>(signal),
-            _SseTerminal(:final cause) => Effect.failCause<List<int>, _SseSignal>(cause).asFlow(),
+            _SseExpected() => Flow.fail<Uint8List, _SseSignal>(signal),
+            _SseTerminal(:final cause) => Effect.failCause<Uint8List, _SseSignal>(cause).asFlow(),
           },
         )
         .mapError(
@@ -420,12 +420,12 @@ final class ProviderHttpClient {
     ).stream;
   }
 
-  Stream<List<int>> _openByteStream(
+  Stream<Uint8List> _openByteStream(
     ProviderHttpRequest request, {
     required int maxResponseBytes,
   }) {
     if (_state != _ClientState.open) {
-      return Stream<List<int>>.error(const ClientClosedError());
+      return Stream<Uint8List>.error(const ClientClosedError());
     }
     final lifetime = _RequestLifetime();
     _active.add(lifetime);

@@ -86,6 +86,18 @@ void main() {
     final response = await borrowed.get(origin.resolve('/unrelated'));
 
     expect(response.statusCode, HttpStatus.ok);
+    expect(
+      () => provider.deployment(baseUrl: origin.resolve('/deployment')),
+      throwsStateError,
+    );
+    expect(
+      () => provider.predictionEndpoint<int, int>(
+        endpoint: origin.resolve('/predict'),
+        encode: JsonNumber.new,
+        decode: (value) => (value as JsonNumber).value.toInt(),
+      ),
+      throwsStateError,
+    );
   });
 }
 

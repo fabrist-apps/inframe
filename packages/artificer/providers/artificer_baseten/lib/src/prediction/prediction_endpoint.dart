@@ -62,13 +62,9 @@ final class BasetenPredictionEndpoint<I, O> {
   /// invoked.
   Flow<Uint8List, AiError> predictRawStream(I input) => Flow.defer(() {
     final body = _encode(input);
-    return _client
-        .sendBytes(
-          ProviderHttpRequest(method: 'POST', path: _path, body: body),
-          decodedChunkCapacity: _decodedChunkCapacity,
-        )
-        .map(
-          (bytes) => bytes is Uint8List ? bytes : Uint8List.fromList(bytes).asUnmodifiableView(),
-        );
+    return _client.sendBytes(
+      ProviderHttpRequest(method: 'POST', path: _path, body: body),
+      decodedChunkCapacity: _decodedChunkCapacity,
+    );
   });
 }
