@@ -46,3 +46,10 @@ The SDK preserves provider-hosted tool records as provider-owned output. Compute
 custom, and function calls remain caller-owned. It never executes either family. Common generation
 always uses explicit history and `store: false`; native callers use `OpenAIResponseRequest` when they
 need background or stored continuation fields.
+
+Common streaming preserves interleaved text, refusal, reasoning-summary, and caller-owned tool
+argument deltas. The terminal Responses object supplies final citations, tool metadata, provider
+tool records, usage, and replay data. Unknown native events are emitted as `ProviderEvent`s and
+retained in replay; a native error or a stream that ends without a terminal event fails with the
+partial assistant message attached to the error. Native callers can set decoded-event and byte
+limits on `responses.stream` before transport begins.

@@ -11,8 +11,13 @@ Future<void> main() async {
     final operation = provider
         .languageModel(modelId)
         .generate(GenerationRequest(messages: [UserMessage.text('Explain this change.')]));
+    final stream = provider
+        .languageModel(modelId)
+        .stream(GenerationRequest(messages: [UserMessage.text('Explain this change.')]))
+        .runCollect();
     if (const bool.fromEnvironment('RUN_OPENAI_EXAMPLE')) {
       await operation.runFuture();
+      await stream.runFuture();
     }
   } finally {
     await provider.close();
