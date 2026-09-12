@@ -69,6 +69,11 @@ jobs:
           dart test packages/artificer/providers/artificer_core/test --chain-stack-traces
           dart run packages/artificer/providers/artificer_core/example/text_generation.dart
 
+      - name: Run Anthropic provider tests and example
+        run: |
+          dart test packages/artificer/providers/artificer_anthropic/test --chain-stack-traces
+          dart run packages/artificer/providers/artificer_anthropic/example/text_generation.dart
+
       - name: Run Chrono ID tests
         run: |
           dart test packages/chrono_id/chrono_id/test --chain-stack-traces
