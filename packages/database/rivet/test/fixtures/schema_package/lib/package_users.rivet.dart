@@ -19,6 +19,30 @@ final class PackageUsersRow {
   final AccessLevel access;
 }
 
+/// Generated values accepted by mutations of 'fixture.packageUsers'.
+final class PackageUsersCompanion implements RivetCompanion<PackageUsers> {
+  const PackageUsersCompanion._({required this.name, required this.access});
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory PackageUsersCompanion.insert({
+    required RivetValue<PackageUsers, String, String> name,
+    required RivetValue<PackageUsers, AccessLevel, AccessLevel> access,
+  }) => PackageUsersCompanion._(name: name, access: access);
+
+  /// Mutation value for `name`.
+  final RivetValue<PackageUsers, String, String> name;
+
+  /// Mutation value for `access`.
+  final RivetValue<PackageUsers, AccessLevel, AccessLevel> access;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<PackageUsers>> get assignments => [
+    RivetAssignment('name', name),
+    RivetAssignment('access', access),
+  ];
+}
+
 final class _$PackageUsersDB
     extends RivetTableAccessor<PackageUsers, PackageUsersRow> {
   const _$PackageUsersDB();
@@ -45,6 +69,11 @@ final class _$PackageUsersDB
       ),
     );
   }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<PackageUsers, PackageUsersRow> insert(
+    PackageUsersCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
 }
 
 // **************************************************************************

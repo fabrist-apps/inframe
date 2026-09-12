@@ -190,6 +190,62 @@ final class ParameterNames extends RivetTableDefinition<ParameterNames> {
   late final value = text(name: 'a@value')();
 }
 
+int mutationDefaultCalls = 0;
+int mutationUpdateCalls = 0;
+int mutationNullableCalls = 0;
+
+DateTime mutationDefault() {
+  mutationDefaultCalls++;
+  return DateTime.utc(2026, 9, 12, 10, 11, mutationDefaultCalls);
+}
+
+DateTime mutationUpdate() {
+  mutationUpdateCalls++;
+  return DateTime.utc(2026, 9, 12, 11, 12, mutationUpdateCalls);
+}
+
+String? mutationNullableDefault() {
+  mutationNullableCalls++;
+  return null;
+}
+
+@RivetTable(schema: 'fbr138')
+final class MutationUsers extends RivetTableDefinition<MutationUsers> {
+  static const db = _$MutationUsersDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final nickname = text().nullable()();
+  late final createdAt = dateTime()
+      .defaultSql('CURRENT_TIMESTAMP')
+      .defaultValue(mutationDefault)
+      .onUpdate(mutationUpdate)();
+  late final updatedAt = dateTime().onUpdate(mutationUpdate)();
+  late final nullableDefault = text().nullable().defaultValue(mutationNullableDefault)();
+  late final serverValue = integer().defaultSql('40 + 2')();
+}
+
+@RivetTable(schema: 'fbr138')
+final class MutationParents extends RivetTableDefinition<MutationParents> {
+  static const db = _$MutationParentsDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final children = many<MutationChildren>(relation: (child) => child.parent)();
+}
+
+@RivetTable(schema: 'fbr138')
+final class MutationChildren extends RivetTableDefinition<MutationChildren> {
+  static const db = _$MutationChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationParents>((parent) => parent.id)();
+  late final parent = one<MutationParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -202,6 +258,9 @@ final class ParameterNames extends RivetTableDefinition<ParameterNames> {
     MalformedArrays,
     MetadataColumns,
     ParameterNames,
+    MutationUsers,
+    MutationParents,
+    MutationChildren,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

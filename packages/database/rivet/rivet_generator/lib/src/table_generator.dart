@@ -5,6 +5,7 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/nullability_suffix.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:build/build.dart';
 import 'package:rivet/rivet.dart';
@@ -28,7 +29,9 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
     }
     final className = element.displayName;
     final rowName = readString(annotation, 'rowName', '${className}Row');
+    final companionName = '${className}Companion';
     if (rowName == className ||
+        rowName == companionName ||
         element.library.getClass(rowName) != null ||
         !RegExp(r'^[A-Za-z_$][A-Za-z0-9_$]*$').hasMatch(rowName)) {
       throw InvalidGenerationSourceError(
@@ -110,6 +113,40 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
           return 'definition.${field.displayName}.configureEnum(${parts.join('.')}.codec);';
         })
         .join('\n    ');
+    final mutationFields = columns.map(_mutationField).toList(growable: false);
+    final companionFields = mutationFields
+        .map(
+          (field) =>
+              '  /// Mutation value for `${field.element.displayName}`.\n'
+              '  final RivetValue<$className, ${field.domainType}, ${field.storageType}> '
+              '${field.element.displayName};',
+        )
+        .join('\n');
+    final companionConstructorParameters =
+        [
+              ...mutationFields.where((field) => field.isRequiredInsert),
+              ...mutationFields.where((field) => !field.isRequiredInsert),
+            ]
+            .map((field) {
+              final type = 'RivetValue<$className, ${field.domainType}, ${field.storageType}>';
+              return field.isRequiredInsert
+                  ? '    required $type ${field.element.displayName},'
+                  : '    $type ${field.element.displayName} = const RivetValue.absent(),';
+            })
+            .join('\n');
+    final companionInitializers = mutationFields
+        .map((field) => '      ${field.element.displayName}: ${field.element.displayName},')
+        .join('\n');
+    final companionPrivateParameters = mutationFields
+        .map((field) => '    required this.${field.element.displayName},')
+        .join('\n');
+    final companionAssignments = mutationFields
+        .map(
+          (field) =>
+              '    RivetAssignment(${literal(field.element.displayName)}, '
+              '${field.element.displayName}),',
+        )
+        .join('\n');
 
     return '''
 /// Generated row returned by reads from ${literal('$schemaName.$tableName')}.
@@ -120,6 +157,28 @@ $parameters
   });
 
 $fields
+}
+
+/// Generated values accepted by mutations of ${literal('$schemaName.$tableName')}.
+final class $companionName implements RivetCompanion<$className> {
+  const $companionName._({
+$companionPrivateParameters
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory $companionName.insert({
+$companionConstructorParameters
+  }) => $companionName._(
+$companionInitializers
+  );
+
+$companionFields
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<$className>> get assignments => [
+$companionAssignments
+  ];
 }
 
 final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
@@ -140,6 +199,10 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     );
   }
 
+  /// Creates a reusable insert plan.
+  RivetInsert<$className, $rowName> insert($companionName companion) =>
+      RivetInsert(buildSchema(), companion);
+
 }
 ''';
   }
@@ -156,6 +219,62 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
       }
     }
     return _enumTypeFromColumn(field.type, field.library);
+  }
+
+  _MutationField _mutationField(FieldElement field) {
+    final type = field.type;
+    if (type is! InterfaceType || type.typeArguments.isEmpty) {
+      throw InvalidGenerationSourceError(
+        'Rivet columns must retain their mutation value types.',
+        element: field,
+      );
+    }
+    final domain = type.typeArguments.first;
+    final isMapped = const TypeChecker.typeNamed(
+      RivetMappedColumn,
+      inPackage: 'rivet',
+    ).isAssignableFromType(type);
+    final storage = isMapped && type.typeArguments.length > 1 ? type.typeArguments[1] : domain;
+    final defaults = _columnDefaults(field);
+    return _MutationField(
+      element: field,
+      domainType: referenceToType(domain, field.library),
+      storageType: referenceToType(storage, field.library),
+      isRequiredInsert:
+          domain.nullabilitySuffix != NullabilitySuffix.question && !defaults.hasInsertDefault,
+    );
+  }
+
+  _ColumnDefaults _columnDefaults(FieldElement field) {
+    final parsed = field.library.session.getParsedLibraryByElement(field.library);
+    if (parsed is! ParsedLibraryResult) return const _ColumnDefaults();
+    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
+    if (declaration is! VariableDeclaration || declaration.initializer == null) {
+      return const _ColumnDefaults();
+    }
+    final methods = <String>{};
+    _collectColumnMethods(declaration.initializer!, methods);
+    return _ColumnDefaults(
+      hasDefaultFn: methods.contains('defaultValue') || methods.contains('chronoID'),
+      hasOnUpdateFn: methods.contains('onUpdate'),
+      hasSqlDefault: methods.contains('defaultSql'),
+    );
+  }
+
+  void _collectColumnMethods(Expression expression, Set<String> methods) {
+    switch (expression) {
+      case MethodInvocation(:final methodName, :final target):
+        methods.add(methodName.name);
+        if (target != null) _collectColumnMethods(target, methods);
+      case FunctionExpressionInvocation(:final function):
+        _collectColumnMethods(function, methods);
+      case ParenthesizedExpression(:final expression):
+        _collectColumnMethods(expression, methods);
+      case PropertyAccess(:final target):
+        if (target != null) _collectColumnMethods(target, methods);
+      default:
+        return;
+    }
   }
 
   String? _enumTypeFromColumn(DartType type, LibraryElement library) {
@@ -207,6 +326,34 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
         ? 'Relation<$targetRow?>'
         : 'Relation<List<$targetRow>>';
   }
+}
+
+final class _MutationField {
+  const _MutationField({
+    required this.element,
+    required this.domainType,
+    required this.storageType,
+    required this.isRequiredInsert,
+  });
+
+  final FieldElement element;
+  final String domainType;
+  final String storageType;
+  final bool isRequiredInsert;
+}
+
+final class _ColumnDefaults {
+  const _ColumnDefaults({
+    this.hasDefaultFn = false,
+    this.hasOnUpdateFn = false,
+    this.hasSqlDefault = false,
+  });
+
+  final bool hasDefaultFn;
+  final bool hasOnUpdateFn;
+  final bool hasSqlDefault;
+
+  bool get hasInsertDefault => hasDefaultFn || hasOnUpdateFn || hasSqlDefault;
 }
 
 final class _EnumTextVisitor extends RecursiveAstVisitor<void> {

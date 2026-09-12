@@ -14,7 +14,19 @@ typedef RivetOrderBy<Definition> = List<RivetOrder> Function(Definition table);
 
 /// A compiled query plus validated bound values.
 final class RivetCompiledQuery {
-  const RivetCompiledQuery._(this.sql, this.parameters);
+  RivetCompiledQuery(this.sql, List<Object?> parameters)
+    : parameters = List.unmodifiable(parameters) {
+    if (parameters.length > _postgresParameterLimit) {
+      throw const RivetUnsupportedQueryException(
+        'PostgreSQL supports at most 65535 bound parameters.',
+      );
+    }
+    if (utf8.encode(sql).length > _postgresSqlByteLimit) {
+      throw const RivetUnsupportedQueryException(
+        'The compiled PostgreSQL statement exceeds the supported SQL size.',
+      );
+    }
+  }
 
   final String sql;
   final List<Object?> parameters;
@@ -22,12 +34,13 @@ final class RivetCompiledQuery {
 
 /// Execution boundary accepted by query terminals.
 // The interface keeps query plans independent from database and transaction owners.
-// ignore: one_member_abstracts
 abstract interface class RivetExecutor {
   Future<List<Row>> execute<Row>(
     RivetCompiledQuery query,
     RivetRowDecoder<Row> decode,
   );
+
+  Future<int> executeAffected(RivetCompiledQuery query);
 }
 
 extension RivetFindAccess<Definition, Row> on RivetTableAccessor<Definition, Row> {
@@ -100,11 +113,6 @@ final class RivetFind<Definition, Row> {
   }
 
   RivetCompiledQuery _compile({int? terminalLimit}) {
-    if ((_predicate?.parameters.length ?? 0) > _postgresParameterLimit) {
-      throw const RivetUnsupportedQueryException(
-        'PostgreSQL supports at most 65535 bound parameters.',
-      );
-    }
     final columns = _schema.columns.indexed
         .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
         .join(', ');
@@ -135,13 +143,7 @@ final class RivetFind<Definition, Row> {
     };
     if (effectiveLimit != null) sql.write(' LIMIT $effectiveLimit');
     if (_offset != null) sql.write(' OFFSET $_offset');
-    final rendered = sql.toString();
-    if (utf8.encode(rendered).length > _postgresSqlByteLimit) {
-      throw const RivetUnsupportedQueryException(
-        'The compiled PostgreSQL statement exceeds the supported SQL size.',
-      );
-    }
-    return RivetCompiledQuery._(rendered, List.unmodifiable(parameters));
+    return RivetCompiledQuery(sql.toString(), parameters);
   }
 }
 

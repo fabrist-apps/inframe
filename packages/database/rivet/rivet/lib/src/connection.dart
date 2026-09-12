@@ -121,6 +121,16 @@ final class RivetDb implements RivetExecutor {
     }
   }
 
+  @override
+  Future<int> executeAffected(RivetCompiledQuery query) async {
+    _acceptWork();
+    try {
+      return await _executeAffectedWith(_pool.run, query);
+    } finally {
+      _finishWork();
+    }
+  }
+
   Future<T> transaction<T>(Future<T> Function(RivetTransaction transaction) callback) async {
     _acceptWork();
     Object? callbackFailure;
@@ -214,6 +224,26 @@ final class RivetDb implements RivetExecutor {
     }
   }
 
+  Future<int> _executeAffectedWith(
+    Future<T> Function<T>(Future<T> Function(pg.Session session) operation) run,
+    RivetCompiledQuery query,
+  ) async {
+    try {
+      _connection.onStatement?.call(query.sql);
+      final result = await run(
+        (session) => session.execute(
+          pg.Sql(query.sql, types: List.filled(query.parameters.length, pg.Type.unspecified)),
+          parameters: query.parameters,
+        ),
+      );
+      return result.affectedRows;
+    } on RivetException {
+      rethrow;
+    } catch (error) {
+      throw RivetDatabaseException('PostgreSQL mutation failed.', error);
+    }
+  }
+
   Future<void> close() {
     if (Zone.current[_transactionDatabaseZoneKey] == this ||
         Zone.current[_afterCommitDatabaseZoneKey] == this) {
@@ -297,6 +327,25 @@ final class RivetTransaction implements RivetExecutor {
       rethrow;
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL transaction query failed.', error);
+    }
+  }
+
+  @override
+  Future<int> executeAffected(RivetCompiledQuery query) async {
+    if (!_active) {
+      throw const RivetExecutorClosedException('The transaction executor has expired.');
+    }
+    try {
+      _connection.onStatement?.call(query.sql);
+      final result = await _session.execute(
+        pg.Sql(query.sql, types: List.filled(query.parameters.length, pg.Type.unspecified)),
+        parameters: query.parameters,
+      );
+      return result.affectedRows;
+    } on RivetException {
+      rethrow;
+    } catch (error) {
+      throw RivetDatabaseException('PostgreSQL transaction mutation failed.', error);
     }
   }
 

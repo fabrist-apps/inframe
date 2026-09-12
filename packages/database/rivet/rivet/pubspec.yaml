@@ -1,5 +1,5 @@
 name: rivet
-description: Generated, type-safe PostgreSQL reads with owned connection lifetimes.
+description: Generated, type-safe PostgreSQL access with owned connection lifetimes.
 version: 0.1.0
 publish_to: none
 resolution: workspace

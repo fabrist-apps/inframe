@@ -244,6 +244,7 @@ abstract class RivetCodec<T> {
   const RivetCodec();
 
   String get cast;
+  bool get acceptsNull => false;
   String select(String columnSql) => columnSql;
   Object? encode(T value);
   T decode(Object? value, {required bool isSqlNull});
@@ -274,6 +275,9 @@ final class RivetNullableCodec<T> extends RivetCodec<T?> {
 
   @override
   String get cast => inner.cast;
+
+  @override
+  bool get acceptsNull => true;
 
   @override
   String select(String columnSql) => inner.select(columnSql);
@@ -617,6 +621,9 @@ final class RivetMappedCodec<Domain, Storage> extends RivetCodec<Domain> {
   String get cast => storage.cast;
 
   @override
+  bool get acceptsNull => storage.acceptsNull;
+
+  @override
   String select(String columnSql) => storage.select(columnSql);
 
   @override
@@ -942,10 +949,75 @@ final class _NullableConverter<Domain, Storage> implements RivetTypeConverter<Do
   Storage? toSql(Domain? value) => value == null ? null : inner.toSql(value);
 }
 
+/// A typed SQL expression that can be rendered with bound PostgreSQL values.
+abstract interface class RivetExpression<T> {
+  String get sql;
+  List<Object?> get parameters;
+  List<RivetColumn<dynamic>> get columns;
+  RivetCodec<T> get codec;
+  bool get referencesRows;
+
+  String renderParameters({int startAt = 1});
+}
+
+final class _RivetBoundExpression<T> implements RivetExpression<T> {
+  _RivetBoundExpression(this.source, T value) : parameters = [source.encodeValue(value)];
+
+  final RivetColumn<T> source;
+
+  @override
+  RivetCodec<T> get codec => source.codec;
+
+  @override
+  List<RivetColumn<dynamic>> get columns => [source];
+
+  @override
+  final List<Object?> parameters;
+
+  @override
+  bool get referencesRows => false;
+
+  @override
+  String get sql => '@value::${codec.cast}';
+
+  @override
+  String renderParameters({int startAt = 1}) => '\$$startAt::${codec.cast}';
+}
+
+final class _RivetBinaryExpression<T> implements RivetExpression<T> {
+  _RivetBinaryExpression(this.left, this.operator, T right)
+    : _right = left.columns.first.encodeValue(right);
+
+  final RivetExpression<T> left;
+  final String operator;
+  final Object? _right;
+
+  @override
+  RivetCodec<T> get codec => left.codec;
+
+  @override
+  List<RivetColumn<dynamic>> get columns => left.columns;
+
+  @override
+  List<Object?> get parameters => [...left.parameters, _right];
+
+  @override
+  bool get referencesRows => left.referencesRows;
+
+  @override
+  String get sql => '(${left.sql} $operator @value::${codec.cast})';
+
+  @override
+  String renderParameters({int startAt = 1}) =>
+      '(${left.renderParameters(startAt: startAt)} $operator '
+      '\$${startAt + left.parameters.length}::${codec.cast})';
+}
+
 /// A typed SQL expression backed by a table column.
-class RivetColumn<T> {
+class RivetColumn<T> implements RivetExpression<T> {
   RivetColumn(this.codec, {this.declaredName, this.renamedFrom});
 
+  @override
   RivetCodec<T> codec;
   final String? declaredName;
   final String? renamedFrom;
@@ -967,9 +1039,22 @@ class RivetColumn<T> {
   }
 
   String get physicalName => declaredName ?? dartName;
+  @override
   String get sql => quoteIdentifier(physicalName);
   String get selectionSql => codec.select(sql);
   bool belongsTo(RivetTableSchema<Object?, Object?> table) => identical(_table, table);
+
+  @override
+  List<Object?> get parameters => const [];
+
+  @override
+  List<RivetColumn<dynamic>> get columns => [this];
+
+  @override
+  bool get referencesRows => true;
+
+  @override
+  String renderParameters({int startAt = 1}) => sql;
 
   void configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) {
     codec = codec.configureEnum(enumCodec);
@@ -983,6 +1068,13 @@ class RivetColumn<T> {
 
   T decodeValue(Object? value, {required bool isSqlNull}) =>
       _convert('decode', () => codec.decode(value, isSqlNull: isSqlNull));
+
+  Object? encodeValue(Object? value) => _convert(
+    'encode',
+    () => (codec as RivetCodec<Object?>).encode(value),
+  );
+
+  RivetExpression<T> value(T value) => _RivetBoundExpression(this, value);
 
   R _convert<R>(String operation, R Function() convert) {
     try {
@@ -1008,6 +1100,12 @@ final class RivetOrderableColumn<T> extends RivetColumn<T> {
       RivetOrder(this, descending: false, nulls: nulls);
   RivetOrder desc({NullsOrder nulls = NullsOrder.last}) =>
       RivetOrder(this, descending: true, nulls: nulls);
+}
+
+extension RivetIntegerExpression on RivetExpression<int> {
+  RivetExpression<int> operator +(int value) {
+    return _RivetBinaryExpression(this, '+', value);
+  }
 }
 
 /// Builder used by table declaration fields such as `text()()`.

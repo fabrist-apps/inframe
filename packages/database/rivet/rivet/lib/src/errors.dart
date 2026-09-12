@@ -15,6 +15,7 @@ sealed class RivetException implements Exception {
         RivetConversionException() => 'RivetConversionException',
         RivetCardinalityException() => 'RivetCardinalityException',
         RivetUnsupportedQueryException() => 'RivetUnsupportedQueryException',
+        RivetMissingValueException() => 'RivetMissingValueException',
         RivetExecutorClosedException() => 'RivetExecutorClosedException',
         AfterCommitException() => 'AfterCommitException',
       }}: $message';
@@ -50,6 +51,15 @@ final class RivetCardinalityException extends RivetException {
 /// A query cannot be represented by the supported root-read grammar.
 final class RivetUnsupportedQueryException extends RivetException {
   const RivetUnsupportedQueryException(super.message);
+}
+
+/// A required mutation field was absent when execution began.
+final class RivetMissingValueException extends RivetException {
+  const RivetMissingValueException({required this.table, required this.column})
+    : super('Required mutation value $table.$column is absent.');
+
+  final String table;
+  final String column;
 }
 
 /// An executor was used outside its valid lifetime.

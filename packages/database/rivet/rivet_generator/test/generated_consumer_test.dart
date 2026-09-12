@@ -51,6 +51,54 @@ final class RivetApp extends _$RivetApp {}
       );
     });
 
+    test('should generate typed insert companions from column defaults', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'mutations.rivet.dart';
+
+@RivetTable()
+final class Users extends RivetTableDefinition<Users> {
+  static const db = _$UsersDB();
+
+  late final id = chronoID(prefix: 'usr')();
+  late final name = text()();
+  late final nickname = text().nullable()();
+  late final createdAt = dateTime().defaultValue(DateTime.now)();
+  late final updatedAt = dateTime().onUpdate(DateTime.now)();
+  late final sequence = integer().defaultSql("nextval('users_seq')")();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/mutations.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/mutations.rivet.dart': decodedMatches(
+            allOf(
+              contains('final class UsersCompanion implements RivetCompanion<Users>'),
+              contains('factory UsersCompanion.insert({'),
+              contains('required RivetValue<Users, String, String> name,'),
+              contains(
+                'RivetValue<Users, String, String> id = const RivetValue.absent(),',
+              ),
+              contains(
+                'RivetValue<Users, String?, String?> nickname = const RivetValue.absent(),',
+              ),
+              contains(
+                'RivetValue<Users, DateTime, DateTime> updatedAt = '
+                'const RivetValue.absent(),',
+              ),
+              contains('RivetInsert<Users, UsersRow> insert(UsersCompanion companion)'),
+            ),
+          ),
+        },
+      );
+    });
+
     test('should preserve prefixes for tables with the same class name', () async {
       final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
       await readerWriter.testing.loadIsolateSources();
