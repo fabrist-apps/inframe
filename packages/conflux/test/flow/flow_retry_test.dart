@@ -106,7 +106,7 @@ void main() {
       var attempts = 0;
       final policy = Schedule<String, int, int>.fromDriver(
         () => ScheduleDriver((_) => Effect.fail(7)),
-      ).mapError((error) => 'policy $error');
+      ).mapError((error, _) => 'policy $error');
       final flow = Flow.defer<int, String>((_) {
         attempts += 1;
         return Flow.fail('source failed');

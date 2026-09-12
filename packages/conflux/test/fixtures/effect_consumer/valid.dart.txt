@@ -37,7 +37,7 @@ Future<void> main() async {
     () => ScheduleDriver(
       (_) => Effect.fail(const _SpecificError()),
     ),
-  ).mapError<_BaseError>((error) => error);
+  ).mapError<_BaseError>((error, _) => error);
   await Runtime().run(retried);
   await Runtime().run(mappedPolicy.driver().step(0));
 
@@ -88,7 +88,7 @@ Future<void> main() async {
     seconds: const {0},
   ) as Success<Cron, CronError>).value;
   final Schedule<Option<int?>, Duration, _BaseError> calendar = Schedule.cron<Option<int?>>(cron)
-      .mapError<_BaseError>(_CalendarError.new);
+      .mapError<_BaseError>((error, _) => _CalendarError(error));
   final Effect<int?, _BaseError> nullable = Effect.succeed(null);
   await nullable.schedule(calendar.within(Duration.zero)).runFuture();
 }

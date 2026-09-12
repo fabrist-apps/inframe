@@ -5,6 +5,7 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
+import 'package:context/context.dart';
 
 /// The result of stepping a [ScheduleDriver].
 sealed class ScheduleDecision<O> {
@@ -247,10 +248,12 @@ final class Schedule<I, O, E> {
 /// Expected-error adaptation for reusable schedules.
 extension ScheduleErrorMapping<I, O, E> on Schedule<I, O, E> {
   /// Transforms only expected driver errors.
-  Schedule<I, O, F> mapError<F>(F Function(E error) transform) {
+  Schedule<I, O, F> mapError<F>(F Function(E error, Context context) transform) {
     return Schedule.fromDriver(() {
       final source = driver();
-      return ScheduleDriver((input) => source.step(input).mapError((value, _) => transform(value)));
+      return ScheduleDriver(
+        (input) => source.step(input).mapError(transform),
+      );
     });
   }
 }
@@ -258,15 +261,17 @@ extension ScheduleErrorMapping<I, O, E> on Schedule<I, O, E> {
 /// Delay, input, sequencing, and observation transforms for a Schedule.
 extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
   /// Replaces each continuing decision's computed delay.
-  Schedule<I, O, E> modifyDelay(Duration Function(Duration delay) transform) {
+  Schedule<I, O, E> modifyDelay(
+    Duration Function(Duration delay, Context context) transform,
+  ) {
     return Schedule.fromDriver(() {
       final source = driver();
       return ScheduleDriver(
-        (input) => source.step(input).map((decision, _) {
+        (input) => source.step(input).map((decision, context) {
           return switch (decision) {
             ScheduleStop<O>() => decision,
             ScheduleContinue<O>(:final output, :final delay) => () {
-              final transformed = transform(delay);
+              final transformed = transform(delay, context);
               _requireNonNegativeDuration(transformed);
               return ScheduleContinue(output, transformed);
             }(),
@@ -282,7 +287,7 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
   /// microseconds and retain the source policy's stop and output behavior.
   Schedule<I, O, E> jittered({double Function()? random}) {
     final nextRandom = random ?? Random().nextDouble;
-    return modifyDelay((delay) {
+    return modifyDelay((delay, _) {
       final value = nextRandom();
       if (!value.isFinite || value < 0 || value >= 1) {
         throw StateError('Random values must be in [0, 1).');
@@ -324,12 +329,14 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
   }
 
   /// Stops before another execution when [predicate] rejects its input.
-  Schedule<I, O, E> whileInput(bool Function(I input) predicate) {
+  Schedule<I, O, E> whileInput(
+    bool Function(I input, Context context) predicate,
+  ) {
     return Schedule.fromDriver(() {
       final source = driver();
       return ScheduleDriver(
-        (input) => source.step(input).map((decision, _) {
-          if (decision is ScheduleContinue<O> && !predicate(input)) {
+        (input) => source.step(input).map((decision, context) {
+          if (decision is ScheduleContinue<O> && !predicate(input, context)) {
             return ScheduleStop(decision.output);
           }
           return decision;
@@ -358,16 +365,17 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
 
   /// Observes each continuing decision without changing it.
   Schedule<I, O, E> tap(
-    Effect<void, Never> Function(ScheduleContinue<O> decision) observe,
+    Effect<void, Never> Function(ScheduleContinue<O> decision, Context context) observe,
   ) {
     return Schedule.fromDriver(() {
       final source = driver();
       return ScheduleDriver(
-        (input) => source.step(input).flatMap((decision, _) {
+        (input) => source.step(input).flatMap((decision, context) {
           if (decision is! ScheduleContinue<O>) return Effect.succeed(decision);
-          return observe(decision)
-              .mapError<E>((value, _) => _absurd(value! as Never))
-              .map((_, _) => decision);
+          return observe(
+            decision,
+            context,
+          ).mapError<E>((value, _) => _absurd(value! as Never)).map((_, _) => decision);
         }),
       );
     });

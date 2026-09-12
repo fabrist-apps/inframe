@@ -158,13 +158,15 @@ expected-error channel and ends the operation; it is distinct from
 
 `spaced` measures each delay from the prior completion. `fixed` instead keeps an
 anchored cadence and skips missed ticks. Exponential delays have no implicit
-cap; add one explicitly with `modifyDelay` when the operation needs it:
+cap; add one explicitly with `modifyDelay` when the operation needs it. Schedule
+callbacks receive the consuming driver's execution `Context` as their final
+argument:
 
 ```dart
 final backoff = Schedule.exponential<String>(
   const Duration(milliseconds: 100),
 ).jittered().modifyDelay(
-  (delay) => delay > const Duration(seconds: 10)
+  (delay, _) => delay > const Duration(seconds: 10)
       ? const Duration(seconds: 10)
       : delay,
 );
@@ -234,7 +236,9 @@ final cron = switch (Cron.parse('0 9 * * mon-fri', location)) {
   Success(value: final value) => value,
   Failure(error: final error) => throw FormatException('$error'),
 };
-final policy = Schedule.cron<void>(cron).mapError<JobError>(InvalidCalendar.new);
+final policy = Schedule.cron<void>(
+  cron,
+).mapError<JobError>((error, _) => InvalidCalendar(error));
 final Effect<void, JobError> job = Effect.sync((_) => print('run job'));
 final scheduled = job.repeat(policy);
 ```

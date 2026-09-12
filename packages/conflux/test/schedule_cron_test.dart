@@ -128,7 +128,7 @@ void main() {
       final Effect<int, _OperationError> operation = Effect.sync((_) => ++executions);
       final policy = Schedule.cron<Option<int>>(
         impossible,
-      ).mapError<_OperationError>(_CalendarError.new);
+      ).mapError<_OperationError>((error, _) => _CalendarError(error));
 
       final exit = await operation.schedule(policy).runFutureExit(clock: clock);
 
