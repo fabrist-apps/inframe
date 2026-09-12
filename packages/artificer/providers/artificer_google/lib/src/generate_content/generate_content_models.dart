@@ -1,14 +1,253 @@
+import 'dart:convert';
+
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
+import 'package:artificer_google/src/generate_content/tool_models.dart';
+
+/// Inline media bytes in a native Gemini part.
+final class GoogleInlineData {
+  /// Creates inline media and copies its bytes.
+  GoogleInlineData({required String mimeType, required Iterable<int> bytes})
+    : mimeType = _nonEmpty(mimeType, 'mimeType'),
+      bytes = List.unmodifiable(bytes);
+
+  /// Decodes inline media.
+  factory GoogleInlineData.fromJson(JsonObject json) {
+    final value = json.toDart();
+    final encoded = _requiredString(value, 'data');
+    return GoogleInlineData(
+      mimeType: _requiredString(value, 'mimeType'),
+      bytes: base64Decode(encoded),
+    );
+  }
+
+  /// Media type.
+  final String mimeType;
+
+  /// Copied bytes.
+  final List<int> bytes;
+
+  /// Encodes inline media.
+  JsonObject toJson() => JsonObject({'mimeType': mimeType, 'data': base64Encode(bytes)});
+}
+
+/// A native Google file URI used in model input.
+final class GoogleFileData {
+  /// Creates a file reference.
+  GoogleFileData({required String mimeType, required String fileUri})
+    : mimeType = _nonEmpty(mimeType, 'mimeType'),
+      fileUri = _nonEmpty(fileUri, 'fileUri');
+
+  /// Decodes a file reference.
+  factory GoogleFileData.fromJson(JsonObject json) {
+    final value = json.toDart();
+    return GoogleFileData(
+      mimeType: _requiredString(value, 'mimeType'),
+      fileUri: _requiredString(value, 'fileUri'),
+    );
+  }
+
+  /// Media type.
+  final String mimeType;
+
+  /// Google file URI.
+  final String fileUri;
+
+  /// Encodes the reference.
+  JsonObject toJson() => JsonObject({'mimeType': mimeType, 'fileUri': fileUri});
+}
+
+/// A native Gemini function call.
+final class GoogleFunctionCall {
+  /// Creates a function call.
+  GoogleFunctionCall({
+    required String name,
+    required this.args,
+    this.id,
+    JsonObject? extensions,
+  }) : name = _nonEmpty(name, 'name'),
+       rawArgs = args,
+       extensions = extensions ?? JsonObject({});
+
+  GoogleFunctionCall._({
+    required this.id,
+    required this.name,
+    required this.args,
+    required this.rawArgs,
+    required this.extensions,
+  });
+
+  /// Decodes a call while retaining unknown fields.
+  factory GoogleFunctionCall.fromJson(JsonObject json) {
+    final value = json.toDart();
+    final args = value['args'];
+    return GoogleFunctionCall._(
+      id: _optionalString(value, 'id'),
+      name: _requiredString(value, 'name'),
+      args: args is Map<String, Object?> ? JsonObject(args) : JsonObject({}),
+      rawArgs: JsonValue.fromDart(args),
+      extensions: JsonObject(_without(value, {'id', 'name', 'args'})),
+    );
+  }
+
+  /// Optional native call ID.
+  final String? id;
+
+  /// Function name.
+  final String name;
+
+  /// Native arguments.
+  final JsonObject args;
+
+  /// Arguments exactly as returned, including malformed non-object values.
+  final JsonValue rawArgs;
+
+  /// Unknown call fields.
+  final JsonObject extensions;
+
+  /// Encodes the call.
+  JsonObject toJson() => JsonObject({
+    ...extensions.toDart(),
+    'id': ?id,
+    'name': name,
+    'args': rawArgs.toDart(),
+  });
+}
+
+/// A native Gemini function result.
+final class GoogleFunctionResponse {
+  /// Creates a function response.
+  GoogleFunctionResponse({
+    required String name,
+    required this.response,
+    this.id,
+    JsonObject? extensions,
+  }) : name = _nonEmpty(name, 'name'),
+       extensions = extensions ?? JsonObject({});
+
+  /// Decodes a function response.
+  factory GoogleFunctionResponse.fromJson(JsonObject json) {
+    final value = json.toDart();
+    return GoogleFunctionResponse(
+      id: _optionalString(value, 'id'),
+      name: _requiredString(value, 'name'),
+      response: JsonObject.fromDart(value['response']),
+      extensions: JsonObject(_without(value, {'id', 'name', 'response'})),
+    );
+  }
+
+  /// Optional call ID.
+  final String? id;
+
+  /// Function name.
+  final String name;
+
+  /// Result object.
+  final JsonObject response;
+
+  /// Unknown response fields.
+  final JsonObject extensions;
+
+  /// Encodes the result.
+  JsonObject toJson() => JsonObject({
+    ...extensions.toDart(),
+    'id': ?id,
+    'name': name,
+    'response': response.toDart(),
+  });
+}
 
 /// One native Gemini content part from the pinned GenerateContent schema.
 final class GooglePart {
   /// Creates a text part.
-  GooglePart.text(String text, {JsonObject? extensions})
+  GooglePart.text(String text, {this.thought, this.thoughtSignature, JsonObject? extensions})
     : text = _nonEmpty(text, 'text'),
+      inlineData = null,
+      fileData = null,
+      functionCall = null,
+      functionResponse = null,
+      executableCode = null,
+      codeExecutionResult = null,
+      toolCall = null,
+      toolResponse = null,
       extensions = extensions ?? JsonObject({});
 
-  GooglePart._({required this.text, required this.extensions});
+  /// Creates an inline-media part.
+  GooglePart.inlineData(GoogleInlineData data, {JsonObject? extensions})
+    : text = null,
+      inlineData = data,
+      fileData = null,
+      functionCall = null,
+      functionResponse = null,
+      executableCode = null,
+      codeExecutionResult = null,
+      toolCall = null,
+      toolResponse = null,
+      thought = null,
+      thoughtSignature = null,
+      extensions = extensions ?? JsonObject({});
+
+  /// Creates a Google-file part.
+  GooglePart.fileData(GoogleFileData data, {JsonObject? extensions})
+    : text = null,
+      inlineData = null,
+      fileData = data,
+      functionCall = null,
+      functionResponse = null,
+      executableCode = null,
+      codeExecutionResult = null,
+      toolCall = null,
+      toolResponse = null,
+      thought = null,
+      thoughtSignature = null,
+      extensions = extensions ?? JsonObject({});
+
+  /// Creates an application function-call part.
+  GooglePart.functionCall(GoogleFunctionCall call, {this.thoughtSignature, JsonObject? extensions})
+    : text = null,
+      inlineData = null,
+      fileData = null,
+      functionCall = call,
+      functionResponse = null,
+      executableCode = null,
+      codeExecutionResult = null,
+      toolCall = null,
+      toolResponse = null,
+      thought = null,
+      extensions = extensions ?? JsonObject({});
+
+  /// Creates an application function-result part.
+  GooglePart.functionResponse(GoogleFunctionResponse response, {JsonObject? extensions})
+    : text = null,
+      inlineData = null,
+      fileData = null,
+      functionCall = null,
+      functionResponse = response,
+      executableCode = null,
+      codeExecutionResult = null,
+      toolCall = null,
+      toolResponse = null,
+      thought = null,
+      thoughtSignature = null,
+      extensions = extensions ?? JsonObject({});
+
+  /// Creates a typed part from its complete pinned-schema JSON.
+  factory GooglePart.raw(JsonObject json) => GooglePart.fromJson(json);
+
+  GooglePart._({
+    required this.text,
+    required this.inlineData,
+    required this.fileData,
+    required this.functionCall,
+    required this.functionResponse,
+    required this.executableCode,
+    required this.codeExecutionResult,
+    required this.toolCall,
+    required this.toolResponse,
+    required this.thought,
+    required this.thoughtSignature,
+    required this.extensions,
+  });
 
   /// Decodes a part while retaining fields outside this slice's typed surface.
   factory GooglePart.fromJson(JsonObject json) {
@@ -19,18 +258,89 @@ final class GooglePart {
     }
     return GooglePart._(
       text: text as String?,
-      extensions: JsonObject(_without(value, {'text'})),
+      inlineData: _optionalObject(value, 'inlineData', GoogleInlineData.fromJson),
+      fileData: _optionalObject(value, 'fileData', GoogleFileData.fromJson),
+      functionCall: _optionalObject(value, 'functionCall', GoogleFunctionCall.fromJson),
+      functionResponse: _optionalObject(
+        value,
+        'functionResponse',
+        GoogleFunctionResponse.fromJson,
+      ),
+      executableCode: _optionalJsonObject(value, 'executableCode'),
+      codeExecutionResult: _optionalJsonObject(value, 'codeExecutionResult'),
+      toolCall: _optionalJsonObject(value, 'toolCall'),
+      toolResponse: _optionalJsonObject(value, 'toolResponse'),
+      thought: _optionalBool(value, 'thought'),
+      thoughtSignature: _optionalString(value, 'thoughtSignature'),
+      extensions: JsonObject(
+        _without(value, {
+          'text',
+          'inlineData',
+          'fileData',
+          'functionCall',
+          'functionResponse',
+          'executableCode',
+          'codeExecutionResult',
+          'toolCall',
+          'toolResponse',
+          'thought',
+          'thoughtSignature',
+        }),
+      ),
     );
   }
 
   /// Text carried by this part, when it is a text part.
   final String? text;
 
+  /// Inline bytes.
+  final GoogleInlineData? inlineData;
+
+  /// Google file URI.
+  final GoogleFileData? fileData;
+
+  /// Application or computer-use call.
+  final GoogleFunctionCall? functionCall;
+
+  /// Application or computer-use result.
+  final GoogleFunctionResponse? functionResponse;
+
+  /// Provider-executed code.
+  final JsonObject? executableCode;
+
+  /// Provider-executed code result.
+  final JsonObject? codeExecutionResult;
+
+  /// Provider-hosted tool activity.
+  final JsonObject? toolCall;
+
+  /// Provider-hosted tool result.
+  final JsonObject? toolResponse;
+
+  /// Whether this is provider-supplied thought content.
+  final bool? thought;
+
+  /// Opaque signature required for same-target replay.
+  final String? thoughtSignature;
+
   /// Immutable fields not yet modeled by this package snapshot.
   final JsonObject extensions;
 
   /// The complete native part.
-  JsonObject toJson() => JsonObject({...extensions.toDart(), 'text': ?text});
+  JsonObject toJson() => JsonObject({
+    ...extensions.toDart(),
+    'text': ?text,
+    if (inlineData case final value?) 'inlineData': value.toJson().toDart(),
+    if (fileData case final value?) 'fileData': value.toJson().toDart(),
+    if (functionCall case final value?) 'functionCall': value.toJson().toDart(),
+    if (functionResponse case final value?) 'functionResponse': value.toJson().toDart(),
+    if (executableCode case final value?) 'executableCode': value.toDart(),
+    if (codeExecutionResult case final value?) 'codeExecutionResult': value.toDart(),
+    if (toolCall case final value?) 'toolCall': value.toDart(),
+    if (toolResponse case final value?) 'toolResponse': value.toDart(),
+    'thought': ?thought,
+    'thoughtSignature': ?thoughtSignature,
+  });
 }
 
 /// One ordered native Gemini conversation turn.
@@ -125,6 +435,8 @@ final class GoogleGenerationConfig {
     this.topP,
     Iterable<String>? stopSequences,
     this.thinkingConfig,
+    this.responseMimeType,
+    this.responseJsonSchema,
     JsonObject? extensions,
   }) : stopSequences = stopSequences == null ? null : List.unmodifiable(stopSequences),
        extensions = extensions ?? JsonObject({}) {
@@ -154,6 +466,12 @@ final class GoogleGenerationConfig {
   /// Native thinking configuration.
   final GoogleThinkingConfig? thinkingConfig;
 
+  /// Requested response media type.
+  final String? responseMimeType;
+
+  /// Unmodified native JSON Schema.
+  final JsonObject? responseJsonSchema;
+
   /// Immutable fields outside the typed snapshot.
   final JsonObject extensions;
 
@@ -166,6 +484,8 @@ final class GoogleGenerationConfig {
     'topP': ?topP,
     'stopSequences': ?stopSequences,
     if (thinkingConfig case final value?) 'thinkingConfig': value.toJson().toDart(),
+    'responseMimeType': ?responseMimeType,
+    if (responseJsonSchema case final value?) 'responseJsonSchema': value.toDart(),
   });
 }
 
@@ -179,10 +499,15 @@ final class GoogleGenerateContentRequest {
     this.generationConfig,
     Iterable<GoogleSafetySetting>? safetySettings,
     this.cachedContent,
+    Iterable<GoogleToolDefinition>? tools,
+    this.toolConfig,
+    this.serviceTier,
+    this.store,
     JsonObject? extraBody,
   }) : model = _modelName(model),
        contents = List.unmodifiable(contents),
        safetySettings = safetySettings == null ? null : List.unmodifiable(safetySettings),
+       tools = tools == null ? null : List.unmodifiable(tools),
        extraBody = extraBody ?? JsonObject({}) {
     if (this.contents.isEmpty) {
       throw ArgumentError.value(contents, 'contents', 'must not be empty');
@@ -211,6 +536,18 @@ final class GoogleGenerateContentRequest {
   /// Optional authoritative `cachedContents/{id}` resource name.
   final String? cachedContent;
 
+  /// Native tools.
+  final List<GoogleToolDefinition>? tools;
+
+  /// Native tool-selection configuration.
+  final GoogleToolConfig? toolConfig;
+
+  /// Native service tier.
+  final String? serviceTier;
+
+  /// Native request logging choice.
+  final bool? store;
+
   /// Forward-compatible request fields.
   final JsonObject extraBody;
 
@@ -223,6 +560,10 @@ final class GoogleGenerateContentRequest {
     if (safetySettings case final values?)
       'safetySettings': values.map((value) => value.toJson().toDart()).toList(),
     'cachedContent': ?cachedContent,
+    if (tools case final values?) 'tools': values.map((value) => value.toJson().toDart()).toList(),
+    if (toolConfig case final value?) 'toolConfig': value.toJson().toDart(),
+    'serviceTier': ?serviceTier,
+    'store': ?store,
   });
 }
 
@@ -430,12 +771,90 @@ final class GoogleGenerateContentChunk {
   final ResponseMetadata metadata;
 }
 
+/// One explicit native token-count request.
+final class GoogleCountTokensRequest {
+  /// Creates a token-count request with exactly one native input form.
+  GoogleCountTokensRequest({
+    required String model,
+    Iterable<GoogleContent>? contents,
+    this.generateContentRequest,
+  }) : model = _modelName(model),
+       contents = contents == null ? null : List.unmodifiable(contents) {
+    if ((this.contents == null) == (generateContentRequest == null)) {
+      throw ArgumentError('Exactly one of contents and generateContentRequest is required.');
+    }
+    if (this.contents?.isEmpty ?? false) {
+      throw ArgumentError.value(contents, 'contents', 'must not be empty');
+    }
+    if (generateContentRequest != null && generateContentRequest!.model != this.model) {
+      throw ArgumentError.value(
+        generateContentRequest!.model,
+        'generateContentRequest',
+        'must target the same model',
+      );
+    }
+  }
+
+  /// Selected model resource.
+  final String model;
+
+  /// Content-only counting input.
+  final List<GoogleContent>? contents;
+
+  /// Full GenerateContent-shaped counting input.
+  final GoogleGenerateContentRequest? generateContentRequest;
+
+  /// Encodes the request body.
+  JsonObject toJson() => JsonObject({
+    if (contents case final values?)
+      'contents': values.map((value) => value.toJson().toDart()).toList(),
+    if (generateContentRequest case final value?) 'generateContentRequest': value.toJson().toDart(),
+  });
+}
+
+/// Native token-count result.
+final class GoogleCountTokensResponse {
+  GoogleCountTokensResponse._({
+    required this.totalTokens,
+    required this.cachedContentTokenCount,
+    required this.extensions,
+    required this.raw,
+  });
+
+  /// Decodes a count while retaining modality details and future fields.
+  factory GoogleCountTokensResponse.fromJson(JsonObject json) {
+    final value = json.toDart();
+    return GoogleCountTokensResponse._(
+      totalTokens: _requiredInt(value, 'totalTokens'),
+      cachedContentTokenCount: _optionalInt(value, 'cachedContentTokenCount'),
+      extensions: JsonObject(_without(value, {'totalTokens', 'cachedContentTokenCount'})),
+      raw: json,
+    );
+  }
+
+  /// Total input tokens.
+  final int totalTokens;
+
+  /// Cached tokens, when reported.
+  final int? cachedContentTokenCount;
+
+  /// Native modality and future accounting.
+  final JsonObject extensions;
+
+  /// Complete response.
+  final JsonObject raw;
+}
+
 const _requestFields = {
   'contents',
   'systemInstruction',
   'generationConfig',
   'safetySettings',
   'cachedContent',
+  'tools',
+  'toolConfig',
+  'serviceTier',
+  'store',
 };
 
 String _modelName(String value) {
@@ -470,6 +889,43 @@ int? _optionalInt(Map<String, Object?> value, String key) {
   if (field == null) return null;
   if (field is! int) throw FormatException('$key must be an integer.');
   return field;
+}
+
+int _requiredInt(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field is! int) throw FormatException('$key must be an integer.');
+  return field;
+}
+
+String _requiredString(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field is! String || field.isEmpty) throw FormatException('$key must be a nonempty string.');
+  return field;
+}
+
+bool? _optionalBool(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field == null) return null;
+  if (field is! bool) throw FormatException('$key must be a boolean.');
+  return field;
+}
+
+JsonObject? _optionalJsonObject(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field == null) return null;
+  if (field is! Map<String, Object?>) throw FormatException('$key must be an object.');
+  return JsonObject(field);
+}
+
+T? _optionalObject<T>(
+  Map<String, Object?> value,
+  String key,
+  T Function(JsonObject) decode,
+) {
+  final field = value[key];
+  if (field == null) return null;
+  if (field is! Map<String, Object?>) throw FormatException('$key must be an object.');
+  return decode(JsonObject(field));
 }
 
 Map<String, Object?> _without(Map<String, Object?> value, Set<String> keys) =>

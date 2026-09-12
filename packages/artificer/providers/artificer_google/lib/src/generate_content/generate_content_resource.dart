@@ -3,6 +3,7 @@ import 'package:artificer_core/json.dart';
 import 'package:artificer_core/protocols.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:artificer_google/src/generate_content/generate_content_models.dart';
+import 'package:artificer_google/src/generate_content/tool_models.dart';
 import 'package:conflux/conflux.dart';
 
 const _providerId = 'google';
@@ -32,6 +33,25 @@ final class GoogleGenerateContentResource {
           modelId: modelId,
         )
         .flatMap(_decodeResponse);
+  }
+
+  /// Counts tokens in one explicit native request.
+  Effect<NativeResponse<GoogleCountTokensResponse>, AiError> countTokens(
+    GoogleCountTokensRequest request,
+  ) {
+    final modelId = _modelId(request.model);
+    return _client
+        .sendJson(
+          ProviderHttpRequest(
+            method: 'POST',
+            path: '/v1beta/models/${Uri.encodeComponent(modelId)}:countTokens',
+            body: request.toJson(),
+          ),
+          providerId: _providerId,
+          api: _api,
+          modelId: modelId,
+        )
+        .flatMap((response) => _decodeTyped(response, GoogleCountTokensResponse.fromJson));
   }
 
   /// Streams native GenerateContent response fragments until normal EOF.
@@ -84,6 +104,7 @@ final class GoogleGenerateContentResource {
   GenerationResult normalize(
     NativeResponse<GoogleGenerateContentResponse> response, {
     int? candidateIndex,
+    GoogleGenerateContentRequest? request,
   }) {
     final value = response.value;
     if (value.candidates.length > 1 && candidateIndex == null) {
@@ -110,25 +131,35 @@ final class GoogleGenerateContentResource {
     }
     final candidate = value.candidates[selected];
     final content = candidate.content;
-    final parts = <OutputPart>[
-      if (content != null)
-        for (final part in content.parts)
-          if (part.text case final text?)
-            TextOutputPart(text)
-          else
-            OpaqueOutputPart(
-              providerId: _providerId,
-              api: _api,
-              kind: 'part',
-              data: part.toJson(),
-            ),
-    ];
+    final citations = _citations(candidate.extensions);
+    final requestTools = request?.tools ?? const <GoogleToolDefinition>[];
+    final callerFunctionNames = requestTools.expand((tool) => tool.functionNames).toSet();
+    final allowsComputerUse = requestTools.any((tool) => tool is GoogleComputerUseTool);
+    var callIndex = 0;
+    final parts = <OutputPart>[];
+    if (content != null) {
+      for (final part in content.parts) {
+        final normalized = _normalizePart(
+          part,
+          index: parts.length,
+          callIndex: callIndex,
+          citations: parts.whereType<TextOutputPart>().isEmpty ? citations : const [],
+          callerFunctionNames: callerFunctionNames,
+          allowsComputerUse: allowsComputerUse,
+        );
+        if (part.functionCall != null) callIndex++;
+        if (normalized != null) parts.add(normalized);
+      }
+    }
     return _result(
       response,
       parts: parts,
       finishReason: _finishReason(candidate.finishReason),
       nativeFinishReason: candidate.finishReason,
-      replay: [ReplayItem(phase: 'candidate', data: candidate.raw)],
+      replay: [
+        if (content != null) ReplayItem(phase: 'content', data: content.toJson()),
+        ReplayItem(phase: 'candidate-metadata', data: candidate.raw),
+      ],
     );
   }
 
@@ -158,6 +189,98 @@ final class GoogleGenerateContentResource {
   );
 }
 
+OutputPart? _normalizePart(
+  GooglePart part, {
+  required int index,
+  required int callIndex,
+  required List<Citation> citations,
+  required Set<String> callerFunctionNames,
+  required bool allowsComputerUse,
+}) {
+  if (part.text case final text?) {
+    if (text.isEmpty && part.thoughtSignature != null) return null;
+    return part.thought == true
+        ? ReasoningSummaryPart(text)
+        : TextOutputPart(text, citations: citations);
+  }
+  if (part.functionCall case final call?) {
+    final isApplicationFunction = callerFunctionNames.contains(call.name);
+    if (!isApplicationFunction && !allowsComputerUse) {
+      return OpaqueOutputPart(
+        providerId: _providerId,
+        api: _api,
+        kind: 'unclassified-function-call',
+        data: part.toJson(),
+      );
+    }
+    return ApplicationToolCallPart(
+      id: call.id ?? 'google-call-$callIndex',
+      name: call.name,
+      arguments: isApplicationFunction
+          ? call.rawArgs.toDart() is Map<String, Object?>
+                ? JsonToolArguments(call.args)
+                : MalformedToolArguments(
+                    originalText: call.rawArgs.encode(),
+                    issue: 'Google functionCall.args must be a JSON object.',
+                  )
+          : NativeToolArguments(
+              providerId: _providerId,
+              api: _api,
+              action: part.toJson(),
+            ),
+    );
+  }
+  final providerActivity =
+      part.executableCode ?? part.codeExecutionResult ?? part.toolCall ?? part.toolResponse;
+  if (providerActivity != null) {
+    final name = switch ((part.executableCode, part.codeExecutionResult, part.toolCall)) {
+      (final value?, _, _) => value.toDart()['language']?.toString() ?? 'code_execution',
+      (_, final value?, _) => value.toDart()['outcome']?.toString() ?? 'code_execution_result',
+      (_, _, final value?) => value.toDart()['toolType']?.toString() ?? 'hosted_tool',
+      _ => 'hosted_tool_result',
+    };
+    return ProviderToolRecordPart(
+      id: 'google-provider-$index',
+      name: name,
+      owner: ToolExecutionOwner.provider,
+      status: part.executableCode != null || part.toolCall != null
+          ? ProviderToolStatus.running
+          : ProviderToolStatus.completed,
+      details: part.toJson(),
+    );
+  }
+  return OpaqueOutputPart(
+    providerId: _providerId,
+    api: _api,
+    kind: 'part',
+    data: part.toJson(),
+  );
+}
+
+List<Citation> _citations(JsonObject extensions) {
+  final metadata = extensions.toDart()['groundingMetadata'];
+  if (metadata is! Map<String, Object?>) return const [];
+  final chunks = metadata['groundingChunks'];
+  if (chunks is! List<Object?>) return const [];
+  final citations = <Citation>[];
+  for (final chunk in chunks.whereType<Map<String, Object?>>()) {
+    final web = chunk['web'];
+    if (web is! Map<String, Object?>) continue;
+    final uriValue = web['uri'];
+    if (uriValue is! String) continue;
+    final uri = Uri.tryParse(uriValue);
+    if (uri == null || !uri.isAbsolute) continue;
+    citations.add(
+      Citation(
+        uri: uri,
+        title: web['title'] as String?,
+        nativeMetadata: JsonObject(chunk),
+      ),
+    );
+  }
+  return List.unmodifiable(citations);
+}
+
 Effect<NativeResponse<GoogleGenerateContentResponse>, AiError> _decodeResponse(
   NativeResponse<JsonObject> response,
 ) {
@@ -166,6 +289,26 @@ Effect<NativeResponse<GoogleGenerateContentResponse>, AiError> _decodeResponse(
     return Effect.succeed(
       NativeResponse(
         value: GoogleGenerateContentResponse.fromJson(response.value),
+        payload: response.payload,
+        metadata: response.metadata,
+      ),
+    );
+  } on AiError catch (error) {
+    return Effect.fail(error);
+  } on FormatException catch (error) {
+    return Effect.fail(ProtocolError(error.message));
+  }
+}
+
+Effect<NativeResponse<T>, AiError> _decodeTyped<T>(
+  NativeResponse<JsonObject> response,
+  T Function(JsonObject) decode,
+) {
+  try {
+    _throwServiceError(response.value, response.metadata);
+    return Effect.succeed(
+      NativeResponse(
+        value: decode(response.value),
         payload: response.payload,
         metadata: response.metadata,
       ),
@@ -393,6 +536,7 @@ bool _isFinished(String? reason) => reason != null && reason != 'FINISH_REASON_U
 
 FinishReason _finishReason(String? reason) => switch (reason) {
   'STOP' => FinishReason.stop,
+  'FUNCTION_CALL' => FinishReason.toolCalls,
   'MAX_TOKENS' => FinishReason.outputLimit,
   'SAFETY' ||
   'BLOCKLIST' ||

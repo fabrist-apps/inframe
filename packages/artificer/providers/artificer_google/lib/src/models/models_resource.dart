@@ -39,7 +39,17 @@ final class GoogleModelsResource {
   GenerationResult normalizeGenerateContent(
     NativeResponse<GoogleGenerateContentResponse> response, {
     int? candidateIndex,
-  }) => _generateContent.normalize(response, candidateIndex: candidateIndex);
+    GoogleGenerateContentRequest? request,
+  }) => _generateContent.normalize(
+    response,
+    candidateIndex: candidateIndex,
+    request: request,
+  );
+
+  /// Counts tokens for the selected model through one explicit request.
+  Effect<NativeResponse<GoogleCountTokensResponse>, AiError> countTokens(
+    GoogleCountTokensRequest request,
+  ) => _generateContent.countTokens(request);
 
   /// Lists exactly one requested page without following its page token.
   Effect<NativeResponse<GoogleModelPage>, AiError> list({int? pageSize, String? pageToken}) {

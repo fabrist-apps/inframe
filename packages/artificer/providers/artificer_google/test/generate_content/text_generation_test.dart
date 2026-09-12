@@ -180,12 +180,16 @@ void main() {
       ]);
     });
 
-    test('should reject unsupported or colliding configuration before I/O', () async {
+    test('should reject collisions and accept JSON object output', () async {
       var requests = 0;
+      Map<String, Object?>? body;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
-      server.listen((request) {
+      server.listen((request) async {
         requests++;
+        body = jsonDecode(await utf8.decoder.bind(request).join())! as Map<String, Object?>;
+        _json(request, _response);
+        await request.response.close();
       });
       final provider = _provider(server);
       addTearDown(provider.close);
@@ -196,7 +200,7 @@ void main() {
       );
 
       final collided = await collision.generate(request).runFutureExit();
-      final structured = await provider
+      await provider
           .languageModel('model')
           .generate(
             GenerationRequest(
@@ -204,11 +208,11 @@ void main() {
               output: const JsonObjectOutputFormat(),
             ),
           )
-          .runFutureExit();
+          .runFuture();
 
       expect(collided, _failedWith<InvalidRequestError>());
-      expect(structured, _failedWith<UnsupportedFeatureError>());
-      expect(requests, 0);
+      expect((body!['generationConfig']! as Map)['responseMimeType'], 'application/json');
+      expect(requests, 1);
     });
 
     test('should reject prefixed IDs and keep unfamiliar capabilities unknown', () {

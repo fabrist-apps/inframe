@@ -64,6 +64,23 @@ final result = await model
     .runFuture();
 ```
 
+Common generation maps inline image, audio, video, and document bytes to native parts. Existing
+Google Files references are forwarded without upload or readiness polling. Arbitrary media URLs
+are rejected before I/O because GenerateContent does not fetch them through the common adapter.
+
+Application functions map to native declarations and returned calls remain caller-owned. Native
+Google Search, code execution, URL context, existing File Search stores, Maps, remote MCP, computer
+use, and legacy search retrieval are available as typed Google tools. Provider-executed search and
+code activity stays inspectable as provider activity; computer-use calls stay caller-owned and use
+provider-tagged native arguments and results.
+
+`JsonObjectOutputFormat` sends `application/json`. `JsonSchemaOutputFormat` also sends the schema as
+`responseJsonSchema`; known unsupported Google schema keywords fail before the request. Returned
+assistant messages carry signed replay metadata. Serialize and restore the complete message before
+appending tool results so thought signatures and native part ordering are retained. See
+[`example/content_and_tools.dart`](example/content_and_tools.dart) for one multimodal, structured
+application-tool round trip.
+
 Native calls keep authoritative resource names:
 
 ```dart
@@ -81,6 +98,17 @@ final native = await provider.models
     )
     .runFuture();
 final common = provider.models.normalizeGenerateContent(native);
+
+final tokenCount = await provider.models
+    .countTokens(
+      GoogleCountTokensRequest(
+        model: selected.value.name,
+        contents: [
+          GoogleContent(role: 'user', parts: [GooglePart.text('Hello')]),
+        ],
+      ),
+    )
+    .runFuture();
 ```
 
 `models.list` fetches exactly one page. Native multi-candidate responses require an explicit
