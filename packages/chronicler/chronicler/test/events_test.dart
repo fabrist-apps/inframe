@@ -7,6 +7,139 @@ import 'support/exporter.dart';
 
 void main() {
   group('ChroniclerEvents', () {
+    test('should emit distinct property removals without changing Context identity', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter, maxBatchRecords: 2);
+      final context = Context().withChronicler(chronicler.recorder).withIdentity(userId: 'caller');
+
+      context.events.unsetUserProperties(
+        userId: 'target',
+        keys: ['plan', 'companySize', 'plan'],
+      );
+      context.events.track('after_unset');
+
+      await Future<void>.delayed(Duration.zero);
+      final update = exporter.batches.single.records.first as UserPropertiesUnsetRecord;
+      final event = exporter.batches.single.records.last as ProductEventRecord;
+      expect(update.envelope.userId, 'caller');
+      expect(update.payload.userId, 'target');
+      expect(update.payload.keys, ['plan', 'companySize']);
+      expect(event.envelope.userId, 'caller');
+    });
+
+    test('should make empty property removals no-ops before target and capture checks', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter);
+
+      Context()
+          .withChronicler(chronicler.recorder)
+          .events
+          .unsetUserProperties(userId: '', keys: const []);
+      chronicler.setCollectionEnabled(ChroniclerSignal.events, false);
+      Context()
+          .withChronicler(chronicler.recorder)
+          .events
+          .unsetUserProperties(userId: '', keys: const []);
+      await chronicler.close();
+      Context()
+          .withChronicler(chronicler.recorder)
+          .events
+          .unsetUserProperties(userId: '', keys: const []);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(exporter.batches, isEmpty);
+      expect(chronicler.diagnosticCounts, isEmpty);
+    });
+
+    test('should deduplicate before limits and validate every removal atomically', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter);
+      final events = Context().withChronicler(chronicler.recorder).events;
+      final repeated = List<String>.filled(200, 'password');
+
+      events.unsetUserProperties(userId: 'target', keys: repeated);
+      repeated[0] = 'changed';
+      events
+        ..unsetUserProperties(
+          userId: 'target',
+          keys: List.generate(129, (index) => 'key$index'),
+        )
+        ..unsetUserProperties(userId: '', keys: const ['valid'])
+        ..unsetUserProperties(userId: 'target', keys: const [''])
+        ..unsetUserProperties(userId: 'target', keys: ['x' * 129])
+        ..unsetUserProperties(
+          userId: 'target',
+          keys: [String.fromCharCode(0xd800)],
+        );
+      await Future<void>.delayed(Duration.zero);
+
+      final record = exporter.batches.single.records.single as UserPropertiesUnsetRecord;
+      expect(record.payload.keys, const ['password']);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(5));
+    });
+
+    test('should bypass sampling and retry one finalized property removal', () async {
+      final exporter = TestExporter();
+      var hookCalls = 0;
+      final keys = ['password', 'access_token'];
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: ChroniclerOptions(
+          delivery: const DeliveryOptions(
+            maxBatchRecords: 1,
+            initialRetryDelay: Duration(microseconds: 1),
+            maxRetryDelay: Duration(microseconds: 1),
+          ),
+          sampling: const SamplingOptions(events: 0),
+          redaction: RedactionOptions(
+            beforeRecord: (record) {
+              hookCalls++;
+              return record;
+            },
+          ),
+        ),
+      );
+      ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
+
+      Context()
+          .withChronicler(chronicler.recorder)
+          .events
+          .unsetUserProperties(userId: 'password', keys: keys);
+      keys.add('later');
+      await _waitForAttempts(exporter, 1);
+      final first = exporter.batches.single.records.single as UserPropertiesUnsetRecord;
+      exporter.attempts.first.completer.complete(const ExportResult.retryable());
+      await _waitForAttempts(exporter, 2);
+      final retried = exporter.batches.last.records.single as UserPropertiesUnsetRecord;
+
+      expect(hookCalls, 1);
+      expect(first.payload.userId, 'password');
+      expect(first.payload.keys, ['password', 'access_token']);
+      expect(retried.envelope.eventId, first.envelope.eventId);
+      expect(retried.envelope.timestamp, first.envelope.timestamp);
+      expect(retried.payload, first.payload);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.sampledOut], isNull);
+      exporter.attempts.last.completer.complete(const ExportResult.accepted());
+    });
+
+    test('should prevent property removals when event collection is disabled', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter)
+        ..setCollectionEnabled(ChroniclerSignal.events, false);
+
+      Context()
+          .withChronicler(chronicler.recorder)
+          .events
+          .unsetUserProperties(userId: 'user', keys: const ['plan']);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(exporter.batches, isEmpty);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.one);
+    });
+
     test('should emit explicit user properties without changing Context identity', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter, maxBatchRecords: 2);

@@ -128,6 +128,16 @@ final class ChroniclerRecorder {
     userId: userId,
     properties: properties,
   );
+
+  /// Records explicit user-property removals for [userId].
+  void unsetUserProperties({
+    required String userId,
+    required List<String> keys,
+  }) => _runtime._recordUserPropertiesUnset(
+    _attribution,
+    userId: userId,
+    keys: keys,
+  );
 }
 
 final class _RecorderAttribution {
@@ -599,6 +609,39 @@ final class ChroniclerRuntime {
         UserPropertiesSetRecord(
           envelope: _envelope(attribution),
           payload: UserPropertiesSetPayload(userId: userId, properties: snapshot),
+        ),
+      );
+    } on RecordValidationException {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    }
+  }
+
+  void _recordUserPropertiesUnset(
+    _RecorderAttribution attribution, {
+    required String userId,
+    required List<String> keys,
+  }) {
+    if (keys.isEmpty) return;
+    if (!_canRecord(ChroniclerSignal.events, null)) return;
+    try {
+      _validateRequiredId(userId, 'userId');
+      final distinctKeys = <String>{};
+      for (final key in keys) {
+        validator.validateString(key, options.limits.maxKeyBytes, 'property key');
+        if (key.isEmpty) {
+          throw const RecordValidationException('property key must be nonempty');
+        }
+        distinctKeys.add(key);
+      }
+      if (distinctKeys.length > options.limits.maxListItems) {
+        throw const RecordValidationException('property key list item limit exceeded');
+      }
+      _finalizeAndEnqueue(
+        UserPropertiesUnsetRecord(
+          envelope: _envelope(attribution),
+          payload: UserPropertiesUnsetPayload(userId: userId, keys: distinctKeys),
         ),
       );
     } on RecordValidationException {

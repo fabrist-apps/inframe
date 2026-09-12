@@ -59,11 +59,17 @@ context.events.setUserProperties(
   userId: userId,
   properties: {'plan': 'pro', 'companySize': 12},
 );
+context.events.unsetUserProperties(
+  userId: userId,
+  keys: ['companySize'],
+);
 ```
 
 A set operation replaces only the supplied keys when processed. Omitted keys remain untouched, and
-null is a stored value rather than deletion intent. Empty updates are no-ops. Updates use bounded
-event delivery but bypass random sampling; enqueueing does not confirm a stored profile change.
+null is a stored value rather than deletion intent. An unset operation explicitly removes its keys,
+collapsing duplicates in first-appearance order. Sensitive names such as `password` remain intact in
+the removal list. Empty updates are no-ops. Updates use bounded event delivery but bypass random
+sampling; enqueueing does not confirm a stored profile change.
 
 The defaults retain up to 5,000 records or 8 MiB, export batches of up to 100 records or 512 KiB
 within five seconds, run one export at a time, and make five total attempts. An attempt times out

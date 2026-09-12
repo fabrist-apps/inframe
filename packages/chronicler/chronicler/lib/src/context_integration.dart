@@ -69,6 +69,15 @@ final class ChroniclerEvents {
     required String userId,
     required Map<String, Object?> properties,
   }) => _recorder.setUserProperties(userId: userId, properties: properties);
+
+  /// Records explicit user-property removals for [userId].
+  ///
+  /// Duplicate [keys] collapse in first-appearance order. An empty list is a
+  /// no-op, and sensitive field names remain intact as deletion intent.
+  void unsetUserProperties({
+    required String userId,
+    required List<String> keys,
+  }) => _recorder.unsetUserProperties(userId: userId, keys: keys);
 }
 
 /// Records structured logs without waiting for transport work.
