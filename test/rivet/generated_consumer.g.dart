@@ -22,6 +22,7 @@ final class _$UserProfilesDB extends RivetTableAccessor<UserProfiles, UserProfil
   @override
   RivetTableSchema<UserProfiles, UserProfilesRow> buildSchema() {
     final definition = UserProfiles();
+
     return RivetTableSchema<UserProfiles, UserProfilesRow>(
       schemaName: 'fbr116',
       tableName: 'userProfiles',
@@ -59,6 +60,7 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
   @override
   RivetTableSchema<Posts, PostsRow> buildSchema() {
     final definition = Posts();
+
     return RivetTableSchema<Posts, PostsRow>(
       schemaName: 'fbr116',
       tableName: 'posts',
@@ -108,6 +110,7 @@ final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValu
   @override
   RivetTableSchema<ScalarValues, ScalarValuesRow> buildSchema() {
     final definition = ScalarValues();
+
     return RivetTableSchema<ScalarValues, ScalarValuesRow>(
       schemaName: 'fbr119',
       tableName: 'scalarValues',
@@ -161,6 +164,38 @@ final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValu
   }
 }
 
+final class EnumValuesRow {
+  const EnumValuesRow({required this.status});
+
+  final WorkStatus status;
+}
+
+final class _$EnumValuesDB extends RivetTableAccessor<EnumValues, EnumValuesRow> {
+  const _$EnumValuesDB();
+
+  @override
+  RivetTableSchema<EnumValues, EnumValuesRow> buildSchema() {
+    final definition = EnumValues();
+    definition.status.useCodec(WorkStatusRivetEnum.codec);
+    return RivetTableSchema<EnumValues, EnumValuesRow>(
+      schemaName: 'fbr120',
+      tableName: 'enumValues',
+      definition: definition,
+      columns: [definition.status as RivetColumn<Object?>],
+      columnNames: ['status'],
+      decode: (values, sqlNulls) => EnumValuesRow(
+        status: definition.status.decodeValue(
+          values[0],
+          isSqlNull: sqlNulls[0],
+        ),
+      ),
+      indexes: const <RivetIndex>[],
+      constraints: const <RivetConstraint>[],
+      relations: {},
+    );
+  }
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -176,6 +211,18 @@ abstract class _$RivetTestDatabase {
       UserProfiles.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       Posts.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       ScalarValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      EnumValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
+  );
+}
+
+// **************************************************************************
+// RivetEnumGenerator
+// **************************************************************************
+
+abstract final class WorkStatusRivetEnum {
+  static const codec = RivetEnumCodec<WorkStatus>(
+    values: [WorkStatus.queued, WorkStatus.complete],
+    labels: ['zeta', 'alpha'],
   );
 }

@@ -55,5 +55,23 @@ final class ScalarValues extends RivetTableDefinition<ScalarValues> {
   late final optionalCode = text().map(const UserCodeConverter()).nullable()();
 }
 
-@RivetDatabase(name: 'rivet_test', tables: [UserProfiles, Posts, ScalarValues])
+@RivetEnum(name: 'workStatus', schema: 'fbr120')
+enum WorkStatus {
+  @RivetEnumValue(name: 'zeta')
+  queued,
+  @RivetEnumValue(name: 'alpha')
+  complete,
+}
+
+@RivetTable(schema: 'fbr120')
+final class EnumValues extends RivetTableDefinition<EnumValues> {
+  static const db = _$EnumValuesDB();
+
+  late final status = enumText<WorkStatus>()();
+}
+
+@RivetDatabase(
+  name: 'rivet_test',
+  tables: [UserProfiles, Posts, ScalarValues, EnumValues],
+)
 final class RivetTestDatabase extends _$RivetTestDatabase {}

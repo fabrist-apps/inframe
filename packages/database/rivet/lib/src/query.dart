@@ -84,7 +84,9 @@ final class RivetFind<Definition, Row> {
   }
 
   RivetCompiledQuery _compile({int? terminalLimit}) {
-    final columns = _schema.columns.map((column) => column.sql).join(', ');
+    final columns = _schema.columns.indexed
+        .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
+        .join(', ');
     final sql = StringBuffer('SELECT $columns FROM ${_schema.qualifiedName}');
     final parameters = <Object?>[];
     if (_predicate case final predicate?) {

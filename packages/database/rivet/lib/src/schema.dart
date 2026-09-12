@@ -80,6 +80,15 @@ abstract class RivetTableDefinition<Self> {
   RivetColumnBuilder<JsonValue> json({String? name, String? renamedFrom}) =>
       RivetColumnBuilder(RivetJsonCodec(), name: name, renamedFrom: renamedFrom);
 
+  RivetOrderableColumnBuilder<E> enumText<E extends Enum>({
+    String? name,
+    String? renamedFrom,
+  }) => RivetOrderableColumnBuilder(
+    RivetUnconfiguredEnumCodec<E>(),
+    name: name,
+    renamedFrom: renamedFrom,
+  );
+
   RivetRelationBuilder<Target, RivetOneRelation<Target>> one<Target>({
     required List<RivetColumn<dynamic>> fields,
     required List<RivetColumn<dynamic>> Function(Target table) references,
@@ -169,13 +178,16 @@ abstract class RivetTableAccessor<Definition, Row> {
 }
 
 /// Converts values at the PostgreSQL boundary.
-abstract interface class RivetCodec<T> {
+abstract class RivetCodec<T> {
+  const RivetCodec();
+
   String get cast;
+  String select(String columnSql) => columnSql;
   Object? encode(T value);
   T decode(Object? value, {required bool isSqlNull});
 }
 
-final class RivetTextCodec implements RivetCodec<String> {
+final class RivetTextCodec extends RivetCodec<String> {
   @override
   String get cast => 'text';
 
@@ -191,13 +203,16 @@ final class RivetTextCodec implements RivetCodec<String> {
   }
 }
 
-final class RivetNullableCodec<T> implements RivetCodec<T?> {
+final class RivetNullableCodec<T> extends RivetCodec<T?> {
   const RivetNullableCodec(this.inner);
 
   final RivetCodec<T> inner;
 
   @override
   String get cast => inner.cast;
+
+  @override
+  String select(String columnSql) => inner.select(columnSql);
 
   @override
   Object? encode(T? value) => value == null ? null : inner.encode(value);
@@ -207,7 +222,7 @@ final class RivetNullableCodec<T> implements RivetCodec<T?> {
       isSqlNull ? null : inner.decode(value, isSqlNull: false);
 }
 
-final class RivetChronoIdCodec implements RivetCodec<String> {
+final class RivetChronoIdCodec extends RivetCodec<String> {
   const RivetChronoIdCodec({this.prefix, this.size = 24});
 
   final String? prefix;
@@ -236,7 +251,7 @@ final class RivetChronoIdCodec implements RivetCodec<String> {
   }
 }
 
-final class RivetIntegerCodec implements RivetCodec<int> {
+final class RivetIntegerCodec extends RivetCodec<int> {
   static const min = -2147483648;
   static const max = 2147483647;
 
@@ -261,7 +276,7 @@ final class RivetIntegerCodec implements RivetCodec<int> {
   }
 }
 
-final class RivetRealCodec implements RivetCodec<double> {
+final class RivetRealCodec extends RivetCodec<double> {
   @override
   String get cast => 'float8';
 
@@ -276,7 +291,7 @@ final class RivetRealCodec implements RivetCodec<double> {
   }
 }
 
-final class RivetBooleanCodec implements RivetCodec<bool> {
+final class RivetBooleanCodec extends RivetCodec<bool> {
   @override
   String get cast => 'bool';
 
@@ -290,7 +305,7 @@ final class RivetBooleanCodec implements RivetCodec<bool> {
   }
 }
 
-final class RivetDateTimeCodec implements RivetCodec<DateTime> {
+final class RivetDateTimeCodec extends RivetCodec<DateTime> {
   @override
   String get cast => 'timestamptz';
 
@@ -345,7 +360,7 @@ final class JsonData extends JsonValue {
   int get hashCode => jsonEncode(value).hashCode;
 }
 
-final class RivetJsonCodec implements RivetCodec<JsonValue> {
+final class RivetJsonCodec extends RivetCodec<JsonValue> {
   @override
   String get cast => 'jsonb';
 
@@ -356,6 +371,46 @@ final class RivetJsonCodec implements RivetCodec<JsonValue> {
   JsonValue decode(Object? value, {required bool isSqlNull}) {
     if (isSqlNull) throw const FormatException('expected non-null PostgreSQL JSONB');
     return JsonValue.from(value);
+  }
+}
+
+final class RivetUnconfiguredEnumCodec<E extends Enum> extends RivetCodec<E> {
+  @override
+  String get cast => 'text';
+
+  @override
+  Object encode(E value) => throw StateError('The generated enum codec was not attached.');
+
+  @override
+  E decode(Object? value, {required bool isSqlNull}) =>
+      throw StateError('The generated enum codec was not attached.');
+}
+
+final class RivetEnumCodec<E extends Enum> extends RivetCodec<E> {
+  const RivetEnumCodec({required this.values, required this.labels});
+
+  final List<E> values;
+  final List<String> labels;
+
+  @override
+  String get cast => 'text';
+
+  @override
+  String select(String columnSql) => '$columnSql::text';
+
+  @override
+  Object encode(E value) {
+    final index = values.indexOf(value);
+    if (index < 0) throw ArgumentError.value(value, 'value', 'is not registered');
+    return labels[index];
+  }
+
+  @override
+  E decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull || value is! String) throw const FormatException('expected a native enum label');
+    final index = labels.indexOf(value);
+    if (index < 0) throw FormatException('unknown native enum label `$value`');
+    return values[index];
   }
 }
 
@@ -387,7 +442,7 @@ abstract interface class RivetTypeConverter<Domain, Storage> {
   Storage toSql(Domain value);
 }
 
-final class RivetMappedCodec<Domain, Storage> implements RivetCodec<Domain> {
+final class RivetMappedCodec<Domain, Storage> extends RivetCodec<Domain> {
   const RivetMappedCodec(this.storage, this.converter);
 
   final RivetCodec<Storage> storage;
@@ -395,6 +450,9 @@ final class RivetMappedCodec<Domain, Storage> implements RivetCodec<Domain> {
 
   @override
   String get cast => storage.cast;
+
+  @override
+  String select(String columnSql) => storage.select(columnSql);
 
   @override
   Object? encode(Domain value) => storage.encode(converter.toSql(value));
@@ -516,7 +574,7 @@ final class _NullableConverter<Domain, Storage> implements RivetTypeConverter<Do
 class RivetColumn<T> {
   RivetColumn(this.codec, {this.declaredName, this.renamedFrom});
 
-  final RivetCodec<T> codec;
+  RivetCodec<T> codec;
   final String? declaredName;
   final String? renamedFrom;
   bool isPrimaryKey = false;
@@ -538,6 +596,9 @@ class RivetColumn<T> {
 
   String get physicalName => declaredName ?? dartName;
   String get sql => quoteIdentifier(physicalName);
+  String get selectionSql => codec.select(sql);
+
+  void useCodec(RivetCodec<T> value) => codec = value;
 
   RivetPredicate equals(T value) {
     final encoded = _convert('encode', () => codec.encode(value));

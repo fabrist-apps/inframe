@@ -85,6 +85,13 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
               '${literal(field.displayName)}: definition.${field.displayName} as RivetRelationDescriptor<Object?>',
         )
         .join(', ');
+    final enumCodecs = columns
+        .where(_isEnumColumn)
+        .map((field) {
+          final enumName = columnValueType(field.type);
+          return 'definition.${field.displayName}.useCodec(${enumName}RivetEnum.codec);';
+        })
+        .join('\n    ');
 
     return '''
 final class $rowName {
@@ -101,6 +108,7 @@ final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
   @override
   RivetTableSchema<$className, $rowName> buildSchema() {
     final definition = $className();
+    $enumCodecs
     return RivetTableSchema<$className, $rowName>(
       schemaName: ${literal(schemaName)},
       tableName: ${literal(tableName)},
@@ -113,8 +121,18 @@ final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
       relations: {$relationMap},
     );
   }
+
 }
 ''';
+  }
+
+  bool _isEnumColumn(FieldElement field) {
+    final type = field.type;
+    if (type is! InterfaceType || type.typeArguments.isEmpty) return false;
+    final valueType = type.typeArguments.first;
+    final element = valueType.element;
+    return element != null &&
+        const TypeChecker.typeNamed(RivetEnum, inPackage: 'rivet').hasAnnotationOf(element);
   }
 
   String _relationValueType(FieldElement field) {
