@@ -142,6 +142,7 @@ void main() {
       final log = records.first as LogRecord;
       final span = records.whereType<SpanRecord>().single;
       final metric = records.whereType<MetricRecord>().first;
+      final unset = records.whereType<UserPropertiesUnsetRecord>().single;
       final outsideRange = DateTime.utc(0);
 
       expect(
@@ -167,6 +168,23 @@ void main() {
           ),
         ),
         throwsA(isA<ChroniclerEncodingException>()),
+      );
+      final oversizedKeys = List.generate(129, (index) => 'key$index');
+      expect(
+        () => const ChroniclerCodec().encodeRecord(
+          unset.copyWith(payload: unset.payload.copyWith(keys: oversizedKeys)),
+        ),
+        throwsA(isA<ChroniclerEncodingException>()),
+      );
+      final unsetMap = jsonDecode(
+        utf8.decode(const ChroniclerCodec().encodeRecord(unset)),
+      ) as Map<String, Object?>;
+      (unsetMap['payload']! as Map<String, Object?>)['keys'] = oversizedKeys;
+      expect(
+        const ChroniclerCodec().decodeRecord(
+          Uint8List.fromList(utf8.encode(jsonEncode(unsetMap))),
+        ),
+        _failure(DecodeFailureReason.limitExceeded),
       );
     });
 

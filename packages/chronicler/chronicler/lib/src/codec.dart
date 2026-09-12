@@ -451,8 +451,11 @@ final class ChroniclerCodec {
       case UserPropertiesUnsetRecord():
         _validateModelString(record.payload.userId, limits.maxIdBytes, allowEmpty: false);
         if (record.payload.keys.isEmpty ||
+            record.payload.keys.length > limits.maxListItems ||
             record.payload.keys.toSet().length != record.payload.keys.length) {
-          throw const ChroniclerEncodingException('property keys must be nonempty and distinct');
+          throw const ChroniclerEncodingException(
+            'property keys must be nonempty, distinct, and within the list limit',
+          );
         }
         for (final key in record.payload.keys) {
           _validateModelString(key, limits.maxKeyBytes, allowEmpty: false);
@@ -686,6 +689,9 @@ final class ChroniclerCodec {
     final value = map['keys'];
     if (value is! List<Object?> || value.isEmpty || value.any((item) => item is! String)) {
       throw const _CodecFailure(DecodeFailureReason.invalidField);
+    }
+    if (value.length > limits.maxListItems) {
+      throw const _CodecFailure(DecodeFailureReason.limitExceeded);
     }
     final keys = value.cast<String>();
     if (keys.toSet().length != keys.length) {
