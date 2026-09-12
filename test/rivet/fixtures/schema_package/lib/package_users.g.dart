@@ -55,7 +55,9 @@ abstract final class AccessLevelRivetEnum {
   static const codec = RivetEnumCodec<AccessLevel>(
     schemaName: 'fixture',
     typeName: 'accessLevel',
+    renamedFrom: 'role',
     values: [AccessLevel.viewer, AccessLevel.owner],
     labels: ['viewer', 'owner-label'],
+    renamedLabels: {'owner-label': 'admin-label'},
   );
 }

@@ -48,8 +48,14 @@ void main() {
         });
 
         final row = await VectorValues.db.find().getSingle(database);
+        final filtered = await VectorValues.db
+            .find(
+              where: (values) => values.embedding.equals(Float32List.fromList([1.25, -2.5, 3.75])),
+            )
+            .getSingle(database);
         expect(row.embedding, Float32List.fromList([1.25, -2.5, 3.75]));
         expect(row.optionalEmbedding, isNull);
+        expect(filtered.embedding, Float32List.fromList([1.25, -2.5, 3.75]));
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

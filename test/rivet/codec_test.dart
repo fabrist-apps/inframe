@@ -59,6 +59,14 @@ void main() {
         table.optionalCode.codec.decode(null, isSqlNull: true),
         isNull,
       );
+      expect(
+        () => table.code.decodeValue(null, isSqlNull: true),
+        throwsA(
+          isA<RivetConversionException>()
+              .having((error) => error.table, 'table', 'fbr119.scalarValues')
+              .having((error) => error.column, 'column', 'code'),
+        ),
+      );
     });
   });
 }

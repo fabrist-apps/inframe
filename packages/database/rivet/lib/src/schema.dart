@@ -455,12 +455,16 @@ final class RivetEnumCodec<E extends Enum> extends RivetCodec<E> {
     required this.typeName,
     required this.values,
     required this.labels,
+    this.renamedFrom,
+    this.renamedLabels = const {},
   });
 
   final String schemaName;
   final String typeName;
   final List<E> values;
   final List<String> labels;
+  final String? renamedFrom;
+  final Map<String, String> renamedLabels;
 
   @override
   String get cast => '${quoteIdentifier(schemaName)}.${quoteIdentifier(typeName)}';

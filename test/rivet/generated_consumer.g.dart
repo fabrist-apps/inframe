@@ -100,6 +100,7 @@ final class ScalarValuesRow {
     required this.active,
     required this.createdAt,
     required this.payload,
+    required this.preferences,
     required this.code,
     required this.optionalCode,
   });
@@ -121,6 +122,9 @@ final class ScalarValuesRow {
 
   /// Value read from `payload`.
   final JsonValue payload;
+
+  /// Value read from `preferences`.
+  final Preferences preferences;
 
   /// Value read from `code`.
   final UserCode code;
@@ -147,6 +151,7 @@ final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValu
         definition.active as RivetColumn<Object?>,
         definition.createdAt as RivetColumn<Object?>,
         definition.payload as RivetColumn<Object?>,
+        definition.preferences as RivetColumn<Object?>,
         definition.code as RivetColumn<Object?>,
         definition.optionalCode as RivetColumn<Object?>,
       ],
@@ -157,6 +162,7 @@ final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValu
         'active',
         'createdAt',
         'payload',
+        'preferences',
         'code',
         'optionalCode',
       ],
@@ -176,10 +182,14 @@ final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValu
           values[5],
           isSqlNull: sqlNulls[5],
         ),
-        code: definition.code.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+        preferences: definition.preferences.decodeValue(
+          values[6],
+          isSqlNull: sqlNulls[6],
+        ),
+        code: definition.code.decodeValue(values[7], isSqlNull: sqlNulls[7]),
         optionalCode: definition.optionalCode.decodeValue(
-          values[7],
-          isSqlNull: sqlNulls[7],
+          values[8],
+          isSqlNull: sqlNulls[8],
         ),
       ),
     );
@@ -399,6 +409,7 @@ abstract final class WorkStatusRivetEnum {
   static const codec = RivetEnumCodec<WorkStatus>(
     schemaName: 'fbr120',
     typeName: 'workStatus',
+
     values: [WorkStatus.queued, WorkStatus.complete],
     labels: ['zeta', 'alpha'],
   );

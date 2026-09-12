@@ -6,11 +6,11 @@ import 'package:rivet/rivet.dart';
 
 part 'package_users.g.dart';
 
-@RivetEnum(schema: 'fixture', name: 'accessLevel')
+@RivetEnum(schema: 'fixture', name: 'accessLevel', renamedFrom: 'role')
 enum AccessLevel {
   viewer,
 
-  @RivetEnumValue(name: 'owner-label')
+  @RivetEnumValue(name: 'owner-label', renamedFrom: 'admin-label')
   owner,
 }
 

@@ -89,5 +89,29 @@ enum Status {
       expect(result.succeeded, isFalse);
       expect(result.errors.single, contains('Could not resolve annotation'));
     });
+
+    test('should reject ambiguous native enum rename hints', () async {
+      final result = await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {
+          'rivet_generator|lib/invalid_enum_rename.dart': '''
+import 'package:rivet/rivet.dart';
+
+part 'invalid_enum_rename.g.dart';
+
+@RivetEnum()
+enum Status {
+  @RivetEnumValue(renamedFrom: 'old')
+  first,
+  @RivetEnumValue(renamedFrom: 'old')
+  second,
+}
+''',
+        },
+      );
+
+      expect(result.succeeded, isFalse);
+      expect(result.errors.single, contains('Could not resolve annotation'));
+    });
   });
 }

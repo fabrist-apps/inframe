@@ -46,6 +46,28 @@ final class UserCodeConverter implements RivetTypeConverter<UserCode, String> {
   String toSql(UserCode value) => value.value;
 }
 
+final class Preferences {
+  const Preferences({required this.darkMode});
+
+  final bool darkMode;
+}
+
+final class PreferencesConverter implements RivetTypeConverter<Preferences, JsonValue> {
+  const PreferencesConverter();
+
+  @override
+  Preferences fromSql(JsonValue value) {
+    final json = value.toDart();
+    if (json is! Map<String, Object?> || json['darkMode'] is! bool) {
+      throw const FormatException('expected preferences JSON');
+    }
+    return Preferences(darkMode: json['darkMode']! as bool);
+  }
+
+  @override
+  JsonValue toSql(Preferences value) => JsonValue.from({'darkMode': value.darkMode});
+}
+
 @RivetTable(schema: 'fbr119')
 final class ScalarValues extends RivetTableDefinition<ScalarValues> {
   static const db = _$ScalarValuesDB();
@@ -56,6 +78,7 @@ final class ScalarValues extends RivetTableDefinition<ScalarValues> {
   late final active = boolean()();
   late final createdAt = dateTime()();
   late final payload = json()();
+  late final preferences = json().map(const PreferencesConverter())();
   late final code = text().map(const UserCodeConverter())();
   late final optionalCode = text().map(const UserCodeConverter()).nullable()();
 }

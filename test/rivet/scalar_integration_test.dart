@@ -25,6 +25,7 @@ void main() {
           active boolean NOT NULL,
           "createdAt" timestamptz(3) NOT NULL,
           payload jsonb NOT NULL,
+          preferences jsonb NOT NULL,
           code text NOT NULL,
           "optionalCode" text
         )
@@ -32,9 +33,9 @@ void main() {
       await fixture.execute(
         pg.Sql.named('''
           INSERT INTO fbr119."scalarValues"
-            (id, count, score, active, "createdAt", payload, code, "optionalCode")
+            (id, count, score, active, "createdAt", payload, preferences, code, "optionalCode")
           VALUES (@id:text, @count:int4, @score:float8, @active:boolean,
-                  @created:timestamptz, @payload:jsonb, @code:text, NULL)
+                  @created:timestamptz, @payload:jsonb, @preferences:jsonb, @code:text, NULL)
         '''),
         parameters: {
           'id': 'usr_000000000000000000000000',
@@ -43,15 +44,16 @@ void main() {
           'active': true,
           'created': DateTime.utc(1969, 12, 31, 23, 59, 59, 999),
           'payload': {'ok': true, 'value': null},
+          'preferences': {'darkMode': true},
           'code': 'A',
         },
       );
       await fixture.execute('''
         INSERT INTO fbr119."scalarValues"
-          (id, count, score, active, "createdAt", payload, code, "optionalCode")
+          (id, count, score, active, "createdAt", payload, preferences, code, "optionalCode")
         VALUES (
           'usr_111111111111111111111111', 0, 0, false,
-          '1970-01-01 00:00:00+00', 'null'::jsonb, 'B', NULL
+          '1970-01-01 00:00:00+00', 'null'::jsonb, '{"darkMode":false}'::jsonb, 'B', NULL
         )
       ''');
       database = await RivetTestDatabase().open(
@@ -75,6 +77,9 @@ void main() {
         final jsonNull = await ScalarValues.db
             .find(where: (values) => values.payload.equals(const JsonNull()))
             .getSingle(database);
+        final mappedJson = await ScalarValues.db
+            .find(where: (values) => values.preferences.equals(const Preferences(darkMode: true)))
+            .getSingle(database);
 
         expect(row.id, 'usr_000000000000000000000000');
         expect(row.count, 2147483647);
@@ -82,9 +87,11 @@ void main() {
         expect(row.active, isTrue);
         expect(row.createdAt, DateTime.utc(1969, 12, 31, 23, 59, 59, 999));
         expect(row.payload, JsonValue.from(const {'ok': true, 'value': null}));
+        expect(row.preferences.darkMode, isTrue);
         expect(row.code.value, 'A');
         expect(row.optionalCode, isNull);
         expect(jsonNull.payload, const JsonNull());
+        expect(mappedJson.code.value, 'A');
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
