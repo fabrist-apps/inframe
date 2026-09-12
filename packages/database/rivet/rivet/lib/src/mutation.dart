@@ -1,5 +1,5 @@
 // Mutation plans retain values and callbacks, then compile them at execution time.
-// ignore_for_file: avoid_returning_this, public_member_api_docs
+// ignore_for_file: avoid_returning_this, prefer_initializing_formals, public_member_api_docs
 
 import 'package:rivet/src/errors.dart';
 import 'package:rivet/src/query.dart';
@@ -45,13 +45,69 @@ abstract interface class RivetCompanion<Definition> {
   List<RivetAssignment<Definition>> get assignments;
 }
 
+typedef RivetConflictTarget<Definition> = List<RivetColumn<dynamic>> Function(Definition table);
+typedef RivetOnConflict<Definition> = RivetConflictAction<Definition> Function(
+  RivetConflictBuilder<Definition> conflict,
+);
+
+sealed class RivetConflictAction<Definition> {
+  const RivetConflictAction();
+}
+
+final class RivetConflictBuilder<Definition> {
+  const RivetConflictBuilder._(this._schema);
+
+  final RivetTableSchema<Definition, dynamic> _schema;
+
+  RivetConflictAction<Definition> doNothing({
+    RivetConflictTarget<Definition>? target,
+    RivetWhere<Definition>? targetWhere,
+  }) {
+    if (target == null && targetWhere != null) {
+      throw const RivetUnsupportedQueryException(
+        'A conflict targetWhere requires a target.',
+      );
+    }
+    final columns = List<RivetColumn<dynamic>>.unmodifiable(
+      target?.call(_schema.definition) ?? const [],
+    );
+    if (target != null && columns.isEmpty) {
+      throw const RivetUnsupportedQueryException(
+        'A conflict target must select at least one column.',
+      );
+    }
+    if (columns.any((column) => !column.belongsTo(_schema))) {
+      throw const RivetUnsupportedQueryException(
+        'Conflict targets can only select columns from the inserted table.',
+      );
+    }
+    final predicate = targetWhere?.call(_schema.definition);
+    if (predicate?.columns.any((column) => !column.belongsTo(_schema)) ?? false) {
+      throw const RivetUnsupportedQueryException(
+        'A conflict targetWhere can only reference the inserted table.',
+      );
+    }
+    return _RivetDoNothing(columns, predicate);
+  }
+}
+
+final class _RivetDoNothing<Definition> extends RivetConflictAction<Definition> {
+  const _RivetDoNothing(this.columns, this.targetWhere);
+
+  final List<RivetColumn<dynamic>> columns;
+  final RivetPredicate? targetWhere;
+}
+
 extension RivetMutationAccess<Definition, Row> on RivetTableAccessor<Definition, Row> {
-  RivetInsert<Definition, Row> insert(RivetCompanion<Definition> companion) =>
-      RivetInsert(buildSchema(), companion);
+  RivetInsert<Definition, Row> insert(
+    RivetCompanion<Definition> companion, {
+    RivetOnConflict<Definition>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
 
   RivetInsertMany<Definition, Row> insertMany(
-    Iterable<RivetCompanion<Definition>> companions,
-  ) => RivetInsertMany(buildSchema(), companions);
+    Iterable<RivetCompanion<Definition>> companions, {
+    RivetOnConflict<Definition>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
 
   RivetUpdate<Definition, Row> update(
     RivetCompanion<Definition> companion, {
@@ -63,29 +119,47 @@ extension RivetMutationAccess<Definition, Row> on RivetTableAccessor<Definition,
 }
 
 final class RivetInsert<Definition, Row> {
-  const RivetInsert(this._schema, this._companion);
+  const RivetInsert(
+    this._schema,
+    this._companion, {
+    RivetOnConflict<Definition>? onConflict,
+  }) : _onConflict = onConflict;
 
   final RivetTableSchema<Definition, Row> _schema;
   final RivetCompanion<Definition> _companion;
+  final RivetOnConflict<Definition>? _onConflict;
 
   RivetInsert<Definition, Row> prepare() => this;
 
-  Future<int> execute(RivetExecutor executor) =>
-      executor.executeAffected(_compileInsert(_schema, _companion, returning: false));
+  Future<int> execute(RivetExecutor executor) => executor.executeAffected(
+    _compileInsert(
+      _schema,
+      _companion,
+      onConflict: _onConflict,
+      returning: false,
+    ),
+  );
 
-  RivetReturningInsert<Definition, Row> returning() => RivetReturningInsert(_schema, _companion);
+  RivetReturningInsert<Definition, Row> returning() =>
+      RivetReturningInsert(_schema, _companion, _onConflict);
 }
 
 final class RivetReturningInsert<Definition, Row> {
-  const RivetReturningInsert(this._schema, this._companion);
+  const RivetReturningInsert(this._schema, this._companion, this._onConflict);
 
   final RivetTableSchema<Definition, Row> _schema;
   final RivetCompanion<Definition> _companion;
+  final RivetOnConflict<Definition>? _onConflict;
 
   RivetReturningInsert<Definition, Row> prepare() => this;
 
   Future<List<Row>> get(RivetExecutor executor) => executor.execute(
-    _compileInsert(_schema, _companion, returning: true),
+    _compileInsert(
+      _schema,
+      _companion,
+      onConflict: _onConflict,
+      returning: true,
+    ),
     _schema.decode,
   );
 }
@@ -93,37 +167,55 @@ final class RivetReturningInsert<Definition, Row> {
 final class RivetInsertMany<Definition, Row> {
   RivetInsertMany(
     this._schema,
-    Iterable<RivetCompanion<Definition>> companions,
-  ) : _companions = List.unmodifiable(companions);
+    Iterable<RivetCompanion<Definition>> companions, {
+    RivetOnConflict<Definition>? onConflict,
+  }) : _companions = List.unmodifiable(companions),
+       _onConflict = onConflict;
 
   final RivetTableSchema<Definition, Row> _schema;
   final List<RivetCompanion<Definition>> _companions;
+  final RivetOnConflict<Definition>? _onConflict;
 
   RivetInsertMany<Definition, Row> prepare() => this;
 
   Future<int> execute(RivetExecutor executor) {
     if (_companions.isEmpty) return Future.value(0);
     return executor.executeAffected(
-      _compileInsertMany(_schema, _companions, returning: false),
+      _compileInsertMany(
+        _schema,
+        _companions,
+        onConflict: _onConflict,
+        returning: false,
+      ),
     );
   }
 
   RivetReturningInsertMany<Definition, Row> returning() =>
-      RivetReturningInsertMany(_schema, _companions);
+      RivetReturningInsertMany(_schema, _companions, _onConflict);
 }
 
 final class RivetReturningInsertMany<Definition, Row> {
-  const RivetReturningInsertMany(this._schema, this._companions);
+  const RivetReturningInsertMany(
+    this._schema,
+    this._companions,
+    this._onConflict,
+  );
 
   final RivetTableSchema<Definition, Row> _schema;
   final List<RivetCompanion<Definition>> _companions;
+  final RivetOnConflict<Definition>? _onConflict;
 
   RivetReturningInsertMany<Definition, Row> prepare() => this;
 
   Future<List<Row>> get(RivetExecutor executor) {
     if (_companions.isEmpty) return Future.value(const []);
     return executor.execute(
-      _compileInsertMany(_schema, _companions, returning: true),
+      _compileInsertMany(
+        _schema,
+        _companions,
+        onConflict: _onConflict,
+        returning: true,
+      ),
       _schema.decode,
     );
   }
@@ -212,14 +304,21 @@ RivetCompiledQuery _compileInsert<Definition, Row>(
   RivetTableSchema<Definition, Row> schema,
   RivetCompanion<Definition> companion, {
   required bool returning,
+  RivetOnConflict<Definition>? onConflict,
 }) {
-  return _compileInsertMany(schema, [companion], returning: returning);
+  return _compileInsertMany(
+    schema,
+    [companion],
+    onConflict: onConflict,
+    returning: returning,
+  );
 }
 
 RivetCompiledQuery _compileInsertMany<Definition, Row>(
   RivetTableSchema<Definition, Row> schema,
   List<RivetCompanion<Definition>> companions, {
   required bool returning,
+  RivetOnConflict<Definition>? onConflict,
 }) {
   final parameters = <Object?>[];
   final rowsSql = <String>[];
@@ -241,6 +340,9 @@ RivetCompiledQuery _compileInsertMany<Definition, Row>(
   final sql = StringBuffer(
     'INSERT INTO ${schema.qualifiedName} ($columns) VALUES ${rowsSql.join(', ')}',
   );
+  if (onConflict?.call(RivetConflictBuilder._(schema)) case final conflict?) {
+    sql.write(_compileConflict(conflict));
+  }
   if (returning) {
     sql
       ..write(' RETURNING ')
@@ -251,6 +353,15 @@ RivetCompiledQuery _compileInsertMany<Definition, Row>(
       );
   }
   return RivetCompiledQuery(sql.toString(), parameters);
+}
+
+String _compileConflict<Definition>(RivetConflictAction<Definition> conflict) {
+  return switch (conflict) {
+    _RivetDoNothing(:final columns, :final targetWhere) =>
+      ' ON CONFLICT${columns.isEmpty ? '' : ' (${columns.map((column) => quoteIdentifier(column.physicalName)).join(', ')})'}'
+          '${targetWhere == null ? '' : ' WHERE ${targetWhere.renderLiterals()}'}'
+          ' DO NOTHING',
+  };
 }
 
 String _insertValue<Definition, Row>(

@@ -213,13 +213,16 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   }
 
   /// Creates a reusable insert plan.
-  RivetInsert<$className, $rowName> insert($companionName companion) =>
-      RivetInsert(buildSchema(), companion);
+  RivetInsert<$className, $rowName> insert(
+    $companionName companion, {
+    RivetOnConflict<$className>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
 
   /// Creates a reusable batch insert plan.
   RivetInsertMany<$className, $rowName> insertMany(
-    Iterable<$companionName> companions,
-  ) => RivetInsertMany(buildSchema(), companions);
+    Iterable<$companionName> companions, {
+    RivetOnConflict<$className>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
 
   /// Creates a reusable update plan.
   RivetUpdate<$className, $rowName> update(

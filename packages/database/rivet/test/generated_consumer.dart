@@ -462,6 +462,56 @@ final class MutationBatchChildren extends RivetTableDefinition<MutationBatchChil
   )();
 }
 
+int conflictDefaultCalls = 0;
+int conflictUpdateCalls = 0;
+
+DateTime conflictDefault() {
+  conflictDefaultCalls++;
+  return DateTime.utc(2026, 9, 12, 15, 0, conflictDefaultCalls);
+}
+
+DateTime conflictUpdate() {
+  conflictUpdateCalls++;
+  return DateTime.utc(2026, 9, 12, 16, 0, conflictUpdateCalls);
+}
+
+@RivetTable(schema: 'fbr143')
+final class MutationConflictGroups extends RivetTableDefinition<MutationConflictGroups> {
+  static const db = _$MutationConflictGroupsDB();
+
+  late final id = integer().primaryKey()();
+}
+
+@RivetTable(schema: 'fbr143')
+final class MutationConflictParents extends RivetTableDefinition<MutationConflictParents> {
+  static const db = _$MutationConflictParentsDB();
+
+  late final id = integer().primaryKey()();
+  late final email = text()();
+  late final username = text()();
+  late final active = boolean()();
+  late final name = text()();
+  late final age = integer()();
+  late final createdAt = dateTime().defaultValue(conflictDefault).onUpdate(conflictUpdate)();
+  late final requiredByDatabase = text().nullable()();
+  late final groupId = integer().nullable().references<MutationConflictGroups>(
+    (group) => group.id,
+  )();
+  late final children = many<MutationConflictChildren>(relation: (child) => child.parent)();
+}
+
+@RivetTable(schema: 'fbr143')
+final class MutationConflictChildren extends RivetTableDefinition<MutationConflictChildren> {
+  static const db = _$MutationConflictChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationConflictParents>((parent) => parent.id)();
+  late final parent = one<MutationConflictParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -485,6 +535,9 @@ final class MutationBatchChildren extends RivetTableDefinition<MutationBatchChil
     MutationRestrictChildren,
     MutationBatchParents,
     MutationBatchChildren,
+    MutationConflictGroups,
+    MutationConflictParents,
+    MutationConflictChildren,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

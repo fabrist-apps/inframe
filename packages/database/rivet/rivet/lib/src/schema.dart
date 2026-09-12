@@ -1,6 +1,7 @@
 // The README documents the declaration DSL; consequential runtime contracts are documented here.
 // ignore_for_file: avoid_returning_this, library_private_types_in_public_api, public_member_api_docs
 
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:chrono_id/chrono_id.dart';
@@ -1564,6 +1565,10 @@ final class RivetPredicate {
     (index) => '\$${startAt + index}',
   );
 
+  String renderLiterals() => _render(
+    (index) => _postgresLiteral(parameters[index]),
+  );
+
   RivetPredicate operator &(RivetPredicate other) => RivetPredicate._(
     _combine('AND', other),
     [...parameters, ...other.parameters],
@@ -1604,6 +1609,21 @@ final class RivetPredicate {
     return result.toString();
   }
 }
+
+String _postgresLiteral(Object? value) => switch (value) {
+  null => 'NULL',
+  final pg.TypedValue<Object> typed when typed.isSqlNull => 'NULL',
+  final pg.TypedValue<Object> typed => _postgresLiteral(typed.value),
+  final bool boolean => boolean ? 'TRUE' : 'FALSE',
+  final num number => number.toString(),
+  final DateTime timestamp => _quotedLiteral(timestamp.toIso8601String()),
+  final String string => _quotedLiteral(string),
+  final List<Object?> list => _quotedLiteral(jsonEncode(list)),
+  final Map<String, Object?> map => _quotedLiteral(jsonEncode(map)),
+  _ => _quotedLiteral(value.toString()),
+};
+
+String _quotedLiteral(String value) => "'${value.replaceAll("'", "''")}'";
 
 String quoteIdentifier(String identifier) {
   if (identifier.isEmpty || identifier.contains('\u0000')) {

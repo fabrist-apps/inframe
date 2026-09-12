@@ -79,13 +79,15 @@ final class _$PackageUsersDB
 
   /// Creates a reusable insert plan.
   RivetInsert<PackageUsers, PackageUsersRow> insert(
-    PackageUsersCompanion companion,
-  ) => RivetInsert(buildSchema(), companion);
+    PackageUsersCompanion companion, {
+    RivetOnConflict<PackageUsers>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
 
   /// Creates a reusable batch insert plan.
   RivetInsertMany<PackageUsers, PackageUsersRow> insertMany(
-    Iterable<PackageUsersCompanion> companions,
-  ) => RivetInsertMany(buildSchema(), companions);
+    Iterable<PackageUsersCompanion> companions, {
+    RivetOnConflict<PackageUsers>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
 
   /// Creates a reusable update plan.
   RivetUpdate<PackageUsers, PackageUsersRow> update(

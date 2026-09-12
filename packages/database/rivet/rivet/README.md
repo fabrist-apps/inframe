@@ -79,6 +79,15 @@ Deletes use the same optional root predicate and terminal shape. Omitting `where
 
 `insertMany` submits every supplied companion in one statement and evaluates omitted runtime defaults independently for each row. Empty batches return zero or an empty returned-row list without executing SQL. Callers can submit their own chunks as separate mutations inside an explicit transaction.
 
+Both insert builders accept typed conflict handling. `conflict.doNothing()` handles any eligible uniqueness conflict; select target columns to restrict it and add `targetWhere` when PostgreSQL must infer a partial unique index:
+
+```dart
+onConflict: (conflict) => conflict.doNothing(
+  target: (users) => [users.name],
+  targetWhere: (users) => ~users.name.equals(''),
+),
+```
+
 The column catalog is `chronoID`, `text`, `integer`, `real`, `boolean`, `dateTime`, `json`, `enumText`, and fixed-dimension `vector`. Add `.map(converter)` for domain values and `.array()` for one-dimensional native PostgreSQL arrays. Nullability before `.array()` applies to elements; nullability after it applies to the array column.
 
 The integration matrix pins `postgres` 3.5.12 and the Inframe image at `sha256:a29d81973c699fdf070b10f77bf5b91b1d94a59fcd7792f67410ba655761f871`: PostgreSQL 18.6, pgvector 0.8.6, pgvectorscale 0.9.1, and pg_textsearch 1.4.0.

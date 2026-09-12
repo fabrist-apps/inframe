@@ -57,6 +57,12 @@ void invalidInsertCalls() {
       (values) => values.code.value(const MutationCode('domain')),
     ),
   );
+  MutationConflictGroups.db.insert(
+    MutationConflictGroupsCompanion.insert(
+      id: const RivetValue.present(1),
+    ),
+    onConflict: (_) => 1,
+  );
 }
 ''');
 
