@@ -63,3 +63,8 @@ contract. Native callers can use `embeddings.create` for float or base64 output 
 flag. Model discovery is always explicit: `models` exposes the compatible `/models` view plus the
 detailed `/language-models` and `/embedding-models` resources. Discovery metadata does not enable
 new common-adapter modalities; the embedding adapter remains text-only.
+
+`files.create`, `files.list`, `files.retrieve`, `files.content`, and `files.delete` expose xAI's
+caller-managed file lifecycle. Uploads use copied bytes or repeatable stream factories; optional
+`expires_after` metadata is emitted before the file part. Downloads remain bounded raw byte flows.
+Closing the provider cancels local work and never deletes a remote file.

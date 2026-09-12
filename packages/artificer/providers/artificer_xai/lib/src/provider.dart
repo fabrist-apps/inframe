@@ -6,6 +6,7 @@ import 'package:artificer_core/transport.dart';
 import 'package:artificer_xai/src/chat/chat_completions_resource.dart';
 import 'package:artificer_xai/src/embeddings/embedding_models.dart';
 import 'package:artificer_xai/src/embeddings/embeddings_resource.dart';
+import 'package:artificer_xai/src/files/files_resource.dart';
 import 'package:artificer_xai/src/models/models_resource.dart';
 import 'package:artificer_xai/src/options.dart';
 import 'package:artificer_xai/src/responses/response_models.dart';
@@ -32,6 +33,7 @@ final class XaiProvider {
        ) {
     chatCompletions = XaiChatCompletionsResource(_client);
     embeddings = XaiEmbeddingsResource(_client);
+    files = XaiFilesResource(_client);
     models = XaiModelsResource(_client);
     responses = XaiResponsesResource(_client);
   }
@@ -43,6 +45,9 @@ final class XaiProvider {
 
   /// Typed native embedding operations.
   late final XaiEmbeddingsResource embeddings;
+
+  /// Explicit caller-managed file operations.
+  late final XaiFilesResource files;
 
   /// Typed native model discovery operations.
   late final XaiModelsResource models;
