@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/runtime.dart';
 import 'package:context/context.dart';
@@ -39,6 +41,61 @@ extension ChroniclerContextLogs on Context {
 extension ChroniclerContextEvents on Context {
   /// Product events backed by the recorder bound to this context.
   ChroniclerEvents get events => ChroniclerEvents(require(_chroniclerKey));
+}
+
+/// Runs callback-managed tracing operations from a configured [Context].
+extension ChroniclerContextTracing on Context {
+  /// Runs [run] in a new root trace and returns its result asynchronously.
+  Future<T> trace<T>(
+    String name, {
+    required FutureOr<T> Function(Context context) run,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => require(_chroniclerKey).trace(
+    name,
+    kind: kind,
+    attributes: attributes,
+    run: (recorder) => run(withChronicler(recorder)),
+  );
+
+  /// Runs [run] synchronously in a new root trace.
+  T traceSync<T>(
+    String name, {
+    required T Function(Context context) run,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => require(_chroniclerKey).traceSync(
+    name,
+    kind: kind,
+    attributes: attributes,
+    run: (recorder) => run(withChronicler(recorder)),
+  );
+
+  /// Runs [run] in a child span, or a new root when no span is active.
+  Future<T> span<T>(
+    String name, {
+    required FutureOr<T> Function(Context context) run,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => require(_chroniclerKey).span(
+    name,
+    kind: kind,
+    attributes: attributes,
+    run: (recorder) => run(withChronicler(recorder)),
+  );
+
+  /// Runs [run] synchronously in a child span, or a root when no span is active.
+  T spanSync<T>(
+    String name, {
+    required T Function(Context context) run,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => require(_chroniclerKey).spanSync(
+    name,
+    kind: kind,
+    attributes: attributes,
+    run: (recorder) => run(withChronicler(recorder)),
+  );
 }
 
 /// Records product events without waiting for transport work.
