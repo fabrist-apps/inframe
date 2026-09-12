@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
+import 'package:artificer_openai/src/models/models_resource.dart';
 import 'package:artificer_openai/src/options.dart';
 import 'package:artificer_openai/src/responses/response_models.dart';
 import 'package:artificer_openai/src/responses/responses_resource.dart';
@@ -31,12 +32,16 @@ final class OpenAIProvider {
          },
        ) {
     responses = OpenAIResponsesResource(_client);
+    models = OpenAIModelsResource(_client);
   }
 
   final ProviderHttpClient _client;
 
   /// Typed native Responses operations.
   late final OpenAIResponsesResource responses;
+
+  /// Typed native model discovery operations.
+  late final OpenAIModelsResource models;
 
   /// Creates a common language model backed by the Responses API.
   OpenAILanguageModel languageModel(String modelId, {OpenAIModelOptions? options}) =>

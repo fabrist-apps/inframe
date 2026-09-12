@@ -53,3 +53,9 @@ tool records, usage, and replay data. Unknown native events are emitted as `Prov
 retained in replay; a native error or a stream that ends without a terminal event fails with the
 partial assistant message attached to the error. Native callers can set decoded-event and byte
 limits on `responses.stream` before transport begins.
+
+Native lifecycle calls are explicit cold operations: `responses.retrieve`, `responses.cancel`,
+`responses.delete`, `responses.listInputItems`, `responses.countInputTokens`, and
+`responses.compact` never poll, paginate, or carry state between calls. `models.list` returns one
+page and `models.retrieve` resolves one exact model ID. Background create results preserve queued
+and in-progress states for the caller to inspect and advance explicitly.

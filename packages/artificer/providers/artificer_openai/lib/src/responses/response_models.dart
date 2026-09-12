@@ -341,13 +341,15 @@ final class OpenAIResponseRequest {
     Iterable<OpenAIToolDefinition>? tools,
     this.toolChoice,
     this.text,
-    this.previousResponseId,
+    Object? previousResponseId = _omitted,
     this.background,
     JsonObject? extraBody,
   }) : model = _nonEmpty(model, 'model'),
        input = List.unmodifiable(input),
        include = include == null ? null : List.unmodifiable(include),
        tools = tools == null ? null : List.unmodifiable(tools),
+       _previousResponseId = _nullableStringValue(previousResponseId, 'previousResponseId'),
+       _hasPreviousResponseId = !identical(previousResponseId, _omitted),
        extraBody = extraBody ?? JsonObject({}) {
     if (this.input.isEmpty) throw ArgumentError.value(input, 'input', 'must not be empty');
     if (maxOutputTokens != null && maxOutputTokens! <= 0) {
@@ -408,7 +410,10 @@ final class OpenAIResponseRequest {
   final JsonObject? text;
 
   /// Explicit stored response to continue from in native calls.
-  final String? previousResponseId;
+  String? get previousResponseId => _previousResponseId;
+
+  final String? _previousResponseId;
+  final bool _hasPreviousResponseId;
 
   /// Whether this native request runs in the background.
   final bool? background;
@@ -437,7 +442,7 @@ final class OpenAIResponseRequest {
       if (tools case final value?) 'tools': value.map((tool) => tool.toDart()).toList(),
       if (toolChoice case final value?) 'tool_choice': value.toDart(),
       if (text case final value?) 'text': value.toDart(),
-      'previous_response_id': ?previousResponseId,
+      if (_hasPreviousResponseId) 'previous_response_id': _previousResponseId,
       'background': ?background,
     });
   }
@@ -792,6 +797,16 @@ final class OpenAIResponseUsage {
 
   /// Complete usage object.
   final JsonObject raw;
+}
+
+const _omitted = Object();
+
+String? _nullableStringValue(Object? value, String name) {
+  if (identical(value, _omitted) || value == null) return null;
+  if (value is! String || value.isEmpty) {
+    throw ArgumentError.value(value, name, 'must be a nonempty string or null');
+  }
+  return value;
 }
 
 String _nonEmpty(String value, String name) {

@@ -2,6 +2,8 @@ import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/protocols.dart';
 import 'package:artificer_core/transport.dart';
+import 'package:artificer_openai/src/options.dart';
+import 'package:artificer_openai/src/responses/lifecycle_models.dart';
 import 'package:artificer_openai/src/responses/response_models.dart';
 import 'package:conflux/conflux.dart';
 
@@ -27,6 +29,87 @@ final class OpenAIResponsesResource {
         )
         .flatMap(_decode);
   }
+
+  /// Retrieves one stored response without polling.
+  Effect<NativeResponse<OpenAIResponse>, AiError> retrieve(String responseId) => _responseCall(
+    method: 'GET',
+    path: 'responses/${Uri.encodeComponent(_nonEmpty(responseId, 'responseId'))}',
+  );
+
+  /// Explicitly cancels one background response.
+  Effect<NativeResponse<OpenAIResponse>, AiError> cancel(String responseId) => _responseCall(
+    method: 'POST',
+    path: 'responses/${Uri.encodeComponent(_nonEmpty(responseId, 'responseId'))}/cancel',
+  );
+
+  /// Explicitly deletes one stored response.
+  Effect<NativeResponse<OpenAIDeletedResponse>, AiError> delete(String responseId) {
+    final id = _nonEmpty(responseId, 'responseId');
+    return _client
+        .sendJson(
+          ProviderHttpRequest(method: 'DELETE', path: 'responses/${Uri.encodeComponent(id)}'),
+          providerId: _providerId,
+          api: _api,
+          modelId: 'responses',
+        )
+        .flatMap((response) => _decodeTyped(response, OpenAIDeletedResponse.fromJson));
+  }
+
+  /// Lists one input-item page without following its cursor.
+  Effect<NativeResponse<OpenAIResponseInputItemPage>, AiError> listInputItems(
+    String responseId, {
+    int? limit,
+    OpenAIListOrder? order,
+    String? after,
+    Iterable<OpenAIResponseInclude>? include,
+  }) {
+    final id = _nonEmpty(responseId, 'responseId');
+    if (limit != null && (limit < 1 || limit > 100)) {
+      throw ArgumentError.value(limit, 'limit', 'must be between 1 and 100');
+    }
+    final query = <String, Object?>{
+      if (limit != null) 'limit': '$limit',
+      if (order != null) 'order': order.wireValue,
+      if (after != null) 'after': _nonEmpty(after, 'after'),
+      if (include != null) 'include': include.map((value) => value.wireValue).toList(),
+    };
+    final path = Uri(
+      path: 'responses/${Uri.encodeComponent(id)}/input_items',
+      queryParameters: query.isEmpty ? null : query,
+    ).toString();
+    return _client
+        .sendJson(
+          ProviderHttpRequest(method: 'GET', path: path),
+          providerId: _providerId,
+          api: _api,
+          modelId: 'responses',
+        )
+        .flatMap((response) => _decodeTyped(response, OpenAIResponseInputItemPage.fromJson));
+  }
+
+  /// Counts input tokens in one explicit native request.
+  Effect<NativeResponse<OpenAIResponseInputTokens>, AiError> countInputTokens(
+    OpenAIResponseInputTokensRequest request,
+  ) => _client
+      .sendJson(
+        ProviderHttpRequest(method: 'POST', path: 'responses/input_tokens', body: request.toJson()),
+        providerId: _providerId,
+        api: _api,
+        modelId: request.model,
+      )
+      .flatMap((response) => _decodeTyped(response, OpenAIResponseInputTokens.fromJson));
+
+  /// Compacts one explicit native input without storing hidden client state.
+  Effect<NativeResponse<OpenAICompactResponse>, AiError> compact(
+    OpenAICompactResponseRequest request,
+  ) => _client
+      .sendJson(
+        ProviderHttpRequest(method: 'POST', path: 'responses/compact', body: request.toJson()),
+        providerId: _providerId,
+        api: _api,
+        modelId: request.model,
+      )
+      .flatMap((response) => _decodeTyped(response, OpenAICompactResponse.fromJson));
 
   /// Streams typed native Responses events.
   Flow<OpenAIResponseEvent, AiError> stream(
@@ -134,6 +217,35 @@ final class OpenAIResponsesResource {
     } on FormatException catch (error) {
       return Effect.fail(ProtocolError(error.message));
     }
+  }
+
+  Effect<NativeResponse<OpenAIResponse>, AiError> _responseCall({
+    required String method,
+    required String path,
+  }) => _client
+      .sendJson(
+        ProviderHttpRequest(method: method, path: path),
+        providerId: _providerId,
+        api: _api,
+        modelId: 'responses',
+      )
+      .flatMap(_decode);
+}
+
+Effect<NativeResponse<T>, AiError> _decodeTyped<T>(
+  NativeResponse<JsonObject> response,
+  T Function(JsonObject) decode,
+) {
+  try {
+    return Effect.succeed(
+      NativeResponse(
+        value: decode(response.value),
+        payload: response.payload,
+        metadata: response.metadata,
+      ),
+    );
+  } on FormatException catch (error) {
+    return Effect.fail(ProtocolError(error.message));
   }
 }
 
@@ -699,6 +811,11 @@ int _integer(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! int) throw FormatException('$key must be an integer.');
   return field;
+}
+
+String _nonEmpty(String value, String name) {
+  if (value.isEmpty) throw ArgumentError.value(value, name, 'must not be empty');
+  return value;
 }
 
 Map<String, Object?> _without(Map<String, Object?> value, Set<String> keys) =>
