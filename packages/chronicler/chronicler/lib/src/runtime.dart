@@ -265,12 +265,7 @@ final class ChroniclerRuntime {
         'anonymousId': anonymousId,
         'sessionId': sessionId,
       }.entries) {
-        if (value != null) {
-          validator.validateString(value, options.limits.maxIdBytes, key);
-          if (value.isEmpty) {
-            throw RecordValidationException('$key must be nonempty');
-          }
-        }
+        if (value != null) _validateRequiredId(value, key);
       }
     } on RecordValidationException catch (error) {
       throw ChroniclerConfigurationException('identity', error.reason);
@@ -578,21 +573,14 @@ final class ChroniclerRuntime {
     required String anonymousId,
     required String userId,
   }) {
-    if (!_canRecord(ChroniclerSignal.events, null)) return;
-    try {
+    _recordEventControl(() {
       _validateRequiredId(anonymousId, 'anonymousId');
       _validateRequiredId(userId, 'userId');
-      _finalizeAndEnqueue(
-        IdentityLinkRecord(
-          envelope: _envelope(attribution),
-          payload: IdentityLinkPayload(anonymousId: anonymousId, userId: userId),
-        ),
+      return IdentityLinkRecord(
+        envelope: _envelope(attribution),
+        payload: IdentityLinkPayload(anonymousId: anonymousId, userId: userId),
       );
-    } on RecordValidationException {
-      diagnostics.record(DiagnosticReason.invalidRecord);
-    } on Object {
-      diagnostics.record(DiagnosticReason.invalidRecord);
-    }
+    });
   }
 
   void _recordUserPropertiesSet(
@@ -601,21 +589,14 @@ final class ChroniclerRuntime {
     required Map<String, Object?> properties,
   }) {
     if (properties.isEmpty) return;
-    if (!_canRecord(ChroniclerSignal.events, null)) return;
-    try {
+    _recordEventControl(() {
       _validateRequiredId(userId, 'userId');
       final snapshot = validator.snapshotAttributes(properties);
-      _finalizeAndEnqueue(
-        UserPropertiesSetRecord(
-          envelope: _envelope(attribution),
-          payload: UserPropertiesSetPayload(userId: userId, properties: snapshot),
-        ),
+      return UserPropertiesSetRecord(
+        envelope: _envelope(attribution),
+        payload: UserPropertiesSetPayload(userId: userId, properties: snapshot),
       );
-    } on RecordValidationException {
-      diagnostics.record(DiagnosticReason.invalidRecord);
-    } on Object {
-      diagnostics.record(DiagnosticReason.invalidRecord);
-    }
+    });
   }
 
   void _recordUserPropertiesUnset(
@@ -624,8 +605,7 @@ final class ChroniclerRuntime {
     required List<String> keys,
   }) {
     if (keys.isEmpty) return;
-    if (!_canRecord(ChroniclerSignal.events, null)) return;
-    try {
+    _recordEventControl(() {
       _validateRequiredId(userId, 'userId');
       final distinctKeys = <String>{};
       for (final key in keys) {
@@ -638,12 +618,17 @@ final class ChroniclerRuntime {
       if (distinctKeys.length > options.limits.maxListItems) {
         throw const RecordValidationException('property key list item limit exceeded');
       }
-      _finalizeAndEnqueue(
-        UserPropertiesUnsetRecord(
-          envelope: _envelope(attribution),
-          payload: UserPropertiesUnsetPayload(userId: userId, keys: distinctKeys),
-        ),
+      return UserPropertiesUnsetRecord(
+        envelope: _envelope(attribution),
+        payload: UserPropertiesUnsetPayload(userId: userId, keys: distinctKeys),
       );
+    });
+  }
+
+  void _recordEventControl(ChroniclerRecord Function() createRecord) {
+    if (!_canRecord(ChroniclerSignal.events, null)) return;
+    try {
+      _finalizeAndEnqueue(createRecord());
     } on RecordValidationException {
       diagnostics.record(DiagnosticReason.invalidRecord);
     } on Object {
