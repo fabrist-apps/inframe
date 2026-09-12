@@ -78,23 +78,41 @@ final class BasetenProvider {
     required Uri endpoint,
     required JsonValue Function(I input) encode,
     required O Function(JsonValue json) decode,
+    int decodedChunkCapacity = 16,
+    int maxResponseBytes = 64 * 1024 * 1024,
   }) {
+    if (decodedChunkCapacity <= 0) {
+      throw ArgumentError.value(
+        decodedChunkCapacity,
+        'decodedChunkCapacity',
+        'must be positive',
+      );
+    }
     final binding = _predictionBinding(endpoint);
     final client = _newClient(
       binding.baseUrl,
       authorization: 'Api-Key $_apiKey',
+      maxResponseBytes: maxResponseBytes,
     );
     _clients.add(client);
-    return BasetenPredictionEndpoint(client, binding.path, encode, decode);
+    return BasetenPredictionEndpoint(
+      client,
+      binding.path,
+      encode,
+      decode,
+      decodedChunkCapacity,
+    );
   }
 
   ProviderHttpClient _newClient(
     Uri baseUrl, {
     required String authorization,
+    int maxResponseBytes = 64 * 1024 * 1024,
   }) => ProviderHttpClient(
     baseUrl: _directoryUri(baseUrl),
     client: _httpClient,
     headers: {'authorization': authorization},
+    maxResponseBytes: maxResponseBytes,
   );
 
   /// Interrupts provider-owned work and releases all owned HTTP resources.

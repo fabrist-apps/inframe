@@ -41,14 +41,14 @@ void main() {
       encode: JsonNumber.new,
       decode: (value) => (value as JsonNumber).value.toInt(),
     );
-    final predictionRun = prediction.predict(1).runFutureExit();
+    final predictionRun = prediction.predictRawStream(1).runCollect().runFutureExit();
     await started.future;
 
     await Future.wait([provider.close(), provider.close()]);
 
     expect(await catalogRun, isA<Failed<GenerationResult, AiError>>());
     expect(await deploymentRun, isA<Failed<GenerationResult, AiError>>());
-    expect(await predictionRun, isA<Failed<NativeResponse<int>, AiError>>());
+    expect(await predictionRun, isA<Failed<List<Object?>, AiError>>());
     expect(requests, 3);
     expect(
       await provider
@@ -57,7 +57,10 @@ void main() {
           .runFutureExit(),
       _failedWith<ClientClosedError>(),
     );
-    expect(await prediction.predict(2).runFutureExit(), _failedWith<ClientClosedError>());
+    expect(
+      await prediction.predictRawStream(2).runCollect().runFutureExit(),
+      _failedWith<ClientClosedError>(),
+    );
   });
 
   test('closing provider leaves a borrowed client usable', () async {

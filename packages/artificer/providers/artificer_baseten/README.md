@@ -114,8 +114,12 @@ final endpoint = provider.predictionEndpoint<List<double>, double>(
   endpoint: Uri.parse('https://model.example.run/predict?environment=production'),
   encode: (input) => JsonArray(input),
   decode: (json) => (json as JsonNumber).value.toDouble(),
+  decodedChunkCapacity: 16,
+  maxResponseBytes: 64 * 1024 * 1024,
 );
 final prediction = await endpoint.predict([1, 2, 3]).runFuture();
+
+final rawChunks = await endpoint.predictRawStream([1, 2, 3]).runCollect().runFuture();
 ```
 
 Creating the binding or `Effect` does not run either callback or issue I/O. Every execution
@@ -124,3 +128,11 @@ encodes once, sends one POST, accepts any JSON response root, and decodes once. 
 other callback exceptions remain Conflux defects with their stacks. Successful responses retain
 the complete native JSON and HTTP metadata. Custom predictions do not infer a model identity or
 use the common model interface; use `deployment` only for an explicitly compatible API.
+
+`predictRawStream` invokes only the encoder, so the encoded input must select any Baseten stream
+field the deployment requires. It emits immutable `Uint8List` chunks and ends successfully at
+normal HTTP EOF. It does not parse SSE, JSONL, chat events, tokens, tools, or terminal sentinels.
+The configured chunk capacity bounds pending output and pauses the response stream for a slow
+consumer; `maxResponseBytes` limits total bytes across both typed and raw predictions. Early Flow
+termination, interruption, and `provider.close()` cancel and clean up the HTTP response. Closing a
+provider never closes a borrowed `http.Client`.
