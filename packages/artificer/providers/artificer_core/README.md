@@ -28,3 +28,9 @@ that provider, then closes only its owned client. Caller cancellation aborts acq
 an acquired response body. A borrowed client must honor abortable requests and response-subscription
 cancellation; arbitrary borrowed clients can make cleanup unbounded. Cancellation does not prove that
 remote inference stopped. Callers compose inference and read-idle timeouts through Conflux.
+
+An `EmbeddingInput` is one semantic input even when it contains multiple text or media parts. An
+`EmbeddingRequest` list is a batch of independent inputs. Provider adapters issue one synchronous
+request, restore native indices, and use `EmbeddingResult.fromIndexed` to reject missing, duplicate,
+empty, nonfinite, or inconsistent vectors. The common contract does not split, parallelize, cache,
+normalize, or retry embedding work.

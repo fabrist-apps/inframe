@@ -1,10 +1,9 @@
 import 'package:conflux/conflux.dart';
 
+import 'capabilities.dart';
 import 'errors.dart';
+import 'embeddings/embeddings.dart';
 import 'generation/generation.dart';
-
-/// Whether a model capability is known to be available.
-enum CapabilitySupport { supported, unsupported, unknown }
 
 /// Shared language-model capabilities.
 final class ModelCapabilities {
@@ -50,4 +49,13 @@ abstract interface class LanguageModel {
 
   Effect<GenerationResult, AiError> generate(GenerationRequest request);
   Flow<GenerationEvent, AiError> stream(GenerationRequest request);
+}
+
+/// Common embeddings implemented by provider-specific models.
+abstract interface class EmbeddingModel {
+  String get providerId;
+  String get modelId;
+  EmbeddingCapabilities get capabilities;
+
+  Effect<EmbeddingResult, AiError> embed(EmbeddingRequest request);
 }

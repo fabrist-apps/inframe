@@ -29,6 +29,68 @@ Future<void> main() async {
   if (events.single is! GenerationFinished) {
     throw StateError('Unexpected stream result.');
   }
+
+  final embeddingModel = FixtureEmbeddingModel('future-embedding-model');
+  final EmbeddingModel commonEmbedding = embeddingModel;
+  final embedding = await commonEmbedding.embed(
+    EmbeddingRequest(items: [EmbeddingInput.text('hello')]),
+  ).runFuture();
+  final overriddenEmbedding = await embeddingModel.embed(
+    EmbeddingRequest(items: [EmbeddingInput.text('hello')]),
+    options: const FixtureEmbeddingOptions(dimensions: 2),
+  ).runFuture();
+  if (embedding.vectors.single.length != 3 || overriddenEmbedding.vectors.single.length != 2) {
+    throw StateError('Unexpected embedding result.');
+  }
+}
+
+final class FixtureEmbeddingOptions {
+  const FixtureEmbeddingOptions({this.dimensions});
+
+  final int? dimensions;
+}
+
+final class FixtureEmbeddingModel implements EmbeddingModel {
+  FixtureEmbeddingModel(this.modelId) {
+    if (modelId.isEmpty) throw ArgumentError.value(modelId, 'modelId');
+  }
+
+  @override
+  final String modelId;
+
+  @override
+  String get providerId => 'fixture';
+
+  @override
+  EmbeddingCapabilities get capabilities => EmbeddingCapabilities({
+    EmbeddingCapability.text: CapabilitySupport.supported,
+  });
+
+  @override
+  Effect<EmbeddingResult, AiError> embed(
+    EmbeddingRequest request, {
+    FixtureEmbeddingOptions? options,
+  }) {
+    final dimensions = options?.dimensions ?? 3;
+    return Effect.succeed(
+      EmbeddingResult.fromIndexed(
+        embeddings: [
+          for (var index = 0; index < request.items.length; index++)
+            IndexedEmbedding(index: index, vector: List.filled(dimensions, index + 1)),
+        ],
+        inputCount: request.items.length,
+        requestedDimensions: options?.dimensions,
+        modelId: modelId,
+        nativePayload: NativePayload(
+          providerId: providerId,
+          api: 'embeddings',
+          modelId: modelId,
+          json: JsonObject({'fixture': true}),
+        ),
+        metadata: ResponseMetadata(statusCode: 200),
+      ),
+    );
+  }
 }
 
 final class FixtureOptions {
