@@ -30,3 +30,28 @@ work.
 and HTTP metadata. `provider.messages.stream` emits typed native events. Common streaming requires
 `message_stop`; an error event or premature EOF fails without a terminal generation result. Unknown
 events and fields remain available for inspection.
+
+Common image inputs support documented JPEG, PNG, GIF, and WebP bytes, URLs, and Anthropic file
+references. Document inputs support inline PDF or UTF-8 text, PDF URLs, and Anthropic file
+references. Audio and video fail before network I/O. Native block constructors expose cache-control
+placement without moving it to a lossy common option.
+
+Application function declarations map to Anthropic client tools. Returned `tool_use` blocks remain
+caller-owned calls; the SDK never invokes them. The returned assistant message carries the exact
+native blocks needed for the next request:
+
+```dart
+final result = await model.generate(request).runFuture();
+final next = GenerationRequest(
+  messages: [...request.messages, result.message, applicationToolResults],
+  tools: request.tools,
+  instructions: request.instructions,
+  toolChoice: request.toolChoice,
+  options: request.options,
+  output: request.output,
+);
+```
+
+JSON Schema output maps to Anthropic's native `output_config.format`. Plain JSON-object output has
+no faithful Messages representation and fails before I/O. The SDK forwards the schema as supplied;
+it does not validate generated values, repair output, or retry.

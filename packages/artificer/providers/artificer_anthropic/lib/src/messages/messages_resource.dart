@@ -338,6 +338,19 @@ OutputPart _commonPart(AnthropicContentBlock block) => switch (block) {
       ),
     ),
   ),
+  AnthropicToolUseBlock(:final id, :final name, :final input) => ApplicationToolCallPart(
+    id: id,
+    name: name,
+    arguments: input is JsonObject
+        ? JsonToolArguments(input, originalText: input.encode())
+        : MalformedToolArguments(
+            originalText: input.encode(),
+            issue: 'Anthropic client-tool input must be a JSON object.',
+          ),
+  ),
+  AnthropicImageBlock() ||
+  AnthropicDocumentBlock() ||
+  AnthropicToolResultBlock() ||
   AnthropicUnknownContentBlock() => OpaqueOutputPart(
     providerId: _providerId,
     api: _api,

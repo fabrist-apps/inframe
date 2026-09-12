@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:artificer_anthropic/src/messages/message_models.dart';
 import 'package:artificer_anthropic/src/messages/messages_resource.dart';
 import 'package:artificer_anthropic/src/options.dart';
 import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:conflux/conflux.dart';
 import 'package:http/http.dart' as http;
@@ -115,28 +118,39 @@ final class AnthropicLanguageModel implements LanguageModel {
       modelId: modelId,
     );
     if (replayError != null) return replayError;
-    if (request.tools.isNotEmpty || request.toolChoice is! AutoToolChoice) {
-      return const UnsupportedFeatureError(
-        'Application tools are not available in this Messages implementation.',
-      );
-    }
-    if (request.output is! TextOutputFormat) {
-      return const UnsupportedFeatureError(
-        'Structured output is not available in this Messages implementation.',
-      );
-    }
     final messages = <AnthropicInputMessage>[];
     for (final message in request.messages) {
       final encoded = switch (message) {
-        UserMessage(:final parts) => _textMessage(AnthropicMessageRole.user, parts),
-        AssistantMessage(:final parts) => _assistantTextMessage(parts),
-        ToolMessage() => const UnsupportedFeatureError(
-          'Tool results are not available in this Messages implementation.',
-        ),
+        UserMessage(:final parts) => _userMessage(parts),
+        AssistantMessage() => _assistantMessage(message),
+        ToolMessage(:final results) => _toolMessage(results),
       };
       if (encoded is AiError) return encoded;
       messages.add(encoded as AnthropicInputMessage);
     }
+    final tools = request.tools
+        .map(
+          (tool) => AnthropicClientTool(
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          ),
+        )
+        .toList();
+    final toolChoice = switch (request.toolChoice) {
+      AutoToolChoice() => tools.isEmpty ? null : const AnthropicAutoToolChoice(),
+      NoToolChoice() => const AnthropicNoToolChoice(),
+      RequiredToolChoice() => const AnthropicAnyToolChoice(),
+      FunctionToolChoice(:final name) => AnthropicNamedToolChoice(name),
+    };
+    final outputConfig = switch (request.output) {
+      TextOutputFormat() => null,
+      JsonSchemaOutputFormat(:final schema) => AnthropicOutputConfig.jsonSchema(schema),
+      JsonObjectOutputFormat() => const UnsupportedFeatureError(
+        'Anthropic Messages requires a JSON Schema for structured output.',
+      ),
+    };
+    if (outputConfig is AiError) return outputConfig;
     final extra = options.resolveExtraBody(callOptions);
     return AnthropicMessageRequest(
       model: modelId,
@@ -146,33 +160,118 @@ final class AnthropicLanguageModel implements LanguageModel {
       temperature: request.options.temperature,
       topP: request.options.topP,
       stopSequences: request.options.stopSequences,
+      tools: tools,
+      toolChoice: toolChoice,
+      outputConfig: outputConfig as AnthropicOutputConfig?,
+      cacheControl: options.resolveCacheControl(callOptions),
       extraBody: extra,
     );
   }
 }
 
-Object _textMessage(AnthropicMessageRole role, Iterable<InputPart> parts) {
+Object _userMessage(Iterable<InputPart> parts) {
   final content = <AnthropicContentBlock>[];
   for (final part in parts) {
-    if (part is! TextInputPart) {
-      return const UnsupportedFeatureError(
-        'Only text content is available in this Messages implementation.',
-      );
-    }
-    content.add(AnthropicTextBlock(part.text));
+    final native = _inputPart(part);
+    if (native is AiError) return native;
+    content.add(native as AnthropicContentBlock);
   }
-  return AnthropicInputMessage(role: role, content: content);
+  return AnthropicInputMessage(role: AnthropicMessageRole.user, content: content);
 }
 
-Object _assistantTextMessage(Iterable<OutputPart> parts) {
-  final content = <AnthropicContentBlock>[];
-  for (final part in parts) {
-    if (part is! TextOutputPart) {
+Object _inputPart(InputPart part) {
+  if (part case TextInputPart(:final text)) return AnthropicTextBlock(text);
+  final media = part as MediaInputPart;
+  if (media.kind == MediaKind.audio || media.kind == MediaKind.video) {
+    return UnsupportedFeatureError(
+      'Anthropic Messages does not support ${media.kind.name} common input.',
+    );
+  }
+  final source = media.source;
+  if (source case ProviderFileSource()) {
+    if (source.providerId != _providerId || source.api != _messagesApi) {
       return const UnsupportedFeatureError(
-        'Only text content is available in this Messages implementation.',
+        'Anthropic Messages accepts only its own provider file references.',
       );
     }
-    content.add(AnthropicTextBlock(part.text));
+    if (source.mimeType != media.mimeType) {
+      return const InvalidRequestError(
+        'The provider file MIME type must match the media part MIME type.',
+      );
+    }
+  }
+  return switch (media.kind) {
+    MediaKind.image => _image(media.mimeType, source),
+    MediaKind.document => _document(media.mimeType, source),
+    MediaKind.audio || MediaKind.video => throw StateError('Rejected above.'),
+  };
+}
+
+Object _image(String mimeType, MediaSource source) {
+  const supported = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'};
+  if (!supported.contains(mimeType)) {
+    return UnsupportedFeatureError(
+      'Anthropic Messages does not support image MIME type $mimeType.',
+    );
+  }
+  return switch (source) {
+    BytesMediaSource(:final bytes) => AnthropicImageBlock.bytes(bytes, mimeType: mimeType),
+    UrlMediaSource(:final url) => AnthropicImageBlock.url(url),
+    ProviderFileSource(:final reference) => AnthropicImageBlock.file(reference),
+  };
+}
+
+Object _document(String mimeType, MediaSource source) {
+  return switch (source) {
+    BytesMediaSource(:final bytes) when mimeType == 'application/pdf' =>
+      AnthropicDocumentBlock.pdfBytes(bytes),
+    BytesMediaSource(:final bytes) when mimeType == 'text/plain' => _plainTextDocument(bytes),
+    UrlMediaSource(:final url) when mimeType == 'application/pdf' => AnthropicDocumentBlock.url(
+      url,
+    ),
+    ProviderFileSource(:final reference) => AnthropicDocumentBlock.file(reference),
+    _ => UnsupportedFeatureError(
+      'Anthropic Messages cannot forward document MIME type $mimeType from this source.',
+    ),
+  };
+}
+
+Object _plainTextDocument(List<int> bytes) {
+  try {
+    return AnthropicDocumentBlock.text(utf8.decode(bytes));
+  } on FormatException {
+    return const InvalidRequestError('Plain-text document bytes must be valid UTF-8.');
+  }
+}
+
+Object _assistantMessage(AssistantMessage message) {
+  final replay = message.replay;
+  if (replay != null) {
+    return AnthropicInputMessage(
+      role: AnthropicMessageRole.assistant,
+      content: replay.items
+          .where((item) => item.phase != 'unknown-event')
+          .map((item) => AnthropicContentBlock.fromJson(item.data)),
+    );
+  }
+  final content = <AnthropicContentBlock>[];
+  for (final part in message.parts) {
+    final native = switch (part) {
+      TextOutputPart(:final text) => AnthropicTextBlock(text),
+      ApplicationToolCallPart(:final id, :final name, :final arguments) => _toolUse(
+        id,
+        name,
+        arguments,
+      ),
+      OpaqueOutputPart(:final providerId, :final api, :final data)
+          when providerId == _providerId && api == _messagesApi =>
+        AnthropicContentBlock.fromJson(data),
+      _ => const UnsupportedFeatureError(
+        'This assistant content cannot be represented by Anthropic Messages.',
+      ),
+    };
+    if (native is AiError) return native;
+    content.add(native as AnthropicContentBlock);
   }
   if (content.isEmpty) {
     return const UnsupportedFeatureError(
@@ -180,6 +279,54 @@ Object _assistantTextMessage(Iterable<OutputPart> parts) {
     );
   }
   return AnthropicInputMessage(role: AnthropicMessageRole.assistant, content: content);
+}
+
+Object _toolUse(String id, String name, ToolArguments arguments) => switch (arguments) {
+  JsonToolArguments(:final value) => AnthropicToolUseBlock(id: id, name: name, input: value),
+  MalformedToolArguments() => const UnsupportedFeatureError(
+    'Malformed tool arguments can only be replayed from retained native blocks.',
+  ),
+  TextToolArguments() || NativeToolArguments() => const UnsupportedFeatureError(
+    'This tool argument kind is not a native Anthropic client-tool input.',
+  ),
+};
+
+Object _toolMessage(Iterable<ToolResult> results) {
+  final content = <AnthropicContentBlock>[];
+  for (final result in results) {
+    final native = _toolResult(result);
+    if (native is AiError) return native;
+    content.add(native as AnthropicContentBlock);
+  }
+  return AnthropicInputMessage(role: AnthropicMessageRole.user, content: content);
+}
+
+Object _toolResult(ToolResult result) => switch (result) {
+  JsonToolResult(:final callId, :final value) => AnthropicToolResultBlock(
+    toolUseId: callId,
+    content: value.encode(),
+  ),
+  TextToolResult(:final callId, :final content) => _contentToolResult(callId, content),
+  ApplicationErrorToolResult(:final callId, :final message, :final details) =>
+    AnthropicToolResultBlock(
+      toolUseId: callId,
+      content: JsonObject({'message': message, if (details != null) 'details': details.toDart()})
+          .encode(),
+      isError: true,
+    ),
+  NativeToolResult() => const UnsupportedFeatureError(
+    'Native Anthropic action results require a matching typed native tool call.',
+  ),
+};
+
+Object _contentToolResult(String callId, Iterable<InputPart> parts) {
+  final content = <Object?>[];
+  for (final part in parts) {
+    final native = _inputPart(part);
+    if (native is AiError) return native;
+    content.add((native as AnthropicContentBlock).toDart());
+  }
+  return AnthropicToolResultBlock(toolUseId: callId, content: content);
 }
 
 String _nonEmpty(String value, String name) {

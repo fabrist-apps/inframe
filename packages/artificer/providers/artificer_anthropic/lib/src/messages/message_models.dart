@@ -1,4 +1,32 @@
+import 'dart:convert';
+
 import 'package:artificer_core/json.dart';
+
+/// Prompt-cache lifetime supported by Anthropic.
+enum AnthropicCacheTtl {
+  /// Five minutes.
+  fiveMinutes('5m'),
+
+  /// One hour.
+  oneHour('1h');
+
+  const AnthropicCacheTtl(this.wireValue);
+
+  /// Native value.
+  final String wireValue;
+}
+
+/// A cache breakpoint placed at a supported native location.
+final class AnthropicCacheControl {
+  /// Creates an ephemeral cache breakpoint.
+  const AnthropicCacheControl({this.ttl = AnthropicCacheTtl.fiveMinutes});
+
+  /// Breakpoint lifetime.
+  final AnthropicCacheTtl ttl;
+
+  /// Encodes this breakpoint.
+  Map<String, Object?> toDart() => {'type': 'ephemeral', 'ttl': ttl.wireValue};
+}
 
 /// One typed Messages input turn.
 final class AnthropicInputMessage {
@@ -7,7 +35,7 @@ final class AnthropicInputMessage {
     required this.role,
     required Iterable<AnthropicContentBlock> content,
   }) : content = List.unmodifiable(content) {
-    if (this.content.isEmpty) {
+    if (this.content.isEmpty && role == AnthropicMessageRole.user) {
       throw ArgumentError.value(content, 'content', 'must not be empty');
     }
   }
@@ -60,6 +88,15 @@ sealed class AnthropicContentBlock {
         citations: _nullableObjects(value, 'citations'),
         raw: raw,
       ),
+      'image' => AnthropicImageBlock._(raw),
+      'document' => AnthropicDocumentBlock._(raw),
+      'tool_use' => AnthropicToolUseBlock._(
+        id: _string(value, 'id'),
+        name: _string(value, 'name'),
+        input: JsonValue.fromDart(value['input']),
+        raw: raw,
+      ),
+      'tool_result' => AnthropicToolResultBlock._(raw),
       final type => AnthropicUnknownContentBlock._(type: type, raw: raw),
     };
   }
@@ -68,16 +105,20 @@ sealed class AnthropicContentBlock {
 /// Native text content with optional citation records.
 final class AnthropicTextBlock extends AnthropicContentBlock {
   /// Creates text input.
-  AnthropicTextBlock(String text, {Iterable<JsonObject>? citations})
-    : this._(
-        text: _nonEmpty(text, 'text'),
-        citations: citations == null ? null : List.unmodifiable(citations),
-        raw: JsonObject({
-          'type': 'text',
-          'text': text,
-          if (citations != null) 'citations': citations.map((item) => item.toDart()).toList(),
-        }),
-      );
+  AnthropicTextBlock(
+    String text, {
+    Iterable<JsonObject>? citations,
+    AnthropicCacheControl? cacheControl,
+  }) : this._(
+         text: _nonEmpty(text, 'text'),
+         citations: citations == null ? null : List.unmodifiable(citations),
+         raw: JsonObject({
+           'type': 'text',
+           'text': text,
+           if (citations != null) 'citations': citations.map((item) => item.toDart()).toList(),
+           if (cacheControl != null) 'cache_control': cacheControl.toDart(),
+         }),
+       );
 
   AnthropicTextBlock._({required this.text, required this.citations, required this.raw});
 
@@ -92,6 +133,283 @@ final class AnthropicTextBlock extends AnthropicContentBlock {
 
   @override
   final JsonObject raw;
+}
+
+/// Native image input from copied base64 bytes, URL, or Anthropic file ID.
+final class AnthropicImageBlock extends AnthropicContentBlock {
+  AnthropicImageBlock._(this.raw);
+
+  /// Creates an inline image.
+  AnthropicImageBlock.bytes(
+    Iterable<int> bytes, {
+    required String mimeType,
+    AnthropicCacheControl? cacheControl,
+  }) : raw = JsonObject({
+         'type': 'image',
+         'source': {
+           'type': 'base64',
+           'media_type': mimeType,
+           'data': base64Encode(bytes.toList(growable: false)),
+         },
+         if (cacheControl != null) 'cache_control': cacheControl.toDart(),
+       });
+
+  /// Creates a native URL image.
+  AnthropicImageBlock.url(Uri url, {AnthropicCacheControl? cacheControl})
+    : raw = JsonObject({
+        'type': 'image',
+        'source': {'type': 'url', 'url': url.toString()},
+        if (cacheControl != null) 'cache_control': cacheControl.toDart(),
+      });
+
+  /// Creates an image reference to an existing Anthropic file.
+  AnthropicImageBlock.file(String fileId, {AnthropicCacheControl? cacheControl})
+    : raw = JsonObject({
+        'type': 'image',
+        'source': {'type': 'file', 'file_id': _nonEmpty(fileId, 'fileId')},
+        if (cacheControl != null) 'cache_control': cacheControl.toDart(),
+      });
+
+  @override
+  String get type => 'image';
+
+  @override
+  final JsonObject raw;
+}
+
+/// Native document input from copied content, URL, or Anthropic file ID.
+final class AnthropicDocumentBlock extends AnthropicContentBlock {
+  AnthropicDocumentBlock._(this.raw);
+
+  /// Creates an inline PDF document.
+  AnthropicDocumentBlock.pdfBytes(
+    Iterable<int> bytes, {
+    AnthropicCacheControl? cacheControl,
+  }) : raw = JsonObject({
+         'type': 'document',
+         'source': {
+           'type': 'base64',
+           'media_type': 'application/pdf',
+           'data': base64Encode(bytes.toList(growable: false)),
+         },
+         if (cacheControl != null) 'cache_control': cacheControl.toDart(),
+       });
+
+  /// Creates an inline plain-text document.
+  AnthropicDocumentBlock.text(String text, {AnthropicCacheControl? cacheControl})
+    : raw = JsonObject({
+        'type': 'document',
+        'source': {'type': 'text', 'media_type': 'text/plain', 'data': text},
+        if (cacheControl != null) 'cache_control': cacheControl.toDart(),
+      });
+
+  /// Creates a URL PDF document.
+  AnthropicDocumentBlock.url(Uri url, {AnthropicCacheControl? cacheControl})
+    : raw = JsonObject({
+        'type': 'document',
+        'source': {'type': 'url', 'url': url.toString()},
+        if (cacheControl != null) 'cache_control': cacheControl.toDart(),
+      });
+
+  /// Creates a document reference to an existing Anthropic file.
+  AnthropicDocumentBlock.file(String fileId, {AnthropicCacheControl? cacheControl})
+    : raw = JsonObject({
+        'type': 'document',
+        'source': {'type': 'file', 'file_id': _nonEmpty(fileId, 'fileId')},
+        if (cacheControl != null) 'cache_control': cacheControl.toDart(),
+      });
+
+  @override
+  String get type => 'document';
+
+  @override
+  final JsonObject raw;
+}
+
+/// A caller-owned native tool call returned by the model.
+final class AnthropicToolUseBlock extends AnthropicContentBlock {
+  /// Creates a tool-use replay block.
+  AnthropicToolUseBlock({
+    required String id,
+    required String name,
+    required JsonValue input,
+  }) : id = _nonEmpty(id, 'id'),
+       name = _nonEmpty(name, 'name'),
+       input = input,
+       raw = JsonObject({
+         'type': 'tool_use',
+         'id': id,
+         'name': name,
+         'input': input.toDart(),
+       });
+
+  AnthropicToolUseBlock._({
+    required this.id,
+    required this.name,
+    required this.input,
+    required this.raw,
+  });
+
+  /// Tool-use ID.
+  final String id;
+
+  /// Tool name.
+  final String name;
+
+  /// Complete tool input.
+  final JsonValue input;
+
+  @override
+  String get type => 'tool_use';
+
+  @override
+  final JsonObject raw;
+}
+
+/// A caller-supplied tool result replay block.
+final class AnthropicToolResultBlock extends AnthropicContentBlock {
+  /// Creates a result with native string or ordered content.
+  AnthropicToolResultBlock({
+    required String toolUseId,
+    required Object content,
+    bool isError = false,
+  }) : raw = JsonObject({
+         'type': 'tool_result',
+         'tool_use_id': _nonEmpty(toolUseId, 'toolUseId'),
+         'content': content,
+         if (isError) 'is_error': true,
+       });
+
+  AnthropicToolResultBlock._(this.raw);
+
+  @override
+  String get type => 'tool_result';
+
+  @override
+  final JsonObject raw;
+}
+
+/// A typed definition accepted by the Messages tools array.
+abstract interface class AnthropicToolDefinition {
+  /// Tool name used for collision checks and selection.
+  String get name;
+
+  /// Encodes the complete native definition.
+  JsonObject toJson();
+}
+
+/// An application-defined JSON Schema tool.
+final class AnthropicClientTool implements AnthropicToolDefinition {
+  /// Creates a caller-executed tool definition.
+  AnthropicClientTool({
+    required String name,
+    required this.inputSchema,
+    this.description,
+  }) : name = _nonEmpty(name, 'name');
+
+  @override
+  final String name;
+
+  /// Optional description.
+  final String? description;
+
+  /// Tool input JSON Schema.
+  final JsonObject inputSchema;
+
+  @override
+  JsonObject toJson() => JsonObject({
+    'name': name,
+    'description': ?description,
+    'input_schema': inputSchema.toDart(),
+  });
+}
+
+/// Native Messages tool-selection policy.
+sealed class AnthropicToolChoice {
+  const AnthropicToolChoice();
+
+  /// Encodes this choice.
+  JsonObject toJson();
+}
+
+/// Let Claude decide whether to call a tool.
+final class AnthropicAutoToolChoice extends AnthropicToolChoice {
+  /// Creates automatic selection.
+  const AnthropicAutoToolChoice({this.disableParallelToolUse});
+
+  /// Whether parallel tool use is disabled.
+  final bool? disableParallelToolUse;
+
+  @override
+  JsonObject toJson() => JsonObject({
+    'type': 'auto',
+    'disable_parallel_tool_use': ?disableParallelToolUse,
+  });
+}
+
+/// Require any available tool.
+final class AnthropicAnyToolChoice extends AnthropicToolChoice {
+  /// Creates required tool selection.
+  const AnthropicAnyToolChoice({this.disableParallelToolUse});
+
+  /// Whether parallel tool use is disabled.
+  final bool? disableParallelToolUse;
+
+  @override
+  JsonObject toJson() => JsonObject({
+    'type': 'any',
+    'disable_parallel_tool_use': ?disableParallelToolUse,
+  });
+}
+
+/// Require one named tool.
+final class AnthropicNamedToolChoice extends AnthropicToolChoice {
+  /// Creates named selection.
+  AnthropicNamedToolChoice(String name, {this.disableParallelToolUse})
+    : name = _nonEmpty(name, 'name');
+
+  /// Selected tool name.
+  final String name;
+
+  /// Whether parallel tool use is disabled.
+  final bool? disableParallelToolUse;
+
+  @override
+  JsonObject toJson() => JsonObject({
+    'type': 'tool',
+    'name': name,
+    'disable_parallel_tool_use': ?disableParallelToolUse,
+  });
+}
+
+/// Disable tools.
+final class AnthropicNoToolChoice extends AnthropicToolChoice {
+  /// Creates disabled tool selection.
+  const AnthropicNoToolChoice();
+
+  @override
+  JsonObject toJson() => JsonObject({'type': 'none'});
+}
+
+/// Native structured-output configuration.
+final class AnthropicOutputConfig {
+  /// Creates native output configuration.
+  const AnthropicOutputConfig({this.effort, this.schema});
+
+  /// Creates JSON Schema output configuration.
+  const AnthropicOutputConfig.jsonSchema(this.schema) : effort = null;
+
+  /// Native effort level.
+  final String? effort;
+
+  /// Output JSON Schema, when selected.
+  final JsonObject? schema;
+
+  /// Encodes this configuration.
+  JsonObject toJson() => JsonObject({
+    'effort': ?effort,
+    if (schema case final value?) 'format': {'type': 'json_schema', 'schema': value.toDart()},
+  });
 }
 
 /// A content type outside this pinned snapshot, retained without loss.
@@ -116,11 +434,16 @@ final class AnthropicMessageRequest {
     this.temperature,
     this.topP,
     Iterable<String> stopSequences = const [],
+    Iterable<AnthropicToolDefinition> tools = const [],
+    this.toolChoice,
+    this.outputConfig,
+    this.cacheControl,
     JsonObject? extraBody,
   }) : model = _nonEmpty(model, 'model'),
        messages = List.unmodifiable(messages),
        system = List.unmodifiable(system),
        stopSequences = List.unmodifiable(stopSequences),
+       tools = List.unmodifiable(tools),
        extraBody = extraBody ?? JsonObject({}) {
     if (maxTokens < 0) {
       throw ArgumentError.value(maxTokens, 'maxTokens', 'must not be negative');
@@ -130,6 +453,12 @@ final class AnthropicMessageRequest {
     }
     if (this.stopSequences.any((value) => value.isEmpty)) {
       throw ArgumentError.value(stopSequences, 'stopSequences', 'must not contain empty values');
+    }
+    final names = <String>{};
+    for (final tool in this.tools) {
+      if (!names.add(tool.name)) {
+        throw ArgumentError.value(tool.name, 'tools', 'contains a duplicate name');
+      }
     }
   }
 
@@ -154,6 +483,18 @@ final class AnthropicMessageRequest {
   /// Optional stop sequences.
   final List<String> stopSequences;
 
+  /// Native tool definitions.
+  final List<AnthropicToolDefinition> tools;
+
+  /// Native tool-selection policy.
+  final AnthropicToolChoice? toolChoice;
+
+  /// Native output settings.
+  final AnthropicOutputConfig? outputConfig;
+
+  /// Top-level prompt-cache breakpoint.
+  final AnthropicCacheControl? cacheControl;
+
   /// Forward-compatible fields.
   final JsonObject extraBody;
 
@@ -167,6 +508,10 @@ final class AnthropicMessageRequest {
       'temperature',
       'top_p',
       'stop_sequences',
+      'tools',
+      'tool_choice',
+      'output_config',
+      'cache_control',
       'stream',
     };
     final collision = extraBody.toDart().keys.where(typed.contains).firstOrNull;
@@ -182,6 +527,10 @@ final class AnthropicMessageRequest {
       'temperature': ?temperature,
       'top_p': ?topP,
       if (stopSequences.isNotEmpty) 'stop_sequences': stopSequences,
+      if (tools.isNotEmpty) 'tools': tools.map((tool) => tool.toJson().toDart()).toList(),
+      if (toolChoice case final value?) 'tool_choice': value.toJson().toDart(),
+      if (outputConfig case final value?) 'output_config': value.toJson().toDart(),
+      if (cacheControl case final value?) 'cache_control': value.toDart(),
       'stream': stream,
     });
   }
