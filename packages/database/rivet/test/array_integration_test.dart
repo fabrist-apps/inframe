@@ -38,6 +38,67 @@ void main() {
       );
     });
 
+    test('should decode lossless nested array transport envelopes', () {
+      final jsonArray = RivetArrayCodec(RivetNullableCodec(RivetJsonCodec()));
+      final decoded = jsonArray.decodeTransport(
+        {
+          'dimensions': 1,
+          'lower': 1,
+          'upper': 3,
+          'elements': [
+            [true, null],
+            [false, null],
+            [
+              false,
+              [1, null],
+            ],
+          ],
+        },
+        isSqlNull: false,
+      );
+
+      expect(decoded, [
+        null,
+        const JsonNull(),
+        JsonValue.from(const [1, null]),
+      ]);
+      expect(
+        jsonArray.decodeTransport(
+          {'dimensions': null, 'lower': null, 'upper': null, 'elements': <Object?>[]},
+          isSqlNull: false,
+        ),
+        isEmpty,
+      );
+      expect(
+        RivetNullableCodec(jsonArray).decodeTransport(null, isSqlNull: true),
+        isNull,
+      );
+      for (final malformed in [
+        {'dimensions': 2, 'lower': 1, 'upper': 2, 'elements': <Object?>[]},
+        {'dimensions': 1, 'lower': 0, 'upper': 1, 'elements': <Object?>[]},
+        {'dimensions': 1, 'lower': 1, 'upper': 2, 'elements': <Object?>[]},
+      ]) {
+        expect(
+          () => jsonArray.decodeTransport(malformed, isSqlNull: false),
+          throwsFormatException,
+        );
+      }
+      expect(
+        () => RivetArrayCodec(RivetIntegerCodec()).decodeTransport(
+          {
+            'dimensions': 1,
+            'lower': 1,
+            'upper': 1,
+            'elements': [
+              [true, null],
+            ],
+          },
+          isSqlNull: false,
+        ),
+        throwsFormatException,
+      );
+    });
+
     test(
       'should preserve array shape, nulls, JSON null, converters, enums, and vectors',
       () async {

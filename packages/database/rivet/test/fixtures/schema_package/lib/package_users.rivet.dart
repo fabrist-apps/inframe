@@ -117,7 +117,7 @@ final class PackageLabelsInclude {
   /// Creates the generated include scope.
   const PackageLabelsInclude(this._schema, {this.path = ''});
 
-  final RivetTableSchema<PackageLabels, PackageLabelsRow> _schema;
+  final RivetTableSchema<PackageLabels, PackageLabelRecord> _schema;
 
   /// Full relation path used in diagnostics.
   final String path;
@@ -151,11 +151,12 @@ final class PackageLabelsInclude {
 }
 
 /// Generated row returned by reads from 'fixture.packageLabels'.
-final class PackageLabelsRow {
+final class PackageLabelRecord {
   /// Creates a row from decoded column and relation values.
-  const PackageLabelsRow({
+  const PackageLabelRecord({
     required this.code,
     required this.name,
+    required this.aliases,
     this.notes = const Relation.unloaded(),
   });
 
@@ -165,25 +166,36 @@ final class PackageLabelsRow {
   /// Value read from `name`.
   final String name;
 
+  /// Value read from `aliases`.
+  final List<JsonValue?> aliases;
+
   /// Loaded or unloaded `notes` relation.
   final Relation<List<PackageLabelNotesRow>> notes;
 }
 
 /// Generated values accepted by mutations of 'fixture.packageLabels'.
 final class PackageLabelsCompanion implements RivetCompanion<PackageLabels> {
-  const PackageLabelsCompanion._({required this.code, required this.name});
+  const PackageLabelsCompanion._({
+    required this.code,
+    required this.name,
+    required this.aliases,
+  });
 
   /// Creates values for an insert, leaving defaulted columns absent.
   factory PackageLabelsCompanion.insert({
     required RivetValue<PackageLabels, String, String> code,
     required RivetValue<PackageLabels, String, String> name,
-  }) => PackageLabelsCompanion._(code: code, name: name);
+    required RivetValue<PackageLabels, List<JsonValue?>, List<JsonValue?>>
+    aliases,
+  }) => PackageLabelsCompanion._(code: code, name: name, aliases: aliases);
 
   /// Creates values for an update, leaving untouched columns absent.
   factory PackageLabelsCompanion.update({
     RivetValue<PackageLabels, String, String> code = const RivetValue.absent(),
     RivetValue<PackageLabels, String, String> name = const RivetValue.absent(),
-  }) => PackageLabelsCompanion._(code: code, name: name);
+    RivetValue<PackageLabels, List<JsonValue?>, List<JsonValue?>> aliases =
+        const RivetValue.absent(),
+  }) => PackageLabelsCompanion._(code: code, name: name, aliases: aliases);
 
   /// Mutation value for `code`.
   final RivetValue<PackageLabels, String, String> code;
@@ -191,20 +203,24 @@ final class PackageLabelsCompanion implements RivetCompanion<PackageLabels> {
   /// Mutation value for `name`.
   final RivetValue<PackageLabels, String, String> name;
 
+  /// Mutation value for `aliases`.
+  final RivetValue<PackageLabels, List<JsonValue?>, List<JsonValue?>> aliases;
+
   /// The generated column assignments in declaration order.
   @override
   List<RivetAssignment<PackageLabels>> operator [](RivetCompanionKey key) => [
     RivetAssignment('code', code),
     RivetAssignment('name', name),
+    RivetAssignment('aliases', aliases),
   ];
 }
 
 final class _$PackageLabelsDB
-    extends RivetTableAccessor<PackageLabels, PackageLabelsRow> {
+    extends RivetTableAccessor<PackageLabels, PackageLabelRecord> {
   const _$PackageLabelsDB();
 
   @override
-  RivetTableSchema<PackageLabels, PackageLabelsRow> buildSchema() {
+  RivetTableSchema<PackageLabels, PackageLabelRecord> buildSchema() {
     PackageLabels createDefinition() {
       final definition = PackageLabels();
 
@@ -212,12 +228,12 @@ final class _$PackageLabelsDB
     }
 
     final definition = createDefinition();
-    PackageLabelsRow decodeRow(
+    PackageLabelRecord decodeRow(
       List<Object?> values,
       List<bool> sqlNulls,
       RivetRelationValues relations, {
       required bool transport,
-    }) => PackageLabelsRow(
+    }) => PackageLabelRecord(
       code: transport
           ? definition.code.decodeTransportValue(
               values[0],
@@ -230,22 +246,30 @@ final class _$PackageLabelsDB
               isSqlNull: sqlNulls[1],
             )
           : definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      aliases: transport
+          ? definition.aliases.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.aliases.decodeValue(values[2], isSqlNull: sqlNulls[2]),
       notes: relations.read('notes'),
     );
 
-    return RivetTableSchema<PackageLabels, PackageLabelsRow>(
+    return RivetTableSchema<PackageLabels, PackageLabelRecord>(
       schemaName: 'fixture',
       tableName: 'packageLabels',
       definition: definition,
       columns: [
         definition.code as RivetColumn<Object?>,
         definition.name as RivetColumn<Object?>,
+        definition.aliases as RivetColumn<Object?>,
       ],
-      columnNames: ['code', 'name'],
+      columnNames: ['code', 'name', 'aliases'],
       createDefinition: createDefinition,
       columnsFor: (definition) => [
         definition.code as RivetColumn<Object?>,
         definition.name as RivetColumn<Object?>,
+        definition.aliases as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => decodeRow(
         values,
@@ -262,7 +286,7 @@ final class _$PackageLabelsDB
   }
 
   /// Creates a reusable read plan with typed relation includes.
-  RivetFind<PackageLabels, PackageLabelsRow> find({
+  RivetFind<PackageLabels, PackageLabelRecord> find({
     RivetWhere<PackageLabels>? where,
     RivetOrderBy<PackageLabels>? orderBy,
     int? limit,
@@ -281,25 +305,25 @@ final class _$PackageLabelsDB
   }
 
   /// Creates a reusable insert plan.
-  RivetInsert<PackageLabels, PackageLabelsRow> insert(
+  RivetInsert<PackageLabels, PackageLabelRecord> insert(
     PackageLabelsCompanion companion, {
     RivetOnConflict<PackageLabels>? onConflict,
   }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
 
   /// Creates a reusable batch insert plan.
-  RivetInsertMany<PackageLabels, PackageLabelsRow> insertMany(
+  RivetInsertMany<PackageLabels, PackageLabelRecord> insertMany(
     Iterable<PackageLabelsCompanion> companions, {
     RivetOnConflict<PackageLabels>? onConflict,
   }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
 
   /// Creates a reusable update plan.
-  RivetUpdate<PackageLabels, PackageLabelsRow> update(
+  RivetUpdate<PackageLabels, PackageLabelRecord> update(
     PackageLabelsCompanion companion, {
     RivetWhere<PackageLabels>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
 
   /// Creates a reusable delete plan.
-  RivetDelete<PackageLabels, PackageLabelsRow> delete({
+  RivetDelete<PackageLabels, PackageLabelRecord> delete({
     RivetWhere<PackageLabels>? where,
   }) => RivetDelete(buildSchema(), where: where);
 }
@@ -315,7 +339,7 @@ final class PackageLabelNotesInclude {
   final String path;
 
   /// Includes the [label] relation.
-  RivetInclude<PackageLabels, PackageLabelsRow> label({
+  RivetInclude<PackageLabels, PackageLabelRecord> label({
     RivetWhere<PackageLabels>? where,
 
     RivetIncludes<PackageLabelsInclude>? include,
@@ -323,7 +347,7 @@ final class PackageLabelNotesInclude {
     final target = PackageLabels.db.buildSchema();
 
     final relationPath = path.isEmpty ? 'label' : '$path.label';
-    return RivetInclude<PackageLabels, PackageLabelsRow>(
+    return RivetInclude<PackageLabels, PackageLabelRecord>(
       name: 'label',
       path: relationPath,
       relation: _schema.relations['label']!,
@@ -358,7 +382,7 @@ final class PackageLabelNotesRow {
   final String body;
 
   /// Loaded or unloaded `label` relation.
-  final Relation<PackageLabelsRow?> label;
+  final Relation<PackageLabelRecord?> label;
 }
 
 /// Generated values accepted by mutations of 'fixture.packageLabelNotes'.

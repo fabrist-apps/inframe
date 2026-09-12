@@ -410,7 +410,7 @@ final class AppProjectsInclude {
   }
 
   /// Includes the [labels] relation.
-  RivetInclude<schema.PackageLabels, schema.PackageLabelsRow> labels({
+  RivetInclude<schema.PackageLabels, schema.PackageLabelRecord> labels({
     RivetWhere<schema.PackageLabels>? where,
     RivetOrderBy<schema.PackageLabels>? orderBy,
     int? limit,
@@ -421,7 +421,7 @@ final class AppProjectsInclude {
     final through = AppProjectLabels.db.buildSchema();
 
     final relationPath = path.isEmpty ? 'labels' : '$path.labels';
-    return RivetInclude<schema.PackageLabels, schema.PackageLabelsRow>(
+    return RivetInclude<schema.PackageLabels, schema.PackageLabelRecord>(
       name: 'labels',
       path: relationPath,
       relation: _schema.relations['labels']!,
@@ -469,7 +469,7 @@ final class AppProjectsRow {
   final Relation<schema.PackageUsersRow?> packageOwner;
 
   /// Loaded or unloaded `labels` relation.
-  final Relation<List<schema.PackageLabelsRow>> labels;
+  final Relation<List<schema.PackageLabelRecord>> labels;
 }
 
 /// Generated values accepted by mutations of 'fixture.appProjects'.
@@ -677,7 +677,7 @@ final class AppProjectLabelsInclude {
   }
 
   /// Includes the [label] relation.
-  RivetInclude<schema.PackageLabels, schema.PackageLabelsRow> label({
+  RivetInclude<schema.PackageLabels, schema.PackageLabelRecord> label({
     RivetWhere<schema.PackageLabels>? where,
 
     RivetIncludes<schema.PackageLabelsInclude>? include,
@@ -685,7 +685,7 @@ final class AppProjectLabelsInclude {
     final target = schema.PackageLabels.db.buildSchema();
 
     final relationPath = path.isEmpty ? 'label' : '$path.label';
-    return RivetInclude<schema.PackageLabels, schema.PackageLabelsRow>(
+    return RivetInclude<schema.PackageLabels, schema.PackageLabelRecord>(
       name: 'label',
       path: relationPath,
       relation: _schema.relations['label']!,
@@ -722,7 +722,7 @@ final class AppProjectLabelsRow {
   final Relation<AppProjectsRow?> project;
 
   /// Loaded or unloaded `label` relation.
-  final Relation<schema.PackageLabelsRow?> label;
+  final Relation<schema.PackageLabelRecord?> label;
 }
 
 /// Generated values accepted by mutations of 'fixture.appProjectLabels'.

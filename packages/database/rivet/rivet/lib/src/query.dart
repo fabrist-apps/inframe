@@ -226,8 +226,7 @@ String _compileInclude(
     for (final nested in include.includes) _compileInclude(nested, target, parameters, nextAlias),
   ];
   final cells = <String>[
-    for (final column in target.columns)
-      'jsonb_build_array(${column.sql} IS NULL, to_jsonb(${column.selectionSql}))',
+    for (final column in target.columns) column.codec.transportSql(column.sql),
     ...nestedSelections,
   ];
   final predicates = [...join.predicates];

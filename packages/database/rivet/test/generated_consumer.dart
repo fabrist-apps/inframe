@@ -255,6 +255,57 @@ final class ArrayValues extends RivetTableDefinition<ArrayValues> {
   late final codes = text().map(const UserCodeConverter()).nullable().array()();
 }
 
+@RivetTable(schema: 'fbr148')
+final class CodecParents extends RivetTableDefinition<CodecParents> {
+  static const db = _$CodecParentsDB();
+
+  late final id = integer()();
+  late final values = many<CodecValues>()();
+  late final linkedValues = many<CodecValues>().through<CodecLinks>(
+    source: (link) => link.owner,
+    target: (link) => link.value,
+  )();
+}
+
+@RivetTable(schema: 'fbr148', rowName: 'CodecRecord')
+final class CodecValues extends RivetTableDefinition<CodecValues> {
+  static const db = _$CodecValuesDB();
+
+  late final id = integer()();
+  late final ownerId = integer()();
+  late final payload = json()();
+  late final happenedAt = dateTime()();
+  late final status = enumText<WorkStatus>()();
+  late final embedding = vector(dimensions: 3)();
+  late final ints = integer().array()();
+  late final optionalInts = integer().array().nullable()();
+  late final nullableInts = integer().nullable().array()();
+  late final jsonValues = json().nullable().array()();
+  late final vectors = vector(dimensions: 3).array()();
+  late final statuses = enumText<WorkStatus>().array()();
+  late final codes = text().map(const UserCodeConverter()).nullable().array()();
+  late final owner = one<CodecParents>(
+    fields: [ownerId],
+    references: (parent) => [parent.id],
+  )();
+}
+
+@RivetTable(schema: 'fbr148')
+final class CodecLinks extends RivetTableDefinition<CodecLinks> {
+  static const db = _$CodecLinksDB();
+
+  late final ownerId = integer()();
+  late final valueId = integer()();
+  late final owner = one<CodecParents>(
+    fields: [ownerId],
+    references: (parent) => [parent.id],
+  )();
+  late final value = one<CodecValues>(
+    fields: [valueId],
+    references: (value) => [value.id],
+  )();
+}
+
 @RivetTable(schema: 'fbr122')
 final class MalformedArrays extends RivetTableDefinition<MalformedArrays> {
   static const db = _$MalformedArraysDB();
@@ -708,6 +759,9 @@ final class MutationAssignmentNames extends RivetTableDefinition<MutationAssignm
     EnumValues,
     VectorValues,
     ArrayValues,
+    CodecParents,
+    CodecValues,
+    CodecLinks,
     MalformedArrays,
     MetadataColumns,
     ParameterNames,

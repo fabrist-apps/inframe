@@ -3230,6 +3230,902 @@ final class _$ArrayValuesDB
   }) => RivetDelete(buildSchema(), where: where);
 }
 
+/// Typed relation include scope for [CodecParents].
+final class CodecParentsInclude {
+  /// Creates the generated include scope.
+  const CodecParentsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<CodecParents, CodecParentsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [values] relation.
+  RivetInclude<CodecValues, CodecRecord> values({
+    RivetWhere<CodecValues>? where,
+    RivetOrderBy<CodecValues>? orderBy,
+    int? limit,
+
+    RivetIncludes<CodecValuesInclude>? include,
+  }) {
+    final target = CodecValues.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'values' : '$path.values';
+    return RivetInclude<CodecValues, CodecRecord>(
+      name: 'values',
+      path: relationPath,
+      relation: _schema.relations['values']!,
+      targetSchema: target,
+
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(CodecValuesInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [linkedValues] relation.
+  RivetInclude<CodecValues, CodecRecord> linkedValues({
+    RivetWhere<CodecValues>? where,
+    RivetOrderBy<CodecValues>? orderBy,
+    int? limit,
+
+    RivetIncludes<CodecValuesInclude>? include,
+  }) {
+    final target = CodecValues.db.buildSchema();
+    final through = CodecLinks.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'linkedValues' : '$path.linkedValues';
+    return RivetInclude<CodecValues, CodecRecord>(
+      name: 'linkedValues',
+      path: relationPath,
+      relation: _schema.relations['linkedValues']!,
+      targetSchema: target,
+      throughSchema: through,
+
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(CodecValuesInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr148.codecParents'.
+final class CodecParentsRow {
+  /// Creates a row from decoded column and relation values.
+  const CodecParentsRow({
+    required this.id,
+    this.values = const Relation.unloaded(),
+    this.linkedValues = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Loaded or unloaded `values` relation.
+  final Relation<List<CodecRecord>> values;
+
+  /// Loaded or unloaded `linkedValues` relation.
+  final Relation<List<CodecRecord>> linkedValues;
+}
+
+/// Generated values accepted by mutations of 'fbr148.codecParents'.
+final class CodecParentsCompanion implements RivetCompanion<CodecParents> {
+  const CodecParentsCompanion._({required this.id});
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory CodecParentsCompanion.insert({
+    required RivetValue<CodecParents, int, int> id,
+  }) => CodecParentsCompanion._(id: id);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory CodecParentsCompanion.update({
+    RivetValue<CodecParents, int, int> id = const RivetValue.absent(),
+  }) => CodecParentsCompanion._(id: id);
+
+  /// Mutation value for `id`.
+  final RivetValue<CodecParents, int, int> id;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<CodecParents>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+  ];
+}
+
+final class _$CodecParentsDB
+    extends RivetTableAccessor<CodecParents, CodecParentsRow> {
+  const _$CodecParentsDB();
+
+  @override
+  RivetTableSchema<CodecParents, CodecParentsRow> buildSchema() {
+    CodecParents createDefinition() {
+      final definition = CodecParents();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    CodecParentsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => CodecParentsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      values: relations.read('values'),
+      linkedValues: relations.read('linkedValues'),
+    );
+
+    return RivetTableSchema<CodecParents, CodecParentsRow>(
+      schemaName: 'fbr148',
+      tableName: 'codecParents',
+      definition: definition,
+      columns: [definition.id as RivetColumn<Object?>],
+      columnNames: ['id'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [definition.id as RivetColumn<Object?>],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'values': definition.values as RivetRelationDescriptor<Object?>,
+        'linkedValues':
+            definition.linkedValues as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<CodecParents, CodecParentsRow> find({
+    RivetWhere<CodecParents>? where,
+    RivetOrderBy<CodecParents>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<CodecParentsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(CodecParentsInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<CodecParents, CodecParentsRow> insert(
+    CodecParentsCompanion companion, {
+    RivetOnConflict<CodecParents>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<CodecParents, CodecParentsRow> insertMany(
+    Iterable<CodecParentsCompanion> companions, {
+    RivetOnConflict<CodecParents>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<CodecParents, CodecParentsRow> update(
+    CodecParentsCompanion companion, {
+    RivetWhere<CodecParents>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<CodecParents, CodecParentsRow> delete({
+    RivetWhere<CodecParents>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [CodecValues].
+final class CodecValuesInclude {
+  /// Creates the generated include scope.
+  const CodecValuesInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<CodecValues, CodecRecord> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [owner] relation.
+  RivetInclude<CodecParents, CodecParentsRow> owner({
+    RivetWhere<CodecParents>? where,
+
+    RivetIncludes<CodecParentsInclude>? include,
+  }) {
+    final target = CodecParents.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'owner' : '$path.owner';
+    return RivetInclude<CodecParents, CodecParentsRow>(
+      name: 'owner',
+      path: relationPath,
+      relation: _schema.relations['owner']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(CodecParentsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr148.codecValues'.
+final class CodecRecord {
+  /// Creates a row from decoded column and relation values.
+  const CodecRecord({
+    required this.id,
+    required this.ownerId,
+    required this.payload,
+    required this.happenedAt,
+    required this.status,
+    required this.embedding,
+    required this.ints,
+    required this.optionalInts,
+    required this.nullableInts,
+    required this.jsonValues,
+    required this.vectors,
+    required this.statuses,
+    required this.codes,
+    this.owner = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `ownerId`.
+  final int ownerId;
+
+  /// Value read from `payload`.
+  final JsonValue payload;
+
+  /// Value read from `happenedAt`.
+  final DateTime happenedAt;
+
+  /// Value read from `status`.
+  final WorkStatus status;
+
+  /// Value read from `embedding`.
+  final Float32List embedding;
+
+  /// Value read from `ints`.
+  final List<int> ints;
+
+  /// Value read from `optionalInts`.
+  final List<int>? optionalInts;
+
+  /// Value read from `nullableInts`.
+  final List<int?> nullableInts;
+
+  /// Value read from `jsonValues`.
+  final List<JsonValue?> jsonValues;
+
+  /// Value read from `vectors`.
+  final List<Float32List> vectors;
+
+  /// Value read from `statuses`.
+  final List<WorkStatus> statuses;
+
+  /// Value read from `codes`.
+  final List<UserCode?> codes;
+
+  /// Loaded or unloaded `owner` relation.
+  final Relation<CodecParentsRow?> owner;
+}
+
+/// Generated values accepted by mutations of 'fbr148.codecValues'.
+final class CodecValuesCompanion implements RivetCompanion<CodecValues> {
+  const CodecValuesCompanion._({
+    required this.id,
+    required this.ownerId,
+    required this.payload,
+    required this.happenedAt,
+    required this.status,
+    required this.embedding,
+    required this.ints,
+    required this.optionalInts,
+    required this.nullableInts,
+    required this.jsonValues,
+    required this.vectors,
+    required this.statuses,
+    required this.codes,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory CodecValuesCompanion.insert({
+    required RivetValue<CodecValues, int, int> id,
+    required RivetValue<CodecValues, int, int> ownerId,
+    required RivetValue<CodecValues, JsonValue, JsonValue> payload,
+    required RivetValue<CodecValues, DateTime, DateTime> happenedAt,
+    required RivetValue<CodecValues, WorkStatus, WorkStatus> status,
+    required RivetValue<CodecValues, Float32List, Float32List> embedding,
+    required RivetValue<CodecValues, List<int>, List<int>> ints,
+    required RivetValue<CodecValues, List<int?>, List<int?>> nullableInts,
+    required RivetValue<CodecValues, List<JsonValue?>, List<JsonValue?>>
+    jsonValues,
+    required RivetValue<CodecValues, List<Float32List>, List<Float32List>>
+    vectors,
+    required RivetValue<CodecValues, List<WorkStatus>, List<WorkStatus>>
+    statuses,
+    required RivetValue<CodecValues, List<UserCode?>, List<String?>> codes,
+    RivetValue<CodecValues, List<int>?, List<int>?> optionalInts =
+        const RivetValue.absent(),
+  }) => CodecValuesCompanion._(
+    id: id,
+    ownerId: ownerId,
+    payload: payload,
+    happenedAt: happenedAt,
+    status: status,
+    embedding: embedding,
+    ints: ints,
+    optionalInts: optionalInts,
+    nullableInts: nullableInts,
+    jsonValues: jsonValues,
+    vectors: vectors,
+    statuses: statuses,
+    codes: codes,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory CodecValuesCompanion.update({
+    RivetValue<CodecValues, int, int> id = const RivetValue.absent(),
+    RivetValue<CodecValues, int, int> ownerId = const RivetValue.absent(),
+    RivetValue<CodecValues, JsonValue, JsonValue> payload =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, DateTime, DateTime> happenedAt =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, WorkStatus, WorkStatus> status =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, Float32List, Float32List> embedding =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, List<int>, List<int>> ints =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, List<int>?, List<int>?> optionalInts =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, List<int?>, List<int?>> nullableInts =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, List<JsonValue?>, List<JsonValue?>> jsonValues =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, List<Float32List>, List<Float32List>> vectors =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, List<WorkStatus>, List<WorkStatus>> statuses =
+        const RivetValue.absent(),
+    RivetValue<CodecValues, List<UserCode?>, List<String?>> codes =
+        const RivetValue.absent(),
+  }) => CodecValuesCompanion._(
+    id: id,
+    ownerId: ownerId,
+    payload: payload,
+    happenedAt: happenedAt,
+    status: status,
+    embedding: embedding,
+    ints: ints,
+    optionalInts: optionalInts,
+    nullableInts: nullableInts,
+    jsonValues: jsonValues,
+    vectors: vectors,
+    statuses: statuses,
+    codes: codes,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<CodecValues, int, int> id;
+
+  /// Mutation value for `ownerId`.
+  final RivetValue<CodecValues, int, int> ownerId;
+
+  /// Mutation value for `payload`.
+  final RivetValue<CodecValues, JsonValue, JsonValue> payload;
+
+  /// Mutation value for `happenedAt`.
+  final RivetValue<CodecValues, DateTime, DateTime> happenedAt;
+
+  /// Mutation value for `status`.
+  final RivetValue<CodecValues, WorkStatus, WorkStatus> status;
+
+  /// Mutation value for `embedding`.
+  final RivetValue<CodecValues, Float32List, Float32List> embedding;
+
+  /// Mutation value for `ints`.
+  final RivetValue<CodecValues, List<int>, List<int>> ints;
+
+  /// Mutation value for `optionalInts`.
+  final RivetValue<CodecValues, List<int>?, List<int>?> optionalInts;
+
+  /// Mutation value for `nullableInts`.
+  final RivetValue<CodecValues, List<int?>, List<int?>> nullableInts;
+
+  /// Mutation value for `jsonValues`.
+  final RivetValue<CodecValues, List<JsonValue?>, List<JsonValue?>> jsonValues;
+
+  /// Mutation value for `vectors`.
+  final RivetValue<CodecValues, List<Float32List>, List<Float32List>> vectors;
+
+  /// Mutation value for `statuses`.
+  final RivetValue<CodecValues, List<WorkStatus>, List<WorkStatus>> statuses;
+
+  /// Mutation value for `codes`.
+  final RivetValue<CodecValues, List<UserCode?>, List<String?>> codes;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<CodecValues>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+    RivetAssignment('ownerId', ownerId),
+    RivetAssignment('payload', payload),
+    RivetAssignment('happenedAt', happenedAt),
+    RivetAssignment('status', status),
+    RivetAssignment('embedding', embedding),
+    RivetAssignment('ints', ints),
+    RivetAssignment('optionalInts', optionalInts),
+    RivetAssignment('nullableInts', nullableInts),
+    RivetAssignment('jsonValues', jsonValues),
+    RivetAssignment('vectors', vectors),
+    RivetAssignment('statuses', statuses),
+    RivetAssignment('codes', codes),
+  ];
+}
+
+final class _$CodecValuesDB
+    extends RivetTableAccessor<CodecValues, CodecRecord> {
+  const _$CodecValuesDB();
+
+  @override
+  RivetTableSchema<CodecValues, CodecRecord> buildSchema() {
+    CodecValues createDefinition() {
+      final definition = CodecValues();
+      definition.status.configureEnum(WorkStatusRivetEnum.codec);
+      definition.statuses.configureEnum(WorkStatusRivetEnum.codec);
+      return definition;
+    }
+
+    final definition = createDefinition();
+    CodecRecord decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => CodecRecord(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      ownerId: transport
+          ? definition.ownerId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.ownerId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      payload: transport
+          ? definition.payload.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.payload.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      happenedAt: transport
+          ? definition.happenedAt.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.happenedAt.decodeValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            ),
+      status: transport
+          ? definition.status.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.status.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      embedding: transport
+          ? definition.embedding.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.embedding.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+      ints: transport
+          ? definition.ints.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.ints.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+      optionalInts: transport
+          ? definition.optionalInts.decodeTransportValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            )
+          : definition.optionalInts.decodeValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            ),
+      nullableInts: transport
+          ? definition.nullableInts.decodeTransportValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            )
+          : definition.nullableInts.decodeValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            ),
+      jsonValues: transport
+          ? definition.jsonValues.decodeTransportValue(
+              values[9],
+              isSqlNull: sqlNulls[9],
+            )
+          : definition.jsonValues.decodeValue(
+              values[9],
+              isSqlNull: sqlNulls[9],
+            ),
+      vectors: transport
+          ? definition.vectors.decodeTransportValue(
+              values[10],
+              isSqlNull: sqlNulls[10],
+            )
+          : definition.vectors.decodeValue(values[10], isSqlNull: sqlNulls[10]),
+      statuses: transport
+          ? definition.statuses.decodeTransportValue(
+              values[11],
+              isSqlNull: sqlNulls[11],
+            )
+          : definition.statuses.decodeValue(
+              values[11],
+              isSqlNull: sqlNulls[11],
+            ),
+      codes: transport
+          ? definition.codes.decodeTransportValue(
+              values[12],
+              isSqlNull: sqlNulls[12],
+            )
+          : definition.codes.decodeValue(values[12], isSqlNull: sqlNulls[12]),
+      owner: relations.read('owner'),
+    );
+
+    return RivetTableSchema<CodecValues, CodecRecord>(
+      schemaName: 'fbr148',
+      tableName: 'codecValues',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.ownerId as RivetColumn<Object?>,
+        definition.payload as RivetColumn<Object?>,
+        definition.happenedAt as RivetColumn<Object?>,
+        definition.status as RivetColumn<Object?>,
+        definition.embedding as RivetColumn<Object?>,
+        definition.ints as RivetColumn<Object?>,
+        definition.optionalInts as RivetColumn<Object?>,
+        definition.nullableInts as RivetColumn<Object?>,
+        definition.jsonValues as RivetColumn<Object?>,
+        definition.vectors as RivetColumn<Object?>,
+        definition.statuses as RivetColumn<Object?>,
+        definition.codes as RivetColumn<Object?>,
+      ],
+      columnNames: [
+        'id',
+        'ownerId',
+        'payload',
+        'happenedAt',
+        'status',
+        'embedding',
+        'ints',
+        'optionalInts',
+        'nullableInts',
+        'jsonValues',
+        'vectors',
+        'statuses',
+        'codes',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.ownerId as RivetColumn<Object?>,
+        definition.payload as RivetColumn<Object?>,
+        definition.happenedAt as RivetColumn<Object?>,
+        definition.status as RivetColumn<Object?>,
+        definition.embedding as RivetColumn<Object?>,
+        definition.ints as RivetColumn<Object?>,
+        definition.optionalInts as RivetColumn<Object?>,
+        definition.nullableInts as RivetColumn<Object?>,
+        definition.jsonValues as RivetColumn<Object?>,
+        definition.vectors as RivetColumn<Object?>,
+        definition.statuses as RivetColumn<Object?>,
+        definition.codes as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'owner': definition.owner as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<CodecValues, CodecRecord> find({
+    RivetWhere<CodecValues>? where,
+    RivetOrderBy<CodecValues>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<CodecValuesInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(CodecValuesInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<CodecValues, CodecRecord> insert(
+    CodecValuesCompanion companion, {
+    RivetOnConflict<CodecValues>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<CodecValues, CodecRecord> insertMany(
+    Iterable<CodecValuesCompanion> companions, {
+    RivetOnConflict<CodecValues>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<CodecValues, CodecRecord> update(
+    CodecValuesCompanion companion, {
+    RivetWhere<CodecValues>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<CodecValues, CodecRecord> delete({
+    RivetWhere<CodecValues>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [CodecLinks].
+final class CodecLinksInclude {
+  /// Creates the generated include scope.
+  const CodecLinksInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<CodecLinks, CodecLinksRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [owner] relation.
+  RivetInclude<CodecParents, CodecParentsRow> owner({
+    RivetWhere<CodecParents>? where,
+
+    RivetIncludes<CodecParentsInclude>? include,
+  }) {
+    final target = CodecParents.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'owner' : '$path.owner';
+    return RivetInclude<CodecParents, CodecParentsRow>(
+      name: 'owner',
+      path: relationPath,
+      relation: _schema.relations['owner']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(CodecParentsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [value] relation.
+  RivetInclude<CodecValues, CodecRecord> value({
+    RivetWhere<CodecValues>? where,
+
+    RivetIncludes<CodecValuesInclude>? include,
+  }) {
+    final target = CodecValues.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'value' : '$path.value';
+    return RivetInclude<CodecValues, CodecRecord>(
+      name: 'value',
+      path: relationPath,
+      relation: _schema.relations['value']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(CodecValuesInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr148.codecLinks'.
+final class CodecLinksRow {
+  /// Creates a row from decoded column and relation values.
+  const CodecLinksRow({
+    required this.ownerId,
+    required this.valueId,
+    this.owner = const Relation.unloaded(),
+    this.value = const Relation.unloaded(),
+  });
+
+  /// Value read from `ownerId`.
+  final int ownerId;
+
+  /// Value read from `valueId`.
+  final int valueId;
+
+  /// Loaded or unloaded `owner` relation.
+  final Relation<CodecParentsRow?> owner;
+
+  /// Loaded or unloaded `value` relation.
+  final Relation<CodecRecord?> value;
+}
+
+/// Generated values accepted by mutations of 'fbr148.codecLinks'.
+final class CodecLinksCompanion implements RivetCompanion<CodecLinks> {
+  const CodecLinksCompanion._({required this.ownerId, required this.valueId});
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory CodecLinksCompanion.insert({
+    required RivetValue<CodecLinks, int, int> ownerId,
+    required RivetValue<CodecLinks, int, int> valueId,
+  }) => CodecLinksCompanion._(ownerId: ownerId, valueId: valueId);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory CodecLinksCompanion.update({
+    RivetValue<CodecLinks, int, int> ownerId = const RivetValue.absent(),
+    RivetValue<CodecLinks, int, int> valueId = const RivetValue.absent(),
+  }) => CodecLinksCompanion._(ownerId: ownerId, valueId: valueId);
+
+  /// Mutation value for `ownerId`.
+  final RivetValue<CodecLinks, int, int> ownerId;
+
+  /// Mutation value for `valueId`.
+  final RivetValue<CodecLinks, int, int> valueId;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<CodecLinks>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('ownerId', ownerId),
+    RivetAssignment('valueId', valueId),
+  ];
+}
+
+final class _$CodecLinksDB
+    extends RivetTableAccessor<CodecLinks, CodecLinksRow> {
+  const _$CodecLinksDB();
+
+  @override
+  RivetTableSchema<CodecLinks, CodecLinksRow> buildSchema() {
+    CodecLinks createDefinition() {
+      final definition = CodecLinks();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    CodecLinksRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => CodecLinksRow(
+      ownerId: transport
+          ? definition.ownerId.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.ownerId.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      valueId: transport
+          ? definition.valueId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.valueId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      owner: relations.read('owner'),
+      value: relations.read('value'),
+    );
+
+    return RivetTableSchema<CodecLinks, CodecLinksRow>(
+      schemaName: 'fbr148',
+      tableName: 'codecLinks',
+      definition: definition,
+      columns: [
+        definition.ownerId as RivetColumn<Object?>,
+        definition.valueId as RivetColumn<Object?>,
+      ],
+      columnNames: ['ownerId', 'valueId'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.ownerId as RivetColumn<Object?>,
+        definition.valueId as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'owner': definition.owner as RivetRelationDescriptor<Object?>,
+        'value': definition.value as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<CodecLinks, CodecLinksRow> find({
+    RivetWhere<CodecLinks>? where,
+    RivetOrderBy<CodecLinks>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<CodecLinksInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(CodecLinksInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<CodecLinks, CodecLinksRow> insert(
+    CodecLinksCompanion companion, {
+    RivetOnConflict<CodecLinks>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<CodecLinks, CodecLinksRow> insertMany(
+    Iterable<CodecLinksCompanion> companions, {
+    RivetOnConflict<CodecLinks>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<CodecLinks, CodecLinksRow> update(
+    CodecLinksCompanion companion, {
+    RivetWhere<CodecLinks>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<CodecLinks, CodecLinksRow> delete({
+    RivetWhere<CodecLinks>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
 /// Generated row returned by reads from 'fbr122.malformedArrays'.
 final class MalformedArraysRow {
   /// Creates a row from decoded column and relation values.
@@ -7652,6 +8548,9 @@ abstract class _$RivetTestDatabase {
       EnumValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       VectorValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       ArrayValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      CodecParents.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      CodecValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      CodecLinks.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       MalformedArrays.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       MetadataColumns.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       ParameterNames.db.buildSchema() as RivetTableSchema<Object?, Object?>,

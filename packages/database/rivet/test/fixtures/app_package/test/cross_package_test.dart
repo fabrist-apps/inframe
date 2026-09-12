@@ -77,7 +77,9 @@ void main() {
           )
         ''');
         await fixture.execute('''
-          CREATE TABLE fixture."packageLabels" (code text NOT NULL, name text NOT NULL)
+          CREATE TABLE fixture."packageLabels" (
+            code text NOT NULL, name text NOT NULL, aliases jsonb[] NOT NULL
+          )
         ''');
         await fixture.execute('''
           CREATE TABLE fixture."packageLabelNotes" (
@@ -105,7 +107,9 @@ void main() {
           VALUES (1, 'Ada', 'Ada'), (2, 'Ada', 'Grace'), (3, 'Grace', 'Grace')
         ''');
         await fixture.execute('''
-          INSERT INTO fixture."packageLabels" VALUES ('a', 'Alpha'), ('b', 'Beta')
+          INSERT INTO fixture."packageLabels" VALUES
+            ('a', 'Alpha', ARRAY[]::jsonb[]),
+            ('b', 'Beta', ARRAY[NULL::jsonb, 'null'::jsonb, '[1,null]'::jsonb])
         ''');
         await fixture.execute('''
           INSERT INTO fixture."packageLabelNotes" VALUES (1, 'a', 'alpha note'), (2, 'b', 'beta note')
@@ -164,8 +168,13 @@ void main() {
           isFalse,
         );
         final labels =
-            (adaProjects.single.labels as LoadedRelation<List<schema.PackageLabelsRow>>).value;
+            (adaProjects.single.labels as LoadedRelation<List<schema.PackageLabelRecord>>).value;
         expect(labels.map((label) => label.code), ['b']);
+        expect(labels.single.aliases, [
+          null,
+          const JsonNull(),
+          JsonValue.from(const [1, null]),
+        ]);
         expect(
           (labels.single.notes as LoadedRelation<List<schema.PackageLabelNotesRow>>).value.map(
             (note) => note.body,

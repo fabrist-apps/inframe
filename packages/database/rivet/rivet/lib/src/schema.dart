@@ -302,6 +302,8 @@ abstract class RivetCodec<T> {
   String get cast;
   bool get acceptsNull => false;
   String select(String columnSql) => columnSql;
+  String transportSql(String columnSql) =>
+      'jsonb_build_array($columnSql IS NULL, to_jsonb(${select(columnSql)}))';
   Object? encode(T value);
   T decode(Object? value, {required bool isSqlNull});
   T decodeTransport(Object? value, {required bool isSqlNull}) =>
@@ -339,6 +341,9 @@ final class RivetNullableCodec<T> extends RivetCodec<T?> {
 
   @override
   String select(String columnSql) => inner.select(columnSql);
+
+  @override
+  String transportSql(String columnSql) => inner.transportSql(columnSql);
 
   @override
   Object? encode(T? value) => value == null ? null : inner.encode(value);
@@ -695,6 +700,9 @@ final class RivetMappedCodec<Domain, Storage> extends RivetCodec<Domain> {
 
   @override
   String select(String columnSql) => storage.select(columnSql);
+
+  @override
+  String transportSql(String columnSql) => storage.transportSql(columnSql);
 
   @override
   Object? encode(Domain value) => storage.encode(converter.toSql(value));
@@ -1581,6 +1589,25 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
   }
 
   @override
+  String transportSql(String columnSql) {
+    final element = elementCodec.transportSql('"__rivet_array_element"');
+    return '''
+jsonb_build_array(
+  $columnSql IS NULL,
+  jsonb_build_object(
+    'dimensions', array_ndims($columnSql),
+    'lower', array_lower($columnSql, 1),
+    'upper', array_upper($columnSql, 1),
+    'elements', CASE WHEN $columnSql IS NULL THEN '[]'::jsonb ELSE COALESCE((
+      SELECT jsonb_agg($element ORDER BY "__rivet_array_order")
+      FROM unnest($columnSql) WITH ORDINALITY
+        AS "__rivet_array"("__rivet_array_element", "__rivet_array_order")
+    ), '[]'::jsonb) END
+  )
+)''';
+  }
+
+  @override
   Object encode(List<Element> value) {
     final encoded = [
       for (final element in value)
@@ -1610,6 +1637,37 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
           value[index],
           isSqlNull: value is pg.JsonbListView ? value.isSqlNull(index) : value[index] == null,
         ),
+    ];
+  }
+
+  @override
+  List<Element> decodeTransport(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull) {
+      throw const FormatException('expected a non-null one-dimensional array');
+    }
+    if (value is! Map<Object?, Object?>) {
+      throw const FormatException('expected an array transport envelope');
+    }
+    final dimensions = value['dimensions'];
+    final lower = value['lower'];
+    final upper = value['upper'];
+    final elements = value['elements'];
+    if (elements is! List<Object?>) {
+      throw const FormatException('expected ordered array transport elements');
+    }
+    final isCanonicalEmpty =
+        dimensions == null && lower == null && upper == null && elements.isEmpty;
+    if (!isCanonicalEmpty && (dimensions != 1 || lower != 1 || upper != elements.length)) {
+      throw const FormatException(
+        'expected a one-dimensional array with canonical lower bound',
+      );
+    }
+    return [
+      for (final encoded in elements)
+        if (encoded case [final bool elementIsSqlNull, final Object? elementValue])
+          elementCodec.decodeTransport(elementValue, isSqlNull: elementIsSqlNull)
+        else
+          throw const FormatException('expected an array element transport cell'),
     ];
   }
 

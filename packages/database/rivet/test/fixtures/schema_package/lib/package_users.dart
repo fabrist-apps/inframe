@@ -34,12 +34,13 @@ final class PackageUsers extends RivetTableDefinition<PackageUsers> {
   late final access = enumText<AccessLevel>()();
 }
 
-@RivetTable(schema: 'fixture', name: 'packageLabels')
+@RivetTable(schema: 'fixture', name: 'packageLabels', rowName: 'PackageLabelRecord')
 final class PackageLabels extends RivetTableDefinition<PackageLabels> {
   static const db = _$PackageLabelsDB();
 
   late final code = text()();
   late final name = text()();
+  late final aliases = json().nullable().array()();
   late final notes = many<PackageLabelNotes>()();
 }
 
