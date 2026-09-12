@@ -88,6 +88,21 @@ onConflict: (conflict) => conflict.doNothing(
 ),
 ```
 
+Use `conflict.update` with an explicit target to upsert. The `set` callback receives typed SQL scopes for the existing row and PostgreSQL's excluded row. `targetWhere` selects a partial unique index; `where` decides whether the conflicting row is updated:
+
+```dart
+onConflict: (conflict) => conflict.update(
+  target: (user) => [user.name],
+  targetWhere: (user) => ~user.name.equals(''),
+  set: (old, excluded) => UsersCompanion.update(
+    age: RivetValue.expression((_) => excluded.age),
+  ),
+  where: (old, excluded) => old.age.lessThanExpression(excluded.age),
+),
+```
+
+Absent fields in the conflict update run their `onUpdate` callbacks once when the statement is prepared for execution. Empty batches run no conflict, default, or update callbacks.
+
 The column catalog is `chronoID`, `text`, `integer`, `real`, `boolean`, `dateTime`, `json`, `enumText`, and fixed-dimension `vector`. Add `.map(converter)` for domain values and `.array()` for one-dimensional native PostgreSQL arrays. Nullability before `.array()` applies to elements; nullability after it applies to the array column.
 
 The integration matrix pins `postgres` 3.5.12 and the Inframe image at `sha256:a29d81973c699fdf070b10f77bf5b91b1d94a59fcd7792f67410ba655761f871`: PostgreSQL 18.6, pgvector 0.8.6, pgvectorscale 0.9.1, and pg_textsearch 1.4.0.

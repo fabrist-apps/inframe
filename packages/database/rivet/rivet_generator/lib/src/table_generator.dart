@@ -199,14 +199,20 @@ final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
 
   @override
   RivetTableSchema<$className, $rowName> buildSchema() {
-    final definition = $className();
-    $enumCodecs
+    $className createDefinition() {
+      final definition = $className();
+      $enumCodecs
+      return definition;
+    }
+    final definition = createDefinition();
     return RivetTableSchema<$className, $rowName>(
       schemaName: ${literal(schemaName)},
       tableName: ${literal(tableName)},
 $renameMetadata      definition: definition,
       columns: [$descriptorList],
       columnNames: [$names],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [$descriptorList],
       decode: (values, sqlNulls) => $rowName($decodes),
 $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},\n'}
     );

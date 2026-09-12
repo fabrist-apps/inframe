@@ -53,8 +53,13 @@ final class _$UserProfilesDB
 
   @override
   RivetTableSchema<UserProfiles, UserProfilesRow> buildSchema() {
-    final definition = UserProfiles();
+    UserProfiles createDefinition() {
+      final definition = UserProfiles();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<UserProfiles, UserProfilesRow>(
       schemaName: 'fbr116',
       tableName: 'userProfiles',
@@ -62,6 +67,10 @@ final class _$UserProfilesDB
       definition: definition,
       columns: [definition.displayName as RivetColumn<Object?>],
       columnNames: ['displayName'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.displayName as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => UserProfilesRow(
         displayName: definition.displayName.decodeValue(
           values[0],
@@ -144,14 +153,23 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
 
   @override
   RivetTableSchema<Posts, PostsRow> buildSchema() {
-    final definition = Posts();
+    Posts createDefinition() {
+      final definition = Posts();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<Posts, PostsRow>(
       schemaName: 'fbr116',
       tableName: 'posts',
       definition: definition,
       columns: [definition.authorName as RivetColumn<Object?>],
       columnNames: ['authorName'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.authorName as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => PostsRow(
         authorName: definition.authorName.decodeValue(
           values[0],
@@ -343,8 +361,13 @@ final class _$ScalarValuesDB
 
   @override
   RivetTableSchema<ScalarValues, ScalarValuesRow> buildSchema() {
-    final definition = ScalarValues();
+    ScalarValues createDefinition() {
+      final definition = ScalarValues();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<ScalarValues, ScalarValuesRow>(
       schemaName: 'fbr119',
       tableName: 'scalarValues',
@@ -370,6 +393,18 @@ final class _$ScalarValuesDB
         'preferences',
         'code',
         'optionalCode',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.count as RivetColumn<Object?>,
+        definition.score as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+        definition.createdAt as RivetColumn<Object?>,
+        definition.payload as RivetColumn<Object?>,
+        definition.preferences as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+        definition.optionalCode as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => ScalarValuesRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
@@ -554,15 +589,20 @@ final class _$EnumValuesDB
 
   @override
   RivetTableSchema<EnumValues, EnumValuesRow> buildSchema() {
-    final definition = EnumValues();
-    definition.status.configureEnum(WorkStatusRivetEnum.codec);
-    definition.optionalStatus.configureEnum(WorkStatusRivetEnum.codec);
-    definition.nullableStatuses.configureEnum(WorkStatusRivetEnum.codec);
-    definition.optionalStatuses.configureEnum(WorkStatusRivetEnum.codec);
-    definition.optionalNullableStatuses.configureEnum(
-      WorkStatusRivetEnum.codec,
-    );
-    definition.mappedStatus.configureEnum(WorkStatusRivetEnum.codec);
+    EnumValues createDefinition() {
+      final definition = EnumValues();
+      definition.status.configureEnum(WorkStatusRivetEnum.codec);
+      definition.optionalStatus.configureEnum(WorkStatusRivetEnum.codec);
+      definition.nullableStatuses.configureEnum(WorkStatusRivetEnum.codec);
+      definition.optionalStatuses.configureEnum(WorkStatusRivetEnum.codec);
+      definition.optionalNullableStatuses.configureEnum(
+        WorkStatusRivetEnum.codec,
+      );
+      definition.mappedStatus.configureEnum(WorkStatusRivetEnum.codec);
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<EnumValues, EnumValuesRow>(
       schemaName: 'fbr120',
       tableName: 'enumValues',
@@ -582,6 +622,15 @@ final class _$EnumValuesDB
         'optionalStatuses',
         'optionalNullableStatuses',
         'mappedStatus',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.status as RivetColumn<Object?>,
+        definition.optionalStatus as RivetColumn<Object?>,
+        definition.nullableStatuses as RivetColumn<Object?>,
+        definition.optionalStatuses as RivetColumn<Object?>,
+        definition.optionalNullableStatuses as RivetColumn<Object?>,
+        definition.mappedStatus as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => EnumValuesRow(
         status: definition.status.decodeValue(
@@ -697,8 +746,13 @@ final class _$VectorValuesDB
 
   @override
   RivetTableSchema<VectorValues, VectorValuesRow> buildSchema() {
-    final definition = VectorValues();
+    VectorValues createDefinition() {
+      final definition = VectorValues();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<VectorValues, VectorValuesRow>(
       schemaName: 'fbr121',
       tableName: 'vectorValues',
@@ -708,6 +762,11 @@ final class _$VectorValuesDB
         definition.optionalEmbedding as RivetColumn<Object?>,
       ],
       columnNames: ['embedding', 'optionalEmbedding'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.embedding as RivetColumn<Object?>,
+        definition.optionalEmbedding as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => VectorValuesRow(
         embedding: definition.embedding.decodeValue(
           values[0],
@@ -896,8 +955,13 @@ final class _$ArrayValuesDB
 
   @override
   RivetTableSchema<ArrayValues, ArrayValuesRow> buildSchema() {
-    final definition = ArrayValues();
-    definition.statuses.configureEnum(WorkStatusRivetEnum.codec);
+    ArrayValues createDefinition() {
+      final definition = ArrayValues();
+      definition.statuses.configureEnum(WorkStatusRivetEnum.codec);
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<ArrayValues, ArrayValuesRow>(
       schemaName: 'fbr122',
       tableName: 'arrayValues',
@@ -921,6 +985,17 @@ final class _$ArrayValuesDB
         'vectors',
         'statuses',
         'codes',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.ints as RivetColumn<Object?>,
+        definition.nullableInts as RivetColumn<Object?>,
+        definition.optionalInts as RivetColumn<Object?>,
+        definition.optionalNullableInts as RivetColumn<Object?>,
+        definition.jsonValues as RivetColumn<Object?>,
+        definition.vectors as RivetColumn<Object?>,
+        definition.statuses as RivetColumn<Object?>,
+        definition.codes as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => ArrayValuesRow(
         ints: definition.ints.decodeValue(values[0], isSqlNull: sqlNulls[0]),
@@ -1018,14 +1093,21 @@ final class _$MalformedArraysDB
 
   @override
   RivetTableSchema<MalformedArrays, MalformedArraysRow> buildSchema() {
-    final definition = MalformedArrays();
+    MalformedArrays createDefinition() {
+      final definition = MalformedArrays();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MalformedArrays, MalformedArraysRow>(
       schemaName: 'fbr122',
       tableName: 'malformedArrays',
       definition: definition,
       columns: [definition.ints as RivetColumn<Object?>],
       columnNames: ['ints'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [definition.ints as RivetColumn<Object?>],
       decode: (values, sqlNulls) => MalformedArraysRow(
         ints: definition.ints.decodeValue(values[0], isSqlNull: sqlNulls[0]),
       ),
@@ -1164,8 +1246,13 @@ final class _$MetadataColumnsDB
 
   @override
   RivetTableSchema<MetadataColumns, MetadataColumnsRow> buildSchema() {
-    final definition = MetadataColumns();
+    MetadataColumns createDefinition() {
+      final definition = MetadataColumns();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MetadataColumns, MetadataColumnsRow>(
       schemaName: 'metadata',
       tableName: 'metadataColumns',
@@ -1178,6 +1265,14 @@ final class _$MetadataColumnsDB
         definition.code as RivetColumn<Object?>,
       ],
       columnNames: ['count', 'payload', 'embedding', 'values', 'code'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.count as RivetColumn<Object?>,
+        definition.payload as RivetColumn<Object?>,
+        definition.embedding as RivetColumn<Object?>,
+        definition.values as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MetadataColumnsRow(
         count: definition.count.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         payload: definition.payload.decodeValue(
@@ -1262,14 +1357,21 @@ final class _$TextTargetsDB
 
   @override
   RivetTableSchema<TextTargets, TextTargetsRow> buildSchema() {
-    final definition = TextTargets();
+    TextTargets createDefinition() {
+      final definition = TextTargets();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<TextTargets, TextTargetsRow>(
       schemaName: 'metadata',
       tableName: 'textTargets',
       definition: definition,
       columns: [definition.value as RivetColumn<Object?>],
       columnNames: ['value'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [definition.value as RivetColumn<Object?>],
       decode: (values, sqlNulls) => TextTargetsRow(
         value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
       ),
@@ -1340,14 +1442,21 @@ final class _$InvalidReferencesDB
 
   @override
   RivetTableSchema<InvalidReferences, InvalidReferencesRow> buildSchema() {
-    final definition = InvalidReferences();
+    InvalidReferences createDefinition() {
+      final definition = InvalidReferences();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<InvalidReferences, InvalidReferencesRow>(
       schemaName: 'metadata',
       tableName: 'invalidReferences',
       definition: definition,
       columns: [definition.value as RivetColumn<Object?>],
       columnNames: ['value'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [definition.value as RivetColumn<Object?>],
       decode: (values, sqlNulls) => InvalidReferencesRow(
         value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
       ),
@@ -1418,14 +1527,21 @@ final class _$ParameterNamesDB
 
   @override
   RivetTableSchema<ParameterNames, ParameterNamesRow> buildSchema() {
-    final definition = ParameterNames();
+    ParameterNames createDefinition() {
+      final definition = ParameterNames();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<ParameterNames, ParameterNamesRow>(
       schemaName: 'metadata',
       tableName: 'parameterNames',
       definition: definition,
       columns: [definition.value as RivetColumn<Object?>],
       columnNames: ['value'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [definition.value as RivetColumn<Object?>],
       decode: (values, sqlNulls) => ParameterNamesRow(
         value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
       ),
@@ -1788,9 +1904,14 @@ final class _$MutationCatalogDB
 
   @override
   RivetTableSchema<MutationCatalog, MutationCatalogRow> buildSchema() {
-    final definition = MutationCatalog();
-    definition.status.configureEnum(MutationStatusRivetEnum.codec);
-    definition.statuses.configureEnum(MutationStatusRivetEnum.codec);
+    MutationCatalog createDefinition() {
+      final definition = MutationCatalog();
+      definition.status.configureEnum(MutationStatusRivetEnum.codec);
+      definition.statuses.configureEnum(MutationStatusRivetEnum.codec);
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationCatalog, MutationCatalogRow>(
       schemaName: 'fbr139',
       tableName: 'mutationCatalog',
@@ -1838,6 +1959,29 @@ final class _$MutationCatalogDB
         'mappedCodes',
         'embedding',
         'embeddings',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.textValue as RivetColumn<Object?>,
+        definition.count as RivetColumn<Object?>,
+        definition.score as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+        definition.createdAt as RivetColumn<Object?>,
+        definition.payload as RivetColumn<Object?>,
+        definition.nullablePayload as RivetColumn<Object?>,
+        definition.preferences as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+        definition.optionalCode as RivetColumn<Object?>,
+        definition.status as RivetColumn<Object?>,
+        definition.statuses as RivetColumn<Object?>,
+        definition.timestamps as RivetColumn<Object?>,
+        definition.nullableInts as RivetColumn<Object?>,
+        definition.optionalInts as RivetColumn<Object?>,
+        definition.jsonValues as RivetColumn<Object?>,
+        definition.mappedCodes as RivetColumn<Object?>,
+        definition.embedding as RivetColumn<Object?>,
+        definition.embeddings as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => MutationCatalogRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
@@ -2069,8 +2213,13 @@ final class _$MutationUsersDB
 
   @override
   RivetTableSchema<MutationUsers, MutationUsersRow> buildSchema() {
-    final definition = MutationUsers();
+    MutationUsers createDefinition() {
+      final definition = MutationUsers();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationUsers, MutationUsersRow>(
       schemaName: 'fbr138',
       tableName: 'mutationUsers',
@@ -2092,6 +2241,16 @@ final class _$MutationUsersDB
         'updatedAt',
         'nullableDefault',
         'serverValue',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+        definition.nickname as RivetColumn<Object?>,
+        definition.createdAt as RivetColumn<Object?>,
+        definition.updatedAt as RivetColumn<Object?>,
+        definition.nullableDefault as RivetColumn<Object?>,
+        definition.serverValue as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => MutationUsersRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
@@ -2201,8 +2360,13 @@ final class _$MutationParentsDB
 
   @override
   RivetTableSchema<MutationParents, MutationParentsRow> buildSchema() {
-    final definition = MutationParents();
+    MutationParents createDefinition() {
+      final definition = MutationParents();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationParents, MutationParentsRow>(
       schemaName: 'fbr138',
       tableName: 'mutationParents',
@@ -2212,6 +2376,11 @@ final class _$MutationParentsDB
         definition.name as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'name'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationParentsRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         name: definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
@@ -2302,8 +2471,13 @@ final class _$MutationChildrenDB
 
   @override
   RivetTableSchema<MutationChildren, MutationChildrenRow> buildSchema() {
-    final definition = MutationChildren();
+    MutationChildren createDefinition() {
+      final definition = MutationChildren();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationChildren, MutationChildrenRow>(
       schemaName: 'fbr138',
       tableName: 'mutationChildren',
@@ -2313,6 +2487,11 @@ final class _$MutationChildrenDB
         definition.parentId as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'parentId'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.parentId as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationChildrenRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         parentId: definition.parentId.decodeValue(
@@ -2504,8 +2683,13 @@ final class _$MutationUpdateUsersDB
 
   @override
   RivetTableSchema<MutationUpdateUsers, MutationUpdateUsersRow> buildSchema() {
-    final definition = MutationUpdateUsers();
+    MutationUpdateUsers createDefinition() {
+      final definition = MutationUpdateUsers();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationUpdateUsers, MutationUpdateUsersRow>(
       schemaName: 'fbr140',
       tableName: 'mutationUpdateUsers',
@@ -2529,6 +2713,17 @@ final class _$MutationUpdateUsersDB
         'code',
         'defaultOnly',
         'serverOnly',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+        definition.age as RivetColumn<Object?>,
+        definition.updatedAt as RivetColumn<Object?>,
+        definition.nullableNote as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+        definition.defaultOnly as RivetColumn<Object?>,
+        definition.serverOnly as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => MutationUpdateUsersRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
@@ -2644,8 +2839,13 @@ final class _$MutationUpdateChildrenDB
   @override
   RivetTableSchema<MutationUpdateChildren, MutationUpdateChildrenRow>
   buildSchema() {
-    final definition = MutationUpdateChildren();
+    MutationUpdateChildren createDefinition() {
+      final definition = MutationUpdateChildren();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationUpdateChildren, MutationUpdateChildrenRow>(
       schemaName: 'fbr140',
       tableName: 'mutationUpdateChildren',
@@ -2655,6 +2855,11 @@ final class _$MutationUpdateChildrenDB
         definition.userId as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'userId'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.userId as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationUpdateChildrenRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         userId: definition.userId.decodeValue(
@@ -2756,8 +2961,13 @@ final class _$MutationDeleteParentsDB
   @override
   RivetTableSchema<MutationDeleteParents, MutationDeleteParentsRow>
   buildSchema() {
-    final definition = MutationDeleteParents();
+    MutationDeleteParents createDefinition() {
+      final definition = MutationDeleteParents();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationDeleteParents, MutationDeleteParentsRow>(
       schemaName: 'fbr141',
       tableName: 'delete Parents',
@@ -2767,6 +2977,11 @@ final class _$MutationDeleteParentsDB
         definition.label as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'label'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.label as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationDeleteParentsRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         label: definition.label.decodeValue(values[1], isSqlNull: sqlNulls[1]),
@@ -2870,8 +3085,13 @@ final class _$MutationCascadeChildrenDB
   @override
   RivetTableSchema<MutationCascadeChildren, MutationCascadeChildrenRow>
   buildSchema() {
-    final definition = MutationCascadeChildren();
+    MutationCascadeChildren createDefinition() {
+      final definition = MutationCascadeChildren();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<
       MutationCascadeChildren,
       MutationCascadeChildrenRow
@@ -2884,6 +3104,11 @@ final class _$MutationCascadeChildrenDB
         definition.parentId as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'parentId'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.parentId as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationCascadeChildrenRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         parentId: definition.parentId.decodeValue(
@@ -2988,8 +3213,13 @@ final class _$MutationRestrictChildrenDB
   @override
   RivetTableSchema<MutationRestrictChildren, MutationRestrictChildrenRow>
   buildSchema() {
-    final definition = MutationRestrictChildren();
+    MutationRestrictChildren createDefinition() {
+      final definition = MutationRestrictChildren();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<
       MutationRestrictChildren,
       MutationRestrictChildrenRow
@@ -3002,6 +3232,11 @@ final class _$MutationRestrictChildrenDB
         definition.parentId as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'parentId'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.parentId as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationRestrictChildrenRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         parentId: definition.parentId.decodeValue(
@@ -3152,8 +3387,13 @@ final class _$MutationBatchParentsDB
   @override
   RivetTableSchema<MutationBatchParents, MutationBatchParentsRow>
   buildSchema() {
-    final definition = MutationBatchParents();
+    MutationBatchParents createDefinition() {
+      final definition = MutationBatchParents();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationBatchParents, MutationBatchParentsRow>(
       schemaName: 'fbr142',
       tableName: 'mutationBatchParents',
@@ -3166,6 +3406,14 @@ final class _$MutationBatchParentsDB
         definition.serverValue as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'name', 'createdAt', 'nickname', 'serverValue'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+        definition.createdAt as RivetColumn<Object?>,
+        definition.nickname as RivetColumn<Object?>,
+        definition.serverValue as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationBatchParentsRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         name: definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
@@ -3274,8 +3522,13 @@ final class _$MutationBatchChildrenDB
   @override
   RivetTableSchema<MutationBatchChildren, MutationBatchChildrenRow>
   buildSchema() {
-    final definition = MutationBatchChildren();
+    MutationBatchChildren createDefinition() {
+      final definition = MutationBatchChildren();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationBatchChildren, MutationBatchChildrenRow>(
       schemaName: 'fbr142',
       tableName: 'mutationBatchChildren',
@@ -3285,6 +3538,11 @@ final class _$MutationBatchChildrenDB
         definition.parentId as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'parentId'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.parentId as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationBatchChildrenRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         parentId: definition.parentId.decodeValue(
@@ -3364,14 +3622,21 @@ final class _$MutationConflictGroupsDB
   @override
   RivetTableSchema<MutationConflictGroups, MutationConflictGroupsRow>
   buildSchema() {
-    final definition = MutationConflictGroups();
+    MutationConflictGroups createDefinition() {
+      final definition = MutationConflictGroups();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<MutationConflictGroups, MutationConflictGroupsRow>(
       schemaName: 'fbr143',
       tableName: 'mutationConflictGroups',
       definition: definition,
       columns: [definition.id as RivetColumn<Object?>],
       columnNames: ['id'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [definition.id as RivetColumn<Object?>],
       decode: (values, sqlNulls) => MutationConflictGroupsRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
       ),
@@ -3576,8 +3841,13 @@ final class _$MutationConflictParentsDB
   @override
   RivetTableSchema<MutationConflictParents, MutationConflictParentsRow>
   buildSchema() {
-    final definition = MutationConflictParents();
+    MutationConflictParents createDefinition() {
+      final definition = MutationConflictParents();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<
       MutationConflictParents,
       MutationConflictParentsRow
@@ -3606,6 +3876,18 @@ final class _$MutationConflictParentsDB
         'createdAt',
         'requiredByDatabase',
         'groupId',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.email as RivetColumn<Object?>,
+        definition.username as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+        definition.age as RivetColumn<Object?>,
+        definition.createdAt as RivetColumn<Object?>,
+        definition.requiredByDatabase as RivetColumn<Object?>,
+        definition.groupId as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => MutationConflictParentsRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
@@ -3730,8 +4012,13 @@ final class _$MutationConflictChildrenDB
   @override
   RivetTableSchema<MutationConflictChildren, MutationConflictChildrenRow>
   buildSchema() {
-    final definition = MutationConflictChildren();
+    MutationConflictChildren createDefinition() {
+      final definition = MutationConflictChildren();
 
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<
       MutationConflictChildren,
       MutationConflictChildrenRow
@@ -3744,6 +4031,11 @@ final class _$MutationConflictChildrenDB
         definition.parentId as RivetColumn<Object?>,
       ],
       columnNames: ['id', 'parentId'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.parentId as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => MutationConflictChildrenRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         parentId: definition.parentId.decodeValue(
@@ -3779,6 +4071,261 @@ final class _$MutationConflictChildrenDB
   /// Creates a reusable delete plan.
   RivetDelete<MutationConflictChildren, MutationConflictChildrenRow> delete({
     RivetWhere<MutationConflictChildren>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Generated row returned by reads from 'fbr144.mutationUpsertUsers'.
+final class MutationUpsertUsersRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationUpsertUsersRow({
+    required this.id,
+    required this.email,
+    required this.name,
+    required this.age,
+    required this.active,
+    required this.conditionValue,
+    required this.updatedAt,
+    required this.note,
+    required this.code,
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `email`.
+  final String email;
+
+  /// Value read from `name`.
+  final String name;
+
+  /// Value read from `age`.
+  final int age;
+
+  /// Value read from `active`.
+  final bool active;
+
+  /// Value read from `conditionValue`.
+  final int? conditionValue;
+
+  /// Value read from `updatedAt`.
+  final DateTime updatedAt;
+
+  /// Value read from `note`.
+  final String? note;
+
+  /// Value read from `code`.
+  final MutationCode code;
+}
+
+/// Generated values accepted by mutations of 'fbr144.mutationUpsertUsers'.
+final class MutationUpsertUsersCompanion
+    implements RivetCompanion<MutationUpsertUsers> {
+  const MutationUpsertUsersCompanion._({
+    required this.id,
+    required this.email,
+    required this.name,
+    required this.age,
+    required this.active,
+    required this.conditionValue,
+    required this.updatedAt,
+    required this.note,
+    required this.code,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationUpsertUsersCompanion.insert({
+    required RivetValue<MutationUpsertUsers, int, int> id,
+    required RivetValue<MutationUpsertUsers, String, String> email,
+    required RivetValue<MutationUpsertUsers, String, String> name,
+    required RivetValue<MutationUpsertUsers, int, int> age,
+    required RivetValue<MutationUpsertUsers, bool, bool> active,
+    RivetValue<MutationUpsertUsers, int?, int?> conditionValue =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, DateTime, DateTime> updatedAt =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, String?, String?> note =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, MutationCode, String> code =
+        const RivetValue.absent(),
+  }) => MutationUpsertUsersCompanion._(
+    id: id,
+    email: email,
+    name: name,
+    age: age,
+    active: active,
+    conditionValue: conditionValue,
+    updatedAt: updatedAt,
+    note: note,
+    code: code,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationUpsertUsersCompanion.update({
+    RivetValue<MutationUpsertUsers, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, String, String> email =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, String, String> name =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, int, int> age = const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, bool, bool> active =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, int?, int?> conditionValue =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, DateTime, DateTime> updatedAt =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, String?, String?> note =
+        const RivetValue.absent(),
+    RivetValue<MutationUpsertUsers, MutationCode, String> code =
+        const RivetValue.absent(),
+  }) => MutationUpsertUsersCompanion._(
+    id: id,
+    email: email,
+    name: name,
+    age: age,
+    active: active,
+    conditionValue: conditionValue,
+    updatedAt: updatedAt,
+    note: note,
+    code: code,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationUpsertUsers, int, int> id;
+
+  /// Mutation value for `email`.
+  final RivetValue<MutationUpsertUsers, String, String> email;
+
+  /// Mutation value for `name`.
+  final RivetValue<MutationUpsertUsers, String, String> name;
+
+  /// Mutation value for `age`.
+  final RivetValue<MutationUpsertUsers, int, int> age;
+
+  /// Mutation value for `active`.
+  final RivetValue<MutationUpsertUsers, bool, bool> active;
+
+  /// Mutation value for `conditionValue`.
+  final RivetValue<MutationUpsertUsers, int?, int?> conditionValue;
+
+  /// Mutation value for `updatedAt`.
+  final RivetValue<MutationUpsertUsers, DateTime, DateTime> updatedAt;
+
+  /// Mutation value for `note`.
+  final RivetValue<MutationUpsertUsers, String?, String?> note;
+
+  /// Mutation value for `code`.
+  final RivetValue<MutationUpsertUsers, MutationCode, String> code;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationUpsertUsers>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('email', email),
+    RivetAssignment('name', name),
+    RivetAssignment('age', age),
+    RivetAssignment('active', active),
+    RivetAssignment('conditionValue', conditionValue),
+    RivetAssignment('updatedAt', updatedAt),
+    RivetAssignment('note', note),
+    RivetAssignment('code', code),
+  ];
+}
+
+final class _$MutationUpsertUsersDB
+    extends RivetTableAccessor<MutationUpsertUsers, MutationUpsertUsersRow> {
+  const _$MutationUpsertUsersDB();
+
+  @override
+  RivetTableSchema<MutationUpsertUsers, MutationUpsertUsersRow> buildSchema() {
+    MutationUpsertUsers createDefinition() {
+      final definition = MutationUpsertUsers();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    return RivetTableSchema<MutationUpsertUsers, MutationUpsertUsersRow>(
+      schemaName: 'fbr144',
+      tableName: 'mutationUpsertUsers',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.email as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+        definition.age as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+        definition.conditionValue as RivetColumn<Object?>,
+        definition.updatedAt as RivetColumn<Object?>,
+        definition.note as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+      ],
+      columnNames: [
+        'id',
+        'email',
+        'name',
+        'age',
+        'active',
+        'conditionValue',
+        'updatedAt',
+        'note',
+        'code',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.email as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+        definition.age as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+        definition.conditionValue as RivetColumn<Object?>,
+        definition.updatedAt as RivetColumn<Object?>,
+        definition.note as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => MutationUpsertUsersRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        email: definition.email.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+        name: definition.name.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+        age: definition.age.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+        active: definition.active.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+        conditionValue: definition.conditionValue.decodeValue(
+          values[5],
+          isSqlNull: sqlNulls[5],
+        ),
+        updatedAt: definition.updatedAt.decodeValue(
+          values[6],
+          isSqlNull: sqlNulls[6],
+        ),
+        note: definition.note.decodeValue(values[7], isSqlNull: sqlNulls[7]),
+        code: definition.code.decodeValue(values[8], isSqlNull: sqlNulls[8]),
+      ),
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationUpsertUsers, MutationUpsertUsersRow> insert(
+    MutationUpsertUsersCompanion companion, {
+    RivetOnConflict<MutationUpsertUsers>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationUpsertUsers, MutationUpsertUsersRow> insertMany(
+    Iterable<MutationUpsertUsersCompanion> companions, {
+    RivetOnConflict<MutationUpsertUsers>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationUpsertUsers, MutationUpsertUsersRow> update(
+    MutationUpsertUsersCompanion companion, {
+    RivetWhere<MutationUpsertUsers>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationUpsertUsers, MutationUpsertUsersRow> delete({
+    RivetWhere<MutationUpsertUsers>? where,
   }) => RivetDelete(buildSchema(), where: where);
 }
 
@@ -3827,6 +4374,8 @@ abstract class _$RivetTestDatabase {
       MutationConflictParents.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
       MutationConflictChildren.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      MutationUpsertUsers.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
     ],
   );

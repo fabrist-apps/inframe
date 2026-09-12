@@ -512,6 +512,63 @@ final class MutationConflictChildren extends RivetTableDefinition<MutationConfli
   )();
 }
 
+int upsertTimestampDefaultCalls = 0;
+int upsertTimestampUpdateCalls = 0;
+int upsertNoteDefaultCalls = 0;
+int upsertNoteUpdateCalls = 0;
+int upsertCodeDefaultCalls = 0;
+int upsertCodeUpdateCalls = 0;
+
+DateTime upsertTimestampDefault() {
+  upsertTimestampDefaultCalls++;
+  return DateTime.utc(2026, 9, 12, 17, 0, upsertTimestampDefaultCalls);
+}
+
+DateTime upsertTimestampUpdate() {
+  upsertTimestampUpdateCalls++;
+  return DateTime.utc(2026, 9, 12, 18, 0, upsertTimestampUpdateCalls);
+}
+
+String? upsertNoteDefault() {
+  upsertNoteDefaultCalls++;
+  return 'insert-$upsertNoteDefaultCalls';
+}
+
+String? upsertNoteUpdate() {
+  upsertNoteUpdateCalls++;
+  return 'update-$upsertNoteUpdateCalls';
+}
+
+MutationCode upsertCodeDefault() {
+  upsertCodeDefaultCalls++;
+  return MutationCode('insert-$upsertCodeDefaultCalls');
+}
+
+MutationCode upsertCodeUpdate() {
+  upsertCodeUpdateCalls++;
+  return MutationCode('update-$upsertCodeUpdateCalls');
+}
+
+@RivetTable(schema: 'fbr144')
+final class MutationUpsertUsers extends RivetTableDefinition<MutationUpsertUsers> {
+  static const db = _$MutationUpsertUsersDB();
+
+  late final id = integer().primaryKey()();
+  late final email = text()();
+  late final name = text()();
+  late final age = integer()();
+  late final active = boolean()();
+  late final conditionValue = integer().nullable()();
+  late final updatedAt = dateTime()
+      .defaultValue(upsertTimestampDefault)
+      .onUpdate(upsertTimestampUpdate)();
+  late final note = text().nullable().defaultValue(upsertNoteDefault).onUpdate(upsertNoteUpdate)();
+  late final code = text()
+      .map(const MutationCodeConverter())
+      .defaultValue(upsertCodeDefault)
+      .onUpdate(upsertCodeUpdate)();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -538,6 +595,7 @@ final class MutationConflictChildren extends RivetTableDefinition<MutationConfli
     MutationConflictGroups,
     MutationConflictParents,
     MutationConflictChildren,
+    MutationUpsertUsers,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

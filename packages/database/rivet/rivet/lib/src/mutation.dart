@@ -46,6 +46,14 @@ abstract interface class RivetCompanion<Definition> {
 }
 
 typedef RivetConflictTarget<Definition> = List<RivetColumn<dynamic>> Function(Definition table);
+typedef RivetConflictSet<Definition> = RivetCompanion<Definition> Function(
+  Definition old,
+  Definition excluded,
+);
+typedef RivetConflictWhere<Definition> = RivetPredicate Function(
+  Definition old,
+  Definition excluded,
+);
 typedef RivetOnConflict<Definition> = RivetConflictAction<Definition> Function(
   RivetConflictBuilder<Definition> conflict,
 );
@@ -68,10 +76,37 @@ final class RivetConflictBuilder<Definition> {
         'A conflict targetWhere requires a target.',
       );
     }
-    final columns = List<RivetColumn<dynamic>>.unmodifiable(
-      target?.call(_schema.definition) ?? const [],
+    final columns = target == null ? const <RivetColumn<dynamic>>[] : _target(target);
+    final predicate = _targetWhere(targetWhere);
+    return _RivetDoNothing(columns, predicate);
+  }
+
+  RivetConflictAction<Definition> update({
+    required RivetConflictTarget<Definition> target,
+    required RivetConflictSet<Definition> set,
+    RivetWhere<Definition>? targetWhere,
+    RivetConflictWhere<Definition>? where,
+  }) {
+    final old = _schema.scopedDefinition(_schema.tableName);
+    final excluded = _schema.scopedDefinition('excluded');
+    final assignments = set(old, excluded);
+    final predicate = where?.call(old, excluded);
+    if (predicate?.columns.any((column) => !column.belongsTo(_schema)) ?? false) {
+      throw const RivetUnsupportedQueryException(
+        'A conflict update predicate can only reference the inserted table.',
+      );
+    }
+    return _RivetConflictUpdate(
+      _target(target),
+      _targetWhere(targetWhere),
+      assignments,
+      predicate,
     );
-    if (target != null && columns.isEmpty) {
+  }
+
+  List<RivetColumn<dynamic>> _target(RivetConflictTarget<Definition> target) {
+    final columns = List<RivetColumn<dynamic>>.unmodifiable(target(_schema.definition));
+    if (columns.isEmpty) {
       throw const RivetUnsupportedQueryException(
         'A conflict target must select at least one column.',
       );
@@ -81,13 +116,17 @@ final class RivetConflictBuilder<Definition> {
         'Conflict targets can only select columns from the inserted table.',
       );
     }
+    return columns;
+  }
+
+  RivetPredicate? _targetWhere(RivetWhere<Definition>? targetWhere) {
     final predicate = targetWhere?.call(_schema.definition);
     if (predicate?.columns.any((column) => !column.belongsTo(_schema)) ?? false) {
       throw const RivetUnsupportedQueryException(
         'A conflict targetWhere can only reference the inserted table.',
       );
     }
-    return _RivetDoNothing(columns, predicate);
+    return predicate;
   }
 }
 
@@ -96,6 +135,20 @@ final class _RivetDoNothing<Definition> extends RivetConflictAction<Definition> 
 
   final List<RivetColumn<dynamic>> columns;
   final RivetPredicate? targetWhere;
+}
+
+final class _RivetConflictUpdate<Definition> extends RivetConflictAction<Definition> {
+  const _RivetConflictUpdate(
+    this.columns,
+    this.targetWhere,
+    this.assignments,
+    this.predicate,
+  );
+
+  final List<RivetColumn<dynamic>> columns;
+  final RivetPredicate? targetWhere;
+  final RivetCompanion<Definition> assignments;
+  final RivetPredicate? predicate;
 }
 
 extension RivetMutationAccess<Definition, Row> on RivetTableAccessor<Definition, Row> {
@@ -341,7 +394,7 @@ RivetCompiledQuery _compileInsertMany<Definition, Row>(
     'INSERT INTO ${schema.qualifiedName} ($columns) VALUES ${rowsSql.join(', ')}',
   );
   if (onConflict?.call(RivetConflictBuilder._(schema)) case final conflict?) {
-    sql.write(_compileConflict(conflict));
+    sql.write(_compileConflict(schema, conflict, parameters));
   }
   if (returning) {
     sql
@@ -355,13 +408,70 @@ RivetCompiledQuery _compileInsertMany<Definition, Row>(
   return RivetCompiledQuery(sql.toString(), parameters);
 }
 
-String _compileConflict<Definition>(RivetConflictAction<Definition> conflict) {
+String _compileConflict<Definition, Row>(
+  RivetTableSchema<Definition, Row> schema,
+  RivetConflictAction<Definition> conflict,
+  List<Object?> parameters,
+) {
   return switch (conflict) {
     _RivetDoNothing(:final columns, :final targetWhere) =>
       ' ON CONFLICT${columns.isEmpty ? '' : ' (${columns.map((column) => quoteIdentifier(column.physicalName)).join(', ')})'}'
           '${targetWhere == null ? '' : ' WHERE ${targetWhere.renderLiterals()}'}'
           ' DO NOTHING',
+    _RivetConflictUpdate(
+      :final columns,
+      :final targetWhere,
+      assignments: final companion,
+      :final predicate,
+    ) =>
+      _compileConflictUpdate(
+        schema,
+        columns,
+        targetWhere,
+        companion,
+        predicate,
+        parameters,
+      ),
   };
+}
+
+String _compileConflictUpdate<Definition, Row>(
+  RivetTableSchema<Definition, Row> schema,
+  List<RivetColumn<dynamic>> target,
+  RivetPredicate? targetWhere,
+  RivetCompanion<Definition> companion,
+  RivetPredicate? predicate,
+  List<Object?> parameters,
+) {
+  final supplied = {
+    for (final assignment in companion.assignments) assignment.columnName: assignment.value,
+  };
+  final assignments = <String>[];
+  for (final column in schema.columns) {
+    final value = supplied[column.dartName];
+    if (value == null) {
+      throw StateError('Generated companion omitted ${column.dartName}.');
+    }
+    final valueSql = _updateValue(schema, column, value, parameters);
+    if (valueSql != null) {
+      assignments.add('${quoteIdentifier(column.physicalName)} = $valueSql');
+    }
+  }
+  if (assignments.isEmpty) {
+    throw RivetEmptyUpdateException(
+      'Conflict update ${schema.schemaName}.${schema.tableName} has no assignments.',
+    );
+  }
+  final sql = StringBuffer(
+    ' ON CONFLICT (${target.map((column) => quoteIdentifier(column.physicalName)).join(', ')})'
+    '${targetWhere == null ? '' : ' WHERE ${targetWhere.renderLiterals()}'}'
+    ' DO UPDATE SET ${assignments.join(', ')}',
+  );
+  if (predicate != null) {
+    sql.write(' WHERE ${predicate.renderParameters(startAt: parameters.length + 1)}');
+    parameters.addAll(predicate.parameters);
+  }
+  return sql.toString();
 }
 
 String _insertValue<Definition, Row>(

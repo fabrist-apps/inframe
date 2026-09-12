@@ -25,6 +25,8 @@ final class RivetTableSchema<Definition, Row> {
     required List<RivetColumn<Object?>> columns,
     required List<String> columnNames,
     required this.decode,
+    this.createDefinition,
+    this.columnsFor,
     this.renamedFrom,
     this.formatVersion = 1,
     List<RivetIndex> Function()? indexes,
@@ -75,6 +77,8 @@ final class RivetTableSchema<Definition, Row> {
   final String? renamedFrom;
   final Definition definition;
   final List<RivetColumn<Object?>> columns;
+  final Definition Function()? createDefinition;
+  final List<RivetColumn<Object?>> Function(Definition definition)? columnsFor;
   final RivetRowDecoder<Row> decode;
   final int formatVersion;
   late final List<RivetIndex> indexes;
@@ -82,6 +86,29 @@ final class RivetTableSchema<Definition, Row> {
   final Map<String, RivetRelationDescriptor<Object?>> relations;
 
   String get qualifiedName => '${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}';
+
+  Definition scopedDefinition(String qualifier) {
+    final buildDefinition = createDefinition;
+    final selectColumns = columnsFor;
+    if (buildDefinition == null || selectColumns == null) {
+      throw StateError(
+        'Generated table metadata is required for conflict update expressions.',
+      );
+    }
+    final scoped = buildDefinition();
+    final scopedColumns = selectColumns(scoped);
+    if (scopedColumns.length != columns.length) {
+      throw StateError('Generated scoped columns do not match the table schema.');
+    }
+    for (var index = 0; index < scopedColumns.length; index++) {
+      scopedColumns[index].attach(
+        this,
+        dartName: columns[index].dartName,
+        qualifier: qualifier,
+      );
+    }
+    return scoped;
+  }
 }
 
 /// Base class used by annotated table declarations.
@@ -776,9 +803,13 @@ class RivetMappedColumn<Domain, Storage> extends RivetColumn<Domain> {
   final RivetColumn<Storage> storage;
 
   @override
-  void attach<Definition, Row>(RivetTableSchema<Definition, Row> table, {String? dartName}) {
-    super.attach(table, dartName: dartName);
-    storage.attach(table, dartName: dartName);
+  void attach<Definition, Row>(
+    RivetTableSchema<Definition, Row> table, {
+    String? dartName,
+    String? qualifier,
+  }) {
+    super.attach(table, dartName: dartName, qualifier: qualifier);
+    storage.attach(table, dartName: dartName, qualifier: qualifier);
   }
 
   @override
@@ -1114,6 +1145,7 @@ abstract interface class RivetExpression<T> {
   RivetCodec<T> get codec;
   bool get referencesRows;
 
+  String renderPlaceholders(String Function(int index) placeholder);
   String renderParameters({int startAt = 1});
 }
 
@@ -1135,10 +1167,15 @@ final class _RivetBoundExpression<T> implements RivetExpression<T> {
   bool get referencesRows => false;
 
   @override
-  String get sql => '@value::${codec.cast}';
+  String get sql => renderPlaceholders((_) => '@value');
 
   @override
-  String renderParameters({int startAt = 1}) => '\$$startAt::${codec.cast}';
+  String renderPlaceholders(String Function(int index) placeholder) =>
+      '${placeholder(0)}::${codec.cast}';
+
+  @override
+  String renderParameters({int startAt = 1}) =>
+      renderPlaceholders((index) => '\$${startAt + index}');
 }
 
 final class _RivetBinaryExpression<T> implements RivetExpression<T> {
@@ -1162,12 +1199,16 @@ final class _RivetBinaryExpression<T> implements RivetExpression<T> {
   bool get referencesRows => left.referencesRows;
 
   @override
-  String get sql => '(${left.sql} $operator @value::${codec.cast})';
+  String get sql => renderPlaceholders((_) => '@value');
+
+  @override
+  String renderPlaceholders(String Function(int index) placeholder) =>
+      '(${left.renderPlaceholders(placeholder)} $operator '
+      '${placeholder(left.parameters.length)}::${codec.cast})';
 
   @override
   String renderParameters({int startAt = 1}) =>
-      '(${left.renderParameters(startAt: startAt)} $operator '
-      '\$${startAt + left.parameters.length}::${codec.cast})';
+      renderPlaceholders((index) => '\$${startAt + index}');
 }
 
 /// A typed SQL expression backed by a table column.
@@ -1185,19 +1226,25 @@ class RivetColumn<T> implements RivetExpression<T> {
   Object? Function()? onUpdateFn;
   late final String dartName;
   late final RivetTableSchema<Object?, Object?> _table;
+  String? _qualifier;
 
   void attach<Definition, Row>(
     RivetTableSchema<Definition, Row> table, {
     String? dartName,
+    String? qualifier,
   }) {
     this.dartName =
         dartName ?? declaredName ?? (throw StateError('Missing generated column name.'));
     _table = table as RivetTableSchema<Object?, Object?>;
+    _qualifier = qualifier;
   }
 
   String get physicalName => declaredName ?? dartName;
   @override
-  String get sql => quoteIdentifier(physicalName);
+  String get sql => [
+    if (_qualifier case final qualifier?) quoteIdentifier(qualifier),
+    quoteIdentifier(physicalName),
+  ].join('.');
   String get selectionSql => codec.select(sql);
   bool belongsTo(RivetTableSchema<Object?, Object?> table) => identical(_table, table);
 
@@ -1209,6 +1256,9 @@ class RivetColumn<T> implements RivetExpression<T> {
 
   @override
   bool get referencesRows => true;
+
+  @override
+  String renderPlaceholders(String Function(int index) placeholder) => sql;
 
   @override
   String renderParameters({int startAt = 1}) => sql;
@@ -1263,6 +1313,11 @@ extension RivetIntegerExpression on RivetExpression<int> {
   RivetExpression<int> operator +(int value) {
     return _RivetBinaryExpression(this, '+', value);
   }
+}
+
+extension RivetExpressionComparison<T> on RivetExpression<T> {
+  RivetPredicate lessThanExpression(RivetExpression<T> other) =>
+      RivetPredicate._comparison(this, '<', other);
 }
 
 /// Builder used by table declaration fields such as `text()()`.
@@ -1538,24 +1593,35 @@ final class RivetOrder {
 /// A parameterized SQL predicate produced by typed expressions.
 final class RivetPredicate {
   RivetPredicate._(
-    List<String> segments,
+    this._renderSql,
     List<Object?> parameters,
     List<RivetColumn<dynamic>> columns,
-  ) : _segments = List.unmodifiable(segments),
-      parameters = List.unmodifiable(parameters),
+  ) : parameters = List.unmodifiable(parameters),
       columns = List.unmodifiable(columns);
 
   RivetPredicate._raw(String sql, List<RivetColumn<dynamic>> columns)
-    : this._([sql], const [], columns);
+    : this._((_) => sql, const [], columns);
 
   RivetPredicate._value(
     String before,
     String after,
     Object? parameter,
     List<RivetColumn<dynamic>> columns,
-  ) : this._([before, after], [parameter], columns);
+  ) : this._((placeholder) => '$before${placeholder(0)}$after', [parameter], columns);
 
-  final List<String> _segments;
+  RivetPredicate._comparison(
+    RivetExpression<dynamic> left,
+    String operator,
+    RivetExpression<dynamic> right,
+  ) : this._(
+        (placeholder) =>
+            '${left.renderPlaceholders(placeholder)} $operator '
+            '${right.renderPlaceholders((index) => placeholder(left.parameters.length + index))}',
+        [...left.parameters, ...right.parameters],
+        [...left.columns, ...right.columns],
+      );
+
+  final String Function(String Function(int index) placeholder) _renderSql;
   final List<Object?> parameters;
   final List<RivetColumn<dynamic>> columns;
 
@@ -1570,44 +1636,28 @@ final class RivetPredicate {
   );
 
   RivetPredicate operator &(RivetPredicate other) => RivetPredicate._(
-    _combine('AND', other),
+    (placeholder) =>
+        '(${_renderSql(placeholder)}) AND '
+        '(${other._renderSql((index) => placeholder(parameters.length + index))})',
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
   );
 
   RivetPredicate operator |(RivetPredicate other) => RivetPredicate._(
-    _combine('OR', other),
+    (placeholder) =>
+        '(${_renderSql(placeholder)}) OR '
+        '(${other._renderSql((index) => placeholder(parameters.length + index))})',
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
   );
 
-  RivetPredicate operator ~() => RivetPredicate._(_negated(), parameters, columns);
+  RivetPredicate operator ~() => RivetPredicate._(
+    (placeholder) => 'NOT (${_renderSql(placeholder)})',
+    parameters,
+    columns,
+  );
 
-  List<String> _combine(String operator, RivetPredicate other) {
-    final result = [..._segments];
-    result[0] = '(${result[0]}';
-    result[result.length - 1] = '${result.last}) $operator (${other._segments.first}';
-    result.addAll(other._segments.skip(1));
-    result[result.length - 1] = '${result.last})';
-    return result;
-  }
-
-  List<String> _negated() {
-    final result = [..._segments];
-    result[0] = 'NOT (${result[0]}';
-    result[result.length - 1] = '${result.last})';
-    return result;
-  }
-
-  String _render(String Function(int index) placeholder) {
-    final result = StringBuffer(_segments.first);
-    for (var index = 0; index < parameters.length; index++) {
-      result
-        ..write(placeholder(index))
-        ..write(_segments[index + 1]);
-    }
-    return result.toString();
-  }
+  String _render(String Function(int index) placeholder) => _renderSql(placeholder);
 }
 
 String _postgresLiteral(Object? value) => switch (value) {

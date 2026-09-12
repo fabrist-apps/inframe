@@ -56,8 +56,13 @@ final class _$PackageUsersDB
 
   @override
   RivetTableSchema<PackageUsers, PackageUsersRow> buildSchema() {
-    final definition = PackageUsers();
-    definition.access.configureEnum(AccessLevelRivetEnum.codec);
+    PackageUsers createDefinition() {
+      final definition = PackageUsers();
+      definition.access.configureEnum(AccessLevelRivetEnum.codec);
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<PackageUsers, PackageUsersRow>(
       schemaName: 'fixture',
       tableName: 'packageUsers',
@@ -67,6 +72,11 @@ final class _$PackageUsersDB
         definition.access as RivetColumn<Object?>,
       ],
       columnNames: ['name', 'access'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.name as RivetColumn<Object?>,
+        definition.access as RivetColumn<Object?>,
+      ],
       decode: (values, sqlNulls) => PackageUsersRow(
         name: definition.name.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         access: definition.access.decodeValue(

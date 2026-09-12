@@ -63,6 +63,33 @@ void invalidInsertCalls() {
     ),
     onConflict: (_) => 1,
   );
+  MutationUpsertUsers.db.insert(
+    MutationUpsertUsersCompanion.insert(
+      id: const RivetValue.present(1),
+      email: const RivetValue.present('user@example.com'),
+      name: const RivetValue.present('user'),
+      age: const RivetValue.present(30),
+      active: const RivetValue.present(true),
+    ),
+    onConflict: (conflict) => conflict.update(
+      set: (_, _) => MutationUpsertUsersCompanion.update(),
+    ),
+  );
+  MutationUpsertUsers.db.insert(
+    MutationUpsertUsersCompanion.insert(
+      id: const RivetValue.present(2),
+      email: const RivetValue.present('other@example.com'),
+      name: const RivetValue.present('other'),
+      age: const RivetValue.present(30),
+      active: const RivetValue.present(true),
+    ),
+    onConflict: (conflict) => conflict.update(
+      target: (users) => [users.email],
+      set: (_, excluded) => MutationUpsertUsersCompanion.update(
+        code: RivetValue.expression((_) => excluded.code),
+      ),
+    ),
+  );
 }
 ''');
 
