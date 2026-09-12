@@ -1,0 +1,207 @@
+import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
+import 'package:artificer_core/protocols.dart';
+import 'package:conflux/conflux.dart';
+
+Future<void> main() async {
+  try {
+    FixtureModel('');
+    throw StateError('Expected an empty model ID to fail.');
+  } on ArgumentError {
+    // Expected local invariant failure.
+  }
+  final concrete = FixtureModel('future-model');
+  final LanguageModel common = concrete;
+  final result = await common.generate(
+    GenerationRequest(messages: [UserMessage.text('hello')]),
+  ).runFuture();
+  final overridden = await concrete.generate(
+    GenerationRequest(messages: [UserMessage.text('hello')]),
+    options: const FixtureOptions(prefix: 'typed'),
+  ).runFuture();
+  final events = await concrete.stream(
+    GenerationRequest(messages: [UserMessage.text('hello')]),
+    options: const FixtureOptions(prefix: 'stream'),
+  ).runCollect().runFuture();
+
+  if (result.text != 'hello' || overridden.text != 'typed:hello') {
+    throw StateError('Unexpected generation result.');
+  }
+  if (events.first is! GenerationStarted || events.last is! GenerationFinished) {
+    throw StateError('Unexpected stream result.');
+  }
+
+  final compatible = OpenAiCompatibleChatCodec(_ConsumerDialect());
+  final encoded = compatible.encode(
+    GenerationRequest(messages: [UserMessage.text('hello')]),
+    modelId: 'compatible-model',
+    options: const _ConsumerOptions(priority: true),
+  );
+  if (encoded is! Success<OpenAiCompatibleChatRequest, AiError> ||
+      encoded.value.body.toDart()['priority'] != true ||
+      encoded.value.body.toDart()['n'] != 1) {
+    throw StateError('Unexpected compatible request.');
+  }
+
+  final embeddingModel = FixtureEmbeddingModel('future-embedding-model');
+  final EmbeddingModel commonEmbedding = embeddingModel;
+  final embedding = await commonEmbedding.embed(
+    EmbeddingRequest(items: [EmbeddingInput.text('hello')]),
+  ).runFuture();
+  final overriddenEmbedding = await embeddingModel.embed(
+    EmbeddingRequest(items: [EmbeddingInput.text('hello')]),
+    options: const FixtureEmbeddingOptions(dimensions: 2),
+  ).runFuture();
+  if (embedding.vectors.single.length != 3 || overriddenEmbedding.vectors.single.length != 2) {
+    throw StateError('Unexpected embedding result.');
+  }
+}
+
+final class FixtureEmbeddingOptions {
+  const FixtureEmbeddingOptions({this.dimensions});
+
+  final int? dimensions;
+}
+
+final class FixtureEmbeddingModel implements EmbeddingModel {
+  FixtureEmbeddingModel(this.modelId) {
+    if (modelId.isEmpty) throw ArgumentError.value(modelId, 'modelId');
+  }
+
+  @override
+  final String modelId;
+
+  @override
+  String get providerId => 'fixture';
+
+  @override
+  EmbeddingCapabilities get capabilities => EmbeddingCapabilities({
+    EmbeddingCapability.text: CapabilitySupport.supported,
+  });
+
+  @override
+  Effect<EmbeddingResult, AiError> embed(
+    EmbeddingRequest request, {
+    FixtureEmbeddingOptions? options,
+  }) {
+    final dimensions = options?.dimensions ?? 3;
+    return Effect.succeed(
+      EmbeddingResult.fromIndexed(
+        embeddings: [
+          for (var index = 0; index < request.items.length; index++)
+            IndexedEmbedding(index: index, vector: List.filled(dimensions, index + 1)),
+        ],
+        inputCount: request.items.length,
+        requestedDimensions: options?.dimensions,
+        modelId: modelId,
+        nativePayload: NativePayload(
+          providerId: providerId,
+          api: 'embeddings',
+          modelId: modelId,
+          json: JsonObject({'fixture': true}),
+        ),
+        metadata: ResponseMetadata(statusCode: 200),
+      ),
+    );
+  }
+}
+
+final class FixtureOptions {
+  const FixtureOptions({this.prefix});
+
+  final String? prefix;
+}
+
+final class _ConsumerOptions {
+  const _ConsumerOptions({required this.priority});
+
+  final bool priority;
+}
+
+final class _ConsumerDialect implements OpenAiCompatibleChatDialect<_ConsumerOptions> {
+  @override
+  String get providerId => 'consumer';
+
+  @override
+  String get api => 'chat.completions';
+
+  @override
+  AiError? validate(GenerationRequest request, _ConsumerOptions options) => null;
+
+  @override
+  JsonObject requestFields(_ConsumerOptions options) => JsonObject({
+    'priority': options.priority,
+  });
+}
+
+final class FixtureModel implements LanguageModel {
+  FixtureModel(this.modelId) {
+    if (modelId.isEmpty) throw ArgumentError.value(modelId, 'modelId');
+  }
+
+  @override
+  final String modelId;
+
+  @override
+  String get providerId => 'fixture';
+
+  @override
+  ModelCapabilities get capabilities => ModelCapabilities({
+    ModelCapability.textGeneration: CapabilitySupport.supported,
+    ModelCapability.streaming: CapabilitySupport.supported,
+  });
+
+  @override
+  Effect<GenerationResult, AiError> generate(
+    GenerationRequest request, {
+    FixtureOptions? options,
+  }) {
+    final text = (request.messages.single as UserMessage).parts.single as TextInputPart;
+    final prefix = options?.prefix;
+    return Effect.succeed(
+      _result(prefix == null ? text.text : '$prefix:${text.text}'),
+    );
+  }
+
+  @override
+  Flow<GenerationEvent, AiError> stream(
+    GenerationRequest request, {
+    FixtureOptions? options,
+  }) => Flow.defer(() {
+    final text = (request.messages.single as UserMessage).parts.single as TextInputPart;
+    final prefix = options?.prefix;
+    final output = prefix == null ? text.text : '$prefix:${text.text}';
+    final assembler = GenerationStreamAssembler(
+      providerId: providerId,
+      api: 'fixture',
+      modelId: modelId,
+    );
+    final metadata = ResponseMetadata(statusCode: 200);
+    final events = <GenerationEvent>[
+      assembler.start(metadata),
+      assembler.startPart(index: 0, kind: GenerationPartKind.text),
+      assembler.appendText(0, output),
+      assembler.finishPart(0, TextOutputPart(output)),
+      assembler.finish(
+        finishReason: FinishReason.stop,
+        nativeResponse: JsonObject({'text': output}),
+      ),
+    ];
+    return Flow.fromIterable(events).widenError<AiError>();
+  });
+
+  GenerationResult _result(String text) {
+    final payload = NativePayload(
+      providerId: providerId,
+      api: 'fixture',
+      modelId: modelId,
+      json: JsonObject({'text': text}),
+    );
+    return GenerationResult(
+      message: AssistantMessage([TextOutputPart(text)]),
+      finishReason: FinishReason.stop,
+      nativePayload: payload,
+      metadata: ResponseMetadata(statusCode: 200),
+    );
+  }
+}
