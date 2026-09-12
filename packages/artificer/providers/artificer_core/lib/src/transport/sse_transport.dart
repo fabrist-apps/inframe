@@ -449,7 +449,7 @@ final class _SseParser {
   _SseParser(this.maxEventBytes);
 
   final int maxEventBytes;
-  final BytesBuilder _line = BytesBuilder(copy: false);
+  final BytesBuilder _line = BytesBuilder();
   final List<String> _data = [];
   String? _event;
   String? _id;
