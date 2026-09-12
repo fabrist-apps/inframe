@@ -1,6 +1,8 @@
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
+import 'package:artificer_google/src/embeddings/embedding_models.dart';
+import 'package:artificer_google/src/embeddings/embeddings_resource.dart';
 import 'package:artificer_google/src/generate_content/generate_content_models.dart';
 import 'package:artificer_google/src/generate_content/generate_content_resource.dart';
 import 'package:artificer_google/src/generate_content/tool_models.dart';
@@ -23,6 +25,7 @@ final class GoogleProvider {
       ) {
     generateContent = GoogleGenerateContentResource(_client);
     models = GoogleModelsResource(_client, generateContent);
+    embeddings = GoogleEmbeddingsResource(_client);
   }
 
   final ProviderHttpClient _client;
@@ -32,6 +35,9 @@ final class GoogleProvider {
 
   /// Typed native model discovery and model-bound operations.
   late final GoogleModelsResource models;
+
+  /// Typed native embedding operations.
+  late final GoogleEmbeddingsResource embeddings;
 
   /// Creates a common explicit-history language model without discovery.
   GoogleLanguageModel languageModel(String modelId, {GoogleModelOptions? options}) {
@@ -48,6 +54,16 @@ final class GoogleProvider {
       options ?? GoogleModelOptions(),
     );
   }
+
+  /// Creates a common synchronous embedding model without discovery.
+  GoogleEmbeddingModel embeddingModel(
+    String modelId, {
+    GoogleEmbeddingOptions? options,
+  }) => GoogleEmbeddingModel(
+    embeddings,
+    modelId,
+    options ?? GoogleEmbeddingOptions(),
+  );
 
   /// Interrupts this provider's work and releases its owned HTTP client.
   Future<void> close() => _client.close();
