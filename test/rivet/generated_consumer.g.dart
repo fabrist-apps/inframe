@@ -31,6 +31,7 @@ final class _$UserProfilesDB extends RivetTableAccessor<UserProfiles, UserProfil
     return RivetTableSchema<UserProfiles, UserProfilesRow>(
       schemaName: 'fbr116',
       tableName: 'userProfiles',
+      renamedFrom: 'profiles',
       definition: definition,
       columns: [definition.displayName as RivetColumn<Object?>],
       columnNames: ['displayName'],
@@ -40,8 +41,8 @@ final class _$UserProfilesDB extends RivetTableAccessor<UserProfiles, UserProfil
           isSqlNull: sqlNulls[0],
         ),
       ),
-      indexes: definition._indexes,
-      constraints: definition._constraints,
+      indexes: () => definition._indexes,
+      constraints: () => definition._constraints,
       relations: {
         'posts': definition.posts as RivetRelationDescriptor<Object?>,
       },
@@ -199,10 +200,32 @@ final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValu
 /// Generated row returned by reads from `fbr120.enumValues`.
 final class EnumValuesRow {
   /// Creates a row from decoded column and relation values.
-  const EnumValuesRow({required this.status});
+  const EnumValuesRow({
+    required this.status,
+    required this.optionalStatus,
+    required this.nullableStatuses,
+    required this.optionalStatuses,
+    required this.optionalNullableStatuses,
+    required this.mappedStatus,
+  });
 
   /// Value read from `status`.
   final WorkStatus status;
+
+  /// Value read from `optionalStatus`.
+  final WorkStatus? optionalStatus;
+
+  /// Value read from `nullableStatuses`.
+  final List<WorkStatus?> nullableStatuses;
+
+  /// Value read from `optionalStatuses`.
+  final List<WorkStatus>? optionalStatuses;
+
+  /// Value read from `optionalNullableStatuses`.
+  final List<WorkStatus?>? optionalNullableStatuses;
+
+  /// Value read from `mappedStatus`.
+  final WorkState mappedStatus;
 }
 
 final class _$EnumValuesDB extends RivetTableAccessor<EnumValues, EnumValuesRow> {
@@ -211,17 +234,58 @@ final class _$EnumValuesDB extends RivetTableAccessor<EnumValues, EnumValuesRow>
   @override
   RivetTableSchema<EnumValues, EnumValuesRow> buildSchema() {
     final definition = EnumValues();
-    definition.status.useCodec(WorkStatusRivetEnum.codec);
+    definition.status.configureEnum(WorkStatusRivetEnum.codec);
+    definition.optionalStatus.configureEnum(WorkStatusRivetEnum.codec);
+    definition.nullableStatuses.configureEnum(WorkStatusRivetEnum.codec);
+    definition.optionalStatuses.configureEnum(WorkStatusRivetEnum.codec);
+    definition.optionalNullableStatuses.configureEnum(
+      WorkStatusRivetEnum.codec,
+    );
+    definition.mappedStatus.configureEnum(WorkStatusRivetEnum.codec);
     return RivetTableSchema<EnumValues, EnumValuesRow>(
       schemaName: 'fbr120',
       tableName: 'enumValues',
       definition: definition,
-      columns: [definition.status as RivetColumn<Object?>],
-      columnNames: ['status'],
+      columns: [
+        definition.status as RivetColumn<Object?>,
+        definition.optionalStatus as RivetColumn<Object?>,
+        definition.nullableStatuses as RivetColumn<Object?>,
+        definition.optionalStatuses as RivetColumn<Object?>,
+        definition.optionalNullableStatuses as RivetColumn<Object?>,
+        definition.mappedStatus as RivetColumn<Object?>,
+      ],
+      columnNames: [
+        'status',
+        'optionalStatus',
+        'nullableStatuses',
+        'optionalStatuses',
+        'optionalNullableStatuses',
+        'mappedStatus',
+      ],
       decode: (values, sqlNulls) => EnumValuesRow(
         status: definition.status.decodeValue(
           values[0],
           isSqlNull: sqlNulls[0],
+        ),
+        optionalStatus: definition.optionalStatus.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+        nullableStatuses: definition.nullableStatuses.decodeValue(
+          values[2],
+          isSqlNull: sqlNulls[2],
+        ),
+        optionalStatuses: definition.optionalStatuses.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
+        ),
+        optionalNullableStatuses: definition.optionalNullableStatuses.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+        mappedStatus: definition.mappedStatus.decodeValue(
+          values[5],
+          isSqlNull: sqlNulls[5],
         ),
       ),
     );
@@ -318,9 +382,7 @@ final class _$ArrayValuesDB extends RivetTableAccessor<ArrayValues, ArrayValuesR
   @override
   RivetTableSchema<ArrayValues, ArrayValuesRow> buildSchema() {
     final definition = ArrayValues();
-    definition.statuses.useCodec(
-      const RivetArrayCodec(WorkStatusRivetEnum.codec),
-    );
+    definition.statuses.configureEnum(WorkStatusRivetEnum.codec);
     return RivetTableSchema<ArrayValues, ArrayValuesRow>(
       schemaName: 'fbr122',
       tableName: 'arrayValues',
@@ -406,6 +468,162 @@ final class _$MalformedArraysDB extends RivetTableAccessor<MalformedArrays, Malf
   }
 }
 
+/// Generated row returned by reads from `metadata.metadataColumns`.
+final class MetadataColumnsRow {
+  /// Creates a row from decoded column and relation values.
+  const MetadataColumnsRow({
+    required this.count,
+    required this.payload,
+    required this.embedding,
+    required this.values,
+    required this.code,
+  });
+
+  /// Value read from `count`.
+  final int? count;
+
+  /// Value read from `payload`.
+  final JsonValue payload;
+
+  /// Value read from `embedding`.
+  final Float32List embedding;
+
+  /// Value read from `values`.
+  final List<int> values;
+
+  /// Value read from `code`.
+  final UserCode code;
+}
+
+final class _$MetadataColumnsDB extends RivetTableAccessor<MetadataColumns, MetadataColumnsRow> {
+  const _$MetadataColumnsDB();
+
+  @override
+  RivetTableSchema<MetadataColumns, MetadataColumnsRow> buildSchema() {
+    final definition = MetadataColumns();
+
+    return RivetTableSchema<MetadataColumns, MetadataColumnsRow>(
+      schemaName: 'metadata',
+      tableName: 'metadataColumns',
+      definition: definition,
+      columns: [
+        definition.count as RivetColumn<Object?>,
+        definition.payload as RivetColumn<Object?>,
+        definition.embedding as RivetColumn<Object?>,
+        definition.values as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+      ],
+      columnNames: ['count', 'payload', 'embedding', 'values', 'code'],
+      decode: (values, sqlNulls) => MetadataColumnsRow(
+        count: definition.count.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        payload: definition.payload.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+        embedding: definition.embedding.decodeValue(
+          values[2],
+          isSqlNull: sqlNulls[2],
+        ),
+        values: definition.values.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
+        ),
+        code: definition.code.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      ),
+      indexes: () => definition._indexes,
+      constraints: () => definition._constraints,
+    );
+  }
+}
+
+/// Generated row returned by reads from `metadata.textTargets`.
+final class TextTargetsRow {
+  /// Creates a row from decoded column and relation values.
+  const TextTargetsRow({required this.value});
+
+  /// Value read from `value`.
+  final String value;
+}
+
+final class _$TextTargetsDB extends RivetTableAccessor<TextTargets, TextTargetsRow> {
+  const _$TextTargetsDB();
+
+  @override
+  RivetTableSchema<TextTargets, TextTargetsRow> buildSchema() {
+    final definition = TextTargets();
+
+    return RivetTableSchema<TextTargets, TextTargetsRow>(
+      schemaName: 'metadata',
+      tableName: 'textTargets',
+      definition: definition,
+      columns: [definition.value as RivetColumn<Object?>],
+      columnNames: ['value'],
+      decode: (values, sqlNulls) => TextTargetsRow(
+        value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      ),
+    );
+  }
+}
+
+/// Generated row returned by reads from `metadata.invalidReferences`.
+final class InvalidReferencesRow {
+  /// Creates a row from decoded column and relation values.
+  const InvalidReferencesRow({required this.value});
+
+  /// Value read from `value`.
+  final int value;
+}
+
+final class _$InvalidReferencesDB
+    extends RivetTableAccessor<InvalidReferences, InvalidReferencesRow> {
+  const _$InvalidReferencesDB();
+
+  @override
+  RivetTableSchema<InvalidReferences, InvalidReferencesRow> buildSchema() {
+    final definition = InvalidReferences();
+
+    return RivetTableSchema<InvalidReferences, InvalidReferencesRow>(
+      schemaName: 'metadata',
+      tableName: 'invalidReferences',
+      definition: definition,
+      columns: [definition.value as RivetColumn<Object?>],
+      columnNames: ['value'],
+      decode: (values, sqlNulls) => InvalidReferencesRow(
+        value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      ),
+    );
+  }
+}
+
+/// Generated row returned by reads from `metadata.parameterNames`.
+final class ParameterNamesRow {
+  /// Creates a row from decoded column and relation values.
+  const ParameterNamesRow({required this.value});
+
+  /// Value read from `value`.
+  final String value;
+}
+
+final class _$ParameterNamesDB extends RivetTableAccessor<ParameterNames, ParameterNamesRow> {
+  const _$ParameterNamesDB();
+
+  @override
+  RivetTableSchema<ParameterNames, ParameterNamesRow> buildSchema() {
+    final definition = ParameterNames();
+
+    return RivetTableSchema<ParameterNames, ParameterNamesRow>(
+      schemaName: 'metadata',
+      tableName: 'parameterNames',
+      definition: definition,
+      columns: [definition.value as RivetColumn<Object?>],
+      columnNames: ['value'],
+      decode: (values, sqlNulls) => ParameterNamesRow(
+        value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      ),
+    );
+  }
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -425,6 +643,8 @@ abstract class _$RivetTestDatabase {
       VectorValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       ArrayValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       MalformedArrays.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      MetadataColumns.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      ParameterNames.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }

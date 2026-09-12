@@ -7,11 +7,11 @@ import 'package:rivet/rivet.dart';
 
 part 'generated_consumer.g.dart';
 
-@RivetTable(schema: 'fbr116', name: 'userProfiles')
+@RivetTable(schema: 'fbr116', name: 'userProfiles', renamedFrom: 'profiles')
 final class UserProfiles extends RivetTableDefinition<UserProfiles> {
   static const db = _$UserProfilesDB();
 
-  late final displayName = text(name: 'displayName')();
+  late final displayName = text()();
   late final posts = many<Posts>()();
   late final _indexes = [
     index('display_name_idx').on([displayName.asc()]),
@@ -91,11 +91,32 @@ enum WorkStatus {
   complete,
 }
 
+final class WorkState {
+  const WorkState(this.value);
+
+  final WorkStatus value;
+}
+
+final class WorkStateConverter implements RivetTypeConverter<WorkState, WorkStatus> {
+  const WorkStateConverter();
+
+  @override
+  WorkState fromSql(WorkStatus value) => WorkState(value);
+
+  @override
+  WorkStatus toSql(WorkState value) => value.value;
+}
+
 @RivetTable(schema: 'fbr120')
 final class EnumValues extends RivetTableDefinition<EnumValues> {
   static const db = _$EnumValuesDB();
 
   late final status = enumText<WorkStatus>()();
+  late final optionalStatus = enumText<WorkStatus>().nullable()();
+  late final nullableStatuses = enumText<WorkStatus>().nullable().array()();
+  late final optionalStatuses = enumText<WorkStatus>().array().nullable()();
+  late final optionalNullableStatuses = enumText<WorkStatus>().nullable().array().nullable()();
+  late final mappedStatus = enumText<WorkStatus>().map(const WorkStateConverter())();
 }
 
 @RivetTable(schema: 'fbr121')
@@ -127,6 +148,44 @@ final class MalformedArrays extends RivetTableDefinition<MalformedArrays> {
   late final ints = integer().array()();
 }
 
+@RivetTable(schema: 'metadata')
+final class MetadataColumns extends RivetTableDefinition<MetadataColumns> {
+  static const db = _$MetadataColumnsDB();
+
+  late final count = integer().defaultSql('1').defaultValue(() => 2).nullable()();
+  late final payload = json().defaultValue(() => JsonValue.from(const {}))();
+  late final embedding = vector(
+    dimensions: 3,
+  ).onUpdate(() => Float32List.fromList([1, 2, 3]))();
+  late final values = integer().array().defaultValue(() => [1])();
+  late final code = chronoID(prefix: 'code').map(const UserCodeConverter())();
+  late final _constraints = [check('positive', count.equals(1))];
+  late final _indexes = [
+    index('partial').where(count.equals(1)).on([count]),
+  ];
+}
+
+@RivetTable(schema: 'metadata')
+final class TextTargets extends RivetTableDefinition<TextTargets> {
+  static const db = _$TextTargetsDB();
+
+  late final value = text()();
+}
+
+@RivetTable(schema: 'metadata')
+final class InvalidReferences extends RivetTableDefinition<InvalidReferences> {
+  static const db = _$InvalidReferencesDB();
+
+  late final value = integer().references<TextTargets>((target) => target.value)();
+}
+
+@RivetTable(schema: 'metadata')
+final class ParameterNames extends RivetTableDefinition<ParameterNames> {
+  static const db = _$ParameterNamesDB();
+
+  late final value = text(name: 'a@value')();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -137,6 +196,8 @@ final class MalformedArrays extends RivetTableDefinition<MalformedArrays> {
     VectorValues,
     ArrayValues,
     MalformedArrays,
+    MetadataColumns,
+    ParameterNames,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

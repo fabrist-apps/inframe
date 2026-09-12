@@ -25,7 +25,7 @@ final class RivetConnection {
     RivetSslMode? sslMode,
     this.securityContext,
     this.onStatement,
-  }) : sslMode = sslMode ?? _sslModeFromUrl(url) ?? RivetSslMode.verifyFull;
+  }) : sslMode = _resolveSslMode(url, sslMode);
 
   final String url;
   final Duration connectTimeout;
@@ -340,9 +340,13 @@ final class _RivetPool {
 
   Future<pg.Connection> _acquire() async {
     if (_closing) throw const RivetExecutorClosedException('The database is closing or closed.');
-    if (_idle.isNotEmpty) {
-      _borrowed++;
-      return _idle.removeLast();
+    while (_idle.isNotEmpty) {
+      final connection = _idle.removeLast();
+      if (connection.isOpen) {
+        _borrowed++;
+        return connection;
+      }
+      _connectionCount--;
     }
     if (_connectionCount < maxConnections) {
       return _openConnection();
@@ -363,9 +367,9 @@ final class _RivetPool {
     late pg.Connection connection;
     try {
       connection = await pg.Connection.open(endpoint, settings: settings);
-    } catch (error, stackTrace) {
+    } catch (error) {
       _connectionCount--;
-      _failNextWaiter(error, stackTrace);
+      _serviceWaiter();
       _completeCloseIfDrained();
       rethrow;
     }
@@ -386,6 +390,12 @@ final class _RivetPool {
 
   Future<void> _release(pg.Connection connection) async {
     _borrowed--;
+    if (!connection.isOpen) {
+      _connectionCount--;
+      _serviceWaiter();
+      _completeCloseIfDrained();
+      return;
+    }
     while (_waiters.isNotEmpty) {
       final waiter = _waiters.removeFirst();
       if (waiter.active) {
@@ -406,6 +416,33 @@ final class _RivetPool {
       }
     } else {
       _idle.add(connection);
+    }
+  }
+
+  void _serviceWaiter() {
+    if (_closing || _connectionCount >= maxConnections) return;
+    while (_waiters.isNotEmpty) {
+      final waiter = _waiters.removeFirst();
+      if (!waiter.active) continue;
+      unawaited(
+        _openConnection().then<void>(
+          (connection) async {
+            if (waiter.active) {
+              waiter.active = false;
+              waiter.completer.complete(connection);
+            } else {
+              await _release(connection);
+            }
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (waiter.active) {
+              waiter.active = false;
+              waiter.completer.completeError(error, stackTrace);
+            }
+          },
+        ),
+      );
+      return;
     }
   }
 
@@ -438,18 +475,6 @@ final class _RivetPool {
       }
     }
     _completeCloseIfDrained();
-  }
-
-  void _failNextWaiter(Object error, StackTrace stackTrace) {
-    while (_waiters.isNotEmpty) {
-      final waiter = _waiters.removeFirst();
-      if (waiter.active) {
-        waiter
-          ..active = false
-          ..completer.completeError(error, stackTrace);
-        return;
-      }
-    }
   }
 
   void _completeCloseIfDrained() {
@@ -500,6 +525,13 @@ void _validateSchemas(List<RivetTableSchema<Object?, Object?>> tables) {
           'a column outside ${target.schemaName}.${target.tableName}.',
         );
       }
+      if (column.codec.cast != referencedColumn.codec.cast) {
+        throw ArgumentError(
+          'Foreign key ${table.schemaName}.${table.tableName}.${column.physicalName} has storage '
+          'type ${column.codec.cast}, but ${target.schemaName}.${target.tableName}.'
+          '${referencedColumn.physicalName} has ${referencedColumn.codec.cast}.',
+        );
+      }
       foreignKey.referencedColumn = referencedColumn;
     }
     for (final relation in table.relations.entries) {
@@ -518,6 +550,23 @@ void _validateSchemas(List<RivetTableSchema<Object?, Object?>> tables) {
         );
       }
       descriptor.resolve(target.definition);
+      if (descriptor.kind == RivetRelationKind.many && descriptor.inverseRelation == null) {
+        final candidates = target.relations.values
+            .where(
+              (candidate) =>
+                  candidate.kind == RivetRelationKind.one &&
+                  candidate.targetTable == table.definition.runtimeType,
+            )
+            .toList(growable: false);
+        if (candidates.length != 1) {
+          throw ArgumentError(
+            'Relation ${table.schemaName}.${table.tableName}.${relation.key} requires exactly one '
+            'inverse relation on ${target.schemaName}.${target.tableName}; found '
+            '${candidates.length}. Supply relation: to disambiguate.',
+          );
+        }
+        descriptor.inverseRelation = candidates.single;
+      }
       if (descriptor.kind == RivetRelationKind.one) {
         if (descriptor.fields.isEmpty || descriptor.fields.length != descriptor.references.length) {
           throw ArgumentError(
@@ -532,9 +581,21 @@ void _validateSchemas(List<RivetTableSchema<Object?, Object?>> tables) {
             'outside its source or target table.',
           );
         }
+        for (var index = 0; index < descriptor.fields.length; index++) {
+          final sourceColumn = descriptor.fields[index];
+          final targetColumn = descriptor.references[index];
+          if (sourceColumn.codec.cast != targetColumn.codec.cast) {
+            throw ArgumentError(
+              'Relation ${table.schemaName}.${table.tableName}.${relation.key} maps '
+              '${sourceColumn.codec.cast} to incompatible ${targetColumn.codec.cast}.',
+            );
+          }
+        }
       }
       final inverse = descriptor.inverseRelation;
-      if (inverse != null && !target.relations.values.contains(inverse)) {
+      if (inverse != null &&
+          (!target.relations.values.contains(inverse) ||
+              inverse.targetTable != table.definition.runtimeType)) {
         throw ArgumentError(
           'Relation ${table.schemaName}.${table.tableName}.${relation.key} selects an inverse '
           'relation outside ${target.schemaName}.${target.tableName}.',
@@ -548,11 +609,16 @@ RivetSslMode? _sslModeFromUrl(String url) {
   final value = Uri.parse(url).queryParameters['sslmode'];
   return switch (value) {
     null => null,
-    'verify-full' || 'verify-ca' => RivetSslMode.verifyFull,
+    'verify-full' => RivetSslMode.verifyFull,
     'require' => RivetSslMode.require,
     'disable' => RivetSslMode.disable,
     _ => throw ArgumentError.value(value, 'sslmode', 'must be verify-full, require, or disable'),
   };
+}
+
+RivetSslMode _resolveSslMode(String url, RivetSslMode? explicit) {
+  final fromUrl = _sslModeFromUrl(url);
+  return explicit ?? fromUrl ?? RivetSslMode.verifyFull;
 }
 
 (String?, String?) _credentials(String userInfo) {

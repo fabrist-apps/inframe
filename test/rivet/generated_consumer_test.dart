@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:postgres/postgres.dart' as pg;
 import 'package:rivet/rivet.dart';
@@ -70,6 +71,7 @@ void main() {
         final posts = Posts.db.buildSchema();
 
         expect(users.formatVersion, 1);
+        expect(users.renamedFrom, 'profiles');
         expect(users.indexes.single.name, 'display_name_idx');
         expect(users.constraints.single.name, 'display_name_present');
         expect(users.relations['posts']?.kind, RivetRelationKind.many);
@@ -86,9 +88,13 @@ void main() {
         final registeredPosts = metadataDatabase.tables.singleWhere(
           (table) => table.definition is Posts,
         );
+        final registeredUsers = metadataDatabase.tables.singleWhere(
+          (table) => table.definition is UserProfiles,
+        );
         final author = registeredPosts.relations['author']!;
         expect(author.fields.single.physicalName, 'authorName');
         expect(author.references.single.physicalName, 'displayName');
+        expect(registeredUsers.relations['posts']?.inverseRelation, same(author));
         expect(
           registeredPosts.columns.single.foreignKey?.referencedColumn?.physicalName,
           'displayName',
@@ -114,6 +120,38 @@ void main() {
       );
       await expectLater(
         RivetDb.open(connection: connection, pool: const RivetPoolOptions(), tables: [posts]),
+        throwsArgumentError,
+      );
+    });
+
+    test('should retain metadata after column modifiers and attach names before expressions', () {
+      final schema = MetadataColumns.db.buildSchema();
+      final table = schema.definition;
+
+      expect(schema.constraints.single.expression, contains('"count"'));
+      expect(schema.indexes.single.predicate?.sql, contains('"count"'));
+      expect(table.count.sqlDefault, '1');
+      expect(table.count.defaultFn?.call(), 2);
+      expect(table.payload.defaultFn?.call(), JsonValue.from(const {}));
+      expect(table.embedding.onUpdateFn?.call(), isA<Float32List>());
+      expect(table.values.defaultFn?.call(), [1]);
+      expect(table.code.defaultFn?.call(), isA<UserCode>());
+    });
+
+    test('should reject incompatible foreign-key storage before connecting', () async {
+      final connection = RivetConnection.url(
+        'postgresql://localhost/unused',
+        sslMode: RivetSslMode.disable,
+      );
+      final target = TextTargets.db.buildSchema() as RivetTableSchema<Object?, Object?>;
+      final source = InvalidReferences.db.buildSchema() as RivetTableSchema<Object?, Object?>;
+
+      await expectLater(
+        RivetDb.open(
+          connection: connection,
+          pool: const RivetPoolOptions(),
+          tables: [target, source],
+        ),
         throwsArgumentError,
       );
     });

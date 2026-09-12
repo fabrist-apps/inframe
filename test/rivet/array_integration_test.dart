@@ -103,6 +103,14 @@ void main() {
               ]),
             )
             .getSingle(database);
+        final vectorFiltered = await ArrayValues.db
+            .find(
+              where: (values) => values.vectors.equals([
+                Float32List.fromList([1, 2, 3]),
+                Float32List.fromList([4, 5, 6]),
+              ]),
+            )
+            .getSingle(database);
         expect(row.ints, isEmpty);
         expect(row.nullableInts, [1, null, 3]);
         expect(row.optionalInts, isNull);
@@ -122,6 +130,7 @@ void main() {
           const JsonNull(),
           JsonValue.from(const {'ok': true}),
         ]);
+        expect(vectorFiltered.vectors, hasLength(2));
 
         await fixture.execute("INSERT INTO fbr122.\"malformedArrays\" VALUES ('[0:1]={1,2}')");
         await expectLater(

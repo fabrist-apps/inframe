@@ -21,7 +21,7 @@ final class _$AppUsersDB extends RivetTableAccessor<AppUsers, AppUsersRow> {
   @override
   RivetTableSchema<AppUsers, AppUsersRow> buildSchema() {
     final definition = AppUsers();
-    definition.access.useCodec(AccessLevelRivetEnum.codec);
+    definition.access.configureEnum(AccessLevelRivetEnum.codec);
     return RivetTableSchema<AppUsers, AppUsersRow>(
       schemaName: 'fixture',
       tableName: 'appUsers',

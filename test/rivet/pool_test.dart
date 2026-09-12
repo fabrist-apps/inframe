@@ -27,6 +27,17 @@ void main() {
         throwsArgumentError,
       );
       expect(
+        () => RivetConnection.url(
+          'postgresql://localhost/db?sslmode=prefer',
+          sslMode: RivetSslMode.disable,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => RivetConnection.url('postgresql://localhost/db?sslmode=verify-ca'),
+        throwsArgumentError,
+      );
+      expect(
         RivetConnection.url('postgresql://localhost/db').connectTimeout,
         const Duration(seconds: 10),
       );
@@ -112,6 +123,47 @@ void main() {
         release.complete();
         await lock;
         expect((await acquiredQuery).single.displayName, 'Ada');
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should replace a connection closed during a transaction',
+      () async {
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        await fixture.execute('CREATE SCHEMA IF NOT EXISTS fbr116');
+        await fixture.execute('''
+          CREATE TABLE IF NOT EXISTS fbr116."userProfiles" (
+            "displayName" text NOT NULL
+          )
+        ''');
+        await fixture.execute('TRUNCATE fbr116."userProfiles"');
+        await fixture.execute("INSERT INTO fbr116.\"userProfiles\" VALUES ('Ada')");
+        await fixture.execute(
+          "ALTER ROLE CURRENT_USER SET idle_in_transaction_session_timeout = '100ms'",
+        );
+        addTearDown(() async {
+          await fixture.execute(
+            'ALTER ROLE CURRENT_USER RESET idle_in_transaction_session_timeout',
+          );
+          await fixture.close();
+        });
+        final database = await RivetTestDatabase().open(
+          connection: RivetConnection.url(databaseUrl),
+          pool: const RivetPoolOptions(maxConnections: 1),
+        );
+        addTearDown(database.close);
+
+        await expectLater(
+          database.transaction((transaction) async {
+            await UserProfiles.db.find().get(transaction);
+            await Future<void>.delayed(const Duration(milliseconds: 500));
+            await UserProfiles.db.find().get(transaction);
+          }),
+          throwsA(isA<RivetException>()),
+        );
+
+        expect(await UserProfiles.db.find().get(database), isNotEmpty);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

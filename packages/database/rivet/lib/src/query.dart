@@ -8,7 +8,6 @@ import 'package:rivet/src/schema.dart';
 
 const _postgresParameterLimit = 65535;
 const int _postgresSqlByteLimit = 1024 * 1024 * 1024;
-final RegExp _valuePlaceholder = RegExp('@value');
 
 typedef RivetWhere<Definition> = RivetPredicate Function(Definition table);
 typedef RivetOrderBy<Definition> = List<RivetOrder> Function(Definition table);
@@ -113,12 +112,7 @@ final class RivetFind<Definition, Row> {
     final parameters = <Object?>[];
     if (_predicate case final predicate?) {
       parameters.addAll(predicate.parameters);
-      var parameterIndex = 0;
-      final predicateSql = predicate.sql.replaceAllMapped(
-        _valuePlaceholder,
-        (_) => '\$${++parameterIndex}',
-      );
-      sql.write(' WHERE $predicateSql');
+      sql.write(' WHERE ${predicate.renderParameters()}');
     }
     if (_orders.isNotEmpty) {
       sql

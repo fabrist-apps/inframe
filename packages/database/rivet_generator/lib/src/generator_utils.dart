@@ -14,7 +14,26 @@ String? readNullableString(ConstantReader annotation, String field) {
 
 String lowerCamel(String value) => value[0].toLowerCase() + value.substring(1);
 
-String literal(String value) => "'${value.replaceAll(r'\', r'\\').replaceAll("'", r"\'")}'";
+String literal(String value) {
+  final result = StringBuffer("'");
+  for (final rune in value.runes) {
+    result.write(
+      switch (rune) {
+        0x08 => r'\b',
+        0x09 => r'\t',
+        0x0A => r'\n',
+        0x0C => r'\f',
+        0x0D => r'\r',
+        0x24 => r'\$',
+        0x27 => r"\'",
+        0x5C => r'\\',
+        < 0x20 || 0x7F => '\\u${rune.toRadixString(16).padLeft(4, '0')}',
+        _ => String.fromCharCode(rune),
+      },
+    );
+  }
+  return "$result'";
+}
 
 String columnValueType(DartType type) {
   if (type is! InterfaceType || type.typeArguments.isEmpty) {

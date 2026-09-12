@@ -1,6 +1,7 @@
 // Generator implementation types are internal to the builder entry point.
 // ignore_for_file: public_member_api_docs
 
+import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:build/build.dart';
@@ -25,7 +26,9 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
     }
     final className = element.displayName;
     final rowName = readString(annotation, 'rowName', '${className}Row');
-    if (rowName == className || !RegExp(r'^[A-Za-z_$][A-Za-z0-9_$]*$').hasMatch(rowName)) {
+    if (rowName == className ||
+        element.library.getClass(rowName) != null ||
+        !RegExp(r'^[A-Za-z_$][A-Za-z0-9_$]*$').hasMatch(rowName)) {
       throw InvalidGenerationSourceError(
         'rowName `$rowName` is invalid or collides with `$className`.',
         element: element,
@@ -33,6 +36,10 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
     }
     final schemaName = readString(annotation, 'schema', 'public');
     final tableName = readString(annotation, 'name', lowerCamel(className));
+    final renamedFrom = readNullableString(annotation, 'renamedFrom');
+    final renameMetadata = renamedFrom == null
+        ? ''
+        : '      renamedFrom: ${literal(renamedFrom)},\n';
     final columns = element.fields
         .where(
           (field) =>
@@ -84,10 +91,10 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
         })
         .join(', ');
     final indexes = element.fields.any((field) => field.displayName == '_indexes')
-        ? '      indexes: definition._indexes,\n'
+        ? '      indexes: () => definition._indexes,\n'
         : '';
     final constraints = element.fields.any((field) => field.displayName == '_constraints')
-        ? '      constraints: definition._constraints,\n'
+        ? '      constraints: () => definition._constraints,\n'
         : '';
     final relationMap = relations
         .map(
@@ -96,15 +103,14 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
         )
         .join(', ');
     final enumCodecs = columns
-        .where(_isEnumColumn)
-        .map((field) {
-          final valueType = (field.type as InterfaceType).typeArguments.first;
-          if (valueType is InterfaceType && valueType.element.displayName == 'List') {
-            final enumName = valueType.typeArguments.first.getDisplayString().replaceAll('?', '');
-            return 'definition.${field.displayName}.useCodec(const RivetArrayCodec(${enumName}RivetEnum.codec));';
-          }
-          final enumName = valueType.getDisplayString().replaceAll('?', '');
-          return 'definition.${field.displayName}.useCodec(${enumName}RivetEnum.codec);';
+        .map((field) => (field, _enumType(field)))
+        .where((entry) => entry.$2 != null)
+        .map((entry) {
+          final field = entry.$1;
+          final enumType = entry.$2!;
+          final parts = enumType.split('.');
+          parts[parts.length - 1] = '${parts.last}RivetEnum';
+          return 'definition.${field.displayName}.configureEnum(${parts.join('.')}.codec);';
         })
         .join('\n    ');
 
@@ -129,7 +135,7 @@ final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
     return RivetTableSchema<$className, $rowName>(
       schemaName: ${literal(schemaName)},
       tableName: ${literal(tableName)},
-      definition: definition,
+$renameMetadata      definition: definition,
       columns: [$descriptorList],
       columnNames: [$names],
       decode: (values, sqlNulls) => $rowName($decodes),
@@ -141,16 +147,15 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
 ''';
   }
 
-  bool _isEnumColumn(FieldElement field) {
-    final type = field.type;
-    if (type is! InterfaceType || type.typeArguments.isEmpty) return false;
-    final valueType = type.typeArguments.first;
-    final candidate = valueType is InterfaceType && valueType.element.displayName == 'List'
-        ? valueType.typeArguments.first
-        : valueType;
-    final element = candidate.element;
-    return element != null &&
-        const TypeChecker.typeNamed(RivetEnum, inPackage: 'rivet').hasAnnotationOf(element);
+  String? _enumType(FieldElement field) {
+    final library = field.library;
+    final parsed = library.session.getParsedLibraryByElement(library);
+    if (parsed is! ParsedLibraryResult) return null;
+    final source = parsed.getFragmentDeclaration(field.firstFragment)?.node.toSource();
+    if (source == null) return null;
+    return RegExp(
+      r'\benumText\s*<\s*((?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*)\s*>',
+    ).firstMatch(source)?.group(1);
   }
 
   String _relationValueType(FieldElement field) {

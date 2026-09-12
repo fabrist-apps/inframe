@@ -53,7 +53,9 @@ import 'package:rivet/rivet.dart';
 
 part 'invalid_row.g.dart';
 
-@RivetTable(rowName: 'Users')
+final class ExistingRow {}
+
+@RivetTable(rowName: 'ExistingRow')
 final class Users extends RivetTableDefinition<Users> {
   static const db = _$UsersDB();
   late final name = text()();
@@ -64,6 +66,43 @@ final class Users extends RivetTableDefinition<Users> {
 
       expect(result.succeeded, isFalse);
       expect(result.errors.single, contains('Could not resolve annotation'));
+    });
+
+    test('should escape generated Dart metadata literals', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'escaped.g.dart';
+
+@RivetEnum(name: 'state\n\$type')
+enum State {
+  @RivetEnumValue(name: 'line\n\$value')
+  ready,
+}
+
+@RivetTable(schema: 'schema\n\$value', name: "quote'name")
+final class Escaped extends RivetTableDefinition<Escaped> {
+  static const db = _$EscapedDB();
+  late final value = text()();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/escaped.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/escaped.rivet.g.part': decodedMatches(
+            allOf(
+              contains(r"schemaName: 'schema\n\$value'"),
+              contains(r"tableName: 'quote\'name'"),
+              contains(r"'line\n\$value'"),
+            ),
+          ),
+        },
+      );
     });
 
     test('should reject duplicate native enum labels', () async {

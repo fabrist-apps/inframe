@@ -87,6 +87,20 @@ void main() {
       );
       expect(executor.queries, isEmpty);
     });
+
+    test('should not rewrite placeholder text inside quoted identifiers', () async {
+      await ParameterNames.db
+          .find(
+            where: (values) => values.value.equals('Ada') | ~values.value.equals('Grace'),
+          )
+          .get(executor);
+
+      expect(
+        executor.queries.single.sql,
+        contains(r'("a@value" = $1::text) OR (NOT ("a@value" = $2::text))'),
+      );
+      expect(executor.queries.single.parameters, ['Ada', 'Grace']);
+    });
   });
 }
 

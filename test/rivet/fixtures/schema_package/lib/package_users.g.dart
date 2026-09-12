@@ -24,7 +24,7 @@ final class _$PackageUsersDB extends RivetTableAccessor<PackageUsers, PackageUse
   @override
   RivetTableSchema<PackageUsers, PackageUsersRow> buildSchema() {
     final definition = PackageUsers();
-    definition.access.useCodec(AccessLevelRivetEnum.codec);
+    definition.access.configureEnum(AccessLevelRivetEnum.codec);
     return RivetTableSchema<PackageUsers, PackageUsersRow>(
       schemaName: 'fixture',
       tableName: 'packageUsers',

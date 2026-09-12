@@ -1,5 +1,5 @@
 // The README documents the declaration DSL; consequential runtime contracts are documented here.
-// ignore_for_file: public_member_api_docs
+// ignore_for_file: avoid_returning_this, library_private_types_in_public_api, public_member_api_docs
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -25,13 +25,12 @@ final class RivetTableSchema<Definition, Row> {
     required List<RivetColumn<Object?>> columns,
     required List<String> columnNames,
     required this.decode,
+    this.renamedFrom,
     this.formatVersion = 1,
-    List<RivetIndex> indexes = const [],
-    List<RivetConstraint> constraints = const [],
+    List<RivetIndex> Function()? indexes,
+    List<RivetConstraint> Function()? constraints,
     Map<String, RivetRelationDescriptor<Object?>> relations = const {},
   }) : columns = List.unmodifiable(columns),
-       indexes = List.unmodifiable(indexes),
-       constraints = List.unmodifiable(constraints),
        relations = Map.unmodifiable(relations) {
     if (columns.length != columnNames.length) {
       throw ArgumentError('Column descriptors and generated names must have equal lengths.');
@@ -39,17 +38,20 @@ final class RivetTableSchema<Definition, Row> {
     for (var index = 0; index < columns.length; index++) {
       columns[index].attach(this, dartName: columnNames[index]);
     }
+    this.indexes = List.unmodifiable(indexes?.call() ?? const []);
+    this.constraints = List.unmodifiable(constraints?.call() ?? const []);
     final physicalNames = columns.map((column) => column.physicalName).toSet();
     if (physicalNames.length != columns.length) {
       throw ArgumentError('Table $schemaName.$tableName has duplicate physical column names.');
     }
-    if (indexes.map((index) => index.name).toSet().length != indexes.length) {
+    if (this.indexes.map((index) => index.name).toSet().length != this.indexes.length) {
       throw ArgumentError('Table $schemaName.$tableName has duplicate index names.');
     }
-    if (constraints.map((constraint) => constraint.name).toSet().length != constraints.length) {
+    if (this.constraints.map((constraint) => constraint.name).toSet().length !=
+        this.constraints.length) {
       throw ArgumentError('Table $schemaName.$tableName has duplicate constraint names.');
     }
-    for (final index in indexes) {
+    for (final index in this.indexes) {
       if (index.terms.isEmpty || index.terms.any((term) => !columns.contains(term.column))) {
         throw ArgumentError('Index $schemaName.$tableName.${index.name} has invalid terms.');
       }
@@ -58,7 +60,7 @@ final class RivetTableSchema<Definition, Row> {
         throw ArgumentError('Index $schemaName.$tableName.${index.name} has an invalid predicate.');
       }
     }
-    for (final constraint in constraints) {
+    for (final constraint in this.constraints) {
       if (constraint.predicate case final predicate?
           when predicate.columns.any((column) => !columns.contains(column))) {
         throw ArgumentError(
@@ -70,12 +72,13 @@ final class RivetTableSchema<Definition, Row> {
 
   final String schemaName;
   final String tableName;
+  final String? renamedFrom;
   final Definition definition;
   final List<RivetColumn<Object?>> columns;
   final RivetRowDecoder<Row> decode;
   final int formatVersion;
-  final List<RivetIndex> indexes;
-  final List<RivetConstraint> constraints;
+  late final List<RivetIndex> indexes;
+  late final List<RivetConstraint> constraints;
   final Map<String, RivetRelationDescriptor<Object?>> relations;
 
   String get qualifiedName => '${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}';
@@ -245,6 +248,8 @@ abstract class RivetCodec<T> {
   String select(String columnSql) => columnSql;
   Object? encode(T value);
   T decode(Object? value, {required bool isSqlNull});
+
+  RivetCodec<T> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) => this;
 }
 
 final class RivetTextCodec extends RivetCodec<String> {
@@ -280,6 +285,10 @@ final class RivetNullableCodec<T> extends RivetCodec<T?> {
   @override
   T? decode(Object? value, {required bool isSqlNull}) =>
       isSqlNull ? null : inner.decode(value, isSqlNull: false);
+
+  @override
+  RivetCodec<T?> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) =>
+      RivetNullableCodec(inner.configureEnum(enumCodec));
 }
 
 final class RivetChronoIdCodec extends RivetCodec<String> {
@@ -447,6 +456,14 @@ final class RivetUnconfiguredEnumCodec<E extends Enum> extends RivetCodec<E> {
   @override
   E decode(Object? value, {required bool isSqlNull}) =>
       throw StateError('The generated enum codec was not attached.');
+
+  @override
+  RivetCodec<E> configureEnum<Configured extends Enum>(
+    RivetEnumCodec<Configured> enumCodec,
+  ) {
+    if (Configured != E) return this;
+    return enumCodec as RivetCodec<E>;
+  }
 }
 
 final class RivetEnumCodec<E extends Enum> extends RivetCodec<E> {
@@ -582,26 +599,136 @@ final class RivetMappedCodec<Domain, Storage> extends RivetCodec<Domain> {
   @override
   Domain decode(Object? value, {required bool isSqlNull}) =>
       converter.fromSql(storage.decode(value, isSqlNull: isSqlNull));
+
+  @override
+  RivetCodec<Domain> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) =>
+      RivetMappedCodec(storage.configureEnum(enumCodec), converter);
 }
 
+final class _RivetColumnMetadata {
+  _RivetColumnMetadata({
+    this.isPrimaryKey = false,
+    this.foreignKey,
+    this.sqlDefault,
+    this.defaultFn,
+    this.onUpdateFn,
+  });
+
+  bool isPrimaryKey;
+  RivetForeignKey? foreignKey;
+  String? sqlDefault;
+  Object? Function()? defaultFn;
+  Object? Function()? onUpdateFn;
+
+  _RivetColumnMetadata copy() => _RivetColumnMetadata(
+    isPrimaryKey: isPrimaryKey,
+    foreignKey: foreignKey,
+    sqlDefault: sqlDefault,
+    defaultFn: defaultFn,
+    onUpdateFn: onUpdateFn,
+  );
+
+  _RivetColumnMetadata mapped<Domain, Storage>(
+    RivetTypeConverter<Domain, Storage> converter,
+  ) => _RivetColumnMetadata(
+    isPrimaryKey: isPrimaryKey,
+    foreignKey: foreignKey,
+    sqlDefault: sqlDefault,
+    defaultFn: defaultFn == null ? null : () => converter.fromSql(defaultFn!() as Storage),
+    onUpdateFn: onUpdateFn == null ? null : () => converter.fromSql(onUpdateFn!() as Storage),
+  );
+
+  Column apply<Column extends RivetColumn<dynamic>>(Column column) {
+    column
+      ..isPrimaryKey = isPrimaryKey
+      ..foreignKey = foreignKey
+      ..sqlDefault = sqlDefault
+      ..defaultFn = defaultFn
+      ..onUpdateFn = onUpdateFn;
+    return column;
+  }
+}
+
+RivetForeignKey _foreignKey<Target>(
+  RivetColumn<dynamic> Function(Target table) reference,
+  RivetReferentialAction onDelete,
+  RivetReferentialAction onUpdate,
+) => RivetForeignKey(
+  targetTable: Target,
+  reference: (table) => reference(table as Target),
+  onDelete: onDelete,
+  onUpdate: onUpdate,
+);
+
 class RivetColumnBuilder<T> {
-  RivetColumnBuilder(this.codec, {this.name, this.renamedFrom});
+  RivetColumnBuilder(
+    this.codec, {
+    this.name,
+    this.renamedFrom,
+    _RivetColumnMetadata? metadata,
+  }) : _metadata = metadata ?? _RivetColumnMetadata();
 
   final RivetCodec<T> codec;
   final String? name;
   final String? renamedFrom;
+  final _RivetColumnMetadata _metadata;
 
-  RivetColumn<T> call() => RivetColumn(codec, declaredName: name, renamedFrom: renamedFrom);
+  RivetColumn<T> call() => _metadata.apply(
+    RivetColumn(codec, declaredName: name, renamedFrom: renamedFrom),
+  );
 
-  RivetColumnBuilder<T?> nullable() =>
-      RivetColumnBuilder(RivetNullableCodec(codec), name: name, renamedFrom: renamedFrom);
+  RivetColumnBuilder<T?> nullable() => RivetColumnBuilder(
+    RivetNullableCodec(codec),
+    name: name,
+    renamedFrom: renamedFrom,
+    metadata: _metadata.copy(),
+  );
 
   RivetMappedColumnBuilder<Domain, T> map<Domain>(
     RivetTypeConverter<Domain, T> converter,
-  ) => RivetMappedColumnBuilder(codec, converter, name: name, renamedFrom: renamedFrom);
+  ) => RivetMappedColumnBuilder(
+    codec,
+    converter,
+    name: name,
+    renamedFrom: renamedFrom,
+    metadata: _metadata.mapped(converter),
+  );
 
-  RivetArrayColumnBuilder<T> array() =>
-      RivetArrayColumnBuilder(codec, name: name, renamedFrom: renamedFrom);
+  RivetArrayColumnBuilder<T> array() => RivetArrayColumnBuilder(
+    codec,
+    name: name,
+    renamedFrom: renamedFrom,
+    metadata: _metadata.copy(),
+  );
+
+  RivetColumnBuilder<T> primaryKey() {
+    _metadata.isPrimaryKey = true;
+    return this;
+  }
+
+  RivetColumnBuilder<T> references<Target>(
+    RivetColumn<dynamic> Function(Target table) reference, {
+    RivetReferentialAction onDelete = RivetReferentialAction.noAction,
+    RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
+  }) {
+    _metadata.foreignKey = _foreignKey(reference, onDelete, onUpdate);
+    return this;
+  }
+
+  RivetColumnBuilder<T> defaultSql(String sql) {
+    _metadata.sqlDefault = sql;
+    return this;
+  }
+
+  RivetColumnBuilder<T> defaultValue(T Function() value) {
+    _metadata.defaultFn = value;
+    return this;
+  }
+
+  RivetColumnBuilder<T> onUpdate(T Function() value) {
+    _metadata.onUpdateFn = value;
+    return this;
+  }
 }
 
 class RivetMappedColumn<Domain, Storage> extends RivetColumn<Domain> {
@@ -619,6 +746,12 @@ class RivetMappedColumn<Domain, Storage> extends RivetColumn<Domain> {
     super.attach(table, dartName: dartName);
     storage.attach(table, dartName: dartName);
   }
+
+  @override
+  void configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) {
+    super.configureEnum(enumCodec);
+    storage.configureEnum(enumCodec);
+  }
 }
 
 final class RivetOrderableMappedColumn<Domain, Storage> extends RivetMappedColumn<Domain, Storage> {
@@ -634,32 +767,72 @@ final class RivetOrderableMappedColumn<Domain, Storage> extends RivetMappedColum
 }
 
 class RivetMappedColumnBuilder<Domain, Storage> {
-  RivetMappedColumnBuilder(this.storageCodec, this.converter, {this.name, this.renamedFrom});
+  RivetMappedColumnBuilder(
+    this.storageCodec,
+    this.converter, {
+    this.name,
+    this.renamedFrom,
+    _RivetColumnMetadata? metadata,
+  }) : _metadata = metadata ?? _RivetColumnMetadata();
 
   final RivetCodec<Storage> storageCodec;
   final RivetTypeConverter<Domain, Storage> converter;
   final String? name;
   final String? renamedFrom;
+  final _RivetColumnMetadata _metadata;
 
   RivetMappedColumnBuilder<Domain?, Storage?> nullable() => RivetMappedColumnBuilder(
     RivetNullableCodec(storageCodec),
     _NullableConverter(converter),
     name: name,
     renamedFrom: renamedFrom,
+    metadata: _metadata.copy(),
   );
 
-  RivetMappedColumn<Domain, Storage> call() => RivetMappedColumn(
-    RivetMappedCodec(storageCodec, converter),
-    RivetColumn(storageCodec, declaredName: name, renamedFrom: renamedFrom),
-    declaredName: name,
-    renamedFrom: renamedFrom,
+  RivetMappedColumn<Domain, Storage> call() => _metadata.apply(
+    RivetMappedColumn(
+      RivetMappedCodec(storageCodec, converter),
+      RivetColumn(storageCodec, declaredName: name, renamedFrom: renamedFrom),
+      declaredName: name,
+      renamedFrom: renamedFrom,
+    ),
   );
 
   RivetArrayColumnBuilder<Domain> array() => RivetArrayColumnBuilder(
     RivetMappedCodec(storageCodec, converter),
     name: name,
     renamedFrom: renamedFrom,
+    metadata: _metadata.copy(),
   );
+
+  RivetMappedColumnBuilder<Domain, Storage> primaryKey() {
+    _metadata.isPrimaryKey = true;
+    return this;
+  }
+
+  RivetMappedColumnBuilder<Domain, Storage> references<Target>(
+    RivetColumn<dynamic> Function(Target table) reference, {
+    RivetReferentialAction onDelete = RivetReferentialAction.noAction,
+    RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
+  }) {
+    _metadata.foreignKey = _foreignKey(reference, onDelete, onUpdate);
+    return this;
+  }
+
+  RivetMappedColumnBuilder<Domain, Storage> defaultSql(String sql) {
+    _metadata.sqlDefault = sql;
+    return this;
+  }
+
+  RivetMappedColumnBuilder<Domain, Storage> defaultValue(Domain Function() value) {
+    _metadata.defaultFn = value;
+    return this;
+  }
+
+  RivetMappedColumnBuilder<Domain, Storage> onUpdate(Domain Function() value) {
+    _metadata.onUpdateFn = value;
+    return this;
+  }
 }
 
 final class RivetOrderableMappedColumnBuilder<Domain, Storage>
@@ -669,14 +842,17 @@ final class RivetOrderableMappedColumnBuilder<Domain, Storage>
     super.converter, {
     super.name,
     super.renamedFrom,
+    super.metadata,
   });
 
   @override
-  RivetOrderableMappedColumn<Domain, Storage> call() => RivetOrderableMappedColumn(
-    RivetMappedCodec(storageCodec, converter),
-    RivetOrderableColumn(storageCodec, declaredName: name, renamedFrom: renamedFrom),
-    declaredName: name,
-    renamedFrom: renamedFrom,
+  RivetOrderableMappedColumn<Domain, Storage> call() => _metadata.apply(
+    RivetOrderableMappedColumn(
+      RivetMappedCodec(storageCodec, converter),
+      RivetOrderableColumn(storageCodec, declaredName: name, renamedFrom: renamedFrom),
+      declaredName: name,
+      renamedFrom: renamedFrom,
+    ),
   );
 
   @override
@@ -686,6 +862,7 @@ final class RivetOrderableMappedColumnBuilder<Domain, Storage>
         _NullableConverter(converter),
         name: name,
         renamedFrom: renamedFrom,
+        metadata: _metadata.copy(),
       );
 }
 
@@ -730,14 +907,14 @@ class RivetColumn<T> {
   String get selectionSql => codec.select(sql);
   bool belongsTo(RivetTableSchema<Object?, Object?> table) => identical(_table, table);
 
-  // The generator replaces the placeholder enum codec after constructing a definition.
-  // ignore: use_setters_to_change_properties
-  void useCodec(RivetCodec<T> value) => codec = value;
+  void configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) {
+    codec = codec.configureEnum(enumCodec);
+  }
 
   RivetPredicate equals(T value) {
-    if (value == null) return RivetPredicate._('$sql IS NULL', const [], [this]);
+    if (value == null) return RivetPredicate._raw('$sql IS NULL', [this]);
     final encoded = _convert('encode', () => codec.encode(value));
-    return RivetPredicate._('$sql = @value::${codec.cast}', [encoded], [this]);
+    return RivetPredicate._value('$sql = ', '::${codec.cast}', encoded, [this]);
   }
 
   T decodeValue(Object? value, {required bool isSqlNull}) =>
@@ -771,21 +948,23 @@ final class RivetOrderableColumn<T> extends RivetColumn<T> {
 
 /// Builder used by table declaration fields such as `text()()`.
 class RivetOrderableColumnBuilder<T> {
-  RivetOrderableColumnBuilder(this.codec, {this.name, this.renamedFrom});
+  RivetOrderableColumnBuilder(
+    this.codec, {
+    this.name,
+    this.renamedFrom,
+    _RivetColumnMetadata? metadata,
+  }) : _metadata = metadata ?? _RivetColumnMetadata();
 
   final RivetCodec<T> codec;
   final String? name;
   final String? renamedFrom;
-  bool _primaryKey = false;
-  RivetForeignKey? _foreignKey;
-  String? _sqlDefault;
-  T Function()? _defaultFn;
-  T Function()? _onUpdateFn;
+  final _RivetColumnMetadata _metadata;
 
   RivetOrderableColumnBuilder<T?> nullable() => RivetOrderableColumnBuilder(
     RivetNullableCodec(codec),
     name: name,
     renamedFrom: renamedFrom,
+    metadata: _metadata.copy(),
   );
 
   RivetOrderableMappedColumnBuilder<Domain, T> map<Domain>(
@@ -795,15 +974,19 @@ class RivetOrderableColumnBuilder<T> {
     converter,
     name: name,
     renamedFrom: renamedFrom,
+    metadata: _metadata.mapped(converter),
   );
 
-  RivetArrayColumnBuilder<T> array() =>
-      RivetArrayColumnBuilder(codec, name: name, renamedFrom: renamedFrom);
+  RivetArrayColumnBuilder<T> array() => RivetArrayColumnBuilder(
+    codec,
+    name: name,
+    renamedFrom: renamedFrom,
+    metadata: _metadata.copy(),
+  );
 
   RivetOrderableColumnBuilder<T> primaryKey() {
-    _primaryKey = true;
+    _metadata.isPrimaryKey = true;
     // Schema modifiers preserve the builder's accumulated metadata.
-    // ignore: avoid_returning_this
     return this;
   }
 
@@ -812,65 +995,90 @@ class RivetOrderableColumnBuilder<T> {
     RivetReferentialAction onDelete = RivetReferentialAction.noAction,
     RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
   }) {
-    _foreignKey = RivetForeignKey(
-      targetTable: Target,
-      reference: (table) => reference(table as Target),
-      onDelete: onDelete,
-      onUpdate: onUpdate,
-    );
+    _metadata.foreignKey = _foreignKey(reference, onDelete, onUpdate);
     // Schema modifiers preserve the builder's accumulated metadata.
-    // ignore: avoid_returning_this
     return this;
   }
 
   RivetOrderableColumnBuilder<T> defaultSql(String sql) {
-    _sqlDefault = sql;
+    _metadata.sqlDefault = sql;
     // Schema modifiers preserve the builder's accumulated metadata.
-    // ignore: avoid_returning_this
     return this;
   }
 
   RivetOrderableColumnBuilder<T> defaultValue(T Function() value) {
-    _defaultFn = value;
+    _metadata.defaultFn = value;
     // Schema modifiers preserve the builder's accumulated metadata.
-    // ignore: avoid_returning_this
     return this;
   }
 
   RivetOrderableColumnBuilder<T> onUpdate(T Function() value) {
-    _onUpdateFn = value;
+    _metadata.onUpdateFn = value;
     // Schema modifiers preserve the builder's accumulated metadata.
-    // ignore: avoid_returning_this
     return this;
   }
 
-  RivetOrderableColumn<T> call() =>
-      RivetOrderableColumn<T>(codec, declaredName: name, renamedFrom: renamedFrom)
-        ..isPrimaryKey = _primaryKey
-        ..foreignKey = _foreignKey
-        ..sqlDefault = _sqlDefault
-        ..defaultFn = _defaultFn
-        ..onUpdateFn = _onUpdateFn;
+  RivetOrderableColumn<T> call() => _metadata.apply(
+    RivetOrderableColumn<T>(codec, declaredName: name, renamedFrom: renamedFrom),
+  );
 }
 
 final class RivetArrayColumnBuilder<Element> {
-  RivetArrayColumnBuilder(this.elementCodec, {this.name, this.renamedFrom});
+  RivetArrayColumnBuilder(
+    this.elementCodec, {
+    this.name,
+    this.renamedFrom,
+    _RivetColumnMetadata? metadata,
+  }) : _metadata = metadata ?? _RivetColumnMetadata();
 
   final RivetCodec<Element> elementCodec;
   final String? name;
   final String? renamedFrom;
+  final _RivetColumnMetadata _metadata;
 
-  RivetColumn<List<Element>> call() => RivetColumn(
-    RivetArrayCodec(elementCodec),
-    declaredName: name,
-    renamedFrom: renamedFrom,
+  RivetColumn<List<Element>> call() => _metadata.apply(
+    RivetColumn(
+      RivetArrayCodec(elementCodec),
+      declaredName: name,
+      renamedFrom: renamedFrom,
+    ),
   );
 
   RivetColumnBuilder<List<Element>?> nullable() => RivetColumnBuilder(
     RivetNullableCodec(RivetArrayCodec(elementCodec)),
     name: name,
     renamedFrom: renamedFrom,
+    metadata: _metadata.copy(),
   );
+
+  RivetArrayColumnBuilder<Element> primaryKey() {
+    _metadata.isPrimaryKey = true;
+    return this;
+  }
+
+  RivetArrayColumnBuilder<Element> references<Target>(
+    RivetColumn<dynamic> Function(Target table) reference, {
+    RivetReferentialAction onDelete = RivetReferentialAction.noAction,
+    RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
+  }) {
+    _metadata.foreignKey = _foreignKey(reference, onDelete, onUpdate);
+    return this;
+  }
+
+  RivetArrayColumnBuilder<Element> defaultSql(String sql) {
+    _metadata.sqlDefault = sql;
+    return this;
+  }
+
+  RivetArrayColumnBuilder<Element> defaultValue(List<Element> Function() value) {
+    _metadata.defaultFn = value;
+    return this;
+  }
+
+  RivetArrayColumnBuilder<Element> onUpdate(List<Element> Function() value) {
+    _metadata.onUpdateFn = value;
+    return this;
+  }
 }
 
 final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
@@ -894,9 +1102,6 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
 
   @override
   Object encode(List<Element> value) {
-    if (value.any((element) => element is List)) {
-      throw const FormatException('multidimensional arrays are not supported');
-    }
     final encoded = [
       for (final element in value)
         if (element == null && elementCodec.cast == 'jsonb')
@@ -912,6 +1117,10 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
     }
     return encoded;
   }
+
+  @override
+  RivetCodec<List<Element>> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) =>
+      RivetArrayCodec(elementCodec.configureEnum(enumCodec));
 
   @override
   List<Element> decode(Object? value, {required bool isSqlNull}) {
@@ -958,29 +1167,72 @@ final class RivetOrder {
 /// A parameterized SQL predicate produced by typed expressions.
 final class RivetPredicate {
   RivetPredicate._(
-    this.sql,
+    List<String> segments,
     List<Object?> parameters,
     List<RivetColumn<dynamic>> columns,
-  ) : parameters = List.unmodifiable(parameters),
+  ) : _segments = List.unmodifiable(segments),
+      parameters = List.unmodifiable(parameters),
       columns = List.unmodifiable(columns);
 
-  final String sql;
+  RivetPredicate._raw(String sql, List<RivetColumn<dynamic>> columns)
+    : this._([sql], const [], columns);
+
+  RivetPredicate._value(
+    String before,
+    String after,
+    Object? parameter,
+    List<RivetColumn<dynamic>> columns,
+  ) : this._([before, after], [parameter], columns);
+
+  final List<String> _segments;
   final List<Object?> parameters;
   final List<RivetColumn<dynamic>> columns;
 
+  String get sql => _render((_) => '@value');
+
+  String renderParameters({int startAt = 1}) => _render(
+    (index) => '\$${startAt + index}',
+  );
+
   RivetPredicate operator &(RivetPredicate other) => RivetPredicate._(
-    '($sql) AND (${other.sql})',
+    _combine('AND', other),
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
   );
 
   RivetPredicate operator |(RivetPredicate other) => RivetPredicate._(
-    '($sql) OR (${other.sql})',
+    _combine('OR', other),
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
   );
 
-  RivetPredicate operator ~() => RivetPredicate._('NOT ($sql)', parameters, columns);
+  RivetPredicate operator ~() => RivetPredicate._(_negated(), parameters, columns);
+
+  List<String> _combine(String operator, RivetPredicate other) {
+    final result = [..._segments];
+    result[0] = '(${result[0]}';
+    result[result.length - 1] = '${result.last}) $operator (${other._segments.first}';
+    result.addAll(other._segments.skip(1));
+    result[result.length - 1] = '${result.last})';
+    return result;
+  }
+
+  List<String> _negated() {
+    final result = [..._segments];
+    result[0] = 'NOT (${result[0]}';
+    result[result.length - 1] = '${result.last})';
+    return result;
+  }
+
+  String _render(String Function(int index) placeholder) {
+    final result = StringBuffer(_segments.first);
+    for (var index = 0; index < parameters.length; index++) {
+      result
+        ..write(placeholder(index))
+        ..write(_segments[index + 1]);
+    }
+    return result.toString();
+  }
 }
 
 String quoteIdentifier(String identifier) {

@@ -20,10 +20,21 @@ void main() {
       await fixture.execute("CREATE TYPE fbr120.\"workStatus\" AS ENUM ('zeta', 'alpha')");
       await fixture.execute('''
         CREATE TABLE fbr120."enumValues" (
-          status fbr120."workStatus" NOT NULL
+          status fbr120."workStatus" NOT NULL,
+          "optionalStatus" fbr120."workStatus",
+          "nullableStatuses" fbr120."workStatus"[] NOT NULL,
+          "optionalStatuses" fbr120."workStatus"[],
+          "optionalNullableStatuses" fbr120."workStatus"[],
+          "mappedStatus" fbr120."workStatus" NOT NULL
         )
       ''');
-      await fixture.execute("INSERT INTO fbr120.\"enumValues\" VALUES ('alpha'), ('zeta')");
+      await fixture.execute('''
+        INSERT INTO fbr120."enumValues" VALUES
+          ('alpha', NULL, ARRAY['zeta', NULL]::fbr120."workStatus"[], NULL, NULL, 'zeta'),
+          ('zeta', 'alpha', ARRAY['alpha']::fbr120."workStatus"[],
+           ARRAY['zeta']::fbr120."workStatus"[],
+           ARRAY[NULL, 'alpha']::fbr120."workStatus"[], 'alpha')
+      ''');
       database = await RivetTestDatabase().open(
         connection: RivetConnection.url(databaseUrl),
         pool: const RivetPoolOptions(maxConnections: 2),
@@ -52,6 +63,16 @@ void main() {
         expect(ascending.map((row) => row.status), [WorkStatus.queued, WorkStatus.complete]);
         expect(descending.map((row) => row.status), [WorkStatus.complete, WorkStatus.queued]);
         expect(filtered.status, WorkStatus.complete);
+        expect(ascending.first.optionalStatus, WorkStatus.complete);
+        expect(ascending.first.nullableStatuses, [WorkStatus.complete]);
+        expect(ascending.first.optionalStatuses, [WorkStatus.queued]);
+        expect(ascending.first.optionalNullableStatuses, [null, WorkStatus.complete]);
+        expect(ascending.first.mappedStatus.value, WorkStatus.complete);
+        expect(ascending.last.optionalStatus, isNull);
+        expect(ascending.last.nullableStatuses, [WorkStatus.queued, null]);
+        expect(ascending.last.optionalStatuses, isNull);
+        expect(ascending.last.optionalNullableStatuses, isNull);
+        expect(ascending.last.mappedStatus.value, WorkStatus.queued);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
