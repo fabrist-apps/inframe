@@ -46,6 +46,12 @@ same-model follow-up requests. Application code owns the ordered history and exp
 Structured output is forwarded through the native response format; generated JSON is returned
 without Ack validation, repair, or retries.
 
+Stored Responses lifecycle calls are explicit: `responses.retrieve`, `responses.delete`,
+`responses.listInputItems`, and `responses.compact` perform one request and never poll, paginate,
+or infer continuation. Native callers control `previousResponseId` and `store`; common generation
+always uses explicit history and disables storage. xAI exposes no remote Responses cancellation
+route in this snapshot, and local Conflux cancellation only aborts local HTTP work.
+
 `chatCompletions.create` and `chatCompletions.stream` expose xAI's typed native Chat Completions
 shape while common generation continues to use Responses. Native requests type xAI sampling,
 reasoning, cache routing, service, tool, search, stop, and End User fields. Normalizing a response

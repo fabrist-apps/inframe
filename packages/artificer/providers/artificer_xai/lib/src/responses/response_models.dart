@@ -452,7 +452,6 @@ final class XaiResponseRequest {
     this.toolChoice,
     this.text,
     Object? previousResponseId = _omitted,
-    this.background,
     JsonObject? extraBody,
   }) : model = _nonEmpty(model, 'model'),
        input = List.unmodifiable(input),
@@ -543,9 +542,6 @@ final class XaiResponseRequest {
   final String? _previousResponseId;
   final bool _hasPreviousResponseId;
 
-  /// Whether this native request runs in the background.
-  final bool? background;
-
   /// Forward-compatible fields outside this pinned typed snapshot.
   final JsonObject extraBody;
 
@@ -571,7 +567,6 @@ final class XaiResponseRequest {
       if (toolChoice case final value?) 'tool_choice': value.toDart(),
       if (text case final value?) 'text': value.toDart(),
       if (_hasPreviousResponseId) 'previous_response_id': _previousResponseId,
-      'background': ?background,
     });
   }
 }
@@ -586,12 +581,6 @@ enum XaiResponseStatus {
 
   /// Still running.
   inProgress,
-
-  /// Cancelled explicitly.
-  cancelled,
-
-  /// Queued for background execution.
-  queued,
 
   /// Ended with partial output.
   incomplete,
@@ -992,8 +981,6 @@ XaiResponseStatus _status(String status) => switch (status) {
   'completed' => XaiResponseStatus.completed,
   'failed' => XaiResponseStatus.failed,
   'in_progress' => XaiResponseStatus.inProgress,
-  'cancelled' => XaiResponseStatus.cancelled,
-  'queued' => XaiResponseStatus.queued,
   'incomplete' => XaiResponseStatus.incomplete,
   _ => XaiResponseStatus.unknown,
 };
@@ -1021,5 +1008,4 @@ const _typedResponseFields = {
   'tool_choice',
   'text',
   'previous_response_id',
-  'background',
 };
