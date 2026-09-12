@@ -1,3 +1,6 @@
+// Error boundaries are documented on each exception type; their data fields retain direct names.
+// ignore_for_file: public_member_api_docs
+
 /// Base class for failures reported by Rivet.
 sealed class RivetException implements Exception {
   const RivetException(this.message, [this.cause]);
@@ -6,7 +9,15 @@ sealed class RivetException implements Exception {
   final Object? cause;
 
   @override
-  String toString() => '$runtimeType: $message';
+  String toString() =>
+      '${switch (this) {
+        RivetDatabaseException() => 'RivetDatabaseException',
+        RivetConversionException() => 'RivetConversionException',
+        RivetCardinalityException() => 'RivetCardinalityException',
+        RivetUnsupportedQueryException() => 'RivetUnsupportedQueryException',
+        RivetExecutorClosedException() => 'RivetExecutorClosedException',
+        AfterCommitException() => 'AfterCommitException',
+      }}: $message';
 }
 
 /// A PostgreSQL operation failed.

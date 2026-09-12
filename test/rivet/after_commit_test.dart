@@ -41,11 +41,12 @@ void main() {
       () async {
         final events = <String>[];
         final result = await database.transaction((transaction) async {
-          transaction.afterCommit(() => events.add('sync'));
-          transaction.afterCommit(() async {
-            final row = await UserProfiles.db.find().getSingle(database);
-            events.add(row.displayName);
-          });
+          transaction
+            ..afterCommit(() => events.add('sync'))
+            ..afterCommit(() async {
+              final row = await UserProfiles.db.find().getSingle(database);
+              events.add(row.displayName);
+            });
           return 42;
         });
 
@@ -77,9 +78,10 @@ void main() {
         final events = <String>[];
         await expectLater(
           database.transaction<void>((transaction) async {
-            transaction.afterCommit(() => throw StateError('first'));
-            transaction.afterCommit(() => events.add('continued'));
-            transaction.afterCommit(() async => throw ArgumentError('last'));
+            transaction
+              ..afterCommit(() => throw StateError('first'))
+              ..afterCommit(() => events.add('continued'))
+              ..afterCommit(() async => throw ArgumentError('last'));
           }),
           throwsA(
             isA<AfterCommitException>()

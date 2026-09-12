@@ -1,3 +1,6 @@
+// Public usage is documented in the package README; these fields mirror the declaration syntax.
+// ignore_for_file: public_member_api_docs
+
 /// Marks a table declaration for Rivet generation.
 final class RivetTable {
   const RivetTable({this.name, this.schema, this.renamedFrom, this.rowName});

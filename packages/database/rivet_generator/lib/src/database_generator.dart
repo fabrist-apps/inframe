@@ -1,3 +1,6 @@
+// Generator implementation types are internal to the builder entry point.
+// ignore_for_file: public_member_api_docs
+
 import 'package:analyzer/dart/element/element.dart';
 import 'package:build/build.dart';
 import 'package:rivet/rivet.dart';

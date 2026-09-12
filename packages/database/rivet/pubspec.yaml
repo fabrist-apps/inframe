@@ -9,6 +9,7 @@ environment:
 
 dependencies:
   chrono_id: ^0.1.0
+  meta: ^1.17.0
   postgres: 3.5.12
 
 dev_dependencies:

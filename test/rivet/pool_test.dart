@@ -38,6 +38,32 @@ void main() {
   group('Rivet bounded pool', () {
     final databaseUrl = Platform.environment['RIVET_TEST_DATABASE_URL'];
 
+    test('should finish closing when an in-flight connection attempt fails', () async {
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final accepted = Completer<Socket>();
+      final subscription = server.listen(accepted.complete);
+      addTearDown(() async {
+        if (accepted.isCompleted) (await accepted.future).destroy();
+        await subscription.cancel();
+        await server.close();
+      });
+      final database = await RivetTestDatabase().open(
+        connection: RivetConnection.url(
+          'postgresql://postgres:password@127.0.0.1:${server.port}/unused',
+          connectTimeout: const Duration(milliseconds: 100),
+          sslMode: RivetSslMode.disable,
+        ),
+        pool: const RivetPoolOptions(maxConnections: 1),
+      );
+
+      final query = UserProfiles.db.find().get(database);
+      await accepted.future;
+      final close = database.close();
+
+      await expectLater(query, throwsA(isA<RivetException>()));
+      await close.timeout(const Duration(seconds: 1));
+    });
+
     test(
       'should time out pool waiting without timing out acquired SQL',
       () async {

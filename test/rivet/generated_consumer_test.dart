@@ -63,16 +63,59 @@ void main() {
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
 
-    test('should expose generated schema metadata without analyzer dependencies', () {
-      final users = UserProfiles.db.buildSchema();
-      final posts = Posts.db.buildSchema();
+    test(
+      'should expose and validate generated schema metadata without analyzer dependencies',
+      () async {
+        final users = UserProfiles.db.buildSchema();
+        final posts = Posts.db.buildSchema();
 
-      expect(users.formatVersion, 1);
-      expect(users.indexes.single.name, 'display_name_idx');
-      expect(users.constraints.single.name, 'display_name_present');
-      expect(users.relations['posts']?.kind, RivetRelationKind.many);
-      expect(posts.relations['author']?.kind, RivetRelationKind.one);
-      expect(posts.columns.single.foreignKey?.targetTable, UserProfiles);
+        expect(users.formatVersion, 1);
+        expect(users.indexes.single.name, 'display_name_idx');
+        expect(users.constraints.single.name, 'display_name_present');
+        expect(users.relations['posts']?.kind, RivetRelationKind.many);
+        expect(posts.relations['author']?.kind, RivetRelationKind.one);
+        expect(posts.columns.single.foreignKey?.targetTable, UserProfiles);
+
+        final metadataDatabase = await RivetTestDatabase().open(
+          connection: RivetConnection.url(
+            'postgresql://localhost/unused',
+            sslMode: RivetSslMode.disable,
+          ),
+        );
+        addTearDown(metadataDatabase.close);
+        final registeredPosts = metadataDatabase.tables.singleWhere(
+          (table) => table.definition is Posts,
+        );
+        final author = registeredPosts.relations['author']!;
+        expect(author.fields.single.physicalName, 'authorName');
+        expect(author.references.single.physicalName, 'displayName');
+        expect(
+          registeredPosts.columns.single.foreignKey?.referencedColumn?.physicalName,
+          'displayName',
+        );
+      },
+    );
+
+    test('should reject duplicate and missing schema registrations before connecting', () async {
+      final connection = RivetConnection.url(
+        'postgresql://localhost/unused',
+        sslMode: RivetSslMode.disable,
+      );
+      final users = UserProfiles.db.buildSchema() as RivetTableSchema<Object?, Object?>;
+      final posts = Posts.db.buildSchema() as RivetTableSchema<Object?, Object?>;
+
+      await expectLater(
+        RivetDb.open(
+          connection: connection,
+          pool: const RivetPoolOptions(),
+          tables: [users, users],
+        ),
+        throwsArgumentError,
+      );
+      await expectLater(
+        RivetDb.open(connection: connection, pool: const RivetPoolOptions(), tables: [posts]),
+        throwsArgumentError,
+      );
     });
   });
 }

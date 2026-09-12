@@ -1,23 +1,29 @@
+// Query usage is documented on the plan and terminal entry points and in the package README.
+// ignore_for_file: public_member_api_docs
+
 import 'dart:convert';
 
-import 'errors.dart';
-import 'schema.dart';
+import 'package:rivet/src/errors.dart';
+import 'package:rivet/src/schema.dart';
 
 const _postgresParameterLimit = 65535;
-const _postgresSqlByteLimit = 1024 * 1024 * 1024;
+const int _postgresSqlByteLimit = 1024 * 1024 * 1024;
+final RegExp _valuePlaceholder = RegExp('@value');
 
 typedef RivetWhere<Definition> = RivetPredicate Function(Definition table);
 typedef RivetOrderBy<Definition> = List<RivetOrder> Function(Definition table);
 
 /// A compiled query plus validated bound values.
 final class RivetCompiledQuery {
-  const RivetCompiledQuery(this.sql, this.parameters);
+  const RivetCompiledQuery._(this.sql, this.parameters);
 
   final String sql;
   final List<Object?> parameters;
 }
 
 /// Execution boundary accepted by query terminals.
+// The interface keeps query plans independent from database and transaction owners.
+// ignore: one_member_abstracts
 abstract interface class RivetExecutor {
   Future<List<Row>> execute<Row>(
     RivetCompiledQuery query,
@@ -50,9 +56,20 @@ final class RivetFind<Definition, Row> {
     int? limit,
     int? offset,
   }) : _predicate = where?.call(_schema.definition),
-       _orders = orderBy?.call(_schema.definition) ?? const [],
+       _orders = List.unmodifiable(orderBy?.call(_schema.definition) ?? const []),
        _limit = _positiveOrNull(limit, 'limit'),
-       _offset = _nonNegativeOrNull(offset, 'offset');
+       _offset = _nonNegativeOrNull(offset, 'offset') {
+    if (_predicate?.columns.any((column) => !column.belongsTo(_schema)) ?? false) {
+      throw const RivetUnsupportedQueryException(
+        'A root predicate can only reference columns from its root table.',
+      );
+    }
+    if (_orders.any((order) => !order.column.belongsTo(_schema))) {
+      throw const RivetUnsupportedQueryException(
+        'Root ordering can only reference columns from its root table.',
+      );
+    }
+  }
 
   final RivetTableSchema<Definition, Row> _schema;
   final RivetPredicate? _predicate;
@@ -84,17 +101,23 @@ final class RivetFind<Definition, Row> {
   }
 
   RivetCompiledQuery _compile({int? terminalLimit}) {
+    if ((_predicate?.parameters.length ?? 0) > _postgresParameterLimit) {
+      throw const RivetUnsupportedQueryException(
+        'PostgreSQL supports at most 65535 bound parameters.',
+      );
+    }
     final columns = _schema.columns.indexed
         .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
         .join(', ');
     final sql = StringBuffer('SELECT $columns FROM ${_schema.qualifiedName}');
     final parameters = <Object?>[];
     if (_predicate case final predicate?) {
-      var predicateSql = predicate.sql;
-      for (final value in predicate.parameters) {
-        parameters.add(value);
-        predicateSql = predicateSql.replaceFirst('@value', '\$${parameters.length}');
-      }
+      parameters.addAll(predicate.parameters);
+      var parameterIndex = 0;
+      final predicateSql = predicate.sql.replaceAllMapped(
+        _valuePlaceholder,
+        (_) => '\$${++parameterIndex}',
+      );
       sql.write(' WHERE $predicateSql');
     }
     if (_orders.isNotEmpty) {
@@ -118,18 +141,13 @@ final class RivetFind<Definition, Row> {
     };
     if (effectiveLimit != null) sql.write(' LIMIT $effectiveLimit');
     if (_offset != null) sql.write(' OFFSET $_offset');
-    if (parameters.length > _postgresParameterLimit) {
-      throw RivetUnsupportedQueryException(
-        'PostgreSQL supports at most $_postgresParameterLimit bound parameters.',
-      );
-    }
     final rendered = sql.toString();
     if (utf8.encode(rendered).length > _postgresSqlByteLimit) {
       throw const RivetUnsupportedQueryException(
         'The compiled PostgreSQL statement exceeds the supported SQL size.',
       );
     }
-    return RivetCompiledQuery(rendered, List.unmodifiable(parameters));
+    return RivetCompiledQuery._(rendered, List.unmodifiable(parameters));
   }
 }
 

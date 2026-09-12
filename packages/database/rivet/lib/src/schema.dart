@@ -1,11 +1,15 @@
+// The README documents the declaration DSL; consequential runtime contracts are documented here.
+// ignore_for_file: public_member_api_docs
+
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:chrono_id/chrono_id.dart';
+import 'package:meta/meta.dart';
 import 'package:postgres/postgres.dart' as pg;
 
-import 'errors.dart';
-import 'relation.dart';
+import 'package:rivet/src/errors.dart';
+import 'package:rivet/src/relation.dart';
 
 typedef RivetRowDecoder<Row> = Row Function(
   List<Object?> values,
@@ -18,14 +22,17 @@ final class RivetTableSchema<Definition, Row> {
     required this.schemaName,
     required this.tableName,
     required this.definition,
-    required this.columns,
+    required List<RivetColumn<Object?>> columns,
     required List<String> columnNames,
     required this.decode,
     this.formatVersion = 1,
-    this.indexes = const [],
-    this.constraints = const [],
-    this.relations = const {},
-  }) {
+    List<RivetIndex> indexes = const [],
+    List<RivetConstraint> constraints = const [],
+    Map<String, RivetRelationDescriptor<Object?>> relations = const {},
+  }) : columns = List.unmodifiable(columns),
+       indexes = List.unmodifiable(indexes),
+       constraints = List.unmodifiable(constraints),
+       relations = Map.unmodifiable(relations) {
     if (columns.length != columnNames.length) {
       throw ArgumentError('Column descriptors and generated names must have equal lengths.');
     }
@@ -35,6 +42,29 @@ final class RivetTableSchema<Definition, Row> {
     final physicalNames = columns.map((column) => column.physicalName).toSet();
     if (physicalNames.length != columns.length) {
       throw ArgumentError('Table $schemaName.$tableName has duplicate physical column names.');
+    }
+    if (indexes.map((index) => index.name).toSet().length != indexes.length) {
+      throw ArgumentError('Table $schemaName.$tableName has duplicate index names.');
+    }
+    if (constraints.map((constraint) => constraint.name).toSet().length != constraints.length) {
+      throw ArgumentError('Table $schemaName.$tableName has duplicate constraint names.');
+    }
+    for (final index in indexes) {
+      if (index.terms.isEmpty || index.terms.any((term) => !columns.contains(term.column))) {
+        throw ArgumentError('Index $schemaName.$tableName.${index.name} has invalid terms.');
+      }
+      if (index.predicate case final predicate?
+          when predicate.columns.any((column) => !columns.contains(column))) {
+        throw ArgumentError('Index $schemaName.$tableName.${index.name} has an invalid predicate.');
+      }
+    }
+    for (final constraint in constraints) {
+      if (constraint.predicate case final predicate?
+          when predicate.columns.any((column) => !columns.contains(column))) {
+        throw ArgumentError(
+          'Constraint $schemaName.$tableName.${constraint.name} has an invalid expression.',
+        );
+      }
     }
   }
 
@@ -104,17 +134,23 @@ abstract class RivetTableDefinition<Self> {
   RivetRelationBuilder<Target, RivetOneRelation<Target>> one<Target>({
     required List<RivetColumn<dynamic>> fields,
     required List<RivetColumn<dynamic>> Function(Target table) references,
-  }) => RivetRelationBuilder(RivetOneRelation(Target));
+  }) => RivetRelationBuilder(
+    RivetOneRelation(Target, fields: List.unmodifiable(fields), references: references),
+  );
 
   RivetRelationBuilder<Target, RivetManyRelation<Target>> many<Target>({
-    Object? Function(Target table)? relation,
+    RivetRelationDescriptor<dynamic> Function(Target table)? relation,
     Type? through,
-  }) => RivetRelationBuilder(RivetManyRelation(Target, through: through));
+  }) => RivetRelationBuilder(RivetManyRelation(Target, relation: relation, through: through));
 
   RivetIndexBuilder index(String name) => RivetIndexBuilder(name, unique: false);
   RivetIndexBuilder uniqueIndex(String name) => RivetIndexBuilder(name, unique: true);
-  RivetConstraint check(String name, RivetPredicate predicate) =>
-      RivetConstraint(name: name, kind: RivetConstraintKind.check, expression: predicate.sql);
+  RivetConstraint check(String name, RivetPredicate predicate) => RivetConstraint(
+    name: name,
+    kind: RivetConstraintKind.check,
+    expression: predicate.sql,
+    predicate: predicate,
+  );
 }
 
 enum RivetReferentialAction { noAction, restrict, cascade, setNull, setDefault }
@@ -122,23 +158,32 @@ enum RivetReferentialAction { noAction, restrict, cascade, setNull, setDefault }
 enum RivetConstraintKind { check, primaryKey, foreignKey }
 
 final class RivetForeignKey {
-  const RivetForeignKey({
+  RivetForeignKey({
     required this.targetTable,
+    required this.reference,
     required this.onDelete,
     required this.onUpdate,
   });
 
   final Type targetTable;
+  final RivetColumn<dynamic> Function(Object table) reference;
   final RivetReferentialAction onDelete;
   final RivetReferentialAction onUpdate;
+  RivetColumn<dynamic>? referencedColumn;
 }
 
 final class RivetConstraint {
-  const RivetConstraint({required this.name, required this.kind, this.expression});
+  const RivetConstraint({
+    required this.name,
+    required this.kind,
+    this.expression,
+    this.predicate,
+  });
 
   final String name;
   final RivetConstraintKind kind;
   final String? expression;
+  final RivetPredicate? predicate;
 }
 
 final class RivetIndex {
@@ -174,6 +219,7 @@ final class RivetIndexBuilder {
       for (final term in terms)
         switch (term) {
           RivetIndexTerm() => term,
+          RivetOrder() => RivetIndexTerm(term.column, descending: term.descending),
           RivetColumn<dynamic>() => RivetIndexTerm(term),
           _ => throw ArgumentError.value(term, 'terms', 'must be a Rivet column or index term'),
         },
@@ -183,6 +229,8 @@ final class RivetIndexBuilder {
 }
 
 /// Builds a generated table schema without retaining a live executor.
+// The accessor is the generated package-composition boundary.
+// ignore: one_member_abstracts
 abstract class RivetTableAccessor<Definition, Row> {
   const RivetTableAccessor();
 
@@ -297,8 +345,9 @@ final class RivetRealCodec extends RivetCodec<double> {
 
   @override
   double decode(Object? value, {required bool isSqlNull}) {
-    if (isSqlNull || value is! num)
+    if (isSqlNull || value is! num) {
       throw const FormatException('expected a PostgreSQL DOUBLE PRECISION');
+    }
     return value.toDouble();
   }
 }
@@ -326,8 +375,9 @@ final class RivetDateTimeCodec extends RivetCodec<DateTime> {
 
   @override
   DateTime decode(Object? value, {required bool isSqlNull}) {
-    if (isSqlNull || value is! DateTime)
+    if (isSqlNull || value is! DateTime) {
       throw const FormatException('expected a PostgreSQL TIMESTAMPTZ');
+    }
     return _milliseconds(value);
   }
 
@@ -335,6 +385,7 @@ final class RivetDateTimeCodec extends RivetCodec<DateTime> {
       DateTime.fromMillisecondsSinceEpoch(value.toUtc().millisecondsSinceEpoch, isUtc: true);
 }
 
+@immutable
 sealed class JsonValue {
   const JsonValue();
 
@@ -377,7 +428,7 @@ final class RivetJsonCodec extends RivetCodec<JsonValue> {
   String get cast => 'jsonb';
 
   @override
-  Object? encode(JsonValue value) => value.toDart();
+  Object encode(JsonValue value) => pg.TypedValue(pg.Type.jsonb, value.toDart(), isSqlNull: false);
 
   @override
   JsonValue decode(Object? value, {required bool isSqlNull}) {
@@ -399,13 +450,20 @@ final class RivetUnconfiguredEnumCodec<E extends Enum> extends RivetCodec<E> {
 }
 
 final class RivetEnumCodec<E extends Enum> extends RivetCodec<E> {
-  const RivetEnumCodec({required this.values, required this.labels});
+  const RivetEnumCodec({
+    required this.schemaName,
+    required this.typeName,
+    required this.values,
+    required this.labels,
+  });
 
+  final String schemaName;
+  final String typeName;
   final List<E> values;
   final List<String> labels;
 
   @override
-  String get cast => 'text';
+  String get cast => '${quoteIdentifier(schemaName)}.${quoteIdentifier(typeName)}';
 
   @override
   String select(String columnSql) => '$columnSql::text';
@@ -472,26 +530,29 @@ final class RivetVectorCodec extends RivetCodec<Float32List> {
 }
 
 Object _validatedJson(Object value) {
-  void validate(Object? item) {
+  Object? freeze(Object? item) {
     switch (item) {
       case null || bool() || String():
-        return;
+        return item;
       case final num number:
         if (!number.isFinite) throw const FormatException('JSON numbers must be finite');
+        return number;
       case final List<Object?> list:
-        for (final child in list) validate(child);
+        return List<Object?>.unmodifiable(list.map(freeze));
       case final Map<Object?, Object?> map:
+        final result = <String, Object?>{};
         for (final entry in map.entries) {
-          if (entry.key is! String) throw const FormatException('JSON object keys must be strings');
-          validate(entry.value);
+          final key = entry.key;
+          if (key is! String) throw const FormatException('JSON object keys must be strings');
+          result[key] = freeze(entry.value);
         }
+        return Map<String, Object?>.unmodifiable(result);
       default:
         throw const FormatException('value is not valid JSON');
     }
   }
 
-  validate(value);
-  return value;
+  return freeze(value)!;
 }
 
 abstract interface class RivetTypeConverter<Domain, Storage> {
@@ -541,11 +602,11 @@ class RivetColumnBuilder<T> {
 
 class RivetMappedColumn<Domain, Storage> extends RivetColumn<Domain> {
   RivetMappedColumn(
-    RivetCodec<Domain> codec,
+    super.codec,
     this.storage, {
     super.declaredName,
     super.renamedFrom,
-  }) : super(codec);
+  });
 
   final RivetColumn<Storage> storage;
 
@@ -663,12 +724,16 @@ class RivetColumn<T> {
   String get physicalName => declaredName ?? dartName;
   String get sql => quoteIdentifier(physicalName);
   String get selectionSql => codec.select(sql);
+  bool belongsTo(RivetTableSchema<Object?, Object?> table) => identical(_table, table);
 
+  // The generator replaces the placeholder enum codec after constructing a definition.
+  // ignore: use_setters_to_change_properties
   void useCodec(RivetCodec<T> value) => codec = value;
 
   RivetPredicate equals(T value) {
+    if (value == null) return RivetPredicate._('$sql IS NULL', const [], [this]);
     final encoded = _convert('encode', () => codec.encode(value));
-    return RivetPredicate('$sql = @value', [encoded]);
+    return RivetPredicate._('$sql = @value::${codec.cast}', [encoded], [this]);
   }
 
   T decodeValue(Object? value, {required bool isSqlNull}) =>
@@ -679,7 +744,7 @@ class RivetColumn<T> {
       return convert();
     } on RivetException {
       rethrow;
-    } catch (error) {
+    } on Object catch (error) {
       throw RivetConversionException(
         table: '${_table.schemaName}.${_table.tableName}',
         column: physicalName,
@@ -694,10 +759,10 @@ class RivetColumn<T> {
 final class RivetOrderableColumn<T> extends RivetColumn<T> {
   RivetOrderableColumn(super.codec, {super.declaredName, super.renamedFrom});
 
-  RivetOrder asc({NullsOrder nulls = NullsOrder.last}) => RivetOrder(this, false, nulls);
-  RivetOrder desc({NullsOrder nulls = NullsOrder.last}) => RivetOrder(this, true, nulls);
-  RivetIndexTerm indexAsc() => RivetIndexTerm(this);
-  RivetIndexTerm indexDesc() => RivetIndexTerm(this, descending: true);
+  RivetOrder asc({NullsOrder nulls = NullsOrder.last}) =>
+      RivetOrder(this, descending: false, nulls: nulls);
+  RivetOrder desc({NullsOrder nulls = NullsOrder.last}) =>
+      RivetOrder(this, descending: true, nulls: nulls);
 }
 
 /// Builder used by table declaration fields such as `text()()`.
@@ -733,6 +798,8 @@ class RivetOrderableColumnBuilder<T> {
 
   RivetOrderableColumnBuilder<T> primaryKey() {
     _primaryKey = true;
+    // Schema modifiers preserve the builder's accumulated metadata.
+    // ignore: avoid_returning_this
     return this;
   }
 
@@ -741,22 +808,35 @@ class RivetOrderableColumnBuilder<T> {
     RivetReferentialAction onDelete = RivetReferentialAction.noAction,
     RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
   }) {
-    _foreignKey = RivetForeignKey(targetTable: Target, onDelete: onDelete, onUpdate: onUpdate);
+    _foreignKey = RivetForeignKey(
+      targetTable: Target,
+      reference: (table) => reference(table as Target),
+      onDelete: onDelete,
+      onUpdate: onUpdate,
+    );
+    // Schema modifiers preserve the builder's accumulated metadata.
+    // ignore: avoid_returning_this
     return this;
   }
 
   RivetOrderableColumnBuilder<T> defaultSql(String sql) {
     _sqlDefault = sql;
+    // Schema modifiers preserve the builder's accumulated metadata.
+    // ignore: avoid_returning_this
     return this;
   }
 
   RivetOrderableColumnBuilder<T> defaultValue(T Function() value) {
     _defaultFn = value;
+    // Schema modifiers preserve the builder's accumulated metadata.
+    // ignore: avoid_returning_this
     return this;
   }
 
   RivetOrderableColumnBuilder<T> onUpdate(T Function() value) {
     _onUpdateFn = value;
+    // Schema modifiers preserve the builder's accumulated metadata.
+    // ignore: avoid_returning_this
     return this;
   }
 
@@ -801,7 +881,7 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
   String select(String columnSql) {
     final elementSelection = elementCodec.select('"__rivet_element"');
     if (elementSelection == '"__rivet_element"') return columnSql;
-    return 'CASE WHEN $columnSql IS NULL THEN NULL ELSE ARRAY('
+    return 'CASE WHEN $columnSql IS NULL THEN NULL ELSE ARRAY( '
         'SELECT $elementSelection FROM unnest($columnSql) WITH ORDINALITY '
         'AS "__rivet_array"("__rivet_element", "__rivet_order") '
         'ORDER BY "__rivet_order") END';
@@ -817,7 +897,7 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
         if (element == null && elementCodec.cast == 'jsonb')
           pg.TypedValue(pg.Type.jsonb, null, isSqlNull: true)
         else
-          elementCodec.encode(element),
+          _arrayElement(elementCodec.encode(element)),
     ];
     if (elementCodec.cast == 'jsonb') {
       return pg.TypedValue(pg.Type.jsonbArray, encoded);
@@ -830,8 +910,9 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
 
   @override
   List<Element> decode(Object? value, {required bool isSqlNull}) {
-    if (isSqlNull || value is! List)
+    if (isSqlNull || value is! List) {
       throw const FormatException('expected a one-dimensional array');
+    }
     return [
       for (var index = 0; index < value.length; index++)
         elementCodec.decode(
@@ -843,12 +924,18 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
 
   String _arrayText(List<Object?> values) =>
       '{${values.map((value) => value == null ? 'NULL' : '"${value.toString().replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"').join(',')}}';
+
+  Object? _arrayElement(Object? value) => switch (value) {
+    pg.TypedValue() when value.isSqlNull => value,
+    pg.TypedValue() => value.value,
+    _ => value,
+  };
 }
 
 enum NullsOrder { first, last }
 
 final class RivetOrder {
-  const RivetOrder(this.column, this.descending, this.nulls);
+  const RivetOrder(this.column, {required this.descending, required this.nulls});
 
   final RivetOrderableColumn<Object?> column;
   final bool descending;
@@ -857,18 +944,30 @@ final class RivetOrder {
 
 /// A parameterized SQL predicate produced by typed expressions.
 final class RivetPredicate {
-  const RivetPredicate(this.sql, this.parameters);
+  RivetPredicate._(
+    this.sql,
+    List<Object?> parameters,
+    List<RivetColumn<dynamic>> columns,
+  ) : parameters = List.unmodifiable(parameters),
+      columns = List.unmodifiable(columns);
 
   final String sql;
   final List<Object?> parameters;
+  final List<RivetColumn<dynamic>> columns;
 
-  RivetPredicate operator &(RivetPredicate other) =>
-      RivetPredicate('($sql) AND (${other.sql})', [...parameters, ...other.parameters]);
+  RivetPredicate operator &(RivetPredicate other) => RivetPredicate._(
+    '($sql) AND (${other.sql})',
+    [...parameters, ...other.parameters],
+    [...columns, ...other.columns],
+  );
 
-  RivetPredicate operator |(RivetPredicate other) =>
-      RivetPredicate('($sql) OR (${other.sql})', [...parameters, ...other.parameters]);
+  RivetPredicate operator |(RivetPredicate other) => RivetPredicate._(
+    '($sql) OR (${other.sql})',
+    [...parameters, ...other.parameters],
+    [...columns, ...other.columns],
+  );
 
-  RivetPredicate operator ~() => RivetPredicate('NOT ($sql)', parameters);
+  RivetPredicate operator ~() => RivetPredicate._('NOT ($sql)', parameters, columns);
 }
 
 String quoteIdentifier(String identifier) {

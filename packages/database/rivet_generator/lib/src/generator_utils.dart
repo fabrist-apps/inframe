@@ -1,4 +1,7 @@
 import 'package:analyzer/dart/element/type.dart';
+// Generator helpers are shared only inside rivet_generator.
+// ignore_for_file: public_member_api_docs
+
 import 'package:source_gen/source_gen.dart';
 
 String readString(ConstantReader annotation, String field, String fallback) =>

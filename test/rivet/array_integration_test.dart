@@ -15,8 +15,11 @@ void main() {
 
     test('should reject null non-nullable elements and multidimensional values', () {
       final table = ArrayValues.db.buildSchema().definition;
+      final dynamic encodeInts = table.ints.codec.encode;
       expect(
-        () => table.ints.codec.encode(<int>[1, null as dynamic]),
+        // Deliberately bypass static typing to verify the runtime guard.
+        // ignore: avoid_dynamic_calls
+        () => encodeInts(<dynamic>[1, null]),
         throwsA(anything),
       );
       expect(
@@ -35,8 +38,15 @@ void main() {
       'should preserve array shape, nulls, JSON null, converters, enums, and vectors',
       () async {
         fixture = await pg.Connection.openFromUrl(databaseUrl!);
-        await fixture.execute('CREATE SCHEMA IF NOT EXISTS fbr122');
-        await fixture.execute('DROP TABLE IF EXISTS fbr122."arrayValues"');
+        await fixture.execute('DROP SCHEMA IF EXISTS fbr122 CASCADE');
+        await fixture.execute('CREATE SCHEMA fbr122');
+        await fixture.execute('CREATE SCHEMA IF NOT EXISTS fbr120');
+        await fixture.execute(r'''
+          DO $$ BEGIN
+            CREATE TYPE fbr120."workStatus" AS ENUM ('zeta', 'alpha');
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END $$
+        ''');
         await fixture.execute('''
           CREATE TABLE fbr122."arrayValues" (
             ints integer[] NOT NULL,
@@ -71,19 +81,42 @@ void main() {
         });
 
         final row = await ArrayValues.db.find().getSingle(database);
+        final filtered = await ArrayValues.db
+            .find(
+              where: (values) => values.statuses.equals([
+                WorkStatus.queued,
+                WorkStatus.complete,
+              ]),
+            )
+            .getSingle(database);
+        final jsonFiltered = await ArrayValues.db
+            .find(
+              where: (values) => values.jsonValues.equals([
+                null,
+                const JsonNull(),
+                JsonValue.from(const {'ok': true}),
+              ]),
+            )
+            .getSingle(database);
         expect(row.ints, isEmpty);
         expect(row.nullableInts, [1, null, 3]);
         expect(row.optionalInts, isNull);
         expect(row.optionalNullableInts, [null, 4]);
         expect(row.jsonValues[0], isNull);
         expect(row.jsonValues[1], const JsonNull());
-        expect(row.jsonValues[2], JsonValue.from({'ok': true}));
+        expect(row.jsonValues[2], JsonValue.from(const {'ok': true}));
         expect(row.vectors, [
           Float32List.fromList([1, 2, 3]),
           Float32List.fromList([4, 5, 6]),
         ]);
         expect(row.statuses, [WorkStatus.queued, WorkStatus.complete]);
         expect(row.codes.map((value) => value?.value), ['A', null]);
+        expect(filtered.statuses, [WorkStatus.queued, WorkStatus.complete]);
+        expect(jsonFiltered.jsonValues, [
+          null,
+          const JsonNull(),
+          JsonValue.from(const {'ok': true}),
+        ]);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

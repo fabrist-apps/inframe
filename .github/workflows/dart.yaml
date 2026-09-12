@@ -31,7 +31,12 @@ jobs:
 
       - name: Generate Rivet consumer fixtures
         run: |
-          dart run build_runner build
+          dart run build_runner build --build-filter=test/rivet/generated_consumer.g.dart
+          dart format test/rivet/generated_consumer.g.dart
+          (cd test/rivet/fixtures/schema_package && dart run build_runner build)
+          dart format test/rivet/fixtures/schema_package/lib/package_users.g.dart
+          (cd test/rivet/fixtures/app_package && dart run build_runner build)
+          dart format test/rivet/fixtures/app_package/lib/app_database.g.dart
           git diff --exit-code
 
       - name: Check formatting
@@ -39,6 +44,11 @@ jobs:
 
       - name: Analyze
         run: dart analyze
+
+      - name: Run Rivet generator and cross-package tests
+        run: |
+          dart test packages/database/rivet_generator/test --chain-stack-traces
+          dart test test/rivet/fixtures/app_package/test --chain-stack-traces
 
       - name: Run context tests and consumer checks
         run: dart test packages/context/test --chain-stack-traces
@@ -98,7 +108,7 @@ jobs:
           done
           docker exec inframe-rivet-test pg_isready \
             --username postgres --dbname inframe_test
-          dart test test/rivet --chain-stack-traces
+          dart test test/rivet/*_test.dart --concurrency=1 --chain-stack-traces
 
       - name: Run ClickHouse integration tests
         env:

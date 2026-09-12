@@ -6,13 +6,18 @@ part of 'generated_consumer.dart';
 // RivetTableGenerator
 // **************************************************************************
 
+/// Generated row returned by reads from `fbr116.userProfiles`.
 final class UserProfilesRow {
+  /// Creates a row from decoded column and relation values.
   const UserProfilesRow({
     required this.displayName,
     this.posts = const Relation.unloaded(),
   });
 
+  /// Value read from `displayName`.
   final String displayName;
+
+  /// Loaded or unloaded `posts` relation.
   final Relation<List<PostsRow>> posts;
 }
 
@@ -44,13 +49,18 @@ final class _$UserProfilesDB extends RivetTableAccessor<UserProfiles, UserProfil
   }
 }
 
+/// Generated row returned by reads from `fbr116.posts`.
 final class PostsRow {
+  /// Creates a row from decoded column and relation values.
   const PostsRow({
     required this.authorName,
     this.author = const Relation.unloaded(),
   });
 
+  /// Value read from `authorName`.
   final String authorName;
+
+  /// Loaded or unloaded `author` relation.
   final Relation<UserProfilesRow?> author;
 }
 
@@ -73,8 +83,6 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
           isSqlNull: sqlNulls[0],
         ),
       ),
-      indexes: const <RivetIndex>[],
-      constraints: const <RivetConstraint>[],
       relations: {
         'author': definition.author as RivetRelationDescriptor<Object?>,
       },
@@ -82,7 +90,9 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
   }
 }
 
+/// Generated row returned by reads from `fbr119.scalarValues`.
 final class ScalarValuesRow {
+  /// Creates a row from decoded column and relation values.
   const ScalarValuesRow({
     required this.id,
     required this.count,
@@ -94,13 +104,28 @@ final class ScalarValuesRow {
     required this.optionalCode,
   });
 
+  /// Value read from `id`.
   final String id;
+
+  /// Value read from `count`.
   final int count;
+
+  /// Value read from `score`.
   final double score;
+
+  /// Value read from `active`.
   final bool active;
+
+  /// Value read from `createdAt`.
   final DateTime createdAt;
+
+  /// Value read from `payload`.
   final JsonValue payload;
+
+  /// Value read from `code`.
   final UserCode code;
+
+  /// Value read from `optionalCode`.
   final UserCode? optionalCode;
 }
 
@@ -157,16 +182,16 @@ final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValu
           isSqlNull: sqlNulls[7],
         ),
       ),
-      indexes: const <RivetIndex>[],
-      constraints: const <RivetConstraint>[],
-      relations: {},
     );
   }
 }
 
+/// Generated row returned by reads from `fbr120.enumValues`.
 final class EnumValuesRow {
+  /// Creates a row from decoded column and relation values.
   const EnumValuesRow({required this.status});
 
+  /// Value read from `status`.
   final WorkStatus status;
 }
 
@@ -189,20 +214,22 @@ final class _$EnumValuesDB extends RivetTableAccessor<EnumValues, EnumValuesRow>
           isSqlNull: sqlNulls[0],
         ),
       ),
-      indexes: const <RivetIndex>[],
-      constraints: const <RivetConstraint>[],
-      relations: {},
     );
   }
 }
 
+/// Generated row returned by reads from `fbr121.vectorValues`.
 final class VectorValuesRow {
+  /// Creates a row from decoded column and relation values.
   const VectorValuesRow({
     required this.embedding,
     required this.optionalEmbedding,
   });
 
+  /// Value read from `embedding`.
   final Float32List embedding;
+
+  /// Value read from `optionalEmbedding`.
   final Float32List? optionalEmbedding;
 }
 
@@ -232,14 +259,13 @@ final class _$VectorValuesDB extends RivetTableAccessor<VectorValues, VectorValu
           isSqlNull: sqlNulls[1],
         ),
       ),
-      indexes: const <RivetIndex>[],
-      constraints: const <RivetConstraint>[],
-      relations: {},
     );
   }
 }
 
+/// Generated row returned by reads from `fbr122.arrayValues`.
 final class ArrayValuesRow {
+  /// Creates a row from decoded column and relation values.
   const ArrayValuesRow({
     required this.ints,
     required this.nullableInts,
@@ -251,13 +277,28 @@ final class ArrayValuesRow {
     required this.codes,
   });
 
+  /// Value read from `ints`.
   final List<int> ints;
+
+  /// Value read from `nullableInts`.
   final List<int?> nullableInts;
+
+  /// Value read from `optionalInts`.
   final List<int>? optionalInts;
+
+  /// Value read from `optionalNullableInts`.
   final List<int?>? optionalNullableInts;
+
+  /// Value read from `jsonValues`.
   final List<JsonValue?> jsonValues;
+
+  /// Value read from `vectors`.
   final List<Float32List> vectors;
+
+  /// Value read from `statuses`.
   final List<WorkStatus> statuses;
+
+  /// Value read from `codes`.
   final List<UserCode?> codes;
 }
 
@@ -267,7 +308,9 @@ final class _$ArrayValuesDB extends RivetTableAccessor<ArrayValues, ArrayValuesR
   @override
   RivetTableSchema<ArrayValues, ArrayValuesRow> buildSchema() {
     final definition = ArrayValues();
-    definition.statuses.useCodec(RivetArrayCodec(WorkStatusRivetEnum.codec));
+    definition.statuses.useCodec(
+      const RivetArrayCodec(WorkStatusRivetEnum.codec),
+    );
     return RivetTableSchema<ArrayValues, ArrayValuesRow>(
       schemaName: 'fbr122',
       tableName: 'arrayValues',
@@ -320,9 +363,6 @@ final class _$ArrayValuesDB extends RivetTableAccessor<ArrayValues, ArrayValuesR
         ),
         codes: definition.codes.decodeValue(values[7], isSqlNull: sqlNulls[7]),
       ),
-      indexes: const <RivetIndex>[],
-      constraints: const <RivetConstraint>[],
-      relations: {},
     );
   }
 }
@@ -353,8 +393,12 @@ abstract class _$RivetTestDatabase {
 // RivetEnumGenerator
 // **************************************************************************
 
+/// Generated PostgreSQL metadata and codec for [WorkStatus].
 abstract final class WorkStatusRivetEnum {
+  /// Converts [WorkStatus] values to and from their stored labels.
   static const codec = RivetEnumCodec<WorkStatus>(
+    schemaName: 'fbr120',
+    typeName: 'workStatus',
     values: [WorkStatus.queued, WorkStatus.complete],
     labels: ['zeta', 'alpha'],
   );

@@ -1,12 +1,16 @@
+// Lifecycle contracts are documented on their entry-point types and in the package README.
+// ignore_for_file: public_member_api_docs
+
 import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 
 import 'package:postgres/postgres.dart' as pg;
 
-import 'errors.dart';
-import 'query.dart';
-import 'schema.dart';
+import 'package:rivet/src/errors.dart';
+import 'package:rivet/src/query.dart';
+import 'package:rivet/src/relation.dart';
+import 'package:rivet/src/schema.dart';
 
 enum RivetSslMode { verifyFull, require, disable }
 
@@ -60,6 +64,12 @@ final class RivetDb implements RivetExecutor {
   }) async {
     if (pool.maxConnections <= 0) {
       throw ArgumentError.value(pool.maxConnections, 'maxConnections', 'must be positive');
+    }
+    if (pool.acquireTimeout <= Duration.zero) {
+      throw ArgumentError.value(pool.acquireTimeout, 'acquireTimeout', 'must be positive');
+    }
+    if (connection.connectTimeout <= Duration.zero) {
+      throw ArgumentError.value(connection.connectTimeout, 'connectTimeout', 'must be positive');
     }
     _validateSchemas(tables);
     final uri = Uri.parse(connection.url);
@@ -135,7 +145,7 @@ final class RivetDb implements RivetExecutor {
       return result;
     } on RivetException {
       rethrow;
-    } catch (error) {
+    } on Object catch (error) {
       if (identical(error, callbackFailure)) rethrow;
       throw RivetDatabaseException('PostgreSQL transaction failed.', error);
     } finally {
@@ -233,7 +243,7 @@ Future<void> _runAfterCommitCallbacks(
         () => Future<void>.sync(callback),
         zoneValues: {_afterCommitDatabaseZoneKey: database},
       );
-    } catch (error, stackTrace) {
+    } on Object catch (error, stackTrace) {
       failures.add(AfterCommitFailure(error, stackTrace));
     }
   }
@@ -290,6 +300,7 @@ final class RivetTransaction implements RivetExecutor {
 
 final class _PoolWaiter {
   final completer = Completer<pg.Connection>();
+  bool active = true;
 }
 
 final class _RivetPool {
@@ -310,6 +321,7 @@ final class _RivetPool {
   int _borrowed = 0;
   bool _closing = false;
   Completer<void>? _closeCompleter;
+  (Object, StackTrace)? _closeFailure;
 
   Future<T> run<T>(Future<T> Function(pg.Session session) operation) async {
     return withConnection(operation);
@@ -333,45 +345,65 @@ final class _RivetPool {
       return _idle.removeLast();
     }
     if (_connectionCount < maxConnections) {
-      _connectionCount++;
-      try {
-        final connection = await pg.Connection.open(endpoint, settings: settings);
-        if (_closing) {
-          await connection.close();
-          _connectionCount--;
-          throw const RivetExecutorClosedException('The database is closing or closed.');
-        }
-        _borrowed++;
-        return connection;
-      } catch (_) {
-        if (_connectionCount > 0 && _borrowed < _connectionCount) _connectionCount--;
-        rethrow;
-      }
+      return _openConnection();
     }
     final waiter = _PoolWaiter();
     _waiters.add(waiter);
     try {
       return await waiter.completer.future.timeout(acquireTimeout);
     } on TimeoutException {
+      waiter.active = false;
       _waiters.remove(waiter);
       throw TimeoutException('Timed out waiting for a Rivet pool connection.', acquireTimeout);
     }
+  }
+
+  Future<pg.Connection> _openConnection() async {
+    _connectionCount++;
+    late pg.Connection connection;
+    try {
+      connection = await pg.Connection.open(endpoint, settings: settings);
+    } catch (error, stackTrace) {
+      _connectionCount--;
+      _failNextWaiter(error, stackTrace);
+      _completeCloseIfDrained();
+      rethrow;
+    }
+    if (_closing) {
+      try {
+        await connection.close();
+      } on Object catch (error, stackTrace) {
+        _closeFailure ??= (error, stackTrace);
+      } finally {
+        _connectionCount--;
+        _completeCloseIfDrained();
+      }
+      throw const RivetExecutorClosedException('The database is closing or closed.');
+    }
+    _borrowed++;
+    return connection;
   }
 
   Future<void> _release(pg.Connection connection) async {
     _borrowed--;
     while (_waiters.isNotEmpty) {
       final waiter = _waiters.removeFirst();
-      if (!waiter.completer.isCompleted) {
+      if (waiter.active) {
+        waiter.active = false;
         _borrowed++;
         waiter.completer.complete(connection);
         return;
       }
     }
     if (_closing) {
-      await connection.close();
-      _connectionCount--;
-      _completeCloseIfDrained();
+      try {
+        await connection.close();
+      } on Object catch (error, stackTrace) {
+        _closeFailure ??= (error, stackTrace);
+      } finally {
+        _connectionCount--;
+        _completeCloseIfDrained();
+      }
     } else {
       _idle.add(connection);
     }
@@ -382,6 +414,7 @@ final class _RivetPool {
     _closing = true;
     _closeCompleter = Completer<void>();
     for (final waiter in _waiters) {
+      waiter.active = false;
       waiter.completer.completeError(
         const RivetExecutorClosedException('The database is closing or closed.'),
       );
@@ -389,36 +422,122 @@ final class _RivetPool {
     _waiters.clear();
     final idle = List<pg.Connection>.of(_idle);
     _idle.clear();
-    Future.wait(idle.map((connection) => connection.close())).then((_) {
-      _connectionCount -= idle.length;
-      _completeCloseIfDrained();
-    });
+    unawaited(_closeIdle(idle));
     _completeCloseIfDrained();
     return _closeCompleter!.future;
+  }
+
+  Future<void> _closeIdle(List<pg.Connection> connections) async {
+    for (final connection in connections) {
+      try {
+        await connection.close();
+      } on Object catch (error, stackTrace) {
+        _closeFailure ??= (error, stackTrace);
+      } finally {
+        _connectionCount--;
+      }
+    }
+    _completeCloseIfDrained();
+  }
+
+  void _failNextWaiter(Object error, StackTrace stackTrace) {
+    while (_waiters.isNotEmpty) {
+      final waiter = _waiters.removeFirst();
+      if (waiter.active) {
+        waiter
+          ..active = false
+          ..completer.completeError(error, stackTrace);
+        return;
+      }
+    }
   }
 
   void _completeCloseIfDrained() {
     if (_closing && _borrowed == 0 && _connectionCount == 0) {
       final completer = _closeCompleter;
-      if (completer != null && !completer.isCompleted) completer.complete();
+      if (completer != null && !completer.isCompleted) {
+        final failure = _closeFailure;
+        if (failure == null) {
+          completer.complete();
+        } else {
+          completer.completeError(failure.$1, failure.$2);
+        }
+      }
     }
   }
 }
 
 void _validateSchemas(List<RivetTableSchema<Object?, Object?>> tables) {
   final physicalNames = <String>{};
-  final registeredTypes = tables.map((table) => table.definition.runtimeType).toSet();
+  final registeredTables = <Type, RivetTableSchema<Object?, Object?>>{};
   for (final table in tables) {
     if (!physicalNames.add('${table.schemaName}.${table.tableName}')) {
       throw ArgumentError(
         'Duplicate Rivet table registration: ${table.schemaName}.${table.tableName}.',
       );
     }
+    final type = table.definition.runtimeType;
+    if (registeredTables[type] != null) {
+      throw ArgumentError('Duplicate Rivet table type registration: $type.');
+    }
+    registeredTables[type] = table;
+  }
+  for (final table in tables) {
+    for (final column in table.columns) {
+      final foreignKey = column.foreignKey;
+      if (foreignKey == null) continue;
+      final target = registeredTables[foreignKey.targetTable];
+      if (target == null) {
+        throw ArgumentError(
+          'Foreign key ${table.schemaName}.${table.tableName}.${column.physicalName} targets '
+          '${foreignKey.targetTable}, which is not registered.',
+        );
+      }
+      final referencedColumn = foreignKey.reference(target.definition!);
+      if (!target.columns.contains(referencedColumn)) {
+        throw ArgumentError(
+          'Foreign key ${table.schemaName}.${table.tableName}.${column.physicalName} selects '
+          'a column outside ${target.schemaName}.${target.tableName}.',
+        );
+      }
+      foreignKey.referencedColumn = referencedColumn;
+    }
     for (final relation in table.relations.entries) {
-      if (!registeredTypes.contains(relation.value.targetTable)) {
+      final descriptor = relation.value;
+      final target = registeredTables[descriptor.targetTable];
+      if (target == null) {
         throw ArgumentError(
           'Relation ${table.schemaName}.${table.tableName}.${relation.key} targets '
-          '${relation.value.targetTable}, which is not registered among $registeredTypes.',
+          '${descriptor.targetTable}, which is not registered.',
+        );
+      }
+      if (descriptor.through case final through? when registeredTables[through] == null) {
+        throw ArgumentError(
+          'Relation ${table.schemaName}.${table.tableName}.${relation.key} uses through table '
+          '$through, which is not registered.',
+        );
+      }
+      descriptor.resolve(target.definition);
+      if (descriptor.kind == RivetRelationKind.one) {
+        if (descriptor.fields.isEmpty || descriptor.fields.length != descriptor.references.length) {
+          throw ArgumentError(
+            'Relation ${table.schemaName}.${table.tableName}.${relation.key} must map the same '
+            'non-zero number of source and target columns.',
+          );
+        }
+        if (descriptor.fields.any((column) => !table.columns.contains(column)) ||
+            descriptor.references.any((column) => !target.columns.contains(column))) {
+          throw ArgumentError(
+            'Relation ${table.schemaName}.${table.tableName}.${relation.key} selects columns '
+            'outside its source or target table.',
+          );
+        }
+      }
+      final inverse = descriptor.inverseRelation;
+      if (inverse != null && !target.relations.values.contains(inverse)) {
+        throw ArgumentError(
+          'Relation ${table.schemaName}.${table.tableName}.${relation.key} selects an inverse '
+          'relation outside ${target.schemaName}.${target.tableName}.',
         );
       }
     }

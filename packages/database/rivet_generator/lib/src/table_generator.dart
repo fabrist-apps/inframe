@@ -1,10 +1,12 @@
+// Generator implementation types are internal to the builder entry point.
+// ignore_for_file: public_member_api_docs
+
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:build/build.dart';
 import 'package:rivet/rivet.dart';
+import 'package:rivet_generator/src/generator_utils.dart';
 import 'package:source_gen/source_gen.dart';
-
-import 'generator_utils.dart';
 
 final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
   const RivetTableGenerator() : super(inPackage: 'rivet');
@@ -55,8 +57,16 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
     }
 
     final fields = [
-      ...columns.map((field) => '  final ${columnValueType(field.type)} ${field.displayName};'),
-      ...relations.map((field) => '  final ${_relationValueType(field)} ${field.displayName};'),
+      ...columns.map(
+        (field) =>
+            '  /// Value read from `${field.displayName}`.\n'
+            '  final ${columnValueType(field.type)} ${field.displayName};',
+      ),
+      ...relations.map(
+        (field) =>
+            '  /// Loaded or unloaded `${field.displayName}` relation.\n'
+            '  final ${_relationValueType(field)} ${field.displayName};',
+      ),
     ].join('\n');
     final parameters = [
       ...columns.map((field) => '    required this.${field.displayName},'),
@@ -74,11 +84,11 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
         })
         .join(', ');
     final indexes = element.fields.any((field) => field.displayName == '_indexes')
-        ? 'definition._indexes'
-        : 'const <RivetIndex>[]';
+        ? '      indexes: definition._indexes,\n'
+        : '';
     final constraints = element.fields.any((field) => field.displayName == '_constraints')
-        ? 'definition._constraints'
-        : 'const <RivetConstraint>[]';
+        ? '      constraints: definition._constraints,\n'
+        : '';
     final relationMap = relations
         .map(
           (field) =>
@@ -91,7 +101,7 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
           final valueType = (field.type as InterfaceType).typeArguments.first;
           if (valueType is InterfaceType && valueType.element.displayName == 'List') {
             final enumName = valueType.typeArguments.first.getDisplayString().replaceAll('?', '');
-            return 'definition.${field.displayName}.useCodec(RivetArrayCodec(${enumName}RivetEnum.codec));';
+            return 'definition.${field.displayName}.useCodec(const RivetArrayCodec(${enumName}RivetEnum.codec));';
           }
           final enumName = valueType.getDisplayString().replaceAll('?', '');
           return 'definition.${field.displayName}.useCodec(${enumName}RivetEnum.codec);';
@@ -99,7 +109,9 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
         .join('\n    ');
 
     return '''
+/// Generated row returned by reads from `$schemaName.$tableName`.
 final class $rowName {
+  /// Creates a row from decoded column and relation values.
   const $rowName({
 $parameters
   });
@@ -121,9 +133,7 @@ final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
       columns: [$descriptorList],
       columnNames: [$names],
       decode: (values, sqlNulls) => $rowName($decodes),
-      indexes: $indexes,
-      constraints: $constraints,
-      relations: {$relationMap},
+$indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},\n'}
     );
   }
 

@@ -24,6 +24,7 @@ void main() {
       expect(executor.queries.single.sql, contains('ORDER BY "displayName" DESC NULLS LAST'));
       expect(executor.queries.single.sql, endsWith('LIMIT 1'));
       expect(executor.queries.single.parameters, ['Ada']);
+      expect(executor.queries.single.sql, contains(r'"displayName" = $1::text'));
     });
 
     test('should honor explicit null placement', () async {
@@ -32,6 +33,22 @@ void main() {
           .get(executor);
 
       expect(executor.queries.single.sql, contains('ASC NULLS FIRST'));
+    });
+
+    test('should compile nullable equality and reject columns from another root', () async {
+      await ScalarValues.db.find(where: (values) => values.optionalCode.equals(null)).get(executor);
+      expect(executor.queries.single.sql, contains('"optionalCode" IS NULL'));
+      expect(executor.queries.single.parameters, isEmpty);
+
+      final other = Posts.db.buildSchema().definition;
+      expect(
+        () => UserProfiles.db.find(where: (_) => other.authorName.equals('Ada')),
+        throwsA(isA<RivetUnsupportedQueryException>()),
+      );
+      expect(
+        () => UserProfiles.db.find(orderBy: (_) => [other.authorName.asc()]),
+        throwsA(isA<RivetUnsupportedQueryException>()),
+      );
     });
 
     test('should enforce exact and optional-single cardinality in one statement', () async {
@@ -46,6 +63,29 @@ void main() {
 
       expect(executor.queries, hasLength(2));
       expect(executor.queries.every((query) => query.sql.endsWith('LIMIT 2')), isTrue);
+    });
+
+    test('should reject PostgreSQL parameter overflow before execution', () {
+      RivetPredicate overflow(UserProfiles users) {
+        var level = List<RivetPredicate>.generate(
+          65536,
+          (index) => users.displayName.equals('$index'),
+          growable: false,
+        );
+        while (level.length > 1) {
+          level = [
+            for (var index = 0; index < level.length; index += 2)
+              if (index + 1 == level.length) level[index] else level[index] | level[index + 1],
+          ];
+        }
+        return level.single;
+      }
+
+      expect(
+        () => UserProfiles.db.find(where: overflow).get(executor),
+        throwsA(isA<RivetUnsupportedQueryException>()),
+      );
+      expect(executor.queries, isEmpty);
     });
   });
 }

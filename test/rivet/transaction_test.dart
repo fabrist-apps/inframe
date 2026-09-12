@@ -84,7 +84,7 @@ void main() {
         final firstClose = database.close();
         final secondClose = database.close();
         var closed = false;
-        firstClose.then((_) => closed = true);
+        unawaited(firstClose.then((_) => closed = true));
         await Future<void>.delayed(const Duration(milliseconds: 20));
         expect(closed, isFalse);
         await expectLater(

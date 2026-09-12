@@ -46,6 +46,14 @@ void main() {
           'code': 'A',
         },
       );
+      await fixture.execute('''
+        INSERT INTO fbr119."scalarValues"
+          (id, count, score, active, "createdAt", payload, code, "optionalCode")
+        VALUES (
+          'usr_111111111111111111111111', 0, 0, false,
+          '1970-01-01 00:00:00+00', 'null'::jsonb, 'B', NULL
+        )
+      ''');
       database = await RivetTestDatabase().open(
         connection: RivetConnection.url(databaseUrl),
         pool: const RivetPoolOptions(maxConnections: 2),
@@ -61,16 +69,22 @@ void main() {
     test(
       'should round-trip every scalar and mapped value',
       () async {
-        final row = await ScalarValues.db.find().getSingle(database);
+        final row = await ScalarValues.db
+            .find(where: (values) => values.code.equals(const UserCode('A')))
+            .getSingle(database);
+        final jsonNull = await ScalarValues.db
+            .find(where: (values) => values.payload.equals(const JsonNull()))
+            .getSingle(database);
 
         expect(row.id, 'usr_000000000000000000000000');
         expect(row.count, 2147483647);
         expect(row.score, 1.5);
         expect(row.active, isTrue);
         expect(row.createdAt, DateTime.utc(1969, 12, 31, 23, 59, 59, 999));
-        expect(row.payload, JsonValue.from({'ok': true, 'value': null}));
+        expect(row.payload, JsonValue.from(const {'ok': true, 'value': null}));
         expect(row.code.value, 'A');
         expect(row.optionalCode, isNull);
+        expect(jsonNull.payload, const JsonNull());
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

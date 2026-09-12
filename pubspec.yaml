@@ -11,6 +11,8 @@ workspace:
   - packages/database/turso
   - packages/database/rivet
   - packages/database/rivet_generator
+  - test/rivet/fixtures/schema_package
+  - test/rivet/fixtures/app_package
   - packages/json_patch
   - packages/chrono_id
   - packages/conflux

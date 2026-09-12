@@ -1,3 +1,8 @@
+// Relation state and metadata contracts are documented on their public root types.
+// ignore_for_file: public_member_api_docs
+
+import 'package:rivet/src/schema.dart';
+
 /// A relation field that has either been requested or deliberately left unloaded.
 sealed class Relation<T> {
   const Relation();
@@ -28,28 +33,52 @@ enum RivetRelationKind { one, many, manyThrough }
 
 /// Runtime metadata for a relation declaration. It never creates a foreign key.
 final class RivetRelationDescriptor<Target> {
-  const RivetRelationDescriptor({
+  RivetRelationDescriptor({
     required this.kind,
     required this.targetTable,
     this.through,
+    this.fields = const [],
+    this.reference,
+    this.inverse,
   });
 
   final RivetRelationKind kind;
   final Type? through;
   final Type targetTable;
+  final List<RivetColumn<dynamic>> fields;
+  final List<RivetColumn<dynamic>> Function(Target table)? reference;
+  final RivetRelationDescriptor<dynamic> Function(Target table)? inverse;
+  List<RivetColumn<dynamic>> references = const [];
+  RivetRelationDescriptor<dynamic>? inverseRelation;
+
+  void resolve(Target definition) {
+    references = List.unmodifiable(reference?.call(definition) ?? const []);
+    inverseRelation = inverse?.call(definition);
+  }
 }
 
 final class RivetOneRelation<Target> extends RivetRelationDescriptor<Target> {
-  const RivetOneRelation(Type targetTable)
-    : super(kind: RivetRelationKind.one, targetTable: targetTable);
+  RivetOneRelation(
+    Type targetTable, {
+    required super.fields,
+    required List<RivetColumn<dynamic>> Function(Target table) references,
+  }) : super(
+         kind: RivetRelationKind.one,
+         targetTable: targetTable,
+         reference: references,
+       );
 }
 
 final class RivetManyRelation<Target> extends RivetRelationDescriptor<Target> {
-  const RivetManyRelation(Type targetTable, {super.through})
-    : super(
-        kind: through == null ? RivetRelationKind.many : RivetRelationKind.manyThrough,
-        targetTable: targetTable,
-      );
+  RivetManyRelation(
+    Type targetTable, {
+    super.through,
+    RivetRelationDescriptor<dynamic> Function(Target table)? relation,
+  }) : super(
+         kind: through == null ? RivetRelationKind.many : RivetRelationKind.manyThrough,
+         targetTable: targetTable,
+         inverse: relation,
+       );
 }
 
 final class RivetRelationBuilder<Target, RelationType extends RivetRelationDescriptor<Target>> {

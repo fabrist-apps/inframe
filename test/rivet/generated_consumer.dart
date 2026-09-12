@@ -1,3 +1,6 @@
+// The declaration DSL relies on inferred field types for generated output.
+// ignore_for_file: specify_nonobvious_property_types
+
 import 'dart:typed_data';
 
 import 'package:rivet/rivet.dart';
@@ -11,7 +14,7 @@ final class UserProfiles extends RivetTableDefinition<UserProfiles> {
   late final displayName = text(name: 'displayName')();
   late final posts = many<Posts>()();
   late final _indexes = [
-    index('display_name_idx').on([displayName.indexAsc()]),
+    index('display_name_idx').on([displayName.asc()]),
   ];
   late final _constraints = [check('display_name_present', displayName.equals(''))];
 }

@@ -1,3 +1,4 @@
+import 'package:postgres/postgres.dart' as pg;
 import 'package:rivet/rivet.dart';
 import 'package:test/test.dart';
 
@@ -21,7 +22,7 @@ void main() {
 
     test('should normalize timestamps to UTC millisecond precision', () {
       final beforeEpoch = DateTime.fromMicrosecondsSinceEpoch(-1);
-      final encoded = table.createdAt.codec.encode(beforeEpoch) as DateTime;
+      final encoded = table.createdAt.codec.encode(beforeEpoch)! as DateTime;
 
       expect(encoded.isUtc, isTrue);
       expect(encoded.microsecondsSinceEpoch, -1000);
@@ -36,8 +37,11 @@ void main() {
         () => table.payload.codec.decode(null, isSqlNull: true),
         throwsFormatException,
       );
+      final jsonNullParameter = table.payload.equals(const JsonNull()).parameters.single;
+      expect(jsonNullParameter, isA<pg.TypedValue<Object>>());
+      expect((jsonNullParameter! as pg.TypedValue<Object>).isSqlNull, isFalse);
       expect(
-        JsonValue.from({
+        JsonValue.from(const {
           'nested': [true, 1, null],
         }).toDart(),
         {

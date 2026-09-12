@@ -15,9 +15,8 @@ void main() {
     setUp(() async {
       if (databaseUrl == null) return;
       fixture = await pg.Connection.openFromUrl(databaseUrl);
-      await fixture.execute('CREATE SCHEMA IF NOT EXISTS fbr120');
-      await fixture.execute('DROP TABLE IF EXISTS fbr120."enumValues"');
-      await fixture.execute('DROP TYPE IF EXISTS fbr120."workStatus"');
+      await fixture.execute('DROP SCHEMA IF EXISTS fbr120 CASCADE');
+      await fixture.execute('CREATE SCHEMA fbr120');
       await fixture.execute("CREATE TYPE fbr120.\"workStatus\" AS ENUM ('zeta', 'alpha')");
       await fixture.execute('''
         CREATE TABLE fbr120."enumValues" (
@@ -46,9 +45,13 @@ void main() {
         final descending = await EnumValues.db
             .find(orderBy: (values) => [values.status.desc()])
             .get(database);
+        final filtered = await EnumValues.db
+            .find(where: (values) => values.status.equals(WorkStatus.complete))
+            .getSingle(database);
 
         expect(ascending.map((row) => row.status), [WorkStatus.queued, WorkStatus.complete]);
         expect(descending.map((row) => row.status), [WorkStatus.complete, WorkStatus.queued]);
+        expect(filtered.status, WorkStatus.complete);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

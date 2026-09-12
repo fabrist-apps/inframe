@@ -1,5 +1,5 @@
-import 'package:build_test/build_test.dart';
 import 'package:build/build.dart';
+import 'package:build_test/build_test.dart';
 import 'package:rivet_generator/builder.dart';
 import 'package:test/test.dart';
 
@@ -34,14 +34,60 @@ final class RivetApp extends _$RivetApp {}
           'rivet_generator|lib/example.rivet.g.part': decodedMatches(
             allOf(
               contains('final class UserProfilesRow'),
-              contains('final class _\$UserProfilesDB'),
-              contains('abstract class _\$RivetApp'),
+              contains(r'final class _$UserProfilesDB'),
+              contains(r'abstract class _$RivetApp'),
               contains("schemaName: 'auth'"),
               contains("tableName: 'userProfiles'"),
             ),
           ),
         },
       );
+    });
+
+    test('should reject an invalid or colliding generated row name', () async {
+      final result = await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {
+          'rivet_generator|lib/invalid_row.dart': r'''
+import 'package:rivet/rivet.dart';
+
+part 'invalid_row.g.dart';
+
+@RivetTable(rowName: 'Users')
+final class Users extends RivetTableDefinition<Users> {
+  static const db = _$UsersDB();
+  late final name = text()();
+}
+''',
+        },
+      );
+
+      expect(result.succeeded, isFalse);
+      expect(result.errors.single, contains('Could not resolve annotation'));
+    });
+
+    test('should reject duplicate native enum labels', () async {
+      final result = await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {
+          'rivet_generator|lib/invalid_enum.dart': '''
+import 'package:rivet/rivet.dart';
+
+part 'invalid_enum.g.dart';
+
+@RivetEnum()
+enum Status {
+  @RivetEnumValue(name: 'same')
+  first,
+  @RivetEnumValue(name: 'same')
+  second,
+}
+''',
+        },
+      );
+
+      expect(result.succeeded, isFalse);
+      expect(result.errors.single, contains('Could not resolve annotation'));
     });
   });
 }
