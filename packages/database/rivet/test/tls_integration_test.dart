@@ -198,11 +198,14 @@ Future<void> _waitForPostgres(String container) async {
     final result = await Process.run('docker', [
       'exec',
       container,
-      'pg_isready',
+      'psql',
       '--username',
       'postgres',
       '--dbname',
       'inframe_test',
+      '--tuples-only',
+      '--command',
+      'SELECT 1',
     ]);
     if (result.exitCode == 0) return;
     await Future<void>.delayed(const Duration(seconds: 1));

@@ -4,7 +4,7 @@
 
 import 'package:rivet/rivet.dart';
 
-part 'package_users.g.dart';
+part 'package_users.rivet.dart';
 
 @RivetEnum(schema: 'fixture', name: 'accessLevel', renamedFrom: 'role')
 enum AccessLevel {

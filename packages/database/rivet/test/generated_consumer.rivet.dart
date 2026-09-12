@@ -1,4 +1,5 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
+// dart format width=80
 
 part of 'generated_consumer.dart';
 
@@ -21,7 +22,8 @@ final class UserProfilesRow {
   final Relation<List<PostsRow>> posts;
 }
 
-final class _$UserProfilesDB extends RivetTableAccessor<UserProfiles, UserProfilesRow> {
+final class _$UserProfilesDB
+    extends RivetTableAccessor<UserProfiles, UserProfilesRow> {
   const _$UserProfilesDB();
 
   @override
@@ -134,7 +136,8 @@ final class ScalarValuesRow {
   final UserCode? optionalCode;
 }
 
-final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValuesRow> {
+final class _$ScalarValuesDB
+    extends RivetTableAccessor<ScalarValues, ScalarValuesRow> {
   const _$ScalarValuesDB();
 
   @override
@@ -228,7 +231,8 @@ final class EnumValuesRow {
   final WorkState mappedStatus;
 }
 
-final class _$EnumValuesDB extends RivetTableAccessor<EnumValues, EnumValuesRow> {
+final class _$EnumValuesDB
+    extends RivetTableAccessor<EnumValues, EnumValuesRow> {
   const _$EnumValuesDB();
 
   @override
@@ -279,10 +283,8 @@ final class _$EnumValuesDB extends RivetTableAccessor<EnumValues, EnumValuesRow>
           values[3],
           isSqlNull: sqlNulls[3],
         ),
-        optionalNullableStatuses: definition.optionalNullableStatuses.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
+        optionalNullableStatuses: definition.optionalNullableStatuses
+            .decodeValue(values[4], isSqlNull: sqlNulls[4]),
         mappedStatus: definition.mappedStatus.decodeValue(
           values[5],
           isSqlNull: sqlNulls[5],
@@ -307,7 +309,8 @@ final class VectorValuesRow {
   final Float32List? optionalEmbedding;
 }
 
-final class _$VectorValuesDB extends RivetTableAccessor<VectorValues, VectorValuesRow> {
+final class _$VectorValuesDB
+    extends RivetTableAccessor<VectorValues, VectorValuesRow> {
   const _$VectorValuesDB();
 
   @override
@@ -376,7 +379,8 @@ final class ArrayValuesRow {
   final List<UserCode?> codes;
 }
 
-final class _$ArrayValuesDB extends RivetTableAccessor<ArrayValues, ArrayValuesRow> {
+final class _$ArrayValuesDB
+    extends RivetTableAccessor<ArrayValues, ArrayValuesRow> {
   const _$ArrayValuesDB();
 
   @override
@@ -448,7 +452,8 @@ final class MalformedArraysRow {
   final List<int> ints;
 }
 
-final class _$MalformedArraysDB extends RivetTableAccessor<MalformedArrays, MalformedArraysRow> {
+final class _$MalformedArraysDB
+    extends RivetTableAccessor<MalformedArrays, MalformedArraysRow> {
   const _$MalformedArraysDB();
 
   @override
@@ -495,7 +500,8 @@ final class MetadataColumnsRow {
   final UserCode code;
 }
 
-final class _$MetadataColumnsDB extends RivetTableAccessor<MetadataColumns, MetadataColumnsRow> {
+final class _$MetadataColumnsDB
+    extends RivetTableAccessor<MetadataColumns, MetadataColumnsRow> {
   const _$MetadataColumnsDB();
 
   @override
@@ -545,7 +551,8 @@ final class TextTargetsRow {
   final String value;
 }
 
-final class _$TextTargetsDB extends RivetTableAccessor<TextTargets, TextTargetsRow> {
+final class _$TextTargetsDB
+    extends RivetTableAccessor<TextTargets, TextTargetsRow> {
   const _$TextTargetsDB();
 
   @override
@@ -604,7 +611,8 @@ final class ParameterNamesRow {
   final String value;
 }
 
-final class _$ParameterNamesDB extends RivetTableAccessor<ParameterNames, ParameterNamesRow> {
+final class _$ParameterNamesDB
+    extends RivetTableAccessor<ParameterNames, ParameterNamesRow> {
   const _$ParameterNamesDB();
 
   @override

@@ -14,7 +14,7 @@ library example;
 
 import 'package:rivet/rivet.dart';
 
-part 'example.g.dart';
+part 'example.rivet.dart';
 
 @RivetTable(schema: 'auth', name: 'userProfiles')
 final class UserProfiles extends RivetTableDefinition<UserProfiles> {
@@ -32,7 +32,7 @@ final class RivetApp extends _$RivetApp {}
         {'rivet_generator|lib/example.dart': source},
         readerWriter: readerWriter,
         outputs: {
-          'rivet_generator|lib/example.rivet.g.part': decodedMatches(
+          'rivet_generator|lib/example.rivet.dart': decodedMatches(
             allOf(
               contains('final class UserProfilesRow'),
               contains(r'final class _$UserProfilesDB'),
@@ -52,7 +52,7 @@ final class RivetApp extends _$RivetApp {}
           'rivet_generator|lib/invalid_row.dart': r'''
 import 'package:rivet/rivet.dart';
 
-part 'invalid_row.g.dart';
+part 'invalid_row.rivet.dart';
 
 final class ExistingRow {}
 
@@ -75,7 +75,7 @@ final class Users extends RivetTableDefinition<Users> {
       const source = r'''
 import 'package:rivet/rivet.dart';
 
-part 'escaped.g.dart';
+part 'escaped.rivet.dart';
 
 @RivetEnum(name: 'state\n\$type')
 enum State {
@@ -95,7 +95,7 @@ final class Escaped extends RivetTableDefinition<Escaped> {
         {'rivet_generator|lib/escaped.dart': source},
         readerWriter: readerWriter,
         outputs: {
-          'rivet_generator|lib/escaped.rivet.g.part': decodedMatches(
+          'rivet_generator|lib/escaped.rivet.dart': decodedMatches(
             allOf(
               contains(r"schemaName: 'schema\n\$value'"),
               contains(r"tableName: 'quote\'name'"),
@@ -116,7 +116,7 @@ final class Escaped extends RivetTableDefinition<Escaped> {
       const source = r'''
 import 'package:rivet/rivet.dart';
 
-part 'enum_helper.g.dart';
+part 'enum_helper.rivet.dart';
 
 @RivetEnum()
 enum Status { ready }
@@ -136,7 +136,7 @@ final class EnumHelper extends RivetTableDefinition<EnumHelper> {
         {'rivet_generator|lib/enum_helper.dart': source},
         readerWriter: readerWriter,
         outputs: {
-          'rivet_generator|lib/enum_helper.rivet.g.part': decodedMatches(
+          'rivet_generator|lib/enum_helper.rivet.dart': decodedMatches(
             contains('definition.status.configureEnum(StatusRivetEnum.codec);'),
           ),
         },
@@ -152,7 +152,7 @@ final class EnumHelper extends RivetTableDefinition<EnumHelper> {
           'rivet_generator|lib/repeated_array.dart': r'''
 import 'package:rivet/rivet.dart';
 
-part 'repeated_array.g.dart';
+part 'repeated_array.rivet.dart';
 
 @RivetTable()
 final class RepeatedArray extends RivetTableDefinition<RepeatedArray> {
@@ -174,7 +174,7 @@ final class RepeatedArray extends RivetTableDefinition<RepeatedArray> {
           'rivet_generator|lib/invalid_enum.dart': '''
 import 'package:rivet/rivet.dart';
 
-part 'invalid_enum.g.dart';
+part 'invalid_enum.rivet.dart';
 
 @RivetEnum()
 enum Status {
@@ -198,7 +198,7 @@ enum Status {
           'rivet_generator|lib/invalid_enum_rename.dart': '''
 import 'package:rivet/rivet.dart';
 
-part 'invalid_enum_rename.g.dart';
+part 'invalid_enum_rename.rivet.dart';
 
 @RivetEnum()
 enum Status {

@@ -5,7 +5,7 @@ import 'dart:typed_data';
 
 import 'package:rivet/rivet.dart';
 
-part 'generated_consumer.g.dart';
+part 'generated_consumer.rivet.dart';
 
 @RivetTable(schema: 'fbr116', name: 'userProfiles', renamedFrom: 'profiles')
 final class UserProfiles extends RivetTableDefinition<UserProfiles> {

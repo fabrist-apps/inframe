@@ -5,7 +5,8 @@ import 'package:rivet_generator/src/table_generator.dart';
 import 'package:source_gen/source_gen.dart';
 
 /// Builds generated Rivet table and database parts.
-Builder rivetBuilder(BuilderOptions options) => SharedPartBuilder(
+Builder rivetBuilder(BuilderOptions options) => PartBuilder(
   const [RivetTableGenerator(), RivetDatabaseGenerator(), RivetEnumGenerator()],
-  'rivet',
+  '.rivet.dart',
+  options: options,
 );

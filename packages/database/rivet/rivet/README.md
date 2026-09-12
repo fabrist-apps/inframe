@@ -21,7 +21,7 @@ final users = await Users.db.find(where: (users) => users.name.equals('Ada')).ge
 await db.close();
 ```
 
-Consumers add `rivet_generator` and `build_runner` as development dependencies, add a `part '<library>.g.dart';` directive, then run `dart run build_runner build`.
+Consumers add `rivet_generator` and `build_runner` as development dependencies, add a `part '<library>.rivet.dart';` directive, then run `dart run build_runner build`.
 
 `RivetConnection.url` defaults to certificate and hostname verification. Use a Dart `SecurityContext` for a private CA. Choose `RivetSslMode.require` only when TLS without certificate verification is intentional, or `RivetSslMode.disable` for an explicitly unencrypted disposable fixture.
 

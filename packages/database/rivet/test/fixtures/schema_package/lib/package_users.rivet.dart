@@ -1,4 +1,5 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
+// dart format width=80
 
 part of 'package_users.dart';
 
@@ -18,7 +19,8 @@ final class PackageUsersRow {
   final AccessLevel access;
 }
 
-final class _$PackageUsersDB extends RivetTableAccessor<PackageUsers, PackageUsersRow> {
+final class _$PackageUsersDB
+    extends RivetTableAccessor<PackageUsers, PackageUsersRow> {
   const _$PackageUsersDB();
 
   @override

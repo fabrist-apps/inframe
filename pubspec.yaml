@@ -10,17 +10,9 @@ workspace:
   - packages/database/clickhouse
   - packages/database/turso
   - packages/database/rivet
-  - packages/database/rivet_generator
-  - test/rivet/fixtures/schema_package
-  - test/rivet/fixtures/app_package
   - packages/json_patch
   - packages/chrono_id
   - packages/conflux
 
 dev_dependencies:
-  build_runner: ^2.16.1
-  postgres: 3.5.12
-  rivet: any
-  rivet_generator: any
-  test: ^1.26.3
   very_good_analysis: ^10.0.0

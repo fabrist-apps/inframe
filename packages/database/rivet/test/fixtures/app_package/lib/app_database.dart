@@ -4,7 +4,7 @@
 import 'package:rivet/rivet.dart';
 import 'package:rivet_fixture_schema/package_users.dart';
 
-part 'app_database.g.dart';
+part 'app_database.rivet.dart';
 
 @RivetTable(schema: 'fixture', name: 'appUsers')
 final class AppUsers extends RivetTableDefinition<AppUsers> {

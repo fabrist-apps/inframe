@@ -31,12 +31,12 @@ jobs:
 
       - name: Generate Rivet consumer fixtures
         run: |
-          dart run build_runner build --build-filter=test/rivet/generated_consumer.g.dart
-          dart format test/rivet/generated_consumer.g.dart
-          (cd test/rivet/fixtures/schema_package && dart run build_runner build)
-          dart format test/rivet/fixtures/schema_package/lib/package_users.g.dart
-          (cd test/rivet/fixtures/app_package && dart run build_runner build)
-          dart format test/rivet/fixtures/app_package/lib/app_database.g.dart
+          (cd packages/database/rivet && dart run build_runner build --build-filter=test/generated_consumer.rivet.dart)
+          dart format packages/database/rivet/test/generated_consumer.rivet.dart
+          (cd packages/database/rivet/test/fixtures/schema_package && dart run build_runner build)
+          dart format packages/database/rivet/test/fixtures/schema_package/lib/package_users.rivet.dart
+          (cd packages/database/rivet/test/fixtures/app_package && dart run build_runner build)
+          dart format packages/database/rivet/test/fixtures/app_package/lib/app_database.rivet.dart
           git diff --exit-code
 
       - name: Check formatting
@@ -47,8 +47,8 @@ jobs:
 
       - name: Run Rivet generator and cross-package tests
         run: |
-          dart test packages/database/rivet_generator/test --chain-stack-traces
-          dart test test/rivet/fixtures/app_package/test --chain-stack-traces
+          dart test packages/database/rivet/rivet_generator/test --chain-stack-traces
+          dart test packages/database/rivet/test/fixtures/app_package/test --chain-stack-traces
 
       - name: Run context tests and consumer checks
         run: dart test packages/context/test --chain-stack-traces
@@ -100,15 +100,17 @@ jobs:
             "$RIVET_POSTGRES_IMAGE"
           trap 'docker stop inframe-rivet-test' EXIT
           for attempt in {1..60}; do
-            if docker exec inframe-rivet-test pg_isready \
-              --username postgres --dbname inframe_test; then
+            if docker exec inframe-rivet-test psql \
+              --username postgres --dbname inframe_test \
+              --tuples-only --command 'SELECT 1'; then
               break
             fi
             sleep 1
           done
-          docker exec inframe-rivet-test pg_isready \
-            --username postgres --dbname inframe_test
-          dart test test/rivet/*_test.dart --concurrency=1 --chain-stack-traces
+          docker exec inframe-rivet-test psql \
+            --username postgres --dbname inframe_test \
+            --tuples-only --command 'SELECT 1'
+          dart test packages/database/rivet/test/*_test.dart --concurrency=1 --chain-stack-traces
 
       - name: Run ClickHouse integration tests
         env:
