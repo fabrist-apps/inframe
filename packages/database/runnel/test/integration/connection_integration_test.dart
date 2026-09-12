@@ -1,6 +1,7 @@
 @Tags(['integration'])
 library;
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -170,6 +171,53 @@ void main() {
             expect(await client.zremrangebyscore(sorted, 1, 1), 1);
             expect(await client.zrem(sorted, ['c']), 1);
             expect(await client.zcard(sorted), 1);
+
+            final stream = 'runnel:integration:stream:$suffix';
+            final firstStreamId = StreamId(BigInt.from(1000), BigInt.zero);
+            expect(
+              await client.xadd(
+                stream,
+                [
+                  StreamField.text('event', 'created'),
+                  StreamField(
+                    Uint8List.fromList([0, 255]),
+                    Uint8List.fromList([13, 10]),
+                  ),
+                  StreamField.text('event', 'duplicate'),
+                ],
+                id: firstStreamId,
+              ),
+              firstStreamId,
+            );
+            final secondStreamId = await client.xadd(
+              stream,
+              [StreamField.text('event', 'updated')],
+              maxLength: 10,
+            );
+            expect(await client.xlen(stream), 2);
+            final range = await client.xrange(
+              stream,
+              start: StreamBound.id(firstStreamId),
+              end: StreamBound.id(secondStreamId),
+            );
+            expect(range.map((entry) => entry.id), [firstStreamId, secondStreamId]);
+            expect(range.first.fields.map((field) => field.field), [
+              utf8.encode('event'),
+              [0, 255],
+              utf8.encode('event'),
+            ]);
+            expect(
+              (await client.xrevrange(stream, count: 1)).single.id,
+              secondStreamId,
+            );
+            final reads = await client.xread({stream: firstStreamId});
+            expect(reads.single.key, stream);
+            expect(reads.single.entries.single.id, secondStreamId);
+            expect(await client.xtrim(stream, StreamTrim.maxLength(1)), 1);
+            expect(
+              await client.xtrim(stream, StreamTrim.minId(secondStreamId)),
+              0,
+            );
           },
         );
       }
