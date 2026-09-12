@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math';
 
 import 'package:chronicler/src/codec.dart';
 import 'package:chronicler/src/configuration.dart';
@@ -111,6 +112,9 @@ final class ChroniclerRuntime {
   final DiagnosticChannel diagnostics;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
+  late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
+  late final Random _random = Random();
+  var _insideHook = false;
   var _pendingBytes = 0;
   var _pumpScheduled = false;
   Timer? _batchTimer;
@@ -124,10 +128,11 @@ final class ChroniclerRuntime {
     StackTrace? stackTrace,
     Map<String, Object?> attributes = const {},
   }) {
-    if (diagnostics.insideCallback) {
+    if (diagnostics.insideCallback || _insideHook) {
       diagnostics.record(DiagnosticReason.reentrantRecording);
       return;
     }
+    if (!_allowsCapture(ChroniclerSignal.logs, options.sampling.logs)) return;
     try {
       validator.validateString(message, options.limits.maxStringBytes, 'message');
       final snapshot = validator.snapshotAttributes(attributes);
@@ -159,6 +164,78 @@ final class ChroniclerRuntime {
           stackTrace: standaloneStack,
         ),
       );
+      _finalizeAndEnqueue(record);
+    } on RecordValidationException {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    }
+  }
+
+  bool _allowsCapture(ChroniclerSignal signal, double? sampleRate) {
+    if (!_enabledSignals.contains(signal)) {
+      diagnostics.record(DiagnosticReason.collectionDisabled);
+      return false;
+    }
+    if (sampleRate != null &&
+        (sampleRate == 0 || sampleRate < 1 && _random.nextDouble() >= sampleRate)) {
+      diagnostics.record(DiagnosticReason.sampledOut);
+      return false;
+    }
+    return true;
+  }
+
+  void _captureFixture(ChroniclerRecord record) {
+    final signal = switch (record.signalKind) {
+      ChroniclerSignalKind.logs => ChroniclerSignal.logs,
+      ChroniclerSignalKind.events => ChroniclerSignal.events,
+      ChroniclerSignalKind.traces => ChroniclerSignal.traces,
+      ChroniclerSignalKind.errors => ChroniclerSignal.errors,
+      ChroniclerSignalKind.metrics => ChroniclerSignal.metrics,
+    };
+    final sampleRate = switch (record) {
+      LogRecord() => options.sampling.logs,
+      ProductEventRecord() => options.sampling.events,
+      SpanRecord() => options.sampling.traces,
+      _ => null,
+    };
+    if (_allowsCapture(signal, sampleRate)) _finalizeAndEnqueue(record);
+  }
+
+  void _finalizeAndEnqueue(ChroniclerRecord original) {
+    try {
+      // Validate caller data before field-name rules can hide it.
+      codec.encodeRecord(original);
+      var record = _redactRecord(original);
+      final hook = options.redaction.beforeRecord;
+      if (hook != null) {
+        ChroniclerRecord? changed;
+        _insideHook = true;
+        try {
+          changed = hook(record);
+        } on Object {
+          diagnostics.record(DiagnosticReason.hookFailed);
+          return;
+        } finally {
+          _insideHook = false;
+        }
+        if (changed == null) {
+          diagnostics.record(DiagnosticReason.hookDropped);
+          return;
+        }
+        if (!_preservesProtectedFields(original, changed)) {
+          diagnostics.record(DiagnosticReason.invalidRecord);
+          return;
+        }
+        try {
+          codec.encodeRecord(changed);
+        } on Object {
+          diagnostics.record(DiagnosticReason.invalidRecord);
+          return;
+        }
+        record = changed;
+      }
+      record = _redactRecord(record);
       final bytes = codec.encodeRecord(record);
       if (bytes.length > options.delivery.maxRecordBytes) {
         diagnostics.record(DiagnosticReason.recordTooLarge);
@@ -178,9 +255,95 @@ final class ChroniclerRuntime {
       }
     } on RecordValidationException {
       diagnostics.record(DiagnosticReason.invalidRecord);
+    } on ChroniclerEncodingException {
+      diagnostics.record(DiagnosticReason.invalidRecord);
     } on Object {
       diagnostics.record(DiagnosticReason.invalidRecord);
     }
+  }
+
+  ChroniclerRecord _redactRecord(ChroniclerRecord record) => switch (record) {
+    LogRecord() => LogRecord(
+      envelope: record.envelope,
+      payload: record.payload.copyWith(attributes: _redactMap(record.payload.attributes)),
+    ),
+    ProductEventRecord() => ProductEventRecord(
+      envelope: record.envelope,
+      payload: record.payload.copyWith(properties: _redactMap(record.payload.properties)),
+    ),
+    UserPropertiesSetRecord() => UserPropertiesSetRecord(
+      envelope: record.envelope,
+      payload: record.payload.copyWith(properties: _redactMap(record.payload.properties)),
+    ),
+    SpanRecord() => SpanRecord(
+      envelope: record.envelope,
+      payload: record.payload.copyWith(attributes: _redactMap(record.payload.attributes)),
+    ),
+    ErrorRecord() => ErrorRecord(
+      envelope: record.envelope,
+      payload: record.payload.copyWith(attributes: _redactMap(record.payload.attributes)),
+    ),
+    MetricRecord() => MetricRecord(
+      envelope: record.envelope,
+      payload: record.payload.copyWith(attributes: _redactMap(record.payload.attributes)),
+    ),
+    IdentityLinkRecord() || UserPropertiesUnsetRecord() => record,
+  };
+
+  Map<String, Object?> _redactMap(Map<String, Object?> source) => Map.unmodifiable({
+    for (final MapEntry(:key, :value) in source.entries)
+      key: options.redaction.fieldTerms.any(key.toLowerCase().contains)
+          ? '[REDACTED]'
+          : _redactValue(value),
+  });
+
+  Object? _redactValue(Object? value) => switch (value) {
+    Map<String, Object?>() => _redactMap(value),
+    List<Object?>() => List<Object?>.unmodifiable(value.map(_redactValue)),
+    _ => value,
+  };
+
+  bool _preservesProtectedFields(ChroniclerRecord original, ChroniclerRecord changed) {
+    if (original.runtimeType != changed.runtimeType) return false;
+    final before = original.envelope;
+    final after = changed.envelope;
+    if (before.eventId != after.eventId ||
+        before.timestamp != after.timestamp ||
+        before.appId != after.appId ||
+        before.source != after.source ||
+        before.release != after.release ||
+        before.buildId != after.buildId ||
+        before.traceId != after.traceId ||
+        before.spanId != after.spanId ||
+        before.parentSpanId != after.parentSpanId ||
+        !_identityPreserved(before.userId, after.userId) ||
+        !_identityPreserved(before.anonymousId, after.anonymousId) ||
+        !_identityPreserved(before.sessionId, after.sessionId)) {
+      return false;
+    }
+    if (original case MetricRecord(payload: final beforeMetric)) {
+      final afterMetric = (changed as MetricRecord).payload;
+      return beforeMetric.name == afterMetric.name &&
+          beforeMetric.instrument == afterMetric.instrument &&
+          beforeMetric.unit == afterMetric.unit &&
+          beforeMetric.intervalStart == afterMetric.intervalStart &&
+          beforeMetric.intervalEnd == afterMetric.intervalEnd &&
+          beforeMetric.durationMicros == afterMetric.durationMicros &&
+          beforeMetric.temporality == afterMetric.temporality &&
+          _sameList(beforeMetric.boundaries, afterMetric.boundaries);
+    }
+    return true;
+  }
+
+  bool _identityPreserved(String? before, String? after) => after == null || after == before;
+
+  bool _sameList<T>(List<T>? before, List<T>? after) {
+    if (before == null || after == null) return before == after;
+    if (before.length != after.length) return false;
+    for (var index = 0; index < before.length; index++) {
+      if (before[index] != after[index]) return false;
+    }
+    return true;
   }
 
   int get _activeRecordCount => _active.fold(0, (count, export) => count + export.records.length);
@@ -265,6 +428,14 @@ final class ChroniclerRuntime {
     }
     _schedulePump();
   }
+}
+
+/// Internal fixture bridge used by sibling-signal contract tests.
+final class ChroniclerCaptureFixture {
+  const ChroniclerCaptureFixture._();
+
+  static void capture(Chronicler chronicler, ChroniclerRecord record) =>
+      chronicler._runtime._captureFixture(record);
 }
 
 final class _PendingRecord {
