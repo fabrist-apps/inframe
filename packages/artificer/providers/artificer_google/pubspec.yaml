@@ -1,0 +1,18 @@
+name: artificer_google
+description: Google Gemini provider SDK for Artificer model contracts and native APIs.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  artificer_core:
+    path: ../artificer_core
+  conflux:
+    path: ../../../conflux
+  http: ^1.6.0
+
+dev_dependencies:
+  test: ^1.26.3
