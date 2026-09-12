@@ -110,6 +110,14 @@ final class ChroniclerRecorder {
     String name, {
     Map<String, Object?> properties = const {},
   }) => _runtime._recordEvent(_attribution, name, properties: properties);
+
+  /// Records an explicit anonymous-to-user association.
+  void identify({required String anonymousId, required String userId}) =>
+      _runtime._recordIdentityLink(
+        _attribution,
+        anonymousId: anonymousId,
+        userId: userId,
+      );
 }
 
 final class _RecorderAttribution {
@@ -487,15 +495,7 @@ final class ChroniclerRuntime {
     StackTrace? stackTrace,
     Map<String, Object?> attributes = const {},
   }) {
-    if (_state != ChroniclerRuntimeState.running) {
-      diagnostics.record(DiagnosticReason.runtimeClosed);
-      return;
-    }
-    if (diagnostics.insideCallback || _insideHook) {
-      diagnostics.record(DiagnosticReason.reentrantRecording);
-      return;
-    }
-    if (!_allowsCapture(ChroniclerSignal.logs, options.sampling.logs)) return;
+    if (!_canRecord(ChroniclerSignal.logs, options.sampling.logs)) return;
     try {
       validator.validateString(message, options.limits.maxStringBytes, 'message');
       final snapshot = validator.snapshotAttributes(attributes);
@@ -533,15 +533,7 @@ final class ChroniclerRuntime {
     String name, {
     Map<String, Object?> properties = const {},
   }) {
-    if (_state != ChroniclerRuntimeState.running) {
-      diagnostics.record(DiagnosticReason.runtimeClosed);
-      return;
-    }
-    if (diagnostics.insideCallback || _insideHook) {
-      diagnostics.record(DiagnosticReason.reentrantRecording);
-      return;
-    }
-    if (!_allowsCapture(ChroniclerSignal.events, options.sampling.events)) return;
+    if (!_canRecord(ChroniclerSignal.events, options.sampling.events)) return;
     try {
       validator.validateString(name, options.limits.maxLabelBytes, 'event name');
       if (name.isEmpty) {
@@ -559,6 +551,45 @@ final class ChroniclerRuntime {
     } on Object {
       diagnostics.record(DiagnosticReason.invalidRecord);
     }
+  }
+
+  void _recordIdentityLink(
+    _RecorderAttribution attribution, {
+    required String anonymousId,
+    required String userId,
+  }) {
+    if (!_canRecord(ChroniclerSignal.events, null)) return;
+    try {
+      _validateRequiredId(anonymousId, 'anonymousId');
+      _validateRequiredId(userId, 'userId');
+      _finalizeAndEnqueue(
+        IdentityLinkRecord(
+          envelope: _envelope(attribution),
+          payload: IdentityLinkPayload(anonymousId: anonymousId, userId: userId),
+        ),
+      );
+    } on RecordValidationException {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    }
+  }
+
+  void _validateRequiredId(String value, String name) {
+    validator.validateString(value, options.limits.maxIdBytes, name);
+    if (value.isEmpty) throw RecordValidationException('$name must be nonempty');
+  }
+
+  bool _canRecord(ChroniclerSignal signal, double? sampleRate) {
+    if (_state != ChroniclerRuntimeState.running) {
+      diagnostics.record(DiagnosticReason.runtimeClosed);
+      return false;
+    }
+    if (diagnostics.insideCallback || _insideHook) {
+      diagnostics.record(DiagnosticReason.reentrantRecording);
+      return false;
+    }
+    return _allowsCapture(signal, sampleRate);
   }
 
   RecordEnvelope _envelope(_RecorderAttribution attribution) => RecordEnvelope(

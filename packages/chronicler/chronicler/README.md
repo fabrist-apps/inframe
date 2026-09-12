@@ -40,6 +40,18 @@ IDs without generating, persisting, expiring, or authenticating them; authentica
 application concern. Calling `withIdentity()` clears attribution on the derived Context and emits no
 record.
 
+Identity assignment and anonymous-to-user linking are separate operations. Client integration can
+emit a link explicitly, then pass a newly derived Context for subsequent records:
+
+```dart
+context.events.identify(anonymousId: anonymousId, userId: userId);
+final identified = context.withIdentity(userId: userId, sessionId: sessionId);
+```
+
+The link is scoped to the configured App and travels through normal bounded delivery. It expresses
+association intent for downstream processing; it does not mutate any Context, merge accounts,
+authenticate the supplied IDs, or confirm that stored history has been updated.
+
 The defaults retain up to 5,000 records or 8 MiB, export batches of up to 100 records or 512 KiB
 within five seconds, run one export at a time, and make five total attempts. An attempt times out
 after ten seconds. `ChroniclerOptions` can change those bounds, sampling, redaction, diagnostics,

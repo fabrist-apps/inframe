@@ -53,6 +53,13 @@ final class ChroniclerEvents {
     String name, {
     Map<String, Object?> properties = const {},
   }) => _recorder.recordEvent(name, properties: properties);
+
+  /// Records an explicit association between an anonymous ID and a user ID.
+  ///
+  /// This does not change identity on this Context or confirm downstream
+  /// profile processing.
+  void identify({required String anonymousId, required String userId}) =>
+      _recorder.identify(anonymousId: anonymousId, userId: userId);
 }
 
 /// Records structured logs without waiting for transport work.
