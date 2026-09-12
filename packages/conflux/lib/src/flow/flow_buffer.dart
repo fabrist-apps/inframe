@@ -38,10 +38,10 @@ final class FlowBufferOverflow {
 }
 
 /// Validates the shared bounded-buffer configuration used by Flow operators.
-void validateFlowBuffer<E>(
+void validateFlowBuffer(
   int capacity,
   FlowOverflowPolicy overflow,
-  E Function(FlowBufferOverflow overflow)? onOverflow,
+  Object? onOverflow,
 ) {
   if (capacity <= 0) {
     throw ArgumentError.value(capacity, 'capacity', 'Must be positive.');

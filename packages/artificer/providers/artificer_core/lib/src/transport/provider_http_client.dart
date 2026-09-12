@@ -303,8 +303,8 @@ final class ProviderHttpClient {
       throw ArgumentError.value(responseLimit, 'maxResponseBytes', 'must be positive');
     }
     return Flow.fromStream<List<int>, _SseSignal>(
-          () => _openByteStream(request, maxResponseBytes: responseLimit),
-          onError: (error, stackTrace) => switch (error) {
+          (_) => _openByteStream(request, maxResponseBytes: responseLimit),
+          onError: (error, stackTrace, _) => switch (error) {
             _SseSignal() => error,
             AiError() => _SseExpected(error),
             _ => _SseTerminal(Defect(error, stackTrace)),
@@ -312,13 +312,13 @@ final class ProviderHttpClient {
           capacity: decodedChunkCapacity,
         )
         .catchError(
-          (signal) => switch (signal) {
+          (signal, _) => switch (signal) {
             _SseExpected() => Flow.fail<List<int>, _SseSignal>(signal),
             _SseTerminal(:final cause) => Effect.failCause<List<int>, _SseSignal>(cause).asFlow(),
           },
         )
         .mapError(
-          (signal) => switch (signal) {
+          (signal, _) => switch (signal) {
             _SseExpected(:final error) => error,
             _SseTerminal() => throw StateError('A byte-stream terminal cause was not expanded.'),
           },
@@ -348,13 +348,13 @@ final class ProviderHttpClient {
       throw ArgumentError.value(responseLimit, 'maxStreamBytes', 'must be positive');
     }
     return Flow.fromStream<A, _SseSignal>(
-          () => _openSseStream(
+          (_) => _openSseStream(
             request,
             protocol: createProtocol(),
             maxEventBytes: maxEventBytes,
             maxStreamBytes: responseLimit,
           ),
-          onError: (error, stackTrace) => switch (error) {
+          onError: (error, stackTrace, _) => switch (error) {
             _SseSignal() => error,
             AiError() => _SseExpected(error),
             _ => _SseTerminal(Defect(error, stackTrace)),
@@ -362,13 +362,13 @@ final class ProviderHttpClient {
           capacity: decodedEventCapacity,
         )
         .catchError(
-          (signal) => switch (signal) {
+          (signal, _) => switch (signal) {
             _SseExpected() => Flow.fail<A, _SseSignal>(signal),
             _SseTerminal(:final cause) => Effect.failCause<A, _SseSignal>(cause).asFlow(),
           },
         )
         .mapError(
-          (signal) => switch (signal) {
+          (signal, _) => switch (signal) {
             _SseExpected(:final error) => error,
             _SseTerminal() => throw StateError('An SSE terminal cause was not expanded.'),
           },

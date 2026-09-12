@@ -272,5 +272,5 @@ final class _LoopbackModel implements LanguageModel {
 
   @override
   Flow<GenerationEvent, AiError> stream(GenerationRequest request) =>
-      generate(request).asFlow().map(GenerationFinished.new);
+      generate(request).asFlow().map((result, _) => GenerationFinished(result));
 }

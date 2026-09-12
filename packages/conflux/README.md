@@ -282,7 +282,7 @@ runner has its result:
 
 ```dart
 final firstThree = Flow.fromIterable([1, 2, 3, 4])
-    .map((value) => value * 2)
+    .map((value, _) => value * 2)
     .take(3)
     .runCollect();
 
@@ -294,12 +294,18 @@ Flow-owned buffer behaves when a producer outruns its consumer:
 
 ```dart
 final events = Flow.fromStream<int, String>(
-  () => eventStream,
-  onError: (error, stackTrace) => 'stream failed: $error',
+  (_) => eventStream,
+  onError: (error, stackTrace, _) => 'stream failed: $error',
   capacity: 32,
   overflow: FlowOverflowPolicy.backpressure,
 );
 ```
+
+Flow source callbacks receive the source execution `Context`. Transformations,
+selection, recovery, observation, and terminal consumers receive their current
+consumption `Context`. Stream errors and overflow retain the `Context` captured
+when that subscription opened. The named `context` arguments on `subscribe`
+and `toStream` still select the root execution context.
 
 `Flow.fromQueue(queue)` creates competing consumers: one consumer receives each
 accepted item. `Flow.fromPubSub(pubsub)` acquires an independent subscription

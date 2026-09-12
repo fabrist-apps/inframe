@@ -34,15 +34,15 @@ void main() {
       final batches = <List<int>>[];
       final fiber = runtime.fork(
         Flow.fromStream<int, String>(
-              () => controller.stream,
-              onError: (error, stackTrace) => '$error',
+              (_) => controller.stream,
+              onError: (error, stackTrace, _) => '$error',
             )
             .bufferTime(
               const Duration(seconds: 5),
               maxSize: 2,
             )
             .runForEach(
-              (batch) =>
+              (batch, _) =>
                   Effect.sync((_) => batches.add(batch))
                       .mapError((value, _) => _widenNever(value! as Never)),
             ),
@@ -77,7 +77,7 @@ void main() {
           .concat(Flow.fail('count failed'))
           .bufferCount(2)
           .runForEach(
-            (batch) =>
+            (batch, _) =>
                 Effect.sync((_) => countBatches.add(batch))
                     .mapError((value, _) => _widenNever(value! as Never)),
           )
@@ -88,7 +88,7 @@ void main() {
           .concat(Flow.fail('time failed'))
           .bufferTime(const Duration(days: 1), maxSize: 2)
           .runForEach(
-            (batch) =>
+            (batch, _) =>
                 Effect.sync((_) => timedBatches.add(batch))
                     .mapError((value, _) => _widenNever(value! as Never)),
           )
@@ -114,8 +114,8 @@ void main() {
       addTearDown(controller.close);
       final fiber = runtime.fork(
         Flow.fromStream<int, String>(
-          () => controller.stream,
-          onError: (error, stackTrace) => '$error',
+          (_) => controller.stream,
+          onError: (error, stackTrace, _) => '$error',
         ).bufferTime(const Duration(seconds: 5), maxSize: 2).runDrain(),
       );
 
@@ -165,7 +165,7 @@ void main() {
       final flow = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
           .tap(
-            (_) =>
+            (_, _) =>
                 Effect.sync((_) => pulled += 1)
                     .mapError((value, _) => _widenNever(value! as Never)),
           )
@@ -174,7 +174,7 @@ void main() {
             maxSize: 2,
             capacity: 1,
           );
-      final subscription = flow.subscribe((batch) {
+      final subscription = flow.subscribe((batch, _) {
         batches.add(batch);
         return Effect.tryFuture<void, String>(
           (_) {
@@ -207,15 +207,15 @@ void main() {
       final batches = <List<int>>[];
       final fiber = runtime.fork(
         Flow.fromStream<int, String>(
-              () => controller.stream,
-              onError: (error, stackTrace) => '$error',
+              (_) => controller.stream,
+              onError: (error, stackTrace, _) => '$error',
             )
             .bufferTime(
               const Duration(seconds: 5),
               maxSize: 2,
               capacity: 4,
             )
-            .runForEach((batch) {
+            .runForEach((batch, _) {
               batches.add(batch);
               if (batches.length > 1) return Effect.succeed(null);
               return Effect.tryFuture<void, String>(

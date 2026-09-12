@@ -477,7 +477,7 @@ void main() {
         final exit = await provider
             .languageModel('future-model')
             .stream(GenerationRequest(messages: [UserMessage.text('hello')]))
-            .runForEach((event) {
+            .runForEach((event, _) {
               observed.add(event);
               return Effect.succeed(null);
             })

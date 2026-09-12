@@ -96,7 +96,7 @@ void main() {
       final source = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
           .tap(
-            (_) =>
+            (_, _) =>
                 Effect.sync((_) => pulled += 1)
                     .mapError((value, _) => _widenNever(value! as Never)),
           );
@@ -104,7 +104,7 @@ void main() {
       addTearDown(runtime.close);
       final fiber = runtime.fork(
         Flow.merge([source], capacity: 1).runForEach(
-          (_) => Effect.tryFuture(
+          (_, _) => Effect.tryFuture(
             (_) {
               if (!consumerStarted.isCompleted) consumerStarted.complete();
               return releaseConsumer.future;
@@ -139,7 +139,7 @@ void main() {
         onOverflow: (overflow) => 'capacity ${overflow.capacity}',
       );
       final fiber = runtime.fork(
-        flow.runForEach((value) {
+        flow.runForEach((value, _) {
           consumed.add(value);
           if (value != 1) return Effect.succeed(null);
           return Effect.tryFuture(
@@ -174,7 +174,7 @@ void main() {
               ],
               capacity: 1,
               overflow: overflow,
-            ).subscribe((value) {
+            ).subscribe((value, _) {
               values.add(value);
               if (value != 1) return Effect.succeed(null);
               return Effect.tryFuture<void, Never>(

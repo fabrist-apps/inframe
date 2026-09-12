@@ -49,7 +49,7 @@ final class EchoModel implements LanguageModel {
   }
 
   @override
-  Flow<GenerationEvent, AiError> stream(GenerationRequest request) => Flow.defer(() {
+  Flow<GenerationEvent, AiError> stream(GenerationRequest request) => Flow.defer((_) {
     final input = (request.messages.single as UserMessage).parts.single as TextInputPart;
     final assembler = GenerationStreamAssembler(
       providerId: providerId,

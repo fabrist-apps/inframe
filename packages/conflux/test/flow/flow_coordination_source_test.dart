@@ -68,7 +68,7 @@ void main() {
       addTearDown(fixture.close);
       final observed = Completer<void>();
       final collecting = fixture.runtime.fork(
-        Flow.fromQueue(fixture.queue).tap((_) {
+        Flow.fromQueue(fixture.queue).tap((_, _) {
           if (!observed.isCompleted) observed.complete();
           return Effect.succeed(null);
         }).runCollect(),
@@ -161,7 +161,7 @@ void main() {
       final remaining = await fixture.subscribe();
       final failed = fixture.runtime.fork(
         Flow.fromPubSub(fixture.pubsub)
-            .tap((_) => Effect.sync((_) => throw StateError('consumer failed')))
+            .tap((_, _) => Effect.sync((_) => throw StateError('consumer failed')))
             .runDrain(),
       );
       await _flushMicrotasks();

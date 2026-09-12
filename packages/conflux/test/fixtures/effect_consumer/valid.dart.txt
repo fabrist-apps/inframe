@@ -41,6 +41,15 @@ Future<void> main() async {
   await Runtime().run(retried);
   await Runtime().run(mappedPolicy.driver().step(0));
 
+  final Flow<String, _BaseError> flow = Flow.fromIterable([1, 2])
+      .widenError<_BaseError>()
+      .map((value, context) => '$value:$context');
+  final folded = flow.runFold<int>(
+    0,
+    (length, value, context) => length + value.length + context.hashCode,
+  );
+  await Runtime().run(folded);
+
   final cron = (Cron.fromFields(
     location: tz.UTC,
     seconds: const {0},

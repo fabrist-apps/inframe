@@ -144,7 +144,7 @@ final class XaiFilesResource {
           maxResponseBytes: maxResponseBytes,
         )
         .map(
-          (chunk) => chunk is Uint8List
+          (chunk, _) => chunk is Uint8List
               ? chunk.asUnmodifiableView()
               : Uint8List.fromList(chunk).asUnmodifiableView(),
         );

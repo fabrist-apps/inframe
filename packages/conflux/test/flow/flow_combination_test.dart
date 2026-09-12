@@ -50,12 +50,12 @@ void main() {
       addTearDown(right.close);
       final result = Flow.combineLatest<int?, String>([
         Flow.fromStream(
-          () => left.stream,
-          onError: (error, stackTrace) => '$error',
+          (_) => left.stream,
+          onError: (error, stackTrace, _) => '$error',
         ),
         Flow.fromStream(
-          () => right.stream,
-          onError: (error, stackTrace) => '$error',
+          (_) => right.stream,
+          onError: (error, stackTrace, _) => '$error',
         ),
       ]).runCollect().runFuture();
 
@@ -113,15 +113,15 @@ void main() {
       addTearDown(secondary.close);
       final result =
           Flow.fromStream<int, String>(
-                () => primary.stream,
-                onError: (error, stackTrace) => '$error',
+                (_) => primary.stream,
+                onError: (error, stackTrace, _) => '$error',
               )
               .withLatestFrom(
                 Flow.fromStream(
-                  () => secondary.stream,
-                  onError: (error, stackTrace) => '$error',
+                  (_) => secondary.stream,
+                  onError: (error, stackTrace, _) => '$error',
                 ).tap(
-                  (value) => Effect.sync((_) {
+                  (value, _) => Effect.sync((_) {
                     if (value == 11) secondLatestObserved.complete();
                   }).mapError<String>((value, _) => _widenNever(value! as Never)),
                 ),
@@ -159,20 +159,20 @@ void main() {
         final values = <int>[];
         final subscription =
             Flow.fromStream<int, String>(
-                  () => primary.stream,
-                  onError: (error, stackTrace) => '$error',
+                  (_) => primary.stream,
+                  onError: (error, stackTrace, _) => '$error',
                 )
                 .withLatestFrom(
                   Flow.fromStream(
-                    () => secondary.stream,
-                    onError: (error, stackTrace) => '$error',
+                    (_) => secondary.stream,
+                    onError: (error, stackTrace, _) => '$error',
                   ),
                   (trigger, latest) => trigger + latest,
                   capacity: 1,
                   overflow: overflow,
                   onOverflow: (_) => 'overflow',
                 )
-                .subscribe((value) {
+                .subscribe((value, _) {
                   values.add(value);
                   if (values.length > 1) return Effect.succeed(null);
                   return Effect.tryFuture<void, String>(

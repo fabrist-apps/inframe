@@ -7,6 +7,25 @@ import 'package:test/test.dart';
 
 void main() {
   group('Flow context, failures, and hooks', () {
+    test('should pass each onExit observer its own Context region', () async {
+      final request = ContextKey<String>('request');
+      final caller = Context().withBinding(request.bind('caller'));
+      final owner = caller.withBinding(request.bind('owner'));
+      final seen = <String>[];
+      final flow = Flow.succeed<int, Never>(1)
+          .onExit((_, context) {
+            return Effect.sync((_) => seen.add('owner:${context.require(request)}'));
+          })
+          .withContext(owner)
+          .onExit((_, context) {
+            return Effect.sync((_) => seen.add('caller:${context.require(request)}'));
+          });
+
+      await Runtime(context: caller).run(flow.runDrain());
+
+      expect(seen, ['owner:owner', 'caller:caller']);
+    });
+
     test('should replace Context for the Flow without changing siblings', () async {
       final key = ContextKey<String>('name');
       final parent = Context().withBinding(key.bind('parent'));
@@ -29,7 +48,7 @@ void main() {
       ]);
       final exit = await Effect.failCause<int, String>(cause)
           .asFlow()
-          .mapError((error) => error.length)
+          .mapError((error, _) => error.length)
           .runCollect()
           .runFutureExit();
 
@@ -40,14 +59,14 @@ void main() {
 
     test('should recover once from expected failure and preserve defects', () async {
       var recoveries = 0;
-      final recovered = Flow.fail<int, String>('missing').catchError((error) {
+      final recovered = Flow.fail<int, String>('missing').catchError((error, _) {
         recoveries += 1;
         return Flow.succeed(error.length);
       });
       final defective = Effect.sync<int>((_) => throw StateError('broken'))
           .mapError<String>((value, _) => _widenNever(value! as Never))
           .asFlow()
-          .catchError((error) {
+          .catchError((error, _) {
             recoveries += 1;
             return Flow.succeed(0);
           });
@@ -62,7 +81,7 @@ void main() {
       final source =
           Effect.failCause<int, String>(
             Sequential([const Expected('first'), const Expected('second')]),
-          ).asFlow().catchError((error) {
+          ).asFlow().catchError((error, _) {
             recoveredError = error;
             return Flow.succeed(error.length);
           });
@@ -74,13 +93,13 @@ void main() {
     test('should sequence value and failure observations without recovery', () async {
       final seen = <String>[];
       final success = Flow.succeed<int, String>(1).tap(
-        (value) =>
+        (value, _) =>
             Effect.sync((_) => seen.add('value $value'))
                 .mapError((value, _) => _widenNever(value! as Never)),
       );
       final failed = Flow.fail<int, String>('source')
-          .tapError((error) => Effect.sync((_) => seen.add('error $error')))
-          .tapCause((cause) => Effect.sync((_) => seen.add('cause ${cause.expectedErrors}')));
+          .tapError((error, _) => Effect.sync((_) => seen.add('error $error')))
+          .tapCause((cause, _) => Effect.sync((_) => seen.add('cause ${cause.expectedErrors}')));
 
       expect(await success.runCollect().runFuture(), [1]);
       final exit = await failed.runCollect().runFutureExit();
@@ -90,7 +109,7 @@ void main() {
 
     test('should append observer and finalizer defects after source failure', () async {
       final flow = Flow.fail<int, String>('source')
-          .tapError((_) => Effect.sync((_) => throw StateError('observer')))
+          .tapError((_, _) => Effect.sync((_) => throw StateError('observer')))
           .ensuring(Effect.sync((_) => throw StateError('finalizer')));
 
       final exit = await flow.runCollect().runFutureExit();
@@ -104,10 +123,10 @@ void main() {
     test('should run onExit once for success, failure, and cancellation', () async {
       final exits = <Exit<void, String>>[];
       final success = Flow.succeed<int, String>(1).onExit(
-        (exit) => Effect.sync((_) => exits.add(exit)),
+        (exit, _) => Effect.sync((_) => exits.add(exit)),
       );
       final failure = Flow.fail<int, String>('failed').onExit(
-        (exit) => Effect.sync((_) => exits.add(exit)),
+        (exit, _) => Effect.sync((_) => exits.add(exit)),
       );
       final started = Completer<void>();
       final pending = Completer<int>();
@@ -117,7 +136,7 @@ void main() {
           return pending.future;
         },
         onError: (error, stackTrace, _) => '$error',
-      ).asFlow().onExit((exit) => Effect.sync((_) => exits.add(exit)));
+      ).asFlow().onExit((exit, _) => Effect.sync((_) => exits.add(exit)));
       final runtime = Runtime();
       addTearDown(runtime.close);
 
@@ -138,12 +157,12 @@ void main() {
       final events = <String>[];
       final flow = Flow.fromIterable([1, 2])
           .onExit(
-            (exit) => Effect.sync(
+            (exit, _) => Effect.sync(
               (_) => events.add('source ${exit is Succeeded<void, Never>}'),
             ),
           )
-          .map((value) => value * 2)
-          .onExit((_) => Effect.sync((_) => events.add('mapped')))
+          .map((value, _) => value * 2)
+          .onExit((_, _) => Effect.sync((_) => events.add('mapped')))
           .ensuring(Effect.sync((_) => events.add('outer')));
 
       expect(await flow.runCollect().runFuture(), [2, 4]);

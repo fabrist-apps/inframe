@@ -2,15 +2,63 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('Flow.fromStream', () {
+    test('should retain subscription Context for delayed errors and overflow', () async {
+      final request = ContextKey<String>('request');
+      final caller = Context().withBinding(request.bind('caller'));
+      final owner = caller.withBinding(request.bind('owner'));
+      final errors = StreamController<int>();
+      final overflow = StreamController<int>(sync: true);
+      addTearDown(errors.close);
+      addTearDown(overflow.close);
+      final seen = <String>[];
+      final failed = Flow.fromStream<int, String>(
+        (context) {
+          seen.add('source:${context.require(request)}');
+          return errors.stream;
+        },
+        onError: (error, stackTrace, context) {
+          seen.add('error:${context.require(request)}');
+          return '$error';
+        },
+      ).withContext(owner).runDrain();
+      final overflowed = Flow.fromStream<int, String>(
+        (_) => overflow.stream,
+        onError: (error, stackTrace, _) => '$error',
+        capacity: 1,
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (event, context) {
+          seen.add('overflow:${context.require(request)}');
+          return 'capacity ${event.capacity}';
+        },
+      ).withContext(owner).runDrain();
+      final runtime = Runtime(context: caller);
+      addTearDown(runtime.close);
+
+      final errorExit = runtime.run(failed);
+      await _waitForListener(errors);
+      errors.addError(StateError('late'));
+      expect(await errorExit, isA<Failed<void, String>>());
+
+      final overflowExit = runtime.run(overflowed);
+      await _waitForListener(overflow);
+      overflow
+        ..add(1)
+        ..add(2)
+        ..add(3);
+      expect(await overflowExit, isA<Failed<void, String>>());
+      expect(seen, ['source:owner', 'error:owner', 'overflow:owner']);
+    });
+
     test('should invoke a cold source factory for every consumption', () async {
       var starts = 0;
       final flow = Flow.fromStream<int, String>(
-        () => Stream.fromIterable([++starts, 2]),
-        onError: (error, stackTrace) => '$error',
+        (_) => Stream.fromIterable([++starts, 2]),
+        onError: (error, stackTrace, _) => '$error',
       );
 
       expect(await flow.runCollect().runFuture(), [1, 2]);
@@ -22,8 +70,8 @@ void main() {
       final source = StreamController<int?>();
       addTearDown(source.close);
       final flow = Flow.fromStream<int?, String>(
-        () => source.stream,
-        onError: (error, stackTrace) => 'mapped: $error',
+        (_) => source.stream,
+        onError: (error, stackTrace, _) => 'mapped: $error',
       );
       final exitFuture = flow.runCollect().runFutureExit();
       await _waitForListener(source);
@@ -37,14 +85,14 @@ void main() {
 
     test('should treat factory and error-mapper throws as defects', () async {
       final factory = Flow.fromStream<int, String>(
-        () => throw StateError('factory'),
-        onError: (error, stackTrace) => '$error',
+        (_) => throw StateError('factory'),
+        onError: (error, stackTrace, _) => '$error',
       );
       final source = StreamController<int>();
       addTearDown(source.close);
       final mapper = Flow.fromStream<int, String>(
-        () => source.stream,
-        onError: (error, stackTrace) => throw StateError('mapper'),
+        (_) => source.stream,
+        onError: (error, stackTrace, _) => throw StateError('mapper'),
       );
 
       final factoryExit = await factory.runCollect().runFutureExit();
@@ -71,13 +119,13 @@ void main() {
       final seen = <int>[];
       final flow =
           Flow.fromStream<int, String>(
-            () => source.stream,
-            onError: (error, stackTrace) => '$error',
+            (_) => source.stream,
+            onError: (error, stackTrace, _) => '$error',
             capacity: 2,
             overflow: FlowOverflowPolicy.fail,
-            onOverflow: (overflow) => 'capacity ${overflow.capacity}',
+            onOverflow: (overflow, _) => 'capacity ${overflow.capacity}',
           ).tap(
-            (value) =>
+            (value, _) =>
                 Effect.sync((_) => seen.add(value))
                     .mapError((value, _) => _widenNever(value! as Never)),
           );
@@ -109,10 +157,10 @@ void main() {
       addTearDown(source.close);
       final flow =
           Flow.fromStream<int, String>(
-            () => source.stream,
-            onError: (error, stackTrace) => '$error',
+            (_) => source.stream,
+            onError: (error, stackTrace, _) => '$error',
             capacity: 2,
-          ).mapEffect((value) {
+          ).mapEffect((value, _) {
             if (value != 1) return Effect.succeed(value);
             return Effect.tryFuture(
               (_) async {
@@ -151,8 +199,8 @@ void main() {
         },
       );
       final flow = Flow.fromStream<int, String>(
-        () => source.stream,
-        onError: (error, stackTrace) => '$error',
+        (_) => source.stream,
+        onError: (error, stackTrace, _) => '$error',
       ).take(1);
       final result = flow.runCollect().runFuture();
       await _waitForListener(source);
@@ -181,8 +229,8 @@ void main() {
       addTearDown(runtime.close);
       final consuming = runtime.fork(
         Flow.fromStream<int, String>(
-          () => source.stream,
-          onError: (error, stackTrace) => '$error',
+          (_) => source.stream,
+          onError: (error, stackTrace, _) => '$error',
         ).runDrain(),
       );
       await _waitForListener(source);
@@ -202,8 +250,8 @@ void main() {
     });
 
     test('should validate capacity and fail-policy configuration', () {
-      Stream<int> source() => const Stream.empty();
-      String mapError(Object error, StackTrace stackTrace) => '$error';
+      Stream<int> source(Context _) => const Stream.empty();
+      String mapError(Object error, StackTrace stackTrace, Context _) => '$error';
 
       expect(
         () => Flow.fromStream<int, String>(source, onError: mapError, capacity: 0),
@@ -224,8 +272,8 @@ void main() {
 Future<List<int>> _runBurst(FlowOverflowPolicy overflow) async {
   final source = StreamController<int>(sync: true);
   final flow = Flow.fromStream<int, String>(
-    () => source.stream,
-    onError: (error, stackTrace) => '$error',
+    (_) => source.stream,
+    onError: (error, stackTrace, _) => '$error',
     capacity: 2,
     overflow: overflow,
   );

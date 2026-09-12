@@ -18,14 +18,14 @@ void main() {
       final values = <int>[];
       final fiber = runtime.fork(
         Flow.fromStream<int, String>(
-              () => controller.stream,
-              onError: (error, stackTrace) => '$error',
+              (_) => controller.stream,
+              onError: (error, stackTrace, _) => '$error',
             )
             .debounce(
               const Duration(seconds: 5),
             )
             .runForEach(
-              (value) =>
+              (value, _) =>
                   Effect.sync((_) => values.add(value))
                       .mapError((value, _) => _widenNever(value! as Never)),
             ),
@@ -64,7 +64,7 @@ void main() {
           .concat(Flow.fail('failed'))
           .debounce(const Duration(days: 1))
           .runForEach(
-            (value) =>
+            (value, _) =>
                 Effect.sync((_) => failedValues.add(value))
                     .mapError((value, _) => _widenNever(value! as Never)),
           )
@@ -85,13 +85,13 @@ void main() {
       final values = <int>[];
       final fiber = runtime.fork(
         Flow.fromStream<int, Never>(
-              () => controller.stream,
-              onError: _impossibleStreamError,
+              (_) => controller.stream,
+              onError: (error, stackTrace, _) => _impossibleStreamError(error, stackTrace),
             )
             .throttle(
               const Duration(seconds: 5),
             )
-            .runForEach((value) => Effect.sync((_) => values.add(value))),
+            .runForEach((value, _) => Effect.sync((_) => values.add(value))),
       );
 
       await listening.future;
@@ -127,8 +127,8 @@ void main() {
       addTearDown(controller.close);
       final fiber = runtime.fork(
         Flow.fromStream<int, String>(
-          () => controller.stream,
-          onError: (error, stackTrace) => '$error',
+          (_) => controller.stream,
+          onError: (error, stackTrace, _) => '$error',
         ).debounce(const Duration(seconds: 5)).runDrain(),
       );
 
@@ -149,12 +149,12 @@ void main() {
       final flow = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
           .tap(
-            (_) =>
+            (_, _) =>
                 Effect.sync((_) => pulled += 1)
                     .mapError((value, _) => _widenNever(value! as Never)),
           )
           .debounce(Duration.zero, capacity: 1);
-      final subscription = flow.subscribe((value) {
+      final subscription = flow.subscribe((value, _) {
         values.add(value);
         return Effect.tryFuture<void, String>(
           (_) {
@@ -187,8 +187,8 @@ void main() {
       addTearDown(controller.close);
       final subscription =
           Flow.fromStream<int, String>(
-                () => controller.stream,
-                onError: (error, stackTrace) => '$error',
+                (_) => controller.stream,
+                onError: (error, stackTrace, _) => '$error',
               )
               .debounce(
                 Duration.zero,
@@ -196,7 +196,7 @@ void main() {
                 overflow: FlowOverflowPolicy.fail,
                 onOverflow: (_) => 'overflow',
               )
-              .subscribe((_) {
+              .subscribe((_, _) {
                 return Effect.tryFuture<void, String>(
                   (_) {
                     if (!consumerStarted.isCompleted) consumerStarted.complete();

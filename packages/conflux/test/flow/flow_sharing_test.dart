@@ -15,17 +15,17 @@ void main() {
         final controller = StreamController<int>(sync: true);
         addTearDown(controller.close);
         final source = Flow.fromStream<int, String>(
-          () {
+          (_) {
             connections += 1;
             return controller.stream;
           },
-          onError: (error, stackTrace) => '$error',
-        ).onExit((_) => Effect.sync(upstreamFinished.complete));
+          onError: (error, stackTrace, _) => '$error',
+        ).onExit((_, _) => Effect.sync(upstreamFinished.complete));
         final shared = source.share(capacity: 3, replay: 2);
         final releaseFirst = Completer<void>();
         final firstValues = <int>[];
         final secondValues = <int>[];
-        final first = shared.subscribe((value) {
+        final first = shared.subscribe((value, _) {
           firstValues.add(value);
           if (value != 1) return Effect.succeed(null);
           return Effect.tryFuture<void, String>(
@@ -36,7 +36,7 @@ void main() {
             onError: (error, stackTrace, _) => '$error',
           );
         });
-        final second = shared.subscribe((value) {
+        final second = shared.subscribe((value, _) {
           secondValues.add(value);
           return Effect.succeed(null);
         });
@@ -71,13 +71,13 @@ void main() {
       final releaseFirst = Completer<void>();
       final firstBlocked = Completer<void>();
       var connections = 0;
-      final shared = Flow.defer<int, String>(() {
+      final shared = Flow.defer<int, String>((_) {
         connections += 1;
         return Flow.fromIterable([1, 2])
             .widenError<String>()
             .concat(Effect.failCause<int, String>(failure).asFlow());
-      }).onExit((_) => Effect.sync(upstreamFinished.complete)).share(replay: 1);
-      final first = shared.subscribe((value) {
+      }).onExit((_, _) => Effect.sync(upstreamFinished.complete)).share(replay: 1);
+      final first = shared.subscribe((value, _) {
         if (value != 1) return Effect.succeed(null);
         return Effect.tryFuture<void, String>(
           (_) {
@@ -92,7 +92,7 @@ void main() {
       await upstreamFinished.future;
       await _flushMicrotasks();
       final lateValues = <int>[];
-      final late = shared.subscribe((value) {
+      final late = shared.subscribe((value, _) {
         lateValues.add(value);
         return Effect.succeed(null);
       });
@@ -112,11 +112,11 @@ void main() {
       final firstBlocked = Completer<void>();
       final upstreamFinished = Completer<void>();
       var connections = 0;
-      final shared = Flow.defer<int, Never>(() {
+      final shared = Flow.defer<int, Never>((_) {
         connections += 1;
         return Flow.succeed(1);
-      }).onExit((_) => Effect.sync(upstreamFinished.complete)).share();
-      final first = shared.subscribe((_) {
+      }).onExit((_, _) => Effect.sync(upstreamFinished.complete)).share();
+      final first = shared.subscribe((_, _) {
         return Effect.tryFuture<void, Never>(
           (_) {
             firstBlocked.complete();
@@ -138,7 +138,7 @@ void main() {
 
     test('should clear replay and reconnect after the final subscriber detaches', () async {
       var connections = 0;
-      final shared = Flow.defer<int, Never>(() {
+      final shared = Flow.defer<int, Never>((_) {
         connections += 1;
         return Flow.succeed(connections);
       }).share(replay: 1);
@@ -154,7 +154,7 @@ void main() {
       final cleanupStarted = Completer<void>();
       final releaseCleanup = Completer<void>();
       final pending = Completer<int>();
-      final shared = Flow.defer<int, String>(() {
+      final shared = Flow.defer<int, String>((_) {
         connections += 1;
         if (connections > 1) return Flow.succeed(connections);
         return Effect.tryFuture<int, String>(
@@ -169,7 +169,7 @@ void main() {
           },
         ).asFlow();
       }).share();
-      final first = shared.subscribe((_) => Effect.succeed(null));
+      final first = shared.subscribe((_, _) => Effect.succeed(null));
 
       await firstStarted.future;
       final cancelled = first.cancel('reset');
@@ -190,7 +190,7 @@ void main() {
       final cleanupStarted = Completer<void>();
       final releaseCleanup = Completer<void>();
       final pending = Completer<int>();
-      final shared = Flow.defer<int, String>(() {
+      final shared = Flow.defer<int, String>((_) {
         connections += 1;
         return Effect.tryFuture<int, String>(
           (_) {
@@ -204,12 +204,12 @@ void main() {
           },
         ).asFlow();
       }).share();
-      final first = shared.subscribe((_) => Effect.succeed(null));
+      final first = shared.subscribe((_, _) => Effect.succeed(null));
 
       await firstStarted.future;
       final firstCancellation = first.cancel('disconnect');
       await cleanupStarted.future;
-      final waiting = shared.subscribe((_) => Effect.succeed(null));
+      final waiting = shared.subscribe((_, _) => Effect.succeed(null));
       await _flushMicrotasks();
       final waitingCancellation = waiting.cancel('stop waiting');
       var cancelled = false;
@@ -234,12 +234,12 @@ void main() {
       final source = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
           .tap(
-            (_) =>
+            (_, _) =>
                 Effect.sync((_) => pulled += 1)
                     .mapError((value, _) => _widenNever(value! as Never)),
           )
           .share(capacity: 1, replay: 2);
-      final subscription = source.subscribe((_) {
+      final subscription = source.subscribe((_, _) {
         return Effect.tryFuture<void, String>(
           (_) {
             if (!consumerStarted.isCompleted) consumerStarted.complete();

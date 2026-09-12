@@ -167,7 +167,7 @@ final class FixtureModel implements LanguageModel {
   Flow<GenerationEvent, AiError> stream(
     GenerationRequest request, {
     FixtureOptions? options,
-  }) => Flow.defer(() {
+  }) => Flow.defer((_) {
     final text = (request.messages.single as UserMessage).parts.single as TextInputPart;
     final prefix = options?.prefix;
     final output = prefix == null ? text.text : '$prefix:${text.text}';
