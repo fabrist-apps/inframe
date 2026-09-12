@@ -56,6 +56,9 @@ void main() {
 
       expect(await exit, isA<Failed<void, String>>());
       expect(seen, contains('overflow:owner'));
+      final consumers = seen.where((entry) => entry.startsWith('consumer:'));
+      expect(consumers, isNotEmpty);
+      expect(consumers.every((entry) => entry.endsWith(':caller')), isTrue);
       expect(seen.where((entry) => entry.startsWith('map:')), isNotEmpty);
       expect(
         seen.where((entry) => entry.startsWith('map:')).every((entry) => entry.endsWith(':owner')),
