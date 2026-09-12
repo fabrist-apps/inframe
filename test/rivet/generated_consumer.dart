@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:rivet/rivet.dart';
 
 part 'generated_consumer.g.dart';
@@ -70,8 +72,16 @@ final class EnumValues extends RivetTableDefinition<EnumValues> {
   late final status = enumText<WorkStatus>()();
 }
 
+@RivetTable(schema: 'fbr121')
+final class VectorValues extends RivetTableDefinition<VectorValues> {
+  static const db = _$VectorValuesDB();
+
+  late final embedding = vector(dimensions: 3)();
+  late final optionalEmbedding = vector(dimensions: 3).nullable()();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
-  tables: [UserProfiles, Posts, ScalarValues, EnumValues],
+  tables: [UserProfiles, Posts, ScalarValues, EnumValues, VectorValues],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

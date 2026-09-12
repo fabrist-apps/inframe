@@ -196,6 +196,49 @@ final class _$EnumValuesDB extends RivetTableAccessor<EnumValues, EnumValuesRow>
   }
 }
 
+final class VectorValuesRow {
+  const VectorValuesRow({
+    required this.embedding,
+    required this.optionalEmbedding,
+  });
+
+  final Float32List embedding;
+  final Float32List? optionalEmbedding;
+}
+
+final class _$VectorValuesDB extends RivetTableAccessor<VectorValues, VectorValuesRow> {
+  const _$VectorValuesDB();
+
+  @override
+  RivetTableSchema<VectorValues, VectorValuesRow> buildSchema() {
+    final definition = VectorValues();
+
+    return RivetTableSchema<VectorValues, VectorValuesRow>(
+      schemaName: 'fbr121',
+      tableName: 'vectorValues',
+      definition: definition,
+      columns: [
+        definition.embedding as RivetColumn<Object?>,
+        definition.optionalEmbedding as RivetColumn<Object?>,
+      ],
+      columnNames: ['embedding', 'optionalEmbedding'],
+      decode: (values, sqlNulls) => VectorValuesRow(
+        embedding: definition.embedding.decodeValue(
+          values[0],
+          isSqlNull: sqlNulls[0],
+        ),
+        optionalEmbedding: definition.optionalEmbedding.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+      ),
+      indexes: const <RivetIndex>[],
+      constraints: const <RivetConstraint>[],
+      relations: {},
+    );
+  }
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -212,6 +255,7 @@ abstract class _$RivetTestDatabase {
       Posts.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       ScalarValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       EnumValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      VectorValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }

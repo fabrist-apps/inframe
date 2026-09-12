@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:chrono_id/chrono_id.dart';
 
@@ -85,6 +86,16 @@ abstract class RivetTableDefinition<Self> {
     String? renamedFrom,
   }) => RivetOrderableColumnBuilder(
     RivetUnconfiguredEnumCodec<E>(),
+    name: name,
+    renamedFrom: renamedFrom,
+  );
+
+  RivetColumnBuilder<Float32List> vector({
+    required int dimensions,
+    String? name,
+    String? renamedFrom,
+  }) => RivetColumnBuilder(
+    RivetVectorCodec(dimensions),
     name: name,
     renamedFrom: renamedFrom,
   );
@@ -411,6 +422,51 @@ final class RivetEnumCodec<E extends Enum> extends RivetCodec<E> {
     final index = labels.indexOf(value);
     if (index < 0) throw FormatException('unknown native enum label `$value`');
     return values[index];
+  }
+}
+
+final class RivetVectorCodec extends RivetCodec<Float32List> {
+  RivetVectorCodec(this.dimensions) {
+    if (dimensions <= 0 || dimensions > 16000) {
+      throw RangeError.range(dimensions, 1, 16000, 'dimensions');
+    }
+  }
+
+  final int dimensions;
+
+  @override
+  String get cast => 'vector';
+
+  @override
+  String select(String columnSql) => '$columnSql::text';
+
+  @override
+  Object encode(Float32List value) {
+    final checked = _validate(value);
+    return '[${checked.join(',')}]';
+  }
+
+  @override
+  Float32List decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull || value is! String || !value.startsWith('[') || !value.endsWith(']')) {
+      throw const FormatException('expected a non-null pgvector text value');
+    }
+    final body = value.substring(1, value.length - 1);
+    final values = body.isEmpty
+        ? <double>[]
+        : body.split(',').map(double.parse).toList(growable: false);
+    return _validate(values);
+  }
+
+  Float32List _validate(List<double> value) {
+    if (value.length != dimensions) {
+      throw FormatException('expected vector dimension $dimensions, received ${value.length}');
+    }
+    final result = Float32List.fromList(value);
+    if (result.any((component) => !component.isFinite)) {
+      throw const FormatException('vector components must be finite float32 values');
+    }
+    return result;
   }
 }
 
