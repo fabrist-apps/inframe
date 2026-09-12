@@ -6,10 +6,13 @@ import 'package:chronicler/src/codec.dart';
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/diagnostics.dart';
 import 'package:chronicler/src/lifecycle.dart';
-import 'package:chronicler/src/metric_aggregation.dart';
 import 'package:chronicler/src/metrics.dart';
+import 'package:chronicler/src/metrics/aggregation.dart';
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/record_validation.dart';
+import 'package:chronicler/src/runtime/configuration.dart';
+import 'package:chronicler/src/runtime/delivery_queue.dart';
+import 'package:chronicler/src/runtime/record_processing.dart';
 import 'package:chronicler/src/trace_propagation.dart';
 import 'package:chronicler/src/transport.dart';
 import 'package:chrono_id/chrono_id.dart';
@@ -275,7 +278,10 @@ final class _RecorderAttribution {
   final _SpanState? span;
 }
 
-/// Internal owner of queue, delivery, and lifecycle state.
+/// Coordinates capture and tracing with metric aggregation and delivery.
+///
+/// Record processing owns hook execution and redaction; delivery owns queue
+/// state, flush snapshots, and exporter shutdown.
 final class ChroniclerRuntime {
   ChroniclerRuntime._({
     required this.appId,
@@ -308,14 +314,14 @@ final class ChroniclerRuntime {
     required ChroniclerOptions options,
     Random Function()? secureRandomFactory,
   }) {
-    final snapshot = _validateAndSnapshotOptions(options);
+    final snapshot = validateAndSnapshotOptions(options);
     final validator = RecordValidator(snapshot.limits);
-    _validateConfiguredLabel(validator, appId, 'appId', snapshot.limits.maxIdBytes);
-    _validateConfiguredLabel(validator, release, 'release', snapshot.limits.maxLabelBytes);
+    validateConfiguredLabel(validator, appId, 'appId', snapshot.limits.maxIdBytes);
+    validateConfiguredLabel(validator, release, 'release', snapshot.limits.maxLabelBytes);
     if (buildId != null) {
-      _validateConfiguredLabel(validator, buildId, 'buildId', snapshot.limits.maxLabelBytes);
+      validateConfiguredLabel(validator, buildId, 'buildId', snapshot.limits.maxLabelBytes);
     }
-    final secureRandom = _createSecureRandom(secureRandomFactory);
+    final secureRandom = createSecureRandom(secureRandomFactory);
     return ChroniclerRuntime._(
       appId: appId,
       release: release,
@@ -360,7 +366,7 @@ final class ChroniclerRuntime {
     limits: options.limits,
     canRecord: () => _canRecord(ChroniclerSignal.metrics, null),
     diagnose: diagnostics.record,
-    redact: _redactMap,
+    redact: _processor.redactAttributes,
     createRecord: _metricRecord,
     finalize: _finalizeAndEnqueue,
     startEnabled: _enabledSignals.contains(ChroniclerSignal.metrics),
@@ -370,11 +376,24 @@ final class ChroniclerRuntime {
 
   /// Metric instrument contracts borrowed by recorders and Context.
   ChroniclerMetrics get metrics => _metrics;
+  late final RecordProcessor _processor = RecordProcessor(
+    codec: codec,
+    redaction: options.redaction,
+    maxRecordBytes: options.delivery.maxRecordBytes,
+  );
+
+  late final DeliveryQueue _delivery = DeliveryQueue(
+    options: options.delivery,
+    exporter: exporter,
+    diagnostics: diagnostics,
+    elapsed: () => _elapsed.elapsed,
+    nextRandom: () => _random.nextDouble(),
+  );
+
+  ChroniclerRuntimeState get _state => _delivery.state;
+
   Random _secureRandom;
-  final _pending = Queue<_PendingRecord>();
-  final _active = <_ActiveExport>{};
   final _liveSpans = <_SpanState>{};
-  final _flushWaiters = <_FlushWaiter>{};
   final _flushFinalizations = Queue<List<ChroniclerRecord>>();
   final _elapsed = Stopwatch()..start();
   DateTime Function()? _nowOverride;
@@ -382,19 +401,7 @@ final class ChroniclerRuntime {
   late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
   late bool _propagationEnabled = options.tracing.propagationEnabled;
   Random _random = Random();
-  var _insideHook = false;
-  var _pendingBytes = 0;
-  var _nextSequence = 0;
-  var _pumpScheduled = false;
-  Timer? _wakeTimer;
-  Duration Function(int attempt, Duration ceiling)? _retryDelayOverride;
   MetricRecord Function(MetricPayload payload)? _metricRecordOverride;
-  ChroniclerRuntimeState _state = ChroniclerRuntimeState.running;
-  bool _deliveryOpen = true;
-  Future<DeliveryReport>? _closeFuture;
-  Set<_RecordDisposition>? _closeSnapshot;
-  Completer<void>? _closeDeliveryResolved;
-  Completer<void>? _activeDrained;
 
   /// An immutable snapshot of exact diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
@@ -514,7 +521,7 @@ final class ChroniclerRuntime {
       diagnostics.record(DiagnosticReason.runtimeClosed);
       return _StartedSpan(null, recorder);
     }
-    if (_insideHook || diagnostics.insideCallback) {
+    if (_processor.insideHook || diagnostics.insideCallback) {
       diagnostics.record(DiagnosticReason.reentrantRecording);
       return _StartedSpan(null, recorder);
     }
@@ -552,7 +559,7 @@ final class ChroniclerRuntime {
           eventId: ChronoID.generate(prefix: 'evt'),
           name: name,
           kind: kind,
-          attributes: _redactMap(validator.snapshotAttributes(attributes)),
+          attributes: _processor.redactAttributes(validator.snapshotAttributes(attributes)),
           startedAt: _elapsedNow,
           timestamp: _now,
           attribution: recorder._attribution,
@@ -620,7 +627,7 @@ final class ChroniclerRuntime {
     if (recording == null) return;
     try {
       final proposed = <String, Object?>{...recording.attributes, ...update};
-      final snapshot = _redactMap(validator.snapshotAttributes(proposed));
+      final snapshot = _processor.redactAttributes(validator.snapshotAttributes(proposed));
       final reserved = _spanRecord(
         span,
         recording,
@@ -726,176 +733,27 @@ final class ChroniclerRuntime {
   /// Flushes the current record snapshot within [timeout].
   Future<DeliveryReport> flush(Duration timeout) {
     _requireOutsideCallback('flush');
-    if (timeout <= Duration.zero) {
-      throw const ChroniclerConfigurationException('timeout', 'must be positive');
-    }
-    final finalizedByCall = <_RecordDisposition>[];
-    if (_state == ChroniclerRuntimeState.running) {
-      for (final record in _metrics.seal()) {
-        finalizedByCall.add(_finalizeForFlush(record));
-      }
-      while (_flushFinalizations.isNotEmpty) {
-        for (final record in _flushFinalizations.removeFirst()) {
-          finalizedByCall.add(_finalizeForFlush(record));
-        }
-      }
-    }
-    final snapshot = <_RecordDisposition>{
-      for (final record in _pending) record.disposition,
-      for (final export in _active)
-        for (final record in export.records) record.disposition,
-      ...finalizedByCall,
-    };
-    if (_state != ChroniclerRuntimeState.running || snapshot.every((state) => state.isTerminal)) {
-      return Future.value(_report(snapshot, timedOut: false));
-    }
-    final now = _elapsed.elapsed;
-    for (final record in _pending) {
-      if (snapshot.contains(record.disposition)) record.readyAt = now;
-    }
-    final waiter = _FlushWaiter(snapshot);
-    _flushWaiters.add(waiter);
-    waiter.timer = Timer(timeout, () => _completeFlush(waiter, timedOut: true));
-    _schedulePump();
-    return waiter.completer.future;
+    return _delivery.flush(timeout, finalize: () => _sealRecords(closing: false));
   }
 
   /// Stops recording and closes the owned exporter within one deadline.
   Future<DeliveryReport> close() {
     _requireOutsideCallback('close');
-    final existing = _closeFuture;
-    if (existing != null) return existing;
-    final completer = Completer<DeliveryReport>();
-    _closeFuture = completer.future;
-    _beginClose(completer);
-    return completer.future;
+    return _delivery.close(finalize: () => _sealRecords(closing: true));
   }
 
-  void _beginClose(Completer<DeliveryReport> completer) {
-    _state = ChroniclerRuntimeState.closing;
-    diagnostics.close();
-    final startedAt = _elapsed.elapsed;
-    final finalizations = <_RecordDisposition>[];
-    for (final record in _metrics.seal(scheduleNext: false)) {
-      finalizations.add(_finalizeForClose(record));
+  List<DeliveryDisposition> _sealRecords({required bool closing}) {
+    final finalized = <DeliveryDisposition>[];
+    final finalize = closing ? _finalizeForClose : _finalizeForFlush;
+    for (final record in _metrics.seal(scheduleNext: !closing)) {
+      finalized.add(finalize(record));
     }
     while (_flushFinalizations.isNotEmpty) {
       for (final record in _flushFinalizations.removeFirst()) {
-        finalizations.add(_finalizeForClose(record));
+        finalized.add(finalize(record));
       }
     }
-    final snapshot = <_RecordDisposition>{
-      for (final record in _pending) record.disposition,
-      for (final export in _active)
-        for (final record in export.records) record.disposition,
-      ...finalizations,
-    };
-    _closeSnapshot = snapshot;
-    final resolved = Completer<void>();
-    _closeDeliveryResolved = resolved;
-    if (snapshot.every((state) => state.isTerminal)) resolved.complete();
-    final now = _elapsed.elapsed;
-    for (final record in _pending) {
-      record.readyAt = now;
-    }
-    _schedulePump();
-    unawaited(
-      _runClose(snapshot, resolved.future, startedAt).then(
-        completer.complete,
-        onError: (Object _, StackTrace _) {
-          _finishOutstandingAtShutdown();
-          _state = ChroniclerRuntimeState.closed;
-          _closeDeliveryResolved = null;
-          _closeSnapshot = null;
-          _activeDrained = null;
-          _notifyDispositionWaiters();
-          completer.complete(_report(snapshot, timedOut: true, cleanupIncomplete: true));
-        },
-      ),
-    );
-  }
-
-  Future<DeliveryReport> _runClose(
-    Set<_RecordDisposition> snapshot,
-    Future<void> deliveryResolved,
-    Duration startedAt,
-  ) async {
-    final totalDeadline = startedAt + options.delivery.closeTimeout;
-    final deliveryDeadline = totalDeadline - options.delivery.cleanupReserve;
-    final deliveryCompleted = await _completesBy(deliveryResolved, deliveryDeadline);
-    _deliveryOpen = false;
-    _wakeTimer?.cancel();
-    _wakeTimer = null;
-    if (!deliveryCompleted) {
-      for (final record in _pending.toList()) {
-        _pending.remove(record);
-        _drop(record, DropReason.shutdown);
-      }
-      for (final active in _active) {
-        for (final record in active.records) {
-          record.disposition.uncertain = true;
-        }
-        _requestCancellation(active);
-      }
-    }
-
-    var cleanupFailed = false;
-    Future<void> exporterCleanup;
-    try {
-      exporterCleanup = exporter.close();
-    } on Object {
-      cleanupFailed = true;
-      diagnostics.record(DiagnosticReason.exportCleanupFailed);
-      exporterCleanup = Future.value();
-    }
-    final observedCleanup = exporterCleanup.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {
-        cleanupFailed = true;
-        diagnostics.record(DiagnosticReason.exportCleanupFailed);
-      },
-    );
-    final activeDrained = Completer<void>();
-    _activeDrained = activeDrained;
-    if (_active.isEmpty) activeDrained.complete();
-    final cleanupCompleted = await _completesBy(
-      Future.wait([observedCleanup, activeDrained.future]),
-      totalDeadline,
-    );
-    if (!cleanupCompleted) _finishOutstandingAtShutdown();
-    _activeDrained = null;
-    _state = ChroniclerRuntimeState.closed;
-    _closeDeliveryResolved = null;
-    _closeSnapshot = null;
-    _notifyDispositionWaiters();
-    return _report(
-      snapshot,
-      timedOut: !deliveryCompleted || !cleanupCompleted,
-      cleanupIncomplete: cleanupFailed || !cleanupCompleted,
-    );
-  }
-
-  Future<bool> _completesBy(Future<void> operation, Duration deadline) {
-    final remaining = deadline - _elapsed.elapsed;
-    if (remaining <= Duration.zero) return Future.value(false);
-    final result = Completer<bool>();
-    late final Timer timer;
-    timer = Timer(remaining, () => result.complete(false));
-    unawaited(
-      operation.then<void>(
-        (_) {
-          if (result.isCompleted) return;
-          timer.cancel();
-          result.complete(true);
-        },
-        onError: (Object _, StackTrace _) {
-          if (result.isCompleted) return;
-          timer.cancel();
-          result.complete(true);
-        },
-      ),
-    );
-    return result.future;
+    return finalized;
   }
 
   /// Whether collection currently accepts [signal].
@@ -921,16 +779,7 @@ final class ChroniclerRuntime {
           ..lineageRecording = false;
       }
     }
-    for (final record in _pending.where((record) => _signalFor(record.record) == signal).toList()) {
-      _pending.remove(record);
-      _drop(record, DropReason.collectionDisabled);
-    }
-    for (final export in _active) {
-      for (final record in export.records) {
-        if (_signalFor(record.record) == signal) record.retryEligible = false;
-      }
-    }
-    _scheduleWakeup();
+    _delivery.disableCollection(signal);
   }
 
   /// Enables or disables trace-context propagation.
@@ -952,7 +801,7 @@ final class ChroniclerRuntime {
   }
 
   void _requireOutsideCallback(String operation) {
-    if (_insideHook || diagnostics.insideCallback) {
+    if (_processor.insideHook || diagnostics.insideCallback) {
       throw ChroniclerConfigurationException(
         operation,
         'cannot be called from a Chronicler callback',
@@ -1136,7 +985,7 @@ final class ChroniclerRuntime {
       diagnostics.record(DiagnosticReason.runtimeClosed);
       return false;
     }
-    if (diagnostics.insideCallback || _insideHook) {
+    if (diagnostics.insideCallback || _processor.insideHook) {
       diagnostics.record(DiagnosticReason.reentrantRecording);
       return false;
     }
@@ -1207,204 +1056,40 @@ final class ChroniclerRuntime {
     ChroniclerSignalKind.metrics => ChroniclerSignal.metrics,
   };
 
-  _RecordDisposition _finalizeForFlush(ChroniclerRecord record) {
+  DeliveryDisposition _finalizeForFlush(ChroniclerRecord record) {
     if (!_enabledSignals.contains(_signalFor(record))) {
-      final disposition = _RecordDisposition();
-      _dropDisposition(disposition, DropReason.collectionDisabled);
-      return disposition;
+      return _delivery.dropped(DropReason.collectionDisabled);
     }
     return _finalizeAndEnqueue(record);
   }
 
-  _RecordDisposition _finalizeForClose(ChroniclerRecord record) {
+  DeliveryDisposition _finalizeForClose(ChroniclerRecord record) {
     if (!_enabledSignals.contains(_signalFor(record))) {
-      final disposition = _RecordDisposition();
-      _dropDisposition(disposition, DropReason.collectionDisabled);
-      return disposition;
+      return _delivery.dropped(DropReason.collectionDisabled);
     }
     return _finalizeAndEnqueue(record, allowDuringClosing: true);
   }
 
-  _RecordDisposition _finalizeAndEnqueue(
+  DeliveryDisposition _finalizeAndEnqueue(
     ChroniclerRecord original, {
     bool allowDuringClosing = false,
   }) {
-    final disposition = _RecordDisposition();
     if (_state != ChroniclerRuntimeState.running && !allowDuringClosing) {
-      _dropDisposition(disposition, DropReason.runtimeClosed);
-      return disposition;
+      return _delivery.dropped(DropReason.runtimeClosed);
     }
     try {
-      // Validate caller data before field-name rules can hide it.
-      codec.validateRecord(original);
-      var record = _redactRecord(original);
-      final hook = options.redaction.beforeRecord;
-      if (hook != null) {
-        ChroniclerRecord? changed;
-        _insideHook = true;
-        try {
-          changed = hook(record);
-        } on Object {
-          _dropDisposition(disposition, DropReason.hookFailed);
-          return disposition;
-        } finally {
-          _insideHook = false;
-        }
-        if (changed == null) {
-          _dropDisposition(disposition, DropReason.hookDropped);
-          return disposition;
-        }
-        if (!_preservesProtectedFields(original, changed)) {
-          _dropDisposition(disposition, DropReason.invalidRecord);
-          return disposition;
-        }
-        try {
-          codec.validateRecord(changed);
-        } on Object {
-          _dropDisposition(disposition, DropReason.invalidRecord);
-          return disposition;
-        }
-        record = changed;
-      }
-      record = _redactRecord(record);
-      final bytes = codec.encodeRecord(record);
-      if (bytes.length > options.delivery.maxRecordBytes) {
-        _dropDisposition(disposition, DropReason.recordTooLarge);
-        return disposition;
-      }
-      if (_pending.length + _activeRecordCount >= options.delivery.maxPendingRecords ||
-          _pendingBytes + bytes.length > options.delivery.maxPendingBytes) {
-        _dropDisposition(disposition, DropReason.queueFull);
-        return disposition;
-      }
-      if (_state != ChroniclerRuntimeState.running && !allowDuringClosing) {
-        _dropDisposition(disposition, DropReason.runtimeClosed);
-        return disposition;
-      }
-      final pending = _PendingRecord(
-        record,
-        bytes.length,
-        _nextSequence++,
-        _elapsed.elapsed + options.delivery.batchInterval,
-        disposition,
-      );
-      _pending.add(pending);
-      _pendingBytes += bytes.length;
-      if (_pending.where((record) => !record.isRetry).length >= options.delivery.maxBatchRecords) {
-        final now = _elapsed.elapsed;
-        for (final record in _pending.where((record) => !record.isRetry)) {
-          record.readyAt = now;
-        }
-        _schedulePump();
-      } else {
-        _scheduleWakeup();
-      }
-      return disposition;
-    } on RecordValidationException {
-      _dropDisposition(disposition, DropReason.invalidRecord);
-    } on ChroniclerEncodingException catch (error) {
-      _dropDisposition(
-        disposition,
-        error.reason == 'record byte limit exceeded'
-            ? DropReason.recordTooLarge
-            : DropReason.invalidRecord,
-      );
+      return switch (_processor.prepare(original)) {
+        PreparedRecord(:final record, :final encodedBytes) => _delivery.enqueue(
+          record,
+          encodedBytes,
+          allowDuringClosing: allowDuringClosing,
+        ),
+        RejectedRecord(:final reason) => _delivery.dropped(reason),
+      };
     } on Object {
-      _dropDisposition(disposition, DropReason.invalidRecord);
+      return _delivery.dropped(DropReason.invalidRecord);
     }
-    return disposition;
   }
-
-  ChroniclerRecord _redactRecord(ChroniclerRecord record) => switch (record) {
-    LogRecord() => LogRecord(
-      envelope: record.envelope,
-      payload: record.payload.copyWith(attributes: _redactMap(record.payload.attributes)),
-    ),
-    ProductEventRecord() => ProductEventRecord(
-      envelope: record.envelope,
-      payload: record.payload.copyWith(properties: _redactMap(record.payload.properties)),
-    ),
-    UserPropertiesSetRecord() => UserPropertiesSetRecord(
-      envelope: record.envelope,
-      payload: record.payload.copyWith(properties: _redactMap(record.payload.properties)),
-    ),
-    SpanRecord() => SpanRecord(
-      envelope: record.envelope,
-      payload: record.payload.copyWith(attributes: _redactMap(record.payload.attributes)),
-    ),
-    ErrorRecord() => ErrorRecord(
-      envelope: record.envelope,
-      payload: record.payload.copyWith(attributes: _redactMap(record.payload.attributes)),
-    ),
-    MetricRecord() => MetricRecord(
-      envelope: record.envelope,
-      payload: record.payload.copyWith(attributes: _redactMap(record.payload.attributes)),
-    ),
-    IdentityLinkRecord() || UserPropertiesUnsetRecord() => record,
-  };
-
-  Map<String, Object?> _redactMap(Map<Object?, Object?> source) => Map.unmodifiable(
-    source.map((key, value) {
-      final stringKey = key! as String;
-      return MapEntry(
-        stringKey,
-        options.redaction.fieldTerms.any(stringKey.toLowerCase().contains)
-            ? '[REDACTED]'
-            : _redactValue(value),
-      );
-    }),
-  );
-
-  Object? _redactValue(Object? value) => switch (value) {
-    Map<Object?, Object?>() => _redactMap(value),
-    List<Object?>() => List<Object?>.unmodifiable(value.map(_redactValue)),
-    _ => value,
-  };
-
-  bool _preservesProtectedFields(ChroniclerRecord original, ChroniclerRecord changed) {
-    if (original.runtimeType != changed.runtimeType) return false;
-    final before = original.envelope;
-    final after = changed.envelope;
-    if (before.eventId != after.eventId ||
-        before.timestamp != after.timestamp ||
-        before.appId != after.appId ||
-        before.source != after.source ||
-        before.release != after.release ||
-        before.buildId != after.buildId ||
-        before.traceId != after.traceId ||
-        before.spanId != after.spanId ||
-        before.parentSpanId != after.parentSpanId ||
-        !_identityPreserved(before.userId, after.userId) ||
-        !_identityPreserved(before.anonymousId, after.anonymousId) ||
-        !_identityPreserved(before.sessionId, after.sessionId)) {
-      return false;
-    }
-    if (original case MetricRecord(payload: final beforeMetric)) {
-      final afterMetric = (changed as MetricRecord).payload;
-      return beforeMetric.name == afterMetric.name &&
-          beforeMetric.instrument == afterMetric.instrument &&
-          beforeMetric.unit == afterMetric.unit &&
-          beforeMetric.intervalStart == afterMetric.intervalStart &&
-          beforeMetric.intervalEnd == afterMetric.intervalEnd &&
-          beforeMetric.durationMicros == afterMetric.durationMicros &&
-          beforeMetric.temporality == afterMetric.temporality &&
-          _sameList(beforeMetric.boundaries, afterMetric.boundaries);
-    }
-    return true;
-  }
-
-  bool _identityPreserved(String? before, String? after) => after == null || after == before;
-
-  bool _sameList<T>(List<T>? before, List<T>? after) {
-    if (before == null || after == null) return before == after;
-    if (before.length != after.length) return false;
-    for (var index = 0; index < before.length; index++) {
-      if (before[index] != after[index]) return false;
-    }
-    return true;
-  }
-
-  int get _activeRecordCount => _active.fold(0, (count, export) => count + export.records.length);
 
   ErrorDetails _convertError(Object error, StackTrace? stackTrace) {
     final type = _safeText(() => error.runtimeType.toString(), '[Unknown error type]');
@@ -1428,331 +1113,6 @@ final class ChroniclerRuntime {
       diagnostics.record(DiagnosticReason.textConversionFailed);
       return fallback;
     }
-  }
-
-  void _schedulePump() {
-    if (_pumpScheduled || !_deliveryOpen) return;
-    _pumpScheduled = true;
-    Timer.run(() {
-      _pumpScheduled = false;
-      _pump();
-    });
-  }
-
-  void _pump() {
-    if (!_deliveryOpen) return;
-    _wakeTimer?.cancel();
-    _wakeTimer = null;
-    while (_active.length < options.delivery.maxConcurrentExports) {
-      final now = _elapsed.elapsed;
-      final eligible = _pending.where((record) => record.readyAt <= now).toList()
-        ..sort((left, right) => left.sequence.compareTo(right.sequence));
-      if (eligible.isEmpty) break;
-      final records = <_PendingRecord>[];
-      var batchBytes = 32;
-      for (final next in eligible) {
-        if (records.length >= options.delivery.maxBatchRecords) break;
-        final candidateBytes = batchBytes + next.encodedBytes + (records.isEmpty ? 0 : 1);
-        if (candidateBytes > options.delivery.maxBatchBytes) break;
-        _pending.remove(next);
-        records.add(next);
-        batchBytes = candidateBytes;
-      }
-      if (records.isEmpty) break;
-      for (final record in records) {
-        record.attempts++;
-      }
-      final active = _ActiveExport(
-        records,
-        _elapsed.elapsed + options.delivery.attemptTimeout,
-      );
-      _active.add(active);
-      try {
-        final attempt = exporter.export(
-          ChroniclerBatch(records.map((pending) => pending.record)),
-        );
-        active.attempt = attempt;
-        final result = attempt.result;
-        unawaited(
-          result.then(
-            (result) => _handleResult(active, result),
-            onError: (Object _, StackTrace _) => _handleFailure(active),
-          ),
-        );
-        _scheduleAttemptTimeout(active);
-      } on Object {
-        _handleFailure(active);
-      }
-    }
-    _scheduleWakeup();
-  }
-
-  void _scheduleAttemptTimeout(_ActiveExport active) {
-    final remaining = active.deadline - _elapsed.elapsed;
-    if (remaining <= Duration.zero) {
-      _timeOut(active);
-    } else {
-      active.timeout = Timer(remaining, () => _timeOut(active));
-    }
-  }
-
-  void _timeOut(_ActiveExport active) {
-    if (!_active.contains(active) || active.timedOut) return;
-    active.timedOut = true;
-    for (final record in active.records) {
-      record.disposition.uncertain = true;
-    }
-    diagnostics.record(DiagnosticReason.exportTimedOut);
-    _requestCancellation(active);
-  }
-
-  void _requestCancellation(_ActiveExport active) {
-    if (active.cancellationRequested) return;
-    active.cancellationRequested = true;
-    active.timeout?.cancel();
-    try {
-      active.attempt?.cancel();
-    } on Object {
-      diagnostics.record(DiagnosticReason.exportCancellationFailed);
-    }
-  }
-
-  void _handleResult(_ActiveExport active, ExportResult result) {
-    if (!_active.remove(active)) return;
-    active.timeout?.cancel();
-    final outcomes = _validatedOutcomes(active.records, result);
-    if (outcomes == null) {
-      diagnostics.record(DiagnosticReason.invalidExportResult);
-      for (final record in active.records) {
-        record.disposition.uncertain = true;
-        _retry(record);
-      }
-      _notifyActiveDrained();
-      _schedulePump();
-      return;
-    }
-    for (final record in active.records) {
-      switch (outcomes[record.record.envelope.eventId]!) {
-        case ExportDisposition.accepted:
-          _accept(record);
-        case ExportDisposition.rejected:
-          _drop(record, DropReason.exportRejected);
-        case ExportDisposition.retryable:
-          record.disposition.uncertain = true;
-          _retry(record);
-      }
-    }
-    _notifyActiveDrained();
-    _schedulePump();
-  }
-
-  void _handleFailure(_ActiveExport active) {
-    if (!_active.remove(active)) return;
-    active.timeout?.cancel();
-    diagnostics.record(DiagnosticReason.exportFailed);
-    for (final record in active.records) {
-      record.disposition.uncertain = true;
-      _retry(record);
-    }
-    _notifyActiveDrained();
-    _schedulePump();
-  }
-
-  Map<String, ExportDisposition>? _validatedOutcomes(
-    List<_PendingRecord> records,
-    ExportResult result,
-  ) {
-    if (result case WholeBatchExportResult(:final disposition)) {
-      return {for (final record in records) record.record.envelope.eventId: disposition};
-    }
-    final submittedIds = records.map((record) => record.record.envelope.eventId).toSet();
-    final outcomes = <String, ExportDisposition>{};
-    for (final outcome in (result as RecordExportResult).outcomes) {
-      if (!submittedIds.contains(outcome.eventId) || outcomes.containsKey(outcome.eventId)) {
-        return null;
-      }
-      outcomes[outcome.eventId] = outcome.disposition;
-    }
-    return outcomes.length == submittedIds.length ? outcomes : null;
-  }
-
-  void _retry(_PendingRecord record) {
-    if (!record.retryEligible) {
-      _drop(record, DropReason.collectionDisabled);
-      return;
-    }
-    if (!_deliveryOpen) {
-      _drop(record, DropReason.shutdown);
-      return;
-    }
-    if (record.attempts >= options.delivery.maxAttempts) {
-      _drop(record, DropReason.attemptsExhausted);
-      return;
-    }
-    final ceiling = _retryCeiling(record.attempts);
-    final delay = _chooseRetryDelay(record.attempts, ceiling);
-    record
-      ..isRetry = true
-      ..readyAt = _elapsed.elapsed + delay;
-    _pending.add(record);
-  }
-
-  Duration _chooseRetryDelay(int attempt, Duration ceiling) {
-    try {
-      final override = _retryDelayOverride;
-      final delay = override == null
-          ? Duration(
-              microseconds: min(
-                (_random.nextDouble() * (ceiling.inMicroseconds + 1)).floor(),
-                ceiling.inMicroseconds,
-              ),
-            )
-          : override(attempt, ceiling);
-      if (delay < Duration.zero || delay > ceiling) {
-        throw StateError('Retry delay must be between zero and its ceiling.');
-      }
-      return delay;
-    } on Object {
-      diagnostics.record(DiagnosticReason.exportFailed);
-      return Duration.zero;
-    }
-  }
-
-  Duration _retryCeiling(int attempts) {
-    final maximumMicros = options.delivery.maxRetryDelay.inMicroseconds;
-    var ceilingMicros = options.delivery.initialRetryDelay.inMicroseconds;
-    for (var retry = 1; retry < attempts; retry++) {
-      ceilingMicros = ceilingMicros >= maximumMicros ~/ 2 ? maximumMicros : ceilingMicros * 2;
-    }
-    return Duration(microseconds: ceilingMicros);
-  }
-
-  void _accept(_PendingRecord record) {
-    _pendingBytes -= record.encodedBytes;
-    record.disposition.accepted = true;
-    _notifyDispositionWaiters();
-  }
-
-  void _drop(_PendingRecord record, DropReason reason) {
-    _pendingBytes -= record.encodedBytes;
-    _dropDisposition(record.disposition, reason);
-  }
-
-  void _dropDisposition(_RecordDisposition disposition, DropReason reason) {
-    disposition.dropReason = reason;
-    diagnostics.record(_diagnosticFor(reason));
-    _notifyDispositionWaiters();
-  }
-
-  DiagnosticReason _diagnosticFor(DropReason reason) => switch (reason) {
-    DropReason.invalidRecord => DiagnosticReason.invalidRecord,
-    DropReason.recordTooLarge => DiagnosticReason.recordTooLarge,
-    DropReason.queueFull => DiagnosticReason.queueFull,
-    DropReason.collectionDisabled => DiagnosticReason.collectionDisabled,
-    DropReason.sampledOut => DiagnosticReason.sampledOut,
-    DropReason.hookDropped => DiagnosticReason.hookDropped,
-    DropReason.hookFailed => DiagnosticReason.hookFailed,
-    DropReason.exportRejected => DiagnosticReason.exportRejected,
-    DropReason.attemptsExhausted => DiagnosticReason.attemptsExhausted,
-    DropReason.shutdown => DiagnosticReason.shutdown,
-    DropReason.runtimeClosed => DiagnosticReason.runtimeClosed,
-  };
-
-  void _notifyDispositionWaiters() {
-    for (final waiter in _flushWaiters.toList()) {
-      if (waiter.snapshot.every((state) => state.isTerminal)) {
-        _completeFlush(waiter, timedOut: false);
-      }
-    }
-    final closeSnapshot = _closeSnapshot;
-    final closeResolved = _closeDeliveryResolved;
-    if (closeSnapshot != null &&
-        closeResolved != null &&
-        !closeResolved.isCompleted &&
-        closeSnapshot.every((state) => state.isTerminal)) {
-      closeResolved.complete();
-    }
-  }
-
-  void _notifyActiveDrained() {
-    final activeDrained = _activeDrained;
-    if (_active.isEmpty && activeDrained != null && !activeDrained.isCompleted) {
-      activeDrained.complete();
-    }
-  }
-
-  void _finishOutstandingAtShutdown() {
-    _wakeTimer?.cancel();
-    _wakeTimer = null;
-    for (final record in _pending.toList()) {
-      _pending.remove(record);
-      _drop(record, DropReason.shutdown);
-    }
-    for (final active in _active.toList()) {
-      _active.remove(active);
-      active.timeout?.cancel();
-      for (final record in active.records) {
-        record.disposition.uncertain = true;
-        _drop(record, DropReason.shutdown);
-      }
-    }
-    _notifyActiveDrained();
-  }
-
-  void _completeFlush(_FlushWaiter waiter, {required bool timedOut}) {
-    if (!_flushWaiters.remove(waiter)) return;
-    waiter.timer?.cancel();
-    waiter.completer.complete(_report(waiter.snapshot, timedOut: timedOut));
-  }
-
-  DeliveryReport _report(
-    Iterable<_RecordDisposition> snapshot, {
-    required bool timedOut,
-    bool cleanupIncomplete = false,
-  }) {
-    var accepted = 0;
-    var pending = 0;
-    var uncertainDropped = 0;
-    final dropped = <DropReason, int>{};
-    for (final disposition in snapshot) {
-      if (disposition.accepted) {
-        accepted++;
-      } else if (disposition.dropReason case final reason?) {
-        dropped.update(reason, (count) => count + 1, ifAbsent: () => 1);
-        if (disposition.uncertain) uncertainDropped++;
-      } else {
-        pending++;
-      }
-    }
-    return DeliveryReport(
-      accepted: accepted,
-      dropped: dropped,
-      pending: pending,
-      uncertainDropped: uncertainDropped,
-      timedOut: timedOut,
-      runtimeState: _state,
-      cleanupIncomplete: cleanupIncomplete,
-    );
-  }
-
-  void _scheduleWakeup() {
-    if (!_deliveryOpen ||
-        _pending.isEmpty ||
-        _active.length >= options.delivery.maxConcurrentExports) {
-      _wakeTimer?.cancel();
-      _wakeTimer = null;
-      return;
-    }
-    final next = _pending
-        .map((record) => record.readyAt)
-        .reduce((left, right) => left <= right ? left : right);
-    final delay = next - _elapsed.elapsed;
-    if (delay <= Duration.zero) {
-      _schedulePump();
-      return;
-    }
-    _wakeTimer?.cancel();
-    _wakeTimer = Timer(delay, _pump);
   }
 }
 
@@ -1889,7 +1249,7 @@ final class ChroniclerDeliveryFixture {
     Chronicler chronicler,
     Duration Function(int attempt, Duration ceiling) selector,
   ) {
-    chronicler._runtime._retryDelayOverride = selector;
+    chronicler._runtime._delivery.selectRetryDelay(selector);
   }
 
   /// Returns the current trace propagation switch.
@@ -1904,7 +1264,7 @@ final class ChroniclerDeliveryFixture {
   }
 
   /// Returns the number of flush calls waiting on record dispositions.
-  static int activeFlushes(Chronicler chronicler) => chronicler._runtime._flushWaiters.length;
+  static int activeFlushes(Chronicler chronicler) => chronicler._runtime._delivery.activeFlushes;
 }
 
 /// Internal fixture bridge for deterministic metric aggregation tests.
@@ -1986,195 +1346,4 @@ final class ChroniclerMetricFixture {
       max: max,
     );
   }
-}
-
-final class _PendingRecord {
-  _PendingRecord(
-    this.record,
-    this.encodedBytes,
-    this.sequence,
-    this.readyAt,
-    this.disposition,
-  );
-  final ChroniclerRecord record;
-  final int encodedBytes;
-  final int sequence;
-  final _RecordDisposition disposition;
-  Duration readyAt;
-  int attempts = 0;
-  bool isRetry = false;
-  bool retryEligible = true;
-}
-
-final class _RecordDisposition {
-  bool accepted = false;
-  DropReason? dropReason;
-  bool uncertain = false;
-
-  bool get isTerminal => accepted || dropReason != null;
-}
-
-final class _FlushWaiter {
-  _FlushWaiter(Set<_RecordDisposition> snapshot) : snapshot = Set.unmodifiable(snapshot);
-
-  final Set<_RecordDisposition> snapshot;
-  final completer = Completer<DeliveryReport>();
-  Timer? timer;
-}
-
-final class _ActiveExport {
-  _ActiveExport(this.records, this.deadline);
-  final List<_PendingRecord> records;
-  final Duration deadline;
-  ExportAttempt? attempt;
-  Timer? timeout;
-  bool timedOut = false;
-  bool cancellationRequested = false;
-}
-
-void _validateConfiguredLabel(
-  RecordValidator validator,
-  String value,
-  String setting,
-  int maxBytes,
-) {
-  try {
-    if (value.isEmpty) throw const RecordValidationException('must be nonempty');
-    validator.validateString(value, maxBytes, setting);
-  } on RecordValidationException {
-    throw ChroniclerConfigurationException(setting, 'is invalid');
-  }
-}
-
-Random _createSecureRandom(Random Function()? factory) {
-  try {
-    final random = (factory?.call() ?? Random.secure())..nextInt(256);
-    return random;
-  } on Object {
-    throw const ChroniclerConfigurationException('secureRandom', 'is unavailable');
-  }
-}
-
-ChroniclerOptions _validateAndSnapshotOptions(ChroniclerOptions options) {
-  final delivery = options.delivery;
-  final positiveIntegers = <String, int>{
-    'maxPendingRecords': delivery.maxPendingRecords,
-    'maxPendingBytes': delivery.maxPendingBytes,
-    'maxRecordBytes': delivery.maxRecordBytes,
-    'maxBatchRecords': delivery.maxBatchRecords,
-    'maxBatchBytes': delivery.maxBatchBytes,
-    'maxConcurrentExports': delivery.maxConcurrentExports,
-    'maxAttempts': delivery.maxAttempts,
-  };
-  for (final MapEntry(:key, :value) in positiveIntegers.entries) {
-    if (value <= 0) throw ChroniclerConfigurationException(key, 'must be positive');
-  }
-  final positiveDurations = <String, Duration>{
-    'batchInterval': delivery.batchInterval,
-    'attemptTimeout': delivery.attemptTimeout,
-    'initialRetryDelay': delivery.initialRetryDelay,
-    'maxRetryDelay': delivery.maxRetryDelay,
-    'flushTimeout': delivery.flushTimeout,
-    'closeTimeout': delivery.closeTimeout,
-  };
-  for (final MapEntry(:key, :value) in positiveDurations.entries) {
-    if (value <= Duration.zero) {
-      throw ChroniclerConfigurationException(key, 'must be positive');
-    }
-  }
-  if (delivery.maxRetryDelay < delivery.initialRetryDelay) {
-    throw const ChroniclerConfigurationException(
-      'maxRetryDelay',
-      'must be at least initialRetryDelay',
-    );
-  }
-  if (delivery.cleanupReserve < Duration.zero || delivery.cleanupReserve >= delivery.closeTimeout) {
-    throw const ChroniclerConfigurationException(
-      'cleanupReserve',
-      'must be nonnegative and less than closeTimeout',
-    );
-  }
-  if (delivery.maxPendingBytes < delivery.maxRecordBytes) {
-    throw const ChroniclerConfigurationException(
-      'maxPendingBytes',
-      'must fit maxRecordBytes',
-    );
-  }
-  if (delivery.maxBatchBytes < delivery.maxRecordBytes + 32) {
-    throw const ChroniclerConfigurationException(
-      'maxBatchBytes',
-      'must fit maxRecordBytes and batch framing',
-    );
-  }
-  final limits = options.limits;
-  final limitValues = <String, int>{
-    'maxIdBytes': limits.maxIdBytes,
-    'maxLabelBytes': limits.maxLabelBytes,
-    'maxMapEntries': limits.maxMapEntries,
-    'maxListItems': limits.maxListItems,
-    'maxDepth': limits.maxDepth,
-    'maxKeyBytes': limits.maxKeyBytes,
-    'maxStringBytes': limits.maxStringBytes,
-    'maxErrorMessageBytes': limits.maxErrorMessageBytes,
-    'maxStackTraceBytes': limits.maxStackTraceBytes,
-  };
-  for (final MapEntry(:key, :value) in limitValues.entries) {
-    if (value <= 0) throw ChroniclerConfigurationException(key, 'must be positive');
-  }
-  if (limits.maxCauses < 0) {
-    throw const ChroniclerConfigurationException('maxCauses', 'must be nonnegative');
-  }
-  for (final MapEntry(:key, :value) in {
-    'logs': options.sampling.logs,
-    'events': options.sampling.events,
-    'traces': options.sampling.traces,
-  }.entries) {
-    if (!value.isFinite || value < 0 || value > 1) {
-      throw ChroniclerConfigurationException(key, 'sampling rate must be between zero and one');
-    }
-  }
-  if (options.diagnostics.notificationInterval <= Duration.zero) {
-    throw const ChroniclerConfigurationException(
-      'notificationInterval',
-      'must be positive',
-    );
-  }
-  final metrics = options.metrics;
-  for (final MapEntry(:key, :value) in {
-    'maxInstruments': metrics.maxInstruments,
-    'maxSeries': metrics.maxSeries,
-    'maxSeriesPerInstrument': metrics.maxSeriesPerInstrument,
-    'maxAttributes': metrics.maxAttributes,
-    'maxHistogramBoundaries': metrics.maxHistogramBoundaries,
-  }.entries) {
-    if (value <= 0) throw ChroniclerConfigurationException(key, 'must be positive');
-  }
-  for (final MapEntry(:key, :value) in {
-    'metricInterval': metrics.interval,
-    'metricIdleTimeout': metrics.idleTimeout,
-  }.entries) {
-    if (value <= Duration.zero) {
-      throw ChroniclerConfigurationException(key, 'must be positive');
-    }
-  }
-  final terms = <String>{};
-  for (final term in options.redaction.fieldTerms) {
-    if (term.isEmpty) {
-      throw const ChroniclerConfigurationException('fieldTerms', 'must contain nonempty terms');
-    }
-    terms.add(term.toLowerCase());
-  }
-  return ChroniclerOptions(
-    delivery: delivery,
-    limits: limits,
-    sampling: options.sampling,
-    redaction: RedactionOptions(
-      fieldTerms: Set.unmodifiable(terms),
-      beforeRecord: options.redaction.beforeRecord,
-    ),
-    diagnostics: options.diagnostics,
-    metrics: options.metrics,
-    tracing: options.tracing,
-    enabledSignals: Set.unmodifiable(options.enabledSignals),
-  );
 }

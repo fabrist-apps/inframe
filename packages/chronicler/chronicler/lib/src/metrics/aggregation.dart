@@ -3,10 +3,11 @@ import 'dart:convert';
 
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/metrics.dart';
+import 'package:chronicler/src/metrics/dimensions.dart';
+import 'package:chronicler/src/metrics/instruments.dart';
+import 'package:chronicler/src/metrics/series.dart';
 import 'package:chronicler/src/models.dart';
-import 'package:chronicler/src/record_validation.dart';
 
-const _maximumPortableInteger = 9007199254740991;
 final _instrumentName = RegExp(r'^[A-Za-z][A-Za-z0-9_.\-/]{0,254}$');
 
 /// Registry of metric instruments owned by one Chronicler runtime.
@@ -42,7 +43,7 @@ final class MetricAggregation implements ChroniclerMetrics {
   final void Function(MetricRecord record) _finalize;
   final DateTime Function() _now;
   final Duration Function() _elapsed;
-  final _instruments = <String, _MetricInstrument>{};
+  final _instruments = <String, RegisteredInstrument>{};
   late DateTime _intervalStart;
   late Duration _intervalElapsed;
   Timer? _timer;
@@ -57,16 +58,17 @@ final class MetricAggregation implements ChroniclerMetrics {
     final existing = _instruments[name];
     if (existing != null) {
       _requireCompatible(existing, MetricInstrument.counter, unit);
-      return (existing as _CounterInstrument).handle;
+      return (existing as CounterInstrument).handle;
     }
     _requireInstrumentCapacity();
-    late final _CounterInstrument instrument;
-    final handle = _ChroniclerCounter(
-      (value, attributes) => _addSum(instrument, value, attributes, nonnegative: true),
+    late final CounterInstrument instrument;
+    instrument = CounterInstrument(
+      name: name,
+      unit: unit,
+      record: (value, attributes) => _addSum(instrument, value, attributes, nonnegative: true),
     );
-    instrument = _CounterInstrument(name: name, unit: unit, handle: handle);
     _instruments[name] = instrument;
-    return handle;
+    return instrument.handle;
   }
 
   /// Returns an up/down counter that records signed interval changes.
@@ -76,16 +78,17 @@ final class MetricAggregation implements ChroniclerMetrics {
     final existing = _instruments[name];
     if (existing != null) {
       _requireCompatible(existing, MetricInstrument.upDownCounter, unit);
-      return (existing as _UpDownCounterInstrument).handle;
+      return (existing as UpDownCounterInstrument).handle;
     }
     _requireInstrumentCapacity();
-    late final _UpDownCounterInstrument instrument;
-    final handle = _ChroniclerUpDownCounter(
-      (value, attributes) => _addSum(instrument, value, attributes, nonnegative: false),
+    late final UpDownCounterInstrument instrument;
+    instrument = UpDownCounterInstrument(
+      name: name,
+      unit: unit,
+      record: (value, attributes) => _addSum(instrument, value, attributes, nonnegative: false),
     );
-    instrument = _UpDownCounterInstrument(name: name, unit: unit, handle: handle);
     _instruments[name] = instrument;
-    return handle;
+    return instrument.handle;
   }
 
   /// Returns a setter gauge that records the latest interval observation.
@@ -95,16 +98,17 @@ final class MetricAggregation implements ChroniclerMetrics {
     final existing = _instruments[name];
     if (existing != null) {
       _requireCompatible(existing, MetricInstrument.gauge, unit);
-      return (existing as _GaugeInstrument).handle;
+      return (existing as GaugeInstrument).handle;
     }
     _requireInstrumentCapacity();
-    late final _GaugeInstrument instrument;
-    final handle = _ChroniclerGauge(
-      (value, attributes) => _setGauge(instrument, value, attributes),
+    late final GaugeInstrument instrument;
+    instrument = GaugeInstrument(
+      name: name,
+      unit: unit,
+      record: (value, attributes) => _setGauge(instrument, value, attributes),
     );
-    instrument = _GaugeInstrument(name: name, unit: unit, handle: handle);
     _instruments[name] = instrument;
-    return handle;
+    return instrument.handle;
   }
 
   /// Returns a histogram with explicit upper-inclusive bucket boundaries.
@@ -124,25 +128,22 @@ final class MetricAggregation implements ChroniclerMetrics {
         unit,
         boundaries: normalizedBoundaries,
       );
-      return (existing as _HistogramInstrument).handle;
+      return (existing as HistogramInstrument).handle;
     }
     _requireInstrumentCapacity();
-    late final _HistogramInstrument instrument;
-    final handle = _ChroniclerHistogram(
-      (value, attributes) => _recordHistogram(instrument, value, attributes),
-    );
-    instrument = _HistogramInstrument(
+    late final HistogramInstrument instrument;
+    instrument = HistogramInstrument(
       name: name,
       unit: unit,
       boundaries: normalizedBoundaries,
-      handle: handle,
+      record: (value, attributes) => _recordHistogram(instrument, value, attributes),
     );
     _instruments[name] = instrument;
-    return handle;
+    return instrument.handle;
   }
 
   void _requireCompatible(
-    _MetricInstrument existing,
+    RegisteredInstrument existing,
     MetricInstrument instrument,
     String unit, {
     List<double>? boundaries,
@@ -157,8 +158,8 @@ final class MetricAggregation implements ChroniclerMetrics {
     }
   }
 
-  bool _sameBoundaries(_MetricInstrument existing, List<double>? boundaries) {
-    if (existing is! _HistogramInstrument) return boundaries == null;
+  bool _sameBoundaries(RegisteredInstrument existing, List<double>? boundaries) {
+    if (existing is! HistogramInstrument) return boundaries == null;
     if (boundaries == null || existing.boundaries.length != boundaries.length) return false;
     for (var index = 0; index < boundaries.length; index++) {
       if (existing.boundaries[index] != boundaries[index]) return false;
@@ -216,7 +217,7 @@ final class MetricAggregation implements ChroniclerMetrics {
   }
 
   void _addSum(
-    _SumInstrument instrument,
+    SumInstrument instrument,
     num input,
     Map<String, Object?> attributes, {
     required bool nonnegative,
@@ -229,27 +230,22 @@ final class MetricAggregation implements ChroniclerMetrics {
     }
     late final Map<String, Object?> dimensions;
     try {
-      dimensions = _redact(_snapshotDimensions(attributes));
+      dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
     } on Object {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    final series = _series(instrument, dimensions, _SumSeries.new);
+    final series = _series(instrument, dimensions, SumSeries.new);
     if (series == null) return;
-    final nextCount = series.count + 1;
-    final nextSum = series.sum + value;
-    if (nextCount > _maximumPortableInteger || !nextSum.isFinite) {
+    if (!series.add(value)) {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    series
-      ..count = nextCount
-      ..sum = nextSum == 0 ? 0 : nextSum
-      ..lastAccepted = _elapsed();
+    series.lastAccepted = _elapsed();
   }
 
   void _setGauge(
-    _GaugeInstrument instrument,
+    GaugeInstrument instrument,
     num input,
     Map<String, Object?> attributes,
   ) {
@@ -261,27 +257,22 @@ final class MetricAggregation implements ChroniclerMetrics {
     }
     late final Map<String, Object?> dimensions;
     try {
-      dimensions = _redact(_snapshotDimensions(attributes));
+      dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
     } on Object {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    final series = _series(instrument, dimensions, _GaugeSeries.new);
+    final series = _series(instrument, dimensions, GaugeSeries.new);
     if (series == null) return;
-    final nextCount = series.count + 1;
-    if (nextCount > _maximumPortableInteger) {
+    if (!series.set(value, _now)) {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    series
-      ..count = nextCount
-      ..value = value == 0 ? 0 : value
-      ..observedAt = _now()
-      ..lastAccepted = _elapsed();
+    series.lastAccepted = _elapsed();
   }
 
   void _recordHistogram(
-    _HistogramInstrument instrument,
+    HistogramInstrument instrument,
     num input,
     Map<String, Object?> attributes,
   ) {
@@ -293,7 +284,7 @@ final class MetricAggregation implements ChroniclerMetrics {
     }
     late final Map<String, Object?> dimensions;
     try {
-      dimensions = _redact(_snapshotDimensions(attributes));
+      dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
     } on Object {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
@@ -301,35 +292,22 @@ final class MetricAggregation implements ChroniclerMetrics {
     final series = _series(
       instrument,
       dimensions,
-      (attributes) => _HistogramSeries(attributes, instrument.boundaries.length + 1),
+      (attributes) => HistogramSeries(attributes, instrument.boundaries.length + 1),
     );
     if (series == null) return;
-    var bucket = instrument.boundaries.indexWhere((boundary) => value <= boundary);
-    if (bucket < 0) bucket = instrument.boundaries.length;
-    final nextCount = series.count + 1;
-    final nextBucketCount = series.bucketCounts[bucket] + 1;
-    final nextSum = series.sum + value;
-    if (nextCount > _maximumPortableInteger ||
-        nextBucketCount > _maximumPortableInteger ||
-        !nextSum.isFinite) {
+    if (!series.record(value, instrument.boundaries)) {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    series
-      ..count = nextCount
-      ..sum = nextSum == 0 ? 0 : nextSum
-      ..min = series.min == null || value < series.min! ? value : series.min
-      ..max = series.max == null || value > series.max! ? value : series.max
-      ..lastAccepted = _elapsed();
-    series.bucketCounts[bucket] = nextBucketCount;
+    series.lastAccepted = _elapsed();
   }
 
-  T? _series<T extends _MetricSeries>(
-    _MetricInstrument instrument,
+  T? _series<T extends MetricSeries>(
+    RegisteredInstrument instrument,
     Map<String, Object?> dimensions,
     T Function(Map<String, Object?> attributes) create,
   ) {
-    final key = _seriesKey(dimensions);
+    final key = metricSeriesKey(dimensions);
     final existing = instrument.series[key];
     if (existing != null) return existing as T;
     _evictExpired(_now(), _elapsed(), finalizePending: true);
@@ -342,24 +320,6 @@ final class MetricAggregation implements ChroniclerMetrics {
     instrument.series[key] = series;
     _seriesCount++;
     return series;
-  }
-
-  Map<String, Object?> _snapshotDimensions(Map<String, Object?> attributes) {
-    final snapshot = RecordValidator(
-      _limits,
-    ).snapshotMetricAttributes(attributes, maxAttributes: _options.maxAttributes);
-    final names = snapshot.keys.toList()..sort();
-    final result = <String, Object?>{};
-    for (final name in names) {
-      final value = snapshot[name];
-      result[name] = switch (value) {
-        String() => value,
-        bool() => value,
-        num() => value.toDouble() == 0 ? 0.0 : value.toDouble(),
-        _ => throw StateError('validated metric dimension has an unsupported type'),
-      };
-    }
-    return Map.unmodifiable(result);
   }
 
   void _scheduleInterval() {
@@ -482,9 +442,9 @@ final class MetricAggregation implements ChroniclerMetrics {
     required double sum,
   }) {
     final instrument = _instruments[name];
-    final dimensions = _redact(_snapshotDimensions(attributes));
-    final series = instrument?.series[_seriesKey(dimensions)];
-    if (series is! _SumSeries) throw StateError('counter series does not exist');
+    final dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
+    final series = instrument?.series[metricSeriesKey(dimensions)];
+    if (series is! SumSeries) throw StateError('counter series does not exist');
     series
       ..count = count
       ..sum = sum;
@@ -497,8 +457,8 @@ final class MetricAggregation implements ChroniclerMetrics {
     required int count,
   }) {
     final instrument = _instruments[name];
-    final dimensions = _redact(_snapshotDimensions(attributes));
-    final series = instrument?.series[_seriesKey(dimensions)];
+    final dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
+    final series = instrument?.series[metricSeriesKey(dimensions)];
     if (series == null) throw StateError('metric series does not exist');
     series.count = count;
   }
@@ -514,9 +474,9 @@ final class MetricAggregation implements ChroniclerMetrics {
     required double max,
   }) {
     final instrument = _instruments[name];
-    final dimensions = _redact(_snapshotDimensions(attributes));
-    final series = instrument?.series[_seriesKey(dimensions)];
-    if (series is! _HistogramSeries) throw StateError('histogram series does not exist');
+    final dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
+    final series = instrument?.series[metricSeriesKey(dimensions)];
+    if (series is! HistogramSeries) throw StateError('histogram series does not exist');
     series
       ..count = count
       ..sum = sum
@@ -525,270 +485,3 @@ final class MetricAggregation implements ChroniclerMetrics {
     series.bucketCounts.setAll(0, bucketCounts);
   }
 }
-
-/// Records nonnegative changes into bounded interval aggregates.
-final class _ChroniclerCounter implements ChroniclerCounter {
-  _ChroniclerCounter(this._add);
-
-  final void Function(num value, Map<String, Object?> attributes) _add;
-
-  /// Adds [value] to the current interval for [attributes].
-  ///
-  /// Dimensions are validated and redacted before selecting a series, so
-  /// sensitive values replaced by the same marker intentionally share state.
-  /// Values use finite double precision and may approximate large integers.
-  @override
-  void add(
-    num value, {
-    Map<String, Object?> attributes = const {},
-  }) => _add(value, attributes);
-}
-
-/// Records signed changes into bounded interval aggregates.
-final class _ChroniclerUpDownCounter implements ChroniclerUpDownCounter {
-  _ChroniclerUpDownCounter(this._add);
-
-  final void Function(num value, Map<String, Object?> attributes) _add;
-
-  /// Adds [value] to the current interval for [attributes].
-  ///
-  /// The exported sum is the signed net change during the interval. Use a
-  /// gauge for an absolute current value.
-  @override
-  void add(
-    num value, {
-    Map<String, Object?> attributes = const {},
-  }) => _add(value, attributes);
-}
-
-/// Records the latest current value observed during each interval.
-final class _ChroniclerGauge implements ChroniclerGauge {
-  _ChroniclerGauge(this._set);
-
-  final void Function(num value, Map<String, Object?> attributes) _set;
-
-  /// Sets the latest [value] for [attributes] in the current interval.
-  ///
-  /// Call this method again in every interval that should emit a value.
-  @override
-  void set(
-    num value, {
-    Map<String, Object?> attributes = const {},
-  }) => _set(value, attributes);
-}
-
-/// Records distributions using explicit upper-inclusive bucket boundaries.
-final class _ChroniclerHistogram implements ChroniclerHistogram {
-  _ChroniclerHistogram(this._record);
-
-  final void Function(num value, Map<String, Object?> attributes) _record;
-
-  /// Records [value] in the current interval for [attributes].
-  @override
-  void record(
-    num value, {
-    Map<String, Object?> attributes = const {},
-  }) => _record(value, attributes);
-}
-
-sealed class _MetricInstrument {
-  _MetricInstrument({required this.name, required this.unit});
-
-  final String name;
-  final String unit;
-  final series = <String, _MetricSeries>{};
-
-  MetricInstrument get instrument;
-
-  MetricPayload payload(
-    _MetricSeries series, {
-    required DateTime intervalStart,
-    required DateTime intervalEnd,
-    required int durationMicros,
-  });
-}
-
-sealed class _SumInstrument extends _MetricInstrument {
-  _SumInstrument({required super.name, required super.unit});
-
-  @override
-  MetricPayload payload(
-    _MetricSeries series, {
-    required DateTime intervalStart,
-    required DateTime intervalEnd,
-    required int durationMicros,
-  }) {
-    final sum = series as _SumSeries;
-    return MetricPayload(
-      name: name,
-      instrument: instrument,
-      unit: unit,
-      attributes: sum.attributes,
-      intervalStart: intervalStart,
-      intervalEnd: intervalEnd,
-      durationMicros: durationMicros,
-      observationCount: sum.count,
-      temporality: MetricTemporality.delta,
-      sum: sum.sum,
-    );
-  }
-}
-
-final class _CounterInstrument extends _SumInstrument {
-  _CounterInstrument({required super.name, required super.unit, required this.handle});
-
-  final ChroniclerCounter handle;
-
-  @override
-  MetricInstrument get instrument => MetricInstrument.counter;
-}
-
-final class _UpDownCounterInstrument extends _SumInstrument {
-  _UpDownCounterInstrument({required super.name, required super.unit, required this.handle});
-
-  final ChroniclerUpDownCounter handle;
-
-  @override
-  MetricInstrument get instrument => MetricInstrument.upDownCounter;
-}
-
-final class _GaugeInstrument extends _MetricInstrument {
-  _GaugeInstrument({required super.name, required super.unit, required this.handle});
-
-  final ChroniclerGauge handle;
-
-  @override
-  MetricInstrument get instrument => MetricInstrument.gauge;
-
-  @override
-  MetricPayload payload(
-    _MetricSeries series, {
-    required DateTime intervalStart,
-    required DateTime intervalEnd,
-    required int durationMicros,
-  }) {
-    final gauge = series as _GaugeSeries;
-    return MetricPayload(
-      name: name,
-      instrument: instrument,
-      unit: unit,
-      attributes: gauge.attributes,
-      intervalStart: intervalStart,
-      intervalEnd: intervalEnd,
-      durationMicros: durationMicros,
-      observationCount: gauge.count,
-      value: gauge.value,
-      observedAt: gauge.observedAt,
-    );
-  }
-}
-
-final class _HistogramInstrument extends _MetricInstrument {
-  _HistogramInstrument({
-    required super.name,
-    required super.unit,
-    required this.boundaries,
-    required this.handle,
-  });
-
-  final List<double> boundaries;
-  final ChroniclerHistogram handle;
-
-  @override
-  MetricInstrument get instrument => MetricInstrument.histogram;
-
-  @override
-  MetricPayload payload(
-    _MetricSeries series, {
-    required DateTime intervalStart,
-    required DateTime intervalEnd,
-    required int durationMicros,
-  }) {
-    final histogram = series as _HistogramSeries;
-    return MetricPayload(
-      name: name,
-      instrument: instrument,
-      unit: unit,
-      attributes: histogram.attributes,
-      intervalStart: intervalStart,
-      intervalEnd: intervalEnd,
-      durationMicros: durationMicros,
-      observationCount: histogram.count,
-      temporality: MetricTemporality.delta,
-      boundaries: boundaries,
-      bucketCounts: histogram.bucketCounts,
-      count: histogram.count,
-      sum: histogram.sum,
-      min: histogram.min,
-      max: histogram.max,
-    );
-  }
-}
-
-sealed class _MetricSeries {
-  _MetricSeries(this.attributes);
-
-  final Map<String, Object?> attributes;
-  int count = 0;
-  Duration lastAccepted = Duration.zero;
-
-  void reset();
-}
-
-final class _SumSeries extends _MetricSeries {
-  _SumSeries(super.attributes);
-
-  double sum = 0;
-
-  @override
-  void reset() {
-    count = 0;
-    sum = 0;
-  }
-}
-
-final class _GaugeSeries extends _MetricSeries {
-  _GaugeSeries(super.attributes);
-
-  double value = 0;
-  DateTime? observedAt;
-
-  @override
-  void reset() {
-    count = 0;
-    value = 0;
-    observedAt = null;
-  }
-}
-
-final class _HistogramSeries extends _MetricSeries {
-  _HistogramSeries(super.attributes, int bucketCount) : bucketCounts = List.filled(bucketCount, 0);
-
-  final List<int> bucketCounts;
-  double sum = 0;
-  double? min;
-  double? max;
-
-  @override
-  void reset() {
-    count = 0;
-    sum = 0;
-    min = null;
-    max = null;
-    bucketCounts.fillRange(0, bucketCounts.length, 0);
-  }
-}
-
-String _seriesKey(Map<String, Object?> attributes) => jsonEncode([
-  for (final MapEntry(:key, :value) in attributes.entries)
-    [
-      key,
-      switch (value) {
-        String() => 'string',
-        bool() => 'boolean',
-        double() => 'number',
-        _ => throw StateError('metric dimension was not canonicalized'),
-      },
-      value,
-    ],
-]);
