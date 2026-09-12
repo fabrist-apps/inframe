@@ -318,7 +318,7 @@ final class ChroniclerRuntime {
   Duration Function()? _elapsedOverride;
   late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
   late bool _propagationEnabled = options.tracing.propagationEnabled;
-  late final Random _random = Random();
+  Random _random = Random();
   var _insideHook = false;
   var _pendingBytes = 0;
   var _nextSequence = 0;
@@ -465,6 +465,8 @@ final class ChroniclerRuntime {
       diagnostics.record(DiagnosticReason.invalidRecord);
     }
     final collectionEnabled = _enabledSignals.contains(ChroniclerSignal.traces);
+    final sampled = activeParent?.sampled ?? collectionEnabled && _selectLocalTraceSampling();
+    final lineageRecording = activeParent?.lineageRecording ?? (collectionEnabled && sampled);
     final state = _SpanState(
       eventId: ChronoID.generate(prefix: 'evt'),
       traceId: traceId,
@@ -475,8 +477,9 @@ final class ChroniclerRuntime {
       attributes: _redactMap(snapshot),
       startedAt: _elapsedNow,
       timestamp: _now,
-      recordPayload: payloadValid && collectionEnabled,
-      lineageRecording: collectionEnabled,
+      recordPayload: payloadValid && lineageRecording,
+      lineageRecording: lineageRecording,
+      sampled: sampled,
       attribution: recorder._attribution,
     );
     return _StartedSpan(
@@ -605,6 +608,13 @@ final class ChroniclerRuntime {
   String _traceId() => _randomHex(16);
 
   String _spanId() => _randomHex(8);
+
+  bool _selectLocalTraceSampling() {
+    final rate = options.sampling.traces;
+    final sampled = rate == 1 || rate > 0 && _random.nextDouble() < rate;
+    if (!sampled) diagnostics.record(DiagnosticReason.sampledOut);
+    return sampled;
+  }
 
   String _randomHex(int byteCount) {
     while (true) {
@@ -1649,6 +1659,11 @@ final class ChroniclerTracingFixture {
   static void overrideSecureRandom(Chronicler chronicler, Random random) {
     chronicler._runtime._secureRandom = random;
   }
+
+  /// Replaces the root sampling source for whole-trace tests.
+  static void overrideSamplingRandom(Chronicler chronicler, Random random) {
+    chronicler._runtime._random = random;
+  }
 }
 
 final class _StartedSpan {
@@ -1671,6 +1686,7 @@ final class _SpanState {
     required this.timestamp,
     required this.recordPayload,
     required this.lineageRecording,
+    required this.sampled,
     required this.attribution,
   });
 
@@ -1685,6 +1701,7 @@ final class _SpanState {
   final DateTime timestamp;
   final bool recordPayload;
   final bool lineageRecording;
+  final bool sampled;
   final _RecorderAttribution attribution;
   bool ended = false;
   bool explicitError = false;

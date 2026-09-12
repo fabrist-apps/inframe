@@ -429,6 +429,78 @@ void main() {
       expect(chronicler.diagnosticCounts[DiagnosticReason.noActiveSpan], BigInt.two);
       expect(chronicler.diagnosticCounts[DiagnosticReason.invalidSpanUpdate], BigInt.two);
     });
+
+    test('should keep correlation and callbacks for an unsampled trace', () async {
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          delivery: DeliveryOptions(maxBatchRecords: 2),
+          sampling: SamplingOptions(traces: 0),
+        ),
+      );
+      var calls = 0;
+
+      final value = await Context()
+          .withChronicler(chronicler.recorder)
+          .span(
+            'unsampled root',
+            run: (root) => root.span(
+              'unsampled child',
+              run: (child) {
+                calls++;
+                child.logs.info('still captured');
+                child.events.track('still captured');
+                return 7;
+              },
+            ),
+          );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(value, 7);
+      expect(calls, 1);
+      final records = exporter.batches.single.records;
+      final log = records.whereType<LogRecord>().single;
+      final event = records.whereType<ProductEventRecord>().single;
+      expect(log.envelope.traceId, matches(RegExp(r'^[0-9a-f]{32}$')));
+      expect(log.envelope.spanId, matches(RegExp(r'^[0-9a-f]{16}$')));
+      expect(event.envelope.traceId, log.envelope.traceId);
+      expect(event.envelope.spanId, log.envelope.spanId);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.sampledOut], BigInt.one);
+    });
+
+    test('should choose sampling once per root and inherit it in children', () async {
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          delivery: DeliveryOptions(maxBatchRecords: 2),
+          sampling: SamplingOptions(traces: 0.5),
+        ),
+      );
+      final random = _SequenceRandom([0.25, 0.75]);
+      ChroniclerTracingFixture.overrideSamplingRandom(chronicler, random);
+      final context = Context().withChronicler(chronicler.recorder);
+
+      await context.span('sampled root', run: (root) => root.span('sampled child', run: (_) {}));
+      await context.trace('excluded root', run: (_) {});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(random.nextDoubleCalls, 2);
+      final spans = exporter.batches.single.records.cast<SpanRecord>().toList();
+      expect(
+        spans.map((span) => span.payload.name),
+        containsAll(['sampled root', 'sampled child']),
+      );
+      expect(spans.map((span) => span.payload.name), isNot(contains('excluded root')));
+      expect(chronicler.diagnosticCounts[DiagnosticReason.sampledOut], BigInt.one);
+    });
   });
 }
 
@@ -451,4 +523,20 @@ final class _ThrowingRandom implements Random {
 
   @override
   int nextInt(int max) => throw UnsupportedError('unavailable');
+}
+
+final class _SequenceRandom implements Random {
+  _SequenceRandom(this._values);
+
+  final List<double> _values;
+  int nextDoubleCalls = 0;
+
+  @override
+  bool nextBool() => nextDouble() < 0.5;
+
+  @override
+  double nextDouble() => _values[nextDoubleCalls++];
+
+  @override
+  int nextInt(int max) => (nextDouble() * max).floor();
 }
