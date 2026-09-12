@@ -1,7 +1,7 @@
 import 'json/json_value.dart';
 
 /// A typed failure expected while preparing or executing an AI operation.
-sealed class AiError {
+sealed class AiError implements Exception {
   const AiError(this.message);
 
   final String message;
@@ -56,10 +56,12 @@ final class TransportError extends AiError {
   const TransportError(
     super.message, {
     required this.deliveryState,
+    this.partialOutput,
     this.remoteResourceId,
   });
 
   final RequestDeliveryState deliveryState;
+  final Object? partialOutput;
   final String? remoteResourceId;
 }
 

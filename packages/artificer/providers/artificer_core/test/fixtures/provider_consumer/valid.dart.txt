@@ -1,5 +1,6 @@
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
+import 'package:artificer_core/protocols.dart';
 import 'package:conflux/conflux.dart';
 
 Future<void> main() async {
@@ -26,7 +27,7 @@ Future<void> main() async {
   if (result.text != 'hello' || overridden.text != 'typed:hello') {
     throw StateError('Unexpected generation result.');
   }
-  if (events.single is! GenerationFinished) {
+  if (events.first is! GenerationStarted || events.last is! GenerationFinished) {
     throw StateError('Unexpected stream result.');
   }
 
@@ -132,7 +133,28 @@ final class FixtureModel implements LanguageModel {
   Flow<GenerationEvent, AiError> stream(
     GenerationRequest request, {
     FixtureOptions? options,
-  }) => Flow.defer(() => generate(request, options: options).asFlow().map(GenerationFinished.new));
+  }) => Flow.defer(() {
+    final text = (request.messages.single as UserMessage).parts.single as TextInputPart;
+    final prefix = options?.prefix;
+    final output = prefix == null ? text.text : '$prefix:${text.text}';
+    final assembler = GenerationStreamAssembler(
+      providerId: providerId,
+      api: 'fixture',
+      modelId: modelId,
+    );
+    final metadata = ResponseMetadata(statusCode: 200);
+    final events = <GenerationEvent>[
+      assembler.start(metadata),
+      assembler.startPart(index: 0, kind: GenerationPartKind.text),
+      assembler.appendText(0, output),
+      assembler.finishPart(0, TextOutputPart(output)),
+      assembler.finish(
+        finishReason: FinishReason.stop,
+        nativeResponse: JsonObject({'text': output}),
+      ),
+    ];
+    return Flow.fromIterable(events).widenError<AiError>();
+  });
 
   GenerationResult _result(String text) {
     final payload = NativePayload(

@@ -42,3 +42,13 @@ close completes. If a remote resource ID is already known, upload failures retai
 The core client does not retry uploads or delete remote files, so executing an upload again may create
 another remote file. Generation media accepts explicit bytes or URLs; it never reads an upload source
 or filesystem path implicitly.
+
+`ProviderHttpClient.sendSse` is cold: every `Flow` consumption sends one request and creates new UTF-8,
+SSE, protocol, and aggregation state. The decoded-event capacity defaults to 16 with lossless upstream
+backpressure. Individual SSE events default to an 8 MiB limit, while streamed and assembled native
+responses default to 64 MiB. Provider protocols use `GenerationStreamAssembler` to issue stable local
+part IDs, cumulative usage snapshots, immutable partial messages, and one final result after recognized
+terminal semantics and transport cleanup. Unknown native events can be emitted as `ProviderEvent` and
+stored selectively in replay data. Premature EOF and partial service failures end the `Flow` with an
+`AiError`; early `take`, `runFirst`, subscription cancellation, and parent interruption close the owned
+response body without closing a shared client.

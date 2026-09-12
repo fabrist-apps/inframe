@@ -344,6 +344,109 @@ sealed class GenerationEvent {
   const GenerationEvent();
 }
 
+/// The kind of output represented by a streaming part.
+enum GenerationPartKind { text, reasoning, refusal, applicationToolCall, providerTool, opaque }
+
+/// The component responsible for acting on a streaming part.
+enum GenerationPartOwner { application, provider }
+
+/// The first event in one generation consumption.
+final class GenerationStarted extends GenerationEvent {
+  const GenerationStarted({this.responseId, required this.metadata});
+
+  final String? responseId;
+  final ResponseMetadata metadata;
+}
+
+/// Declares the stable local identity of one output part.
+final class PartStarted extends GenerationEvent {
+  const PartStarted({
+    required this.partId,
+    required this.index,
+    required this.kind,
+    required this.owner,
+  });
+
+  final String partId;
+  final int index;
+  final GenerationPartKind kind;
+  final GenerationPartOwner owner;
+}
+
+/// An incremental update for one previously started part.
+sealed class PartDelta extends GenerationEvent {
+  const PartDelta({required this.partId, required this.index});
+
+  final String partId;
+  final int index;
+}
+
+/// Incremental visible text.
+final class TextPartDelta extends PartDelta {
+  const TextPartDelta({required super.partId, required super.index, required this.text});
+
+  final String text;
+}
+
+/// Incremental provider-supplied reasoning summary.
+final class ReasoningPartDelta extends PartDelta {
+  const ReasoningPartDelta({required super.partId, required super.index, required this.text});
+
+  final String text;
+}
+
+/// Incremental provider-supplied refusal text.
+final class RefusalPartDelta extends PartDelta {
+  const RefusalPartDelta({required super.partId, required super.index, required this.text});
+
+  final String text;
+}
+
+/// Incremental application-tool arguments in their native text form.
+final class ToolArgumentsPartDelta extends PartDelta {
+  const ToolArgumentsPartDelta({required super.partId, required super.index, required this.text});
+
+  final String text;
+}
+
+/// Incremental native data that has no common representation.
+final class OpaquePartDelta extends PartDelta {
+  const OpaquePartDelta({required super.partId, required super.index, required this.data});
+
+  final JsonObject data;
+}
+
+/// Completes one part without changing its local stream identity.
+final class PartFinished extends GenerationEvent {
+  const PartFinished({required this.partId, required this.index, required this.part});
+
+  final String partId;
+  final int index;
+  final OutputPart part;
+}
+
+/// A cumulative usage snapshot from the provider.
+final class UsageUpdated extends GenerationEvent {
+  const UsageUpdated(this.usage);
+
+  final Usage usage;
+}
+
+/// A native event retained because the common protocol does not interpret it.
+final class ProviderEvent extends GenerationEvent {
+  ProviderEvent({
+    required this.providerId,
+    required this.api,
+    required String name,
+    required this.data,
+  }) : name = _nonEmpty(name, 'name');
+
+  final String providerId;
+  final String api;
+  final String name;
+  final JsonObject data;
+}
+
 /// The successful terminal event for a generation stream.
 final class GenerationFinished extends GenerationEvent {
   const GenerationFinished(this.result);

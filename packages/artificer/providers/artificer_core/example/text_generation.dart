@@ -1,5 +1,6 @@
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
+import 'package:artificer_core/protocols.dart';
 import 'package:conflux/conflux.dart';
 
 Future<void> main() async {
@@ -46,6 +47,23 @@ final class EchoModel implements LanguageModel {
   }
 
   @override
-  Flow<GenerationEvent, AiError> stream(GenerationRequest request) =>
-      generate(request).asFlow().map(GenerationFinished.new);
+  Flow<GenerationEvent, AiError> stream(GenerationRequest request) => Flow.defer(() {
+    final input = (request.messages.single as UserMessage).parts.single as TextInputPart;
+    final assembler = GenerationStreamAssembler(
+      providerId: providerId,
+      api: 'echo',
+      modelId: modelId,
+    );
+    final events = <GenerationEvent>[
+      assembler.start(ResponseMetadata(statusCode: 200)),
+      assembler.startPart(index: 0, kind: GenerationPartKind.text),
+      assembler.appendText(0, input.text),
+      assembler.finishPart(0, TextOutputPart(input.text)),
+      assembler.finish(
+        finishReason: FinishReason.stop,
+        nativeResponse: JsonObject({'text': input.text}),
+      ),
+    ];
+    return Flow.fromIterable(events).widenError<AiError>();
+  });
 }

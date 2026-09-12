@@ -9,7 +9,10 @@ import 'package:http/io_client.dart';
 import '../errors.dart';
 import '../json/json_value.dart';
 import '../native.dart';
+import '../protocols/sse.dart';
 import 'upload_source.dart';
+
+part 'sse_transport.dart';
 
 /// One immutable HTTP request issued by a provider operation.
 final class ProviderHttpRequest {
@@ -110,6 +113,72 @@ final class ProviderHttpClient {
         modelId: modelId,
       ),
     );
+  }
+
+  /// Sends one cold SSE request through a fresh protocol decoder per consumption.
+  Flow<A, AiError> sendSse<A>(
+    ProviderHttpRequest request, {
+    required SseProtocol<A> Function() createProtocol,
+    int decodedEventCapacity = 16,
+    int maxEventBytes = 8 * 1024 * 1024,
+    int? maxStreamBytes,
+  }) {
+    if (decodedEventCapacity <= 0) {
+      throw ArgumentError.value(
+        decodedEventCapacity,
+        'decodedEventCapacity',
+        'must be positive',
+      );
+    }
+    if (maxEventBytes <= 0) {
+      throw ArgumentError.value(maxEventBytes, 'maxEventBytes', 'must be positive');
+    }
+    final responseLimit = maxStreamBytes ?? maxResponseBytes;
+    if (responseLimit <= 0) {
+      throw ArgumentError.value(responseLimit, 'maxStreamBytes', 'must be positive');
+    }
+    return Flow.fromStream<A, AiError>(
+      () => _openSseStream(
+        request,
+        protocol: createProtocol(),
+        maxEventBytes: maxEventBytes,
+        maxStreamBytes: responseLimit,
+      ),
+      onError: (error, _) => error is AiError
+          ? error
+          : TransportError(
+              _safeForeignMessage(error),
+              deliveryState: RequestDeliveryState.responseStarted,
+            ),
+      capacity: decodedEventCapacity,
+    );
+  }
+
+  Stream<A> _openSseStream<A>(
+    ProviderHttpRequest request, {
+    required SseProtocol<A> protocol,
+    required int maxEventBytes,
+    required int maxStreamBytes,
+  }) {
+    if (_state != _ClientState.open) {
+      return Stream<A>.error(const ClientClosedError());
+    }
+    final lifetime = _RequestLifetime();
+    _active.add(lifetime);
+    return _SsePump<A>(
+      client: _client,
+      url: baseUrl.resolve(request.path),
+      request: request,
+      headers: headers,
+      lifetime: lifetime,
+      protocol: protocol,
+      maxEventBytes: maxEventBytes,
+      maxStreamBytes: maxStreamBytes,
+      release: () {
+        _active.remove(lifetime);
+        lifetime.complete();
+      },
+    ).stream;
   }
 
   Effect<A, AiError> _execute<A>(
