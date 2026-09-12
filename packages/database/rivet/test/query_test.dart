@@ -136,13 +136,30 @@ void main() {
     test('should compare a relation aggregate with a root column', () async {
       await RelationalUsers.db
           .find(
-            where: (user) => user.authoredPosts.count().lessThanExpression(user.id),
+            where: (user) => (user.authoredPosts.count() + 1).lessThanExpression(user.id),
           )
           .get(executor);
 
-      expect(executor.queries.single.parameters, isEmpty);
+      expect(executor.queries.single.parameters, [1]);
       expect(executor.queries.single.sql, contains('SELECT count(*)'));
       expect(executor.queries.single.sql, contains('< "__rivet_t0"."id"'));
+    });
+
+    test('should encode aggregate arithmetic through the aggregate codec', () {
+      final users = UserProfiles.db.buildSchema().definition;
+
+      expect(() => users.posts.count() + 1, returnsNormally);
+    });
+
+    test('should clear relational aliases before reusing a base find', () async {
+      final find = RelationalUsers.db.find(where: (user) => user.id.equals(1));
+
+      await find.withScore((user) => user.authoredPosts.max((post) => post.weight)).get(executor);
+      await find.get(executor);
+
+      expect(executor.queries, hasLength(2));
+      expect(executor.queries.first.sql, contains('AS "__rivet_t0"'));
+      expect(executor.queries.last.sql, isNot(contains('__rivet_t0')));
     });
 
     test('should load one relation and preserve missing and duplicate cardinality', () async {

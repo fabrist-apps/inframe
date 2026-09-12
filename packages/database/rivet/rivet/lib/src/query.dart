@@ -215,41 +215,45 @@ final class RivetFind<Definition, Row> {
     String nextAlias() => '__rivet_t${aliasIndex++}';
     final rootAlias = nextAlias();
     _schema.qualify(rootAlias);
-    final parameters = <Object?>[];
-    final selections = <String>[
-      for (final column in _schema.columns) column.selectionSql,
-      for (var index = 0; index < _includes.length; index++)
-        '${_compileInclude(_includes[index], _schema, parameters, nextAlias)} AS "__rivet_r$index"',
-    ];
-    if (score != null) {
-      final rendered = _renderExpression(score, parameters, nextAlias: nextAlias);
-      selections.add('${score.codec.select(rendered)} AS "__rivet_score"');
-    }
-    final sql = StringBuffer(
-      'SELECT ${selections.join(', ')} FROM ${_schema.qualifiedName} AS ${quoteIdentifier(rootAlias)}',
-    );
-    if (_predicate case final predicate?) {
-      final rendered = predicate.renderParameters(
-        startAt: parameters.length + 1,
-        nextAlias: nextAlias,
+    try {
+      final parameters = <Object?>[];
+      final selections = <String>[
+        for (final column in _schema.columns) column.selectionSql,
+        for (var index = 0; index < _includes.length; index++)
+          '${_compileInclude(_includes[index], _schema, parameters, nextAlias)} AS "__rivet_r$index"',
+      ];
+      if (score != null) {
+        final rendered = _renderExpression(score, parameters, nextAlias: nextAlias);
+        selections.add('${score.codec.select(rendered)} AS "__rivet_score"');
+      }
+      final sql = StringBuffer(
+        'SELECT ${selections.join(', ')} FROM ${_schema.qualifiedName} AS ${quoteIdentifier(rootAlias)}',
       );
-      sql.write(' WHERE $rendered');
-      parameters.addAll(predicate.parameters);
+      if (_predicate case final predicate?) {
+        final rendered = predicate.renderParameters(
+          startAt: parameters.length + 1,
+          nextAlias: nextAlias,
+        );
+        sql.write(' WHERE $rendered');
+        parameters.addAll(predicate.parameters);
+      }
+      if (_orders.isNotEmpty) {
+        sql.write(
+          ' ORDER BY ${_renderOrders(_orders, parameters, nextAlias: nextAlias)}',
+        );
+      }
+      final effectiveLimit = switch ((_limit, terminalLimit)) {
+        (final int requested, final int terminal) => requested < terminal ? requested : terminal,
+        (final int requested, null) => requested,
+        (null, final int terminal) => terminal,
+        _ => null,
+      };
+      if (effectiveLimit != null) sql.write(' LIMIT $effectiveLimit');
+      if (_offset != null) sql.write(' OFFSET $_offset');
+      return RivetCompiledQuery(sql.toString(), parameters);
+    } finally {
+      _schema.unqualify();
     }
-    if (_orders.isNotEmpty) {
-      sql.write(
-        ' ORDER BY ${_renderOrders(_orders, parameters, nextAlias: nextAlias)}',
-      );
-    }
-    final effectiveLimit = switch ((_limit, terminalLimit)) {
-      (final int requested, final int terminal) => requested < terminal ? requested : terminal,
-      (final int requested, null) => requested,
-      (null, final int terminal) => terminal,
-      _ => null,
-    };
-    if (effectiveLimit != null) sql.write(' LIMIT $effectiveLimit');
-    if (_offset != null) sql.write(' OFFSET $_offset');
-    return RivetCompiledQuery(sql.toString(), parameters);
   }
 }
 

@@ -487,11 +487,11 @@ void main() {
 
         final fewerPostsThanId = await RelationalUsers.db
             .find(
-              where: (user) => user.authoredPosts.count().lessThanExpression(user.id),
+              where: (user) => (user.authoredPosts.count() + 1).lessThanExpression(user.id),
               orderBy: (user) => [user.id.asc()],
             )
             .get(database);
-        expect(fewerPostsThanId.map((user) => user.name), ['Grace', 'Linus']);
+        expect(fewerPostsThanId.map((user) => user.name), ['Linus']);
         expect(ordered.every((user) => !user.authoredPosts.isLoaded), isTrue);
         expect(statements, hasLength(5));
       },

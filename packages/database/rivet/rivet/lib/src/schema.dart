@@ -116,6 +116,12 @@ final class RivetTableSchema<Definition, Row> {
     }
   }
 
+  void unqualify() {
+    for (final column in columns) {
+      column.qualifier = null;
+    }
+  }
+
   Definition scopedDefinition(String qualifier) {
     final buildDefinition = createDefinition;
     final selectColumns = columnsFor;
@@ -1275,9 +1281,8 @@ final class _RivetBoundExpression<T> implements RivetExpression<T> {
       renderPlaceholders((index) => '\$${startAt + index}');
 }
 
-final class _RivetBinaryExpression<T> implements RivetExpression<T> {
-  _RivetBinaryExpression(this.left, this.operator, T right)
-    : _right = left.columns.first.encodeValue(right);
+final class _RivetBinaryExpression<T> implements RivetAliasedExpression<T> {
+  _RivetBinaryExpression(this.left, this.operator, T right) : _right = left.codec.encode(right);
 
   final RivetExpression<T> left;
   final String operator;
@@ -1296,6 +1301,9 @@ final class _RivetBinaryExpression<T> implements RivetExpression<T> {
   bool get referencesRows => left.referencesRows;
 
   @override
+  bool get usesRelations => _usesRelationAliases(left);
+
+  @override
   String get sql => renderPlaceholders((_) => '@value');
 
   @override
@@ -1306,6 +1314,14 @@ final class _RivetBinaryExpression<T> implements RivetExpression<T> {
   @override
   String renderParameters({int startAt = 1}) =>
       renderPlaceholders((index) => '\$${startAt + index}');
+
+  @override
+  String renderWith(
+    String Function(int index) placeholder,
+    String Function() nextAlias,
+  ) =>
+      '(${_renderPredicateExpression(left, placeholder, nextAlias)} $operator '
+      '${placeholder(left.parameters.length)}::${codec.cast})';
 }
 
 /// A typed SQL expression backed by a table column.
@@ -1323,7 +1339,7 @@ class RivetColumn<T> implements RivetExpression<T> {
   Object? Function()? onUpdateFn;
   late final String dartName;
   late final RivetTableSchema<Object?, Object?> _table;
-  String? _qualifier;
+  String? qualifier;
 
   void attach<Definition, Row>(
     RivetTableSchema<Definition, Row> table, {
@@ -1333,16 +1349,13 @@ class RivetColumn<T> implements RivetExpression<T> {
     this.dartName =
         dartName ?? declaredName ?? (throw StateError('Missing generated column name.'));
     _table = table as RivetTableSchema<Object?, Object?>;
-    _qualifier = qualifier;
+    this.qualifier = qualifier;
   }
-
-  String? get qualifier => _qualifier;
-  set qualifier(String value) => _qualifier = value;
 
   String get physicalName => declaredName ?? dartName;
   @override
   String get sql => [
-    if (_qualifier case final qualifier?) quoteIdentifier(qualifier),
+    if (qualifier case final qualifier?) quoteIdentifier(qualifier),
     quoteIdentifier(physicalName),
   ].join('.');
   String get selectionSql => codec.select(sql);
