@@ -52,6 +52,7 @@ void main() {
         final all = await UserProfiles.db.find().get(database);
 
         expect(one.single.displayName, 'Ada');
+        expect(one.single.posts.isLoaded, isFalse);
         expect(all.map((row) => row.displayName), containsAll(['Ada', 'Grace']));
         expect(statements, hasLength(3));
         expect(
@@ -61,5 +62,17 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test('should expose generated schema metadata without analyzer dependencies', () {
+      final users = UserProfiles.db.buildSchema();
+      final posts = Posts.db.buildSchema();
+
+      expect(users.formatVersion, 1);
+      expect(users.indexes.single.name, 'display_name_idx');
+      expect(users.constraints.single.name, 'display_name_present');
+      expect(users.relations['posts']?.kind, RivetRelationKind.many);
+      expect(posts.relations['author']?.kind, RivetRelationKind.one);
+      expect(posts.columns.single.foreignKey?.targetTable, UserProfiles);
+    });
   });
 }
