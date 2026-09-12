@@ -120,7 +120,8 @@ final class BasetenLanguageModel implements LanguageModel {
   }) => _chat.generate(
     request,
     modelId: modelId,
-    options: options ?? this.options,
+    options: this.options,
+    overrides: options,
   );
 
   @override
@@ -130,7 +131,8 @@ final class BasetenLanguageModel implements LanguageModel {
   }) => _chat.streamCommon(
     request,
     modelId: modelId,
-    options: options ?? this.options,
+    options: this.options,
+    overrides: options,
   );
 }
 

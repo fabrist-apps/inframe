@@ -45,3 +45,20 @@ finish metadata is required for common generation success. Premature EOF, error 
 frames, and configured size limits fail without emitting a final result. Closing the provider
 interrupts its catalog and deployment work, waits for cleanup, and leaves a borrowed HTTP client
 open.
+
+Compatible chat maps ordered text and image inputs, application function tools and results, and
+text, JSON-object, or JSON-Schema output configuration. Image bytes are copied into a data URL;
+absolute image URLs remain URLs. Audio, video, documents, provider file references, and media tool
+results currently fail before I/O because this snapshot has no verified compatible mapping for
+them. The service decides whether a selected model supports a request whose protocol mapping is
+known.
+
+`BasetenModelOptions` uses `Setting.inherit`, `Setting.set`, and `Setting.clear` for optional
+vendor fields. Per-call settings resolve over model defaults, collections replace rather than
+append, and `clear` omits the field. `extraBody` carries forward-compatible native fields; a key
+that collides with a common or typed field fails before transport.
+
+Returned assistant messages carry compatible native replay data. Reusing that message with the
+same Baseten API and model preserves native message extensions, reasoning data, tool IDs, and
+malformed argument text. Replay against another provider, API, or model fails explicitly. The SDK
+never executes application tools or treats unknown native tool activity as an application call.

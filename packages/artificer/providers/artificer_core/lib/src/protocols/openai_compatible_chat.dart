@@ -22,6 +22,14 @@ abstract interface class OpenAiCompatibleChatDialect<O> {
   JsonObject requestFields(O options);
 }
 
+/// Optional provider-owned encoding for compatible multimodal user content.
+// This optional interface preserves source compatibility for text-only dialects.
+// ignore: one_member_abstracts
+abstract interface class OpenAiCompatibleChatContentDialect {
+  /// Encodes all ordered parts of one user message without fetching or uploading media.
+  Object encodeUserContent(List<InputPart> parts);
+}
+
 /// An encoded compatible-chat request ready for the shared JSON transport.
 final class OpenAiCompatibleChatRequest {
   /// Creates an [OpenAiCompatibleChatRequest].
@@ -325,7 +333,7 @@ final class OpenAiCompatibleChatCodec<O> {
     final validation = dialect.validate(request, options);
     if (validation != null) return Failure(validation);
     try {
-      final body = _encodeRequest(request, modelId);
+      final body = _encodeRequest(request, modelId, dialect);
       final dialectFields = dialect.requestFields(options).toDart();
       final collision = dialectFields.keys.where(_reservedRequestFields.contains).firstOrNull;
       if (collision != null) {
@@ -779,11 +787,15 @@ final class _ToolStreamState {
   final Map<String, Object?> functionExtensions = {};
 }
 
-Map<String, Object?> _encodeRequest(GenerationRequest request, String modelId) {
+Map<String, Object?> _encodeRequest<O>(
+  GenerationRequest request,
+  String modelId,
+  OpenAiCompatibleChatDialect<O> dialect,
+) {
   if (modelId.isEmpty) throw ArgumentError.value(modelId, 'modelId');
   final messages = <Map<String, Object?>>[
     if (request.instructions case final instructions?) {'role': 'system', 'content': instructions},
-    for (final message in request.messages) ..._encodeMessage(message),
+    for (final message in request.messages) ..._encodeMessage(message, dialect),
   ];
   return {
     'model': modelId,
@@ -811,9 +823,20 @@ Map<String, Object?> _encodeRequest(GenerationRequest request, String modelId) {
   };
 }
 
-Iterable<Map<String, Object?>> _encodeMessage(Message message) sync* {
+Iterable<Map<String, Object?>> _encodeMessage<O>(
+  Message message,
+  OpenAiCompatibleChatDialect<O> dialect,
+) sync* {
   switch (message) {
     case UserMessage(:final parts):
+      if (parts.any((part) => part is! TextInputPart) &&
+          dialect is OpenAiCompatibleChatContentDialect) {
+        yield {
+          'role': 'user',
+          'content': (dialect as OpenAiCompatibleChatContentDialect).encodeUserContent(parts),
+        };
+        return;
+      }
       final text = <String>[];
       for (final part in parts) {
         if (part is! TextInputPart) {

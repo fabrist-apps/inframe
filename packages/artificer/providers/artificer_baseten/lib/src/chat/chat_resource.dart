@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:artificer_baseten/src/chat/chat_models.dart';
 import 'package:artificer_baseten/src/options.dart';
 import 'package:artificer_core/artificer_core.dart';
@@ -63,12 +65,14 @@ final class BasetenChatCompletionsResource {
     GenerationRequest request, {
     required String modelId,
     required BasetenModelOptions options,
+    BasetenModelOptions? overrides,
   }) {
+    final resolved = options.resolve(overrides);
     final encoded = _codec.encode(
       request,
       modelId: modelId,
-      options: options,
-      extraBody: options.extraBody,
+      options: resolved,
+      extraBody: resolved.extraBody,
     );
     return switch (encoded) {
       Failure(:final error) => Effect.fail(error),
@@ -94,16 +98,18 @@ final class BasetenChatCompletionsResource {
     GenerationRequest request, {
     required String modelId,
     required BasetenModelOptions options,
+    BasetenModelOptions? overrides,
     int decodedEventCapacity = 16,
     int maxEventBytes = 8 * 1024 * 1024,
     int maxAssembledBytes = 64 * 1024 * 1024,
     int? maxStreamBytes,
   }) {
+    final resolved = options.resolve(overrides);
     final encoded = _codec.encode(
       request,
       modelId: modelId,
-      options: options,
-      extraBody: options.extraBody,
+      options: resolved,
+      extraBody: resolved.extraBody,
     );
     return switch (encoded) {
       Failure(:final error) => Effect.fail<GenerationEvent, AiError>(error).asFlow(),
@@ -125,7 +131,10 @@ final class BasetenChatCompletionsResource {
   }
 }
 
-final class _BasetenChatDialect implements OpenAiCompatibleChatDialect<BasetenModelOptions> {
+final class _BasetenChatDialect
+    implements
+        OpenAiCompatibleChatDialect<BasetenModelOptions>,
+        OpenAiCompatibleChatContentDialect {
   const _BasetenChatDialect();
 
   @override
@@ -139,7 +148,37 @@ final class _BasetenChatDialect implements OpenAiCompatibleChatDialect<BasetenMo
 
   @override
   JsonObject requestFields(BasetenModelOptions options) => JsonObject({
-    'top_k': ?options.topK,
-    'repetition_penalty': ?options.repetitionPenalty,
+    'top_k': ?options.topK.resolve(null),
+    'repetition_penalty': ?options.repetitionPenalty.resolve(null),
   });
+
+  @override
+  Object encodeUserContent(List<InputPart> parts) => [
+    for (final part in parts)
+      switch (part) {
+        TextInputPart(:final text) => {'type': 'text', 'text': text},
+        MediaInputPart(
+          kind: MediaKind.image,
+          :final mimeType,
+          :final source,
+        ) =>
+          {
+            'type': 'image_url',
+            'image_url': {
+              'url': switch (source) {
+                BytesMediaSource(:final bytes) => 'data:$mimeType;base64,${base64Encode(bytes)}',
+                UrlMediaSource(:final url) => url.toString(),
+                ProviderFileSource() => throw const UnsupportedFeatureError(
+                  'Baseten compatible chat does not accept provider file references.',
+                  feature: 'providerFileInput',
+                ),
+              },
+            },
+          },
+        MediaInputPart(:final kind) => throw UnsupportedFeatureError(
+          'Baseten compatible chat has no verified ${kind.name} input mapping.',
+          feature: '${kind.name}Input',
+        ),
+      },
+  ];
 }
