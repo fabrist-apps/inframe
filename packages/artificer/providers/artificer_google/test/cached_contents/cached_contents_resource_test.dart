@@ -212,6 +212,32 @@ void main() {
       );
     });
 
+    test('should accept only range-valid RFC 3339 expiration timestamps', () {
+      for (final expireTime in [
+        '2026-09-13T12:00:00Z',
+        '2026-09-13T12:00:00+05:30',
+        '2026-09-13T12:00:00.123456789-04:00',
+      ]) {
+        expect(
+          () => GoogleCachedContentExpirationUpdate(expireTime: expireTime),
+          returnsNormally,
+        );
+      }
+
+      for (final expireTime in [
+        '2026-09-13 12:00:00Z',
+        '2026-02-30T12:00:00Z',
+        '2026-09-13T24:00:00Z',
+        '2026-09-13T12:00:00+24:00',
+        '2026-09-13T12:00:00.1234567890Z',
+      ]) {
+        expect(
+          () => GoogleCachedContentExpirationUpdate(expireTime: expireTime),
+          throwsArgumentError,
+        );
+      }
+    });
+
     test('should retain native service errors', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));

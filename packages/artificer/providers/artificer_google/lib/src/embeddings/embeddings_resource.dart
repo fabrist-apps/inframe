@@ -369,17 +369,12 @@ _EmbeddingProfile? _profile(String modelId) => switch (modelId) {
     minimumDimensions: 128,
     maximumDimensions: 3072,
   ),
-  'gemini-embedding-001' || 'text-embedding-004' => const _EmbeddingProfile(
+  'gemini-embedding-001' => const _EmbeddingProfile(
     multimodal: false,
     supportsTasks: true,
     supportsDimensions: true,
-    minimumDimensions: 1,
+    minimumDimensions: 128,
     maximumDimensions: 3072,
-  ),
-  'embedding-001' => const _EmbeddingProfile(
-    multimodal: false,
-    supportsTasks: false,
-    supportsDimensions: false,
   ),
   _ => null,
 };

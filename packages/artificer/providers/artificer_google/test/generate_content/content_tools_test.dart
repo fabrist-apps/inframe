@@ -256,6 +256,50 @@ void main() {
       );
     });
 
+    test('ignores a non-string optional citation title', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        _json(request, {
+          'candidates': [
+            {
+              'content': {
+                'role': 'model',
+                'parts': [
+                  {'text': 'Grounded answer'},
+                ],
+              },
+              'finishReason': 'STOP',
+              'groundingMetadata': {
+                'groundingChunks': [
+                  {
+                    'web': {
+                      'uri': 'https://source.example/page',
+                      'title': 42,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+        await request.response.close();
+      });
+      final provider = _provider(server);
+      addTearDown(provider.close);
+
+      final result = await provider
+          .languageModel('gemini-test')
+          .generate(GenerationRequest(messages: [UserMessage.text('hello')]))
+          .runFuture();
+
+      expect(
+        result.message.parts.whereType<TextOutputPart>().single.citations.single.title,
+        isNull,
+      );
+    });
+
     test('replays signed native content and ordered application results', () async {
       final bodies = <Map<String, Object?>>[];
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

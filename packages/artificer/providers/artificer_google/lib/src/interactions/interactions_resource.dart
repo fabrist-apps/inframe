@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/protocols.dart';
@@ -9,6 +11,7 @@ import 'package:conflux/conflux.dart';
 const _providerId = 'google';
 const _api = 'interactions';
 const _modelId = 'interactions';
+const _diagnosticEventCapacity = 16;
 
 /// Explicit lifecycle operations for the stable Google Interactions v1 API.
 final class GoogleInteractionsResource {
@@ -154,7 +157,7 @@ final class GoogleInteractionsResource {
 }
 
 final class _GoogleInteractionsProtocol implements SseProtocol<GoogleInteractionEvent> {
-  final List<GoogleInteractionEvent> _events = [];
+  final ListQueue<GoogleInteractionEvent> _events = ListQueue(_diagnosticEventCapacity);
   late ResponseMetadata _metadata;
   var _terminal = false;
   var _done = false;
@@ -189,6 +192,7 @@ final class _GoogleInteractionsProtocol implements SseProtocol<GoogleInteraction
       throw ProtocolError(error.message, partialOutput: partialOutput);
     }
     _events.add(decoded);
+    if (_events.length > _diagnosticEventCapacity) _events.removeFirst();
     if (decoded case GoogleInteractionErrorEvent(:final error)) {
       throw ProviderError(
         error?.message ?? 'Google reported an interaction streaming error.',
@@ -200,13 +204,12 @@ final class _GoogleInteractionsProtocol implements SseProtocol<GoogleInteraction
         partialOutput: partialOutput,
       );
     }
-    final terminalStatus = switch (decoded) {
-      GoogleInteractionCompletedEvent(:final interaction) => interaction.status,
-      GoogleInteractionStatusEvent(:final status) => status,
-      _ => null,
-    };
-    if (terminalStatus != null && _isTerminalStatus(terminalStatus)) {
-      _terminal = true;
+    switch (decoded) {
+      case GoogleInteractionCompletedEvent():
+        _terminal = true;
+      case GoogleInteractionStatusEvent(:final status) when _isTerminalStatus(status):
+        _terminal = true;
+      default:
     }
     return [decoded];
   }

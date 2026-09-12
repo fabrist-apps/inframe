@@ -176,12 +176,20 @@ void main() {
         'future-embedding-model',
         GoogleEmbeddingOptions(),
       );
+      final retired = [
+        GoogleEmbeddingModel(resource, 'text-embedding-004', GoogleEmbeddingOptions()),
+        GoogleEmbeddingModel(resource, 'embedding-001', GoogleEmbeddingOptions()),
+      ];
 
       expect(multimodal.capabilities[EmbeddingCapability.image], CapabilitySupport.supported);
       expect(textOnly.capabilities[EmbeddingCapability.text], CapabilitySupport.supported);
       expect(textOnly.capabilities[EmbeddingCapability.image], CapabilitySupport.unsupported);
       expect(unfamiliar.capabilities[EmbeddingCapability.text], CapabilitySupport.unknown);
       expect(unfamiliar.capabilities[EmbeddingCapability.batching], CapabilitySupport.unknown);
+      for (final model in retired) {
+        expect(model.capabilities[EmbeddingCapability.text], CapabilitySupport.unknown);
+        expect(model.capabilities[EmbeddingCapability.dimensions], CapabilitySupport.unknown);
+      }
     });
 
     test('should expose the public factory for bare IDs without discovery', () {

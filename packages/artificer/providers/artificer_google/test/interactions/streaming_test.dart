@@ -117,7 +117,11 @@ void main() {
     });
 
     test('fails malformed, premature, oversized, and service-error streams', () async {
-      Future<Object> run(String body, {int maxEventBytes = 1024}) async {
+      Future<Object> run(
+        String body, {
+        int decodedEventCapacity = 16,
+        int maxEventBytes = 1024,
+      }) async {
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         addTearDown(() => server.close(force: true));
         server.listen((request) async {
@@ -131,7 +135,11 @@ void main() {
         final client = _client(server);
         addTearDown(client.close);
         return GoogleInteractionsResource(client)
-            .streamRetrieve('id', maxEventBytes: maxEventBytes)
+            .streamRetrieve(
+              'id',
+              decodedEventCapacity: decodedEventCapacity,
+              maxEventBytes: maxEventBytes,
+            )
             .runCollect()
             .runFutureExit();
       }
@@ -172,6 +180,29 @@ void main() {
         await run('data: ${jsonEncode(_completed)}\n\n', maxEventBytes: 20),
         _failedWith<ResponseLimitError>(),
       );
+
+      final diagnosticStream = [
+        for (var index = 0; index < 20; index++)
+          'data: ${jsonEncode({..._unknown, 'event_id': 'event-$index'})}\n\n',
+        'data: ${jsonEncode(_error)}\n\n',
+      ].join();
+      for (final decodedEventCapacity in [1, 32]) {
+        final history = await run(
+          diagnosticStream,
+          decodedEventCapacity: decodedEventCapacity,
+        );
+        final recentEvents =
+            (_expected(history) as ProviderError).partialOutput! as List<GoogleInteractionEvent>;
+        expect(recentEvents, hasLength(16));
+        expect(recentEvents.map((event) => event.eventId), [
+          for (var index = 5; index < 20; index++) 'event-$index',
+          'event-error',
+        ]);
+        expect(
+          () => recentEvents.add(recentEvents.first),
+          throwsUnsupportedError,
+        );
+      }
     });
 
     test('accepts every terminal status followed by DONE', () async {
@@ -208,6 +239,37 @@ void main() {
 
         expect(events.single, isA<GoogleInteractionStatusEvent>());
       }
+    });
+
+    test('accepts a completion event with a future native status', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        request.response.headers.contentType = ContentType('text', 'event-stream');
+        _writeEvents(request.response, [
+          {
+            ..._completed,
+            'interaction': {
+              ..._completed['interaction']! as Map<String, Object?>,
+              'status': 'future_terminal_status',
+            },
+          },
+        ]);
+        request.response.write('data: [DONE]\n\n');
+        await request.response.close();
+      });
+      final client = _client(server);
+      addTearDown(client.close);
+
+      final events = await GoogleInteractionsResource(client)
+          .streamRetrieve('interaction-1')
+          .runCollect()
+          .runFuture();
+
+      final completed = events.single as GoogleInteractionCompletedEvent;
+      expect(completed.interaction.status, GoogleInteractionStatus.unknown);
+      expect(completed.interaction.nativeStatus, 'future_terminal_status');
     });
 
     test('rejects a terminal event without the documented DONE sentinel', () async {

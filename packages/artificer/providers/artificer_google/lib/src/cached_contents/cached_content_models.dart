@@ -264,11 +264,40 @@ void _expiration(String? ttl, String? expireTime, {required bool requireOne}) {
   if (ttl != null && !RegExp(r'^\d+(?:\.\d{1,9})?s$').hasMatch(ttl)) {
     throw ArgumentError.value(ttl, 'ttl', 'must be a nonnegative protobuf duration');
   }
-  if (expireTime != null &&
-      (!RegExp(r'(?:Z|[+-]\d\d:\d\d)$').hasMatch(expireTime) ||
-          DateTime.tryParse(expireTime) == null)) {
+  if (expireTime != null && !_isRfc3339Timestamp(expireTime)) {
     throw ArgumentError.value(expireTime, 'expireTime', 'must be an RFC 3339 timestamp');
   }
+}
+
+bool _isRfc3339Timestamp(String value) {
+  final match = RegExp(
+    r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$',
+  ).firstMatch(value);
+  if (match == null) return false;
+
+  final year = int.parse(match[1]!);
+  final month = int.parse(match[2]!);
+  final day = int.parse(match[3]!);
+  final hour = int.parse(match[4]!);
+  final minute = int.parse(match[5]!);
+  final second = int.parse(match[6]!);
+  final offsetHour = int.tryParse(match[7] ?? '') ?? 0;
+  final offsetMinute = int.tryParse(match[8] ?? '') ?? 0;
+  if (year == 0 ||
+      month < 1 ||
+      month > 12 ||
+      hour > 23 ||
+      minute > 59 ||
+      second > 59 ||
+      offsetHour > 23 ||
+      offsetMinute > 59) {
+    return false;
+  }
+
+  const daysPerMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  final leapDay = month == 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+  final maxDay = daysPerMonth[month - 1] + (leapDay ? 1 : 0);
+  return day >= 1 && day <= maxDay;
 }
 
 String _decodedCacheName(String value) {

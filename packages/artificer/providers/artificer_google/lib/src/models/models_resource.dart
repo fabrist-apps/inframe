@@ -7,7 +7,7 @@ import 'package:artificer_google/src/models/google_models.dart';
 import 'package:conflux/conflux.dart';
 
 const _providerId = 'google';
-const _api = 'generateContent';
+const _api = 'models';
 
 /// Typed native Gemini model discovery operations.
 final class GoogleModelsResource {

@@ -475,8 +475,7 @@ final class ProviderHttpClient {
       }
 
       deliveryState = RequestDeliveryState.mayHaveReachedProvider;
-      final acquisition = _client.send(nativeRequest);
-      lifetime.startExchange(acquisition);
+      final acquisition = lifetime.startExchange(() => _client.send(nativeRequest));
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
           () => lifetime.waitFor(acquisition),
@@ -668,8 +667,7 @@ final class ProviderHttpClient {
       }
 
       deliveryState = RequestDeliveryState.mayHaveReachedProvider;
-      final acquisition = _client.send(nativeRequest);
-      lifetime.startExchange(acquisition);
+      final acquisition = lifetime.startExchange(() => _client.send(nativeRequest));
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
           () => lifetime.waitFor(acquisition),
@@ -855,11 +853,18 @@ final class _RequestLifetime {
     ]);
   }
 
-  void startExchange(Future<http.StreamedResponse> acquisition) {
-    _acquisition = acquisition;
+  Future<http.StreamedResponse> startExchange(
+    Future<http.StreamedResponse> Function() acquire,
+  ) {
+    // A client may listen to the request body during acquisition, which registers
+    // upload cleanup. Clear the previous exchange before that can happen.
+    _acquisition = null;
     _response = null;
     _bodySubscription = null;
     _uploadCleanup = null;
+    final acquisition = acquire();
+    _acquisition = acquisition;
+    return acquisition;
   }
 
   void trackUpload(Future<void> Function() cleanup) {

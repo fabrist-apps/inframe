@@ -284,10 +284,11 @@ List<Citation> _citations(JsonObject extensions) {
     if (uriValue is! String) continue;
     final uri = Uri.tryParse(uriValue);
     if (uri == null || !uri.isAbsolute) continue;
+    final title = web['title'];
     citations.add(
       Citation(
         uri: uri,
-        title: web['title'] as String?,
+        title: title is String ? title : null,
         nativeMetadata: JsonObject(chunk),
       ),
     );

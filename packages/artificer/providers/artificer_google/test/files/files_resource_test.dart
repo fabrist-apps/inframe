@@ -262,6 +262,28 @@ void main() {
       expect(source.reference, 'https://generativelanguage.googleapis.com/v1beta/files/file-1');
       expect(source.mimeType, 'text/plain');
     });
+
+    test('should report a non-object page entry as a protocol error', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        _json(request, {
+          'files': ['not-a-file'],
+        });
+        await request.response.close();
+      });
+      final provider = GoogleProvider(
+        apiKey: 'secret',
+        baseUrl: Uri.parse('http://${server.address.address}:${server.port}'),
+      );
+      addTearDown(provider.close);
+
+      final exit = await provider.files.list().runFutureExit();
+
+      final error = ((exit as Failed<Object?, AiError>).cause as Expected<AiError>).error;
+      expect(error, isA<ProtocolError>());
+      expect(error.message, 'files must contain objects.');
+    });
   });
 }
 

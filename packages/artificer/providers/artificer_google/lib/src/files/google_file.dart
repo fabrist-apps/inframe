@@ -299,10 +299,14 @@ final class GoogleFilePage {
     if (files != null && files is! List<Object?>) {
       throw const FormatException('files must be an array.');
     }
+    final pageFiles = files as List<Object?>? ?? const [];
+    if (pageFiles.any((file) => file is! Map<String, Object?>)) {
+      throw const FormatException('files must contain objects.');
+    }
     return GoogleFilePage._(
       files: List.unmodifiable(
-        (files as List<Object?>? ?? const []).map(
-          (file) => GoogleFile.fromJson(JsonObject.fromDart(file)),
+        pageFiles.cast<Map<String, Object?>>().map(
+          (file) => GoogleFile.fromJson(JsonObject(file)),
         ),
       ),
       nextPageToken: _optionalString(value, 'nextPageToken'),

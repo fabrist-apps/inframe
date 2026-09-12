@@ -365,6 +365,15 @@ void main() {
             ),
           )
           .runFutureExit();
+      final undersized = await textModel
+          .embed(
+            EmbeddingRequest(
+              items: [EmbeddingInput.text('document')],
+              dimensions: 127,
+            ),
+            options: GoogleEmbeddingOptions(dimensions: const Setting.clear()),
+          )
+          .runFutureExit();
 
       expect(result.vectors.single, hasLength(768));
       expect(bodies.single['embedContentConfig'], {
@@ -376,6 +385,7 @@ void main() {
       expect(taskOnEmbedding2, _failedWith<UnsupportedFeatureError>());
       expect(mediaOnTextModel, _failedWith<UnsupportedFeatureError>());
       expect(oversized, _failedWith<UnsupportedFeatureError>());
+      expect(undersized, _failedWith<InvalidRequestError>());
       expect(bodies, hasLength(1));
     });
 

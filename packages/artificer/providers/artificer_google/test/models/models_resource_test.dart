@@ -36,8 +36,16 @@ void main() {
       expect(page.value.models.single.name, 'models/future-model');
       expect(page.value.nextPageToken, 'next page');
       expect(page.value.extensions.toDart()['futurePage'], isTrue);
+      expect(page.payload.providerId, 'google');
+      expect(page.payload.api, 'models');
+      expect(page.payload.modelId, 'models');
+      expect(page.metadata.statusCode, HttpStatus.ok);
       expect(model.value.supportedGenerationMethods, ['generateContent']);
       expect(model.value.extensions.toDart()['futureModel'], {'keep': true});
+      expect(model.payload.providerId, 'google');
+      expect(model.payload.api, 'models');
+      expect(model.payload.modelId, 'future-model');
+      expect(model.metadata.statusCode, HttpStatus.ok);
       expect(requests, [
         'GET /v1beta/models?pageSize=1&pageToken=current+page',
         'GET /v1beta/models/future-model',

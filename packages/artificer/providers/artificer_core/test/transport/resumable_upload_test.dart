@@ -91,51 +91,57 @@ void main() {
       }
     });
 
-    test('should reject a non-absolute upload URL before opening the source', () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-      server.listen((request) async {
-        request.response.headers
-          ..set('x-goog-upload-url', '/relative')
-          ..set('x-guploader-uploadid', 'upload-2');
-        await request.response.close();
+    for (final entry in const {
+      'a relative': '/relative',
+      'an absolute non-HTTP': 'ftp://upload.example/session',
+    }.entries) {
+      test('should reject ${entry.key} upload URL before opening the source', () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((request) async {
+          request.response.headers
+            ..set('x-goog-upload-url', entry.value)
+            ..set('x-guploader-uploadid', 'upload-2');
+          await request.response.close();
+        });
+        final client = ProviderHttpClient(
+          baseUrl: Uri.parse('http://${server.address.address}:${server.port}'),
+        );
+        addTearDown(client.close);
+        var opens = 0;
+
+        final exit = await client
+            .sendResumableUpload(
+              ProviderResumableUploadRequest(
+                startRequest: ProviderHttpRequest(method: 'POST', path: '/start'),
+                remoteResourceIdHeader: 'x-guploader-uploadid',
+              ),
+              UploadSource.stream(
+                () {
+                  opens++;
+                  return Stream.value([1]);
+                },
+                length: 1,
+                filename: 'sample.bin',
+                mimeType: 'application/octet-stream',
+              ),
+              providerId: 'fixture',
+              api: 'files',
+            )
+            .runFutureExit();
+
+        final error = ((exit as Failed<Object?, AiError>).cause as Expected<AiError>).error;
+        expect(error, isA<ProtocolError>());
+        expect((error as ProtocolError).remoteResourceId, 'upload-2');
+        expect(opens, 0);
       });
-      final client = ProviderHttpClient(
-        baseUrl: Uri.parse('http://${server.address.address}:${server.port}'),
-      );
-      addTearDown(client.close);
-      var opens = 0;
+    }
 
-      final exit = await client
-          .sendResumableUpload(
-            ProviderResumableUploadRequest(
-              startRequest: ProviderHttpRequest(method: 'POST', path: '/start'),
-              remoteResourceIdHeader: 'x-guploader-uploadid',
-            ),
-            UploadSource.stream(
-              () {
-                opens++;
-                return Stream.value([1]);
-              },
-              length: 1,
-              filename: 'sample.bin',
-              mimeType: 'application/octet-stream',
-            ),
-            providerId: 'fixture',
-            api: 'files',
-          )
-          .runFutureExit();
-
-      final error = ((exit as Failed<Object?, AiError>).cause as Expected<AiError>).error;
-      expect(error, isA<ProtocolError>());
-      expect((error as ProtocolError).remoteResourceId, 'upload-2');
-      expect(opens, 0);
-    });
-
-    test('should cancel transfer before close completes and preserve a borrowed client', () async {
+    test('should cancel a synchronous transfer and preserve a borrowed client', () async {
       final transferStarted = Completer<void>();
       final sourceCancelled = Completer<void>();
-      final borrowed = _HoldingResumableClient(transferStarted);
+      final borrowed = _SynchronousListeningResumableClient(transferStarted);
+      addTearDown(borrowed.dispose);
       final client = ProviderHttpClient(
         baseUrl: Uri.parse('https://start.example/'),
         headers: {'x-api-key': 'secret'},
@@ -209,38 +215,40 @@ void main() {
   });
 }
 
-final class _HoldingResumableClient extends http.BaseClient {
-  _HoldingResumableClient(this.transferStarted);
+final class _SynchronousListeningResumableClient extends http.BaseClient {
+  _SynchronousListeningResumableClient(this.transferStarted);
 
   final Completer<void> transferStarted;
+  StreamSubscription<List<int>>? _bodySubscription;
   bool transferAbortSeen = false;
   bool closed = false;
   int requests = 0;
 
   @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
     requests++;
     if (request.url.host == 'sibling.example') {
-      return http.StreamedResponse(Stream.value(const []), 200);
+      return Future.value(http.StreamedResponse(Stream.value(const []), 200));
     }
     if (requests == 1) {
-      return http.StreamedResponse(
-        Stream.value(const []),
-        200,
-        headers: {
-          'x-goog-upload-url': 'https://upload.example/session',
-          'x-upload-id': 'upload-3',
-        },
+      return Future.value(
+        http.StreamedResponse(
+          Stream.value(const []),
+          200,
+          headers: {
+            'x-goog-upload-url': 'https://upload.example/session',
+            'x-upload-id': 'upload-3',
+          },
+        ),
       );
     }
     transferStarted.complete();
     final response = Completer<http.StreamedResponse>();
-    final body = request.finalize().listen((_) {});
+    _bodySubscription = request.finalize().listen((_) {});
     if (request case http.Abortable(:final abortTrigger?)) {
       unawaited(
-        abortTrigger.whenComplete(() async {
+        abortTrigger.whenComplete(() {
           transferAbortSeen = true;
-          await body.cancel();
           if (!response.isCompleted) {
             response.completeError(http.RequestAbortedException(request.url));
           }
@@ -253,5 +261,9 @@ final class _HoldingResumableClient extends http.BaseClient {
   @override
   void close() {
     closed = true;
+  }
+
+  Future<void> dispose() async {
+    await _bodySubscription?.cancel();
   }
 }
