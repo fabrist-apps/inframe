@@ -48,7 +48,10 @@ final class RivetDb implements RivetExecutor {
   final _RivetPool _pool;
   final RivetConnection _connection;
   final List<RivetTableSchema<Object?, Object?>> tables;
-  bool _closed = false;
+  bool _closing = false;
+  int _acceptedWork = 0;
+  Completer<void>? _drained;
+  Future<void>? _closeFuture;
 
   static Future<RivetDb> open({
     required RivetConnection connection,
@@ -95,12 +98,68 @@ final class RivetDb implements RivetExecutor {
     RivetCompiledQuery query,
     RivetRowDecoder<Row> decode,
   ) async {
-    if (_closed) {
+    _acceptWork();
+    try {
+      return await _executeWith(_pool.run, query, decode);
+    } finally {
+      _finishWork();
+    }
+  }
+
+  Future<T> transaction<T>(Future<T> Function(RivetTransaction transaction) callback) async {
+    _acceptWork();
+    Object? callbackFailure;
+    try {
+      return await _pool.withConnection(
+        (connection) => connection.runTx((session) async {
+          final transaction = RivetTransaction._(session, _connection);
+          try {
+            return await runZoned(
+              () async {
+                try {
+                  return await callback(transaction);
+                } catch (error) {
+                  callbackFailure = error;
+                  rethrow;
+                }
+              },
+              zoneValues: {_transactionDatabaseZoneKey: this},
+            );
+          } finally {
+            transaction._expire();
+          }
+        }),
+      );
+    } on RivetException {
+      rethrow;
+    } catch (error) {
+      if (identical(error, callbackFailure)) rethrow;
+      throw RivetDatabaseException('PostgreSQL transaction failed.', error);
+    } finally {
+      _finishWork();
+    }
+  }
+
+  void _acceptWork() {
+    if (_closing) {
       throw const RivetExecutorClosedException('The database is closing or closed.');
     }
+    _acceptedWork++;
+  }
+
+  void _finishWork() {
+    _acceptedWork--;
+    if (_closing && _acceptedWork == 0) _drained?.complete();
+  }
+
+  Future<List<Row>> _executeWith<Row>(
+    Future<T> Function<T>(Future<T> Function(pg.Session session) operation) run,
+    RivetCompiledQuery query,
+    RivetRowDecoder<Row> decode,
+  ) async {
     try {
       _connection.onStatement?.call(query.sql);
-      final result = await _pool.run(
+      final result = await run(
         (session) => session.execute(
           pg.Sql(query.sql, types: List.filled(query.parameters.length, pg.Type.unspecified)),
           parameters: query.parameters,
@@ -120,11 +179,63 @@ final class RivetDb implements RivetExecutor {
     }
   }
 
-  Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
+  Future<void> close() {
+    if (Zone.current[_transactionDatabaseZoneKey] == this) {
+      throw const RivetExecutorClosedException(
+        'Cannot close a database from its own transaction callback.',
+      );
+    }
+    return _closeFuture ??= _drainAndClose();
+  }
+
+  Future<void> _drainAndClose() async {
+    _closing = true;
+    if (_acceptedWork > 0) {
+      _drained = Completer<void>();
+      await _drained!.future;
+    }
     await _pool.close();
   }
+}
+
+final _transactionDatabaseZoneKey = Object();
+
+final class RivetTransaction implements RivetExecutor {
+  RivetTransaction._(this._session, this._connection);
+
+  final pg.TxSession _session;
+  final RivetConnection _connection;
+  bool _active = true;
+
+  @override
+  Future<List<Row>> execute<Row>(
+    RivetCompiledQuery query,
+    RivetRowDecoder<Row> decode,
+  ) async {
+    if (!_active) {
+      throw const RivetExecutorClosedException('The transaction executor has expired.');
+    }
+    try {
+      _connection.onStatement?.call(query.sql);
+      final result = await _session.execute(
+        pg.Sql(query.sql, types: List.filled(query.parameters.length, pg.Type.unspecified)),
+        parameters: query.parameters,
+      );
+      return [
+        for (final row in result)
+          decode(
+            row.toList(growable: false),
+            [for (var index = 0; index < row.length; index++) row.isSqlNull(index)],
+          ),
+      ];
+    } on RivetException {
+      rethrow;
+    } catch (error) {
+      throw RivetDatabaseException('PostgreSQL transaction query failed.', error);
+    }
+  }
+
+  void _expire() => _active = false;
 }
 
 final class _PoolWaiter {
@@ -151,6 +262,12 @@ final class _RivetPool {
   Completer<void>? _closeCompleter;
 
   Future<T> run<T>(Future<T> Function(pg.Session session) operation) async {
+    return withConnection(operation);
+  }
+
+  Future<T> withConnection<T>(
+    Future<T> Function(pg.Connection connection) operation,
+  ) async {
     final connection = await _acquire();
     try {
       return await operation(connection);
