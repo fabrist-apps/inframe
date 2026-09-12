@@ -322,6 +322,7 @@ final class ChroniclerRuntime {
   Random _secureRandom;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
+  final _liveSpans = <_SpanState>{};
   final _flushWaiters = <_FlushWaiter>{};
   final _flushFinalizations = Queue<List<ChroniclerRecord>>();
   final _elapsed = Stopwatch()..start();
@@ -482,8 +483,9 @@ final class ChroniclerRuntime {
       diagnostics.record(DiagnosticReason.invalidRecord);
     }
     final collectionEnabled = _enabledSignals.contains(ChroniclerSignal.traces);
-    final sampled =
-        activeParent?.sampled ?? _selectBoundarySampling(acceptedRemote, collectionEnabled);
+    final sampled = activeParent == null
+        ? _selectBoundarySampling(acceptedRemote, collectionEnabled)
+        : activeParent.lineageRecording && activeParent.sampled;
     final lineageRecording = activeParent?.lineageRecording ?? (collectionEnabled && sampled);
     final state = _SpanState(
       eventId: ChronoID.generate(prefix: 'evt'),
@@ -501,6 +503,7 @@ final class ChroniclerRuntime {
       tracestate: acceptedRemote?.tracestate ?? activeParent?.tracestate ?? const [],
       attribution: recorder._attribution,
     );
+    _liveSpans.add(state);
     return _StartedSpan(
       state,
       ChroniclerRecorder._(
@@ -521,6 +524,7 @@ final class ChroniclerRuntime {
     if (span == null) return;
     if (span.ended) return;
     span.ended = true;
+    _liveSpans.remove(span);
     if (!span.recordPayload) return;
     final finalStatus = status == SpanStatus.success && span.explicitError
         ? SpanStatus.error
@@ -845,6 +849,13 @@ final class ChroniclerRuntime {
       return;
     }
     _enabledSignals.remove(signal);
+    if (signal == ChroniclerSignal.traces) {
+      for (final span in _liveSpans) {
+        span
+          ..recordPayload = false
+          ..lineageRecording = false;
+      }
+    }
     for (final record in _pending.where((record) => _signalFor(record.record) == signal).toList()) {
       _pending.remove(record);
       _drop(record, DropReason.collectionDisabled);
@@ -1739,8 +1750,8 @@ final class _SpanState {
   Map<String, Object?> attributes;
   final Duration startedAt;
   final DateTime timestamp;
-  final bool recordPayload;
-  final bool lineageRecording;
+  bool recordPayload;
+  bool lineageRecording;
   final bool sampled;
   final List<String> tracestate;
   final _RecorderAttribution attribution;

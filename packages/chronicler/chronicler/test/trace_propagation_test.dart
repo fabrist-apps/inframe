@@ -204,5 +204,125 @@ void main() {
       await base.span('ended', run: (span) => retained = span);
       expect(retained.tracing.inject({'tracestate': 'stale'}), isEmpty);
     });
+
+    test('should suppress a live lineage without rewriting its outbound flag', () async {
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          delivery: DeliveryOptions(maxBatchRecords: 2),
+        ),
+      );
+      final base = Context().withChronicler(chronicler.recorder);
+      late String activeHeader;
+      late String suppressedChildHeader;
+
+      await base.span(
+        'active',
+        run: (active) async {
+          final before = active.tracing.inject({})['traceparent']!;
+          chronicler.setCollectionEnabled(ChroniclerSignal.traces, false);
+          active.tracing
+            ..setAttribute('discarded', true)
+            ..setError();
+          activeHeader = active.tracing.inject({})['traceparent']!;
+          expect(activeHeader, before);
+          chronicler.setCollectionEnabled(ChroniclerSignal.traces, true);
+          await active.span(
+            'suppressed child',
+            run: (child) {
+              suppressedChildHeader = child.tracing.inject({})['traceparent']!;
+              child.logs.info('correlated without spans');
+            },
+          );
+        },
+      );
+      await base.trace('fresh boundary', run: (_) {});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(activeHeader, endsWith('-01'));
+      expect(suppressedChildHeader, endsWith('-00'));
+      final records = exporter.batches.single.records;
+      expect(records.whereType<SpanRecord>().single.payload.name, 'fresh boundary');
+      expect(records.whereType<LogRecord>().single.envelope.traceId, isNotNull);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.noActiveSpan], isNull);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidSpanUpdate], isNull);
+    });
+
+    test('should toggle propagation independently and ignore parents while disabled', () async {
+      final remote = TracePropagation.extract({
+        'traceparent': '00-$traceId-$parentId-01',
+      });
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          delivery: DeliveryOptions(maxBatchRecords: 1),
+        ),
+      );
+      final base = Context().withChronicler(chronicler.recorder);
+      late String localTraceId;
+      late String activeHeader;
+
+      chronicler.setPropagationEnabled(false);
+      await base.trace(
+        'local',
+        parent: remote,
+        run: (local) {
+          expect(local.tracing.inject({'traceparent': 'stale'}), isEmpty);
+          local.logs.info('local correlation');
+          chronicler.setPropagationEnabled(true);
+          activeHeader = local.tracing.inject({})['traceparent']!;
+          chronicler.setPropagationEnabled(false);
+        },
+      );
+      chronicler.setPropagationEnabled(true);
+      await Future<void>.delayed(Duration.zero);
+      localTraceId = (exporter.batches.single.records.single as LogRecord).envelope.traceId!;
+
+      expect(localTraceId, isNot(traceId));
+      expect(activeHeader, contains(localTraceId));
+      expect(chronicler.isCollectionEnabled(ChroniclerSignal.traces), isTrue);
+    });
+
+    test('should let local collection disablement override a sampled remote parent', () async {
+      final remote = TracePropagation.extract({
+        'traceparent': '00-$traceId-$parentId-01',
+      });
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          delivery: DeliveryOptions(maxBatchRecords: 1),
+        ),
+      )..setCollectionEnabled(ChroniclerSignal.traces, false);
+      late String header;
+
+      await Context()
+          .withChronicler(chronicler.recorder)
+          .trace(
+            'server',
+            parent: remote,
+            run: (server) {
+              header = server.tracing.inject({})['traceparent']!;
+              server.logs.info('remote correlation');
+            },
+          );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(header, startsWith('00-$traceId-'));
+      expect(header, endsWith('-00'));
+      expect(exporter.batches.single.records, everyElement(isA<LogRecord>()));
+      expect(exporter.batches.single.records.single.envelope.traceId, traceId);
+    });
   });
 }
