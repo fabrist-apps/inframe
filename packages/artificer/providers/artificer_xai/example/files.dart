@@ -16,9 +16,12 @@ Future<void> main() async {
 
     if (const bool.fromEnvironment('RUN_XAI_EXAMPLE')) {
       final file = (await upload.runFuture()).value;
-      await provider.files.retrieve(file.id).runFuture();
-      await provider.files.content(file.id).runDrain().runFuture();
-      await provider.files.delete(file.id).runFuture();
+      try {
+        await provider.files.retrieve(file.id).runFuture();
+        await provider.files.content(file.id).runDrain().runFuture();
+      } finally {
+        await provider.files.delete(file.id).runFuture();
+      }
     }
   } finally {
     // Closing the provider releases local I/O only; remote deletion is explicit.

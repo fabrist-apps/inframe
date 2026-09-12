@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
 import 'package:artificer_xai/artificer_xai.dart';
 import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
@@ -157,6 +158,24 @@ void main() {
         .runFutureExit();
     expect(invalidBase64, _failedWith<ProtocolError>());
     expect(requests, 2);
+  });
+
+  test('missing native usage members remain null', () {
+    final response = XaiEmbeddingResponse.fromJson(
+      JsonObject.fromDart({
+        'model': 'grok-embedding-future',
+        'data': [
+          {
+            'index': 0,
+            'embedding': [1.0],
+          },
+        ],
+        'usage': <String, Object?>{},
+      }),
+    );
+
+    expect(response.usage!.promptTokens, isNull);
+    expect(response.usage!.totalTokens, isNull);
   });
 }
 

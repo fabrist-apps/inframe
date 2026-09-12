@@ -252,7 +252,7 @@ sealed class XaiResponseEvent {
     );
     return switch (type) {
       'response.created' => XaiResponseCreatedEvent._(
-        response: XaiResponse.fromJson(JsonObject.fromDart(value['response'])),
+        response: XaiResponse.fromJson(_jsonObject(value['response'], 'response')),
         raw: raw,
         extensions: extensions,
       ),
@@ -287,7 +287,7 @@ sealed class XaiResponseEvent {
       ),
       'response.completed' || 'response.incomplete' => XaiResponseCompletedEvent._(
         type: type,
-        response: XaiResponse.fromJson(JsonObject.fromDart(value['response'])),
+        response: XaiResponse.fromJson(_jsonObject(value['response'], 'response')),
         raw: raw,
         extensions: extensions,
       ),
@@ -828,6 +828,11 @@ int _integer(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! int) throw FormatException('$key must be an integer.');
   return field;
+}
+
+JsonObject _jsonObject(Object? value, String name) {
+  if (value is! Map<String, Object?>) throw FormatException('$name must be an object.');
+  return JsonObject(value);
 }
 
 String _nonEmpty(String value, String name) {

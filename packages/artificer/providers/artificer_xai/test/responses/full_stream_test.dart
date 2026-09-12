@@ -310,7 +310,33 @@ void main() {
       ),
     );
   });
+
+  test('malformed nested response objects fail through the typed channel', () async {
+    final server = await _streamServer([
+      {'type': 'response.created', 'sequence_number': 0, 'response': null},
+    ]);
+    final provider = _provider(server);
+    addTearDown(provider.close);
+
+    final exit = await provider.responses
+        .stream(
+          XaiResponseRequest(
+            model: 'grok-future',
+            input: [XaiResponseInputMessage.userText('hello')],
+          ),
+        )
+        .runCollect()
+        .runFutureExit();
+
+    expect(exit, _failedWith<ProtocolError>());
+  });
 }
+
+Matcher _failedWith<E extends AiError>() => isA<Failed<Object?, AiError>>().having(
+  (failure) => (failure.cause as Expected<AiError>).error,
+  'error',
+  isA<E>(),
+);
 
 Future<HttpServer> _streamServer(List<Map<String, Object?>> events) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

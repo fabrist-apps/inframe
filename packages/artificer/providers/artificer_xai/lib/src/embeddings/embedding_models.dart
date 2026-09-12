@@ -220,8 +220,8 @@ final class XaiEmbeddingUsage {
   factory XaiEmbeddingUsage.fromDart(Object? input) {
     final value = _object(input, 'embedding usage');
     return XaiEmbeddingUsage._(
-      promptTokens: _integer(value, 'prompt_tokens'),
-      totalTokens: _integer(value, 'total_tokens'),
+      promptTokens: _optionalInteger(value, 'prompt_tokens'),
+      totalTokens: _optionalInteger(value, 'total_tokens'),
       raw: JsonObject(value),
     );
   }
@@ -233,10 +233,10 @@ final class XaiEmbeddingUsage {
   });
 
   /// Input token count.
-  final int promptTokens;
+  final int? promptTokens;
 
   /// Total token count.
-  final int totalTokens;
+  final int? totalTokens;
 
   /// Complete native usage object.
   final JsonObject raw;
@@ -327,6 +327,13 @@ String _string(Map<String, Object?> value, String key) {
 int _integer(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! int) throw FormatException('$key must be an integer.');
+  return field;
+}
+
+int? _optionalInteger(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field == null) return null;
+  if (field is! int) throw FormatException('$key must be an integer or null.');
   return field;
 }
 

@@ -183,7 +183,7 @@ final class XaiModelPage {
   factory XaiModelPage.fromJson(JsonObject raw) {
     final value = raw.toDart();
     return XaiModelPage._(
-      data: _list(value, 'data').map((item) => XaiModel.fromJson(JsonObject.fromDart(item))),
+      data: _list(value, 'data').map((item) => XaiModel.fromJson(_jsonObject(item, 'model'))),
       raw: raw,
       extensions: JsonObject(_without(value, {'object', 'data'})),
     );
@@ -211,7 +211,7 @@ final class XaiDetailedModelPage {
       models: _list(
         value,
         'models',
-      ).map((item) => XaiDetailedModel.fromJson(JsonObject.fromDart(item))),
+      ).map((item) => XaiDetailedModel.fromJson(_jsonObject(item, 'model'))),
       raw: raw,
       extensions: JsonObject(_without(value, {'models'})),
     );
@@ -279,6 +279,11 @@ List<String> _strings(Map<String, Object?> value, String key) {
     throw FormatException('$key must contain strings.');
   }
   return values.cast<String>();
+}
+
+JsonObject _jsonObject(Object? value, String name) {
+  if (value is! Map<String, Object?>) throw FormatException('$name must be an object.');
+  return JsonObject(value);
 }
 
 Map<String, Object?> _without(Map<String, Object?> value, Set<String> keys) =>

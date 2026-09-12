@@ -90,7 +90,7 @@ final class XaiFilePage {
   factory XaiFilePage.fromJson(JsonObject raw) {
     final value = raw.toDart();
     return XaiFilePage._(
-      data: _list(value, 'data').map((item) => XaiFile.fromJson(JsonObject.fromDart(item))),
+      data: _list(value, 'data').map((item) => XaiFile.fromJson(_jsonObject(item, 'file'))),
       paginationToken: _optionalString(value, 'pagination_token'),
       raw: raw,
       extensions: JsonObject(_without(value, {'data', 'pagination_token'})),
@@ -186,6 +186,11 @@ List<Object?> _list(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! List<Object?>) throw FormatException('$key must be an array.');
   return field;
+}
+
+JsonObject _jsonObject(Object? value, String name) {
+  if (value is! Map<String, Object?>) throw FormatException('$name must be an object.');
+  return JsonObject(value);
 }
 
 Map<String, Object?> _without(Map<String, Object?> value, Set<String> keys) =>

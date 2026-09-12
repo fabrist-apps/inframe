@@ -207,6 +207,27 @@ void main() {
     expect((downloadExit as Failed<Object?, AiError>).cause.containsInterruption, isTrue);
     expect(requests, ['POST /v1/files', 'GET /v1/files/file_1/content']);
   });
+
+  test('malformed file page members fail through the typed channel', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write(
+          jsonEncode({
+            'data': [null],
+          }),
+        );
+      await request.response.close();
+    });
+    final provider = _provider(server);
+    addTearDown(provider.close);
+
+    final exit = await provider.files.list().runFutureExit();
+
+    expect(exit, _failedWith<ProtocolError>());
+  });
 }
 
 Matcher _failedWith<E extends AiError>() => isA<Failed<Object?, AiError>>().having(

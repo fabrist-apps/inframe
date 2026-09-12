@@ -648,7 +648,7 @@ sealed class XaiResponseOutputItem {
         status: _optionalString(value, 'status'),
         content: _list(value, 'content').map(XaiResponseOutputContent.fromDart),
         raw: raw,
-        extensions: JsonObject(_without(value, {'type', 'id', 'status', 'role', 'content'})),
+        extensions: JsonObject(_without(value, {'type', 'id', 'status', 'content'})),
       ),
       'reasoning' => XaiReasoningOutputItem._(
         id: _optionalString(value, 'id'),

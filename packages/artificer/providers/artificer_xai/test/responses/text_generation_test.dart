@@ -9,11 +9,13 @@ import 'package:test/test.dart';
 void main() {
   test('native and common generation share the typed Responses mapper', () async {
     final bodies = <Map<String, Object?>>[];
+    final paths = <String>[];
+    final authorizations = <String?>[];
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));
     server.listen((request) async {
-      expect(request.uri.path, '/v1/responses');
-      expect(request.headers.value('authorization'), 'Bearer secret');
+      paths.add(request.uri.path);
+      authorizations.add(request.headers.value('authorization'));
       bodies.add(jsonDecode(await utf8.decoder.bind(request).join())! as Map<String, Object?>);
       request.response
         ..headers.contentType = ContentType.json
@@ -56,6 +58,12 @@ void main() {
     expect(common.text, 'Hello.');
     expect(common.toJson().toDart(), mappedAgain.toJson().toDart());
     expect(bodies, hasLength(2));
+    expect(paths, ['/v1/responses', '/v1/responses']);
+    expect(authorizations, ['Bearer secret', 'Bearer secret']);
+    expect(
+      native.value.output.whereType<XaiResponseMessageItem>().single.extensions.toDart()['role'],
+      'assistant',
+    );
     expect(bodies.last, {
       'model': 'future-model',
       'input': [

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_xai/artificer_xai.dart';
 import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
@@ -85,4 +86,35 @@ void main() {
       'GET /v1/embedding-models/grok%2Ffuture',
     ]);
   });
+
+  test('malformed model page members fail through the typed channel', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write(
+          jsonEncode({
+            'object': 'list',
+            'data': [null],
+          }),
+        );
+      await request.response.close();
+    });
+    final provider = XaiProvider(
+      apiKey: 'secret',
+      baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1/'),
+    );
+    addTearDown(provider.close);
+
+    final exit = await provider.models.list().runFutureExit();
+
+    expect(exit, _failedWith<ProtocolError>());
+  });
 }
+
+Matcher _failedWith<E extends AiError>() => isA<Failed<Object?, AiError>>().having(
+  (failure) => (failure.cause as Expected<AiError>).error,
+  'error',
+  isA<E>(),
+);
