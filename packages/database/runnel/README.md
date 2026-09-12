@@ -21,6 +21,13 @@ Runnel connects to one externally managed primary endpoint. It does not discover
 Sentinel topology and does not follow `MOVED` or `ASK` redirects. Keys and channels are preserved
 exactly; callers own app scoping and authorization.
 
+Commands accepted while ready are automatically written together at the next microtask boundary
+while retaining submission order. A command submitted without a conclusive reply fails with
+`RedisDeliveryStatus.outcomeUnknown` and is never replayed. Commands attempted while the client is
+reconnecting fail immediately with `RedisDeliveryStatus.notSent`; Runnel has no offline queue.
+Submitted command timeout closes that physical connection so a late reply cannot shift reply
+ownership. The parent reconnects the endpoint with capped jitter and repeats the complete handshake.
+
 ## Tested compatibility
 
 The integration suite verifies TCP and TLS with RESP2 and RESP3 against:

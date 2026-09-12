@@ -76,21 +76,22 @@ final class RedisTimeoutException extends RunnelException {
 /// Incoming bytes violated the RESP contract.
 final class RedisProtocolException extends RunnelException {
   /// Creates a malformed-protocol failure.
-  const RedisProtocolException({required super.message, super.cause})
-    : super(
-        category: RedisFailureCategory.protocol,
-        deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
-      );
+  const RedisProtocolException({
+    required super.message,
+    super.cause,
+    super.deliveryStatus = RedisDeliveryStatus.outcomeUnknown,
+  }) : super(
+         category: RedisFailureCategory.protocol,
+       );
 }
 
 /// A connection or client has already closed.
 final class RedisClosedException extends RunnelException {
   /// Creates a failure for work rejected after close.
-  const RedisClosedException({required super.message})
-    : super(
-        category: RedisFailureCategory.closed,
-        deliveryStatus: RedisDeliveryStatus.notSent,
-      );
+  const RedisClosedException({
+    required super.message,
+    super.deliveryStatus = RedisDeliveryStatus.notSent,
+  }) : super(category: RedisFailureCategory.closed);
 }
 
 /// A configured command or protocol resource budget was exceeded.
