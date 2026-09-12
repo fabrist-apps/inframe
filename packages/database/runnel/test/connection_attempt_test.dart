@@ -40,10 +40,14 @@ void main() {
         timeout: const Duration(seconds: 5),
         attempt: attempt,
       );
+      final openingFailure = expectLater(
+        opening.timeout(const Duration(seconds: 1)),
+        throwsA(anything),
+      );
       await peer.connected;
       await attempt.cancel();
 
-      await expectLater(opening.timeout(const Duration(seconds: 1)), throwsA(anything));
+      await openingFailure;
       attempt.finish();
       await peer.disconnected.timeout(const Duration(seconds: 1));
       await attempt.settled;

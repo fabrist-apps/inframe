@@ -184,6 +184,7 @@ final class _RespPeer {
 
   void _accept(Socket socket) {
     _socket = socket;
+    unawaited(socket.done.then<void>((_) {}, onError: (_, _) {}));
     var buffer = <int>[];
     socket.listen(
       (bytes) {
