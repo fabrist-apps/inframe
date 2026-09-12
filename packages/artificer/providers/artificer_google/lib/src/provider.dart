@@ -7,6 +7,7 @@ import 'package:artificer_google/src/files/files_resource.dart';
 import 'package:artificer_google/src/generate_content/generate_content_models.dart';
 import 'package:artificer_google/src/generate_content/generate_content_resource.dart';
 import 'package:artificer_google/src/generate_content/tool_models.dart';
+import 'package:artificer_google/src/interactions/interactions_resource.dart';
 import 'package:artificer_google/src/models/models_resource.dart';
 import 'package:artificer_google/src/options.dart';
 import 'package:conflux/conflux.dart';
@@ -28,6 +29,7 @@ final class GoogleProvider {
     models = GoogleModelsResource(_client, generateContent);
     embeddings = GoogleEmbeddingsResource(_client);
     files = GoogleFilesResource(_client);
+    interactions = GoogleInteractionsResource(_client);
   }
 
   final ProviderHttpClient _client;
@@ -43,6 +45,9 @@ final class GoogleProvider {
 
   /// Explicit Google Files upload and lifecycle operations.
   late final GoogleFilesResource files;
+
+  /// Explicit stable-v1 Interactions lifecycle and streaming operations.
+  late final GoogleInteractionsResource interactions;
 
   /// Creates a common explicit-history language model without discovery.
   GoogleLanguageModel languageModel(String modelId, {GoogleModelOptions? options}) {
