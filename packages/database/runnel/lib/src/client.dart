@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/command_validation.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
 import 'package:runnel/src/errors.dart';
@@ -158,6 +158,11 @@ final class Runnel {
   Future<T> execute<T>(RedisCommand<T> command, {Duration? timeout}) {
     final deadline = timeout ?? _commandTimeout;
     _positive(deadline, 'timeout');
+    try {
+      validateOrdinaryCommand(command as RedisCommand<Object?>);
+    } on Object catch (error, stackTrace) {
+      return Future.error(error, stackTrace);
+    }
     if (_state == _ClientState.reconnecting || _state == _ClientState.connecting) {
       return Future.error(
         const RedisTransportException(
@@ -178,49 +183,6 @@ final class Runnel {
     RedisCommand<bool>([RedisArgument.text('PING')], (reply) => respText(reply) == 'PONG'),
     timeout: timeout,
   );
-
-  /// Reads a strict UTF-8 string, returning null for a missing key.
-  Future<String?> get(String key, {Duration? timeout}) => execute(
-    RedisCommand<String?>(
-      [RedisArgument.text('GET'), RedisArgument.text(key)],
-      (reply) => switch (reply) {
-        const RespNull() => null,
-        _ => respText(reply),
-      },
-    ),
-    timeout: timeout,
-  );
-
-  /// Reads arbitrary bytes, returning null for a missing key.
-  Future<Uint8List?> getBytes(String key, {Duration? timeout}) => execute(
-    RedisCommand<Uint8List?>(
-      [RedisArgument.text('GET'), RedisArgument.text(key)],
-      (reply) => switch (reply) {
-        const RespNull() => null,
-        RespBlobString(:final value) => Uint8List.fromList(value),
-        _ => throw const FormatException('Expected a binary GET reply.'),
-      },
-    ),
-    timeout: timeout,
-  );
-
-  /// Stores a UTF-8 string and reports whether Redis applied the write.
-  Future<bool> set(String key, String value, {Duration? timeout}) => execute(
-    _setCommand(key, RedisArgument.text(value)),
-    timeout: timeout,
-  );
-
-  /// Stores owned arbitrary bytes and reports whether Redis applied the write.
-  Future<bool> setBytes(String key, Uint8List value, {Duration? timeout}) {
-    final command = _setCommand(key, RedisArgument.bytes(value));
-    return execute(command, timeout: timeout);
-  }
-
-  RedisCommand<bool> _setCommand(String key, RedisArgument value) => RedisCommand<bool>([
-    RedisArgument.text('SET'),
-    RedisArgument.text(key),
-    value,
-  ], (reply) => respText(reply) == 'OK');
 
   /// Drains accepted ordinary commands within the shutdown deadline, then releases resources.
   Future<void> close() => _closing ??= _close();

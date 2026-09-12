@@ -46,6 +46,62 @@ void main() {
             expect(await client.get(textKey), 'café');
             expect(await client.setBytes(bytesKey, Uint8List.fromList([0, 255, 13, 10])), isTrue);
             expect(await client.getBytes(bytesKey), [0, 255, 13, 10]);
+
+            final conditionalKey = 'runnel:integration:conditional:$suffix';
+            expect(
+              await client.set(
+                conditionalKey,
+                'first',
+                condition: SetCondition.ifAbsent,
+                expiry: Expiry.after(const Duration(seconds: 5)),
+              ),
+              isTrue,
+            );
+            expect(
+              await client.set(
+                conditionalKey,
+                'ignored',
+                condition: SetCondition.ifAbsent,
+              ),
+              isFalse,
+            );
+            expect(
+              await client.set(
+                conditionalKey,
+                'second',
+                condition: SetCondition.ifPresent,
+                expiry: const Expiry.keep(),
+              ),
+              isTrue,
+            );
+            expect(await client.pttl(conditionalKey), inInclusiveRange(1, 5000));
+            expect(await client.set(conditionalKey, 'without-expiry'), isTrue);
+            expect(await client.pttl(conditionalKey), -1);
+
+            final first = 'runnel:integration:scalar:$suffix:first';
+            final second = 'runnel:integration:scalar:$suffix:second';
+            await client.mset({first: 'one', second: 'two'});
+            expect(await client.mget([first, 'missing:$suffix', first]), ['one', null, 'one']);
+            expect(await client.exists([first, first, second]), 3);
+            expect(await client.type(first), 'string');
+            expect(await client.expire(second, Duration.zero), isTrue);
+            expect(await client.pttl(second), -2);
+
+            final scanned = await client.scan(
+              match: 'runnel:integration:scalar:$suffix:*',
+              count: 1,
+            ).toSet();
+            expect(scanned, contains(first));
+
+            expect(
+              await client.execute(
+                RedisCommand<String>(
+                  [RedisArgument.text('ECHO'), RedisArgument.text('custom')],
+                  respText,
+                ),
+              ),
+              'custom',
+            );
           },
         );
       }
