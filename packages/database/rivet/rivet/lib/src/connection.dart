@@ -47,10 +47,11 @@ final class RivetPoolOptions {
 
 /// An owned connection pool used by generated Rivet databases.
 final class RivetDb implements RivetExecutor {
-  RivetDb._(this._pool, this._connection, this.tables);
+  RivetDb._(this._pool, this._connection, this.name, this.tables);
 
   final _RivetPool _pool;
   final RivetConnection _connection;
+  final String name;
   final List<RivetTableSchema<Object?, Object?>> tables;
   bool _closing = false;
   int _acceptedWork = 0;
@@ -58,10 +59,14 @@ final class RivetDb implements RivetExecutor {
   Future<void>? _closeFuture;
 
   static Future<RivetDb> open({
+    required String name,
     required RivetConnection connection,
     required RivetPoolOptions pool,
     required List<RivetTableSchema<Object?, Object?>> tables,
   }) async {
+    if (name.isEmpty || name.contains('\u0000')) {
+      throw ArgumentError.value(name, 'name', 'must be non-empty and contain no NUL characters');
+    }
     if (pool.maxConnections <= 0) {
       throw ArgumentError.value(pool.maxConnections, 'maxConnections', 'must be positive');
     }
@@ -71,11 +76,11 @@ final class RivetDb implements RivetExecutor {
     if (connection.connectTimeout <= Duration.zero) {
       throw ArgumentError.value(connection.connectTimeout, 'connectTimeout', 'must be positive');
     }
-    _validateSchemas(tables);
-    final uri = Uri.parse(connection.url);
+    final uri = _parseConnectionUrl(connection.url);
     if (uri.scheme != 'postgres' && uri.scheme != 'postgresql') {
-      throw ArgumentError.value(connection.url, 'url', 'must use postgres or postgresql');
+      throw ArgumentError.value(uri.scheme, 'url scheme', 'must be postgres or postgresql');
     }
+    _validateSchemas(tables);
     final credentials = _credentials(uri.userInfo);
     final driverPool = _RivetPool(
       endpoint: pg.Endpoint(
@@ -100,7 +105,7 @@ final class RivetDb implements RivetExecutor {
       maxConnections: pool.maxConnections,
       acquireTimeout: pool.acquireTimeout,
     );
-    return RivetDb._(driverPool, connection, List.unmodifiable(tables));
+    return RivetDb._(driverPool, connection, name, List.unmodifiable(tables));
   }
 
   @override
@@ -496,12 +501,18 @@ void _validateSchemas(List<RivetTableSchema<Object?, Object?>> tables) {
   final physicalNames = <String>{};
   final registeredTables = <Type, RivetTableSchema<Object?, Object?>>{};
   for (final table in tables) {
+    final definition = table.definition;
+    if (definition == null) {
+      throw ArgumentError(
+        'Rivet table ${table.schemaName}.${table.tableName} has a null definition.',
+      );
+    }
     if (!physicalNames.add('${table.schemaName}.${table.tableName}')) {
       throw ArgumentError(
         'Duplicate Rivet table registration: ${table.schemaName}.${table.tableName}.',
       );
     }
-    final type = table.definition.runtimeType;
+    final type = definition.runtimeType;
     if (registeredTables[type] != null) {
       throw ArgumentError('Duplicate Rivet table type registration: $type.');
     }
@@ -606,7 +617,7 @@ void _validateSchemas(List<RivetTableSchema<Object?, Object?>> tables) {
 }
 
 RivetSslMode? _sslModeFromUrl(String url) {
-  final value = Uri.parse(url).queryParameters['sslmode'];
+  final value = _parseConnectionUrl(url).queryParameters['sslmode'];
   return switch (value) {
     null => null,
     'verify-full' => RivetSslMode.verifyFull,
@@ -614,6 +625,14 @@ RivetSslMode? _sslModeFromUrl(String url) {
     'disable' => RivetSslMode.disable,
     _ => throw ArgumentError.value(value, 'sslmode', 'must be verify-full, require, or disable'),
   };
+}
+
+Uri _parseConnectionUrl(String url) {
+  try {
+    return Uri.parse(url);
+  } on FormatException {
+    throw ArgumentError('url must be a valid PostgreSQL URL.');
+  }
 }
 
 RivetSslMode _resolveSslMode(String url, RivetSslMode? explicit) {

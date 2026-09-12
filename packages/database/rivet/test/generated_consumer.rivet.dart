@@ -641,6 +641,7 @@ abstract class _$RivetTestDatabase {
     required RivetConnection connection,
     RivetPoolOptions pool = const RivetPoolOptions(),
   }) => RivetDb.open(
+    name: 'rivet_test',
     connection: connection,
     pool: pool,
     tables: [

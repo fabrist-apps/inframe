@@ -10,36 +10,27 @@ import 'generated_consumer.dart';
 void main() {
   group('generated Rivet consumer', () {
     final databaseUrl = Platform.environment['RIVET_TEST_DATABASE_URL'];
-    late pg.Connection fixture;
-    late RivetDb database;
-    late List<String> statements;
-
-    setUp(() async {
-      if (databaseUrl == null) return;
-      fixture = await pg.Connection.openFromUrl(databaseUrl);
-      await fixture.execute('CREATE SCHEMA IF NOT EXISTS fbr116');
-      await fixture.execute('''
-        CREATE TABLE IF NOT EXISTS fbr116."userProfiles" (
-          "displayName" text NOT NULL
-        )
-      ''');
-      await fixture.execute('TRUNCATE fbr116."userProfiles"');
-      statements = [];
-      database = await RivetTestDatabase().open(
-        connection: RivetConnection.url(databaseUrl, onStatement: statements.add),
-        pool: const RivetPoolOptions(maxConnections: 2),
-      );
-    });
-
-    tearDown(() async {
-      if (databaseUrl == null) return;
-      await database.close();
-      await fixture.close();
-    });
 
     test(
       'should read zero, one, and multiple rows through generated APIs',
       () async {
+        final resolvedDatabaseUrl = databaseUrl!;
+        final fixture = await pg.Connection.openFromUrl(resolvedDatabaseUrl);
+        addTearDown(fixture.close);
+        await fixture.execute('CREATE SCHEMA IF NOT EXISTS fbr116');
+        await fixture.execute('''
+          CREATE TABLE IF NOT EXISTS fbr116."userProfiles" (
+            "displayName" text NOT NULL
+          )
+        ''');
+        await fixture.execute('TRUNCATE fbr116."userProfiles"');
+        final statements = <String>[];
+        final database = await RivetTestDatabase().open(
+          connection: RivetConnection.url(resolvedDatabaseUrl, onStatement: statements.add),
+          pool: const RivetPoolOptions(maxConnections: 2),
+        );
+        addTearDown(database.close);
+
         expect(await UserProfiles.db.find().get(database), isEmpty);
 
         await fixture.execute('''
@@ -85,6 +76,7 @@ void main() {
           ),
         );
         addTearDown(metadataDatabase.close);
+        expect(metadataDatabase.name, 'rivet_test');
         final registeredPosts = metadataDatabase.tables.singleWhere(
           (table) => table.definition is Posts,
         );
@@ -112,6 +104,7 @@ void main() {
 
       await expectLater(
         RivetDb.open(
+          name: 'duplicate_test',
           connection: connection,
           pool: const RivetPoolOptions(),
           tables: [users, users],
@@ -119,8 +112,54 @@ void main() {
         throwsArgumentError,
       );
       await expectLater(
-        RivetDb.open(connection: connection, pool: const RivetPoolOptions(), tables: [posts]),
+        RivetDb.open(
+          name: 'missing_test',
+          connection: connection,
+          pool: const RivetPoolOptions(),
+          tables: [posts],
+        ),
         throwsArgumentError,
+      );
+    });
+
+    test('should reject null definitions and redact credentials in URL errors', () async {
+      final nullDefinition = RivetTableSchema<Object?, Object?>(
+        schemaName: 'invalid',
+        tableName: 'nullDefinition',
+        definition: null,
+        columns: const [],
+        columnNames: const [],
+        decode: (_, _) => Object(),
+      );
+      await expectLater(
+        RivetDb.open(
+          name: 'null_definition_test',
+          connection: RivetConnection.url(
+            'postgresql://localhost/unused',
+            sslMode: RivetSslMode.disable,
+          ),
+          pool: const RivetPoolOptions(),
+          tables: [nullDefinition],
+        ),
+        throwsArgumentError,
+      );
+
+      final users = UserProfiles.db.buildSchema() as RivetTableSchema<Object?, Object?>;
+      await expectLater(
+        RivetDb.open(
+          name: 'redaction_test',
+          connection: RivetConnection.url(
+            'mysql://builder:super-secret@localhost/inframe',
+            sslMode: RivetSslMode.disable,
+          ),
+          pool: const RivetPoolOptions(),
+          tables: [users],
+        ),
+        throwsA(
+          isA<ArgumentError>()
+              .having((error) => error.toString(), 'message', contains('mysql'))
+              .having((error) => error.toString(), 'message', isNot(contains('super-secret'))),
+        ),
       );
     });
 
@@ -150,6 +189,7 @@ void main() {
 
       await expectLater(
         RivetDb.open(
+          name: 'foreign_key_test',
           connection: connection,
           pool: const RivetPoolOptions(),
           tables: [target, source],

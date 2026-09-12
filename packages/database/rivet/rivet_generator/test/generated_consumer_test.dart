@@ -16,11 +16,15 @@ import 'package:rivet/rivet.dart';
 
 part 'example.rivet.dart';
 
+final class NotARivetRelation<T> {}
+
 @RivetTable(schema: 'auth', name: 'userProfiles')
 final class UserProfiles extends RivetTableDefinition<UserProfiles> {
   static const db = _$UserProfilesDB();
 
   late final displayName = text(name: 'displayName')();
+  late final ignoredColumns = <RivetColumn<int>>[];
+  late final ignoredRelation = NotARivetRelation<int>();
 }
 
 @RivetDatabase(name: 'rivet_app', tables: [UserProfiles])
@@ -39,6 +43,41 @@ final class RivetApp extends _$RivetApp {}
               contains(r'abstract class _$RivetApp'),
               contains("schemaName: 'auth'"),
               contains("tableName: 'userProfiles'"),
+              isNot(contains('ignoredColumns')),
+              isNot(contains('ignoredRelation')),
+            ),
+          ),
+        },
+      );
+    });
+
+    test('should preserve prefixes for tables with the same class name', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {
+          'rivet_generator|lib/first.dart': 'final class Users {}',
+          'rivet_generator|lib/second.dart': 'final class Users {}',
+          'rivet_generator|lib/prefixed_database.dart': r'''
+import 'package:rivet/rivet.dart';
+import 'first.dart' as first;
+import 'second.dart' as second;
+
+part 'prefixed_database.rivet.dart';
+
+@RivetDatabase(name: 'prefixed', tables: [first.Users, second.Users])
+final class PrefixedDatabase extends _$PrefixedDatabase {}
+''',
+        },
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/prefixed_database.rivet.dart': decodedMatches(
+            allOf(
+              contains("name: 'prefixed'"),
+              contains('first.Users.db.buildSchema()'),
+              contains('second.Users.db.buildSchema()'),
             ),
           ),
         },
@@ -46,6 +85,8 @@ final class RivetApp extends _$RivetApp {}
     });
 
     test('should reject an invalid or colliding generated row name', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
       final result = await testBuilder(
         rivetBuilder(BuilderOptions.empty),
         {
@@ -63,10 +104,11 @@ final class Users extends RivetTableDefinition<Users> {
 }
 ''',
         },
+        readerWriter: readerWriter,
       );
 
       expect(result.succeeded, isFalse);
-      expect(result.errors.single, contains('Could not resolve annotation'));
+      expect(result.errors.single, contains('rowName `ExistingRow` is invalid or collides'));
     });
 
     test('should escape generated Dart metadata literals', () async {
@@ -168,6 +210,8 @@ final class RepeatedArray extends RivetTableDefinition<RepeatedArray> {
     });
 
     test('should reject duplicate native enum labels', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
       final result = await testBuilder(
         rivetBuilder(BuilderOptions.empty),
         {
@@ -185,13 +229,16 @@ enum Status {
 }
 ''',
         },
+        readerWriter: readerWriter,
       );
 
       expect(result.succeeded, isFalse);
-      expect(result.errors.single, contains('Could not resolve annotation'));
+      expect(result.errors.single, contains('Native enum labels must be unique.'));
     });
 
     test('should reject ambiguous native enum rename hints', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
       final result = await testBuilder(
         rivetBuilder(BuilderOptions.empty),
         {
@@ -209,10 +256,14 @@ enum Status {
 }
 ''',
         },
+        readerWriter: readerWriter,
       );
 
       expect(result.succeeded, isFalse);
-      expect(result.errors.single, contains('Could not resolve annotation'));
+      expect(
+        result.errors.single,
+        contains('Native enum rename hints must identify unambiguous previous labels.'),
+      );
     });
   });
 }

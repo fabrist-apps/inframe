@@ -48,6 +48,7 @@ abstract class _$FixtureAppDatabase {
     required RivetConnection connection,
     RivetPoolOptions pool = const RivetPoolOptions(),
   }) => RivetDb.open(
+    name: 'fixture_app',
     connection: connection,
     pool: pool,
     tables: [

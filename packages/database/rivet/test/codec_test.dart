@@ -50,6 +50,27 @@ void main() {
       );
     });
 
+    test('should compare JSON objects structurally without depending on key order', () {
+      final first = JsonValue.from(const {
+        'name': 'Ada',
+        'metadata': {
+          'active': true,
+          'scores': [1, 2],
+        },
+      });
+      final reordered = JsonValue.from(const {
+        'metadata': {
+          'scores': [1, 2],
+          'active': true,
+        },
+        'name': 'Ada',
+      });
+
+      expect(first, reordered);
+      expect(first.hashCode, reordered.hashCode);
+      expect(first, isNot(JsonValue.from(const {'name': 'Ada'})));
+    });
+
     test('should bind mapped domains and expose storage operations', () {
       expect(table.code.equals(const UserCode('A')).parameters, ['A']);
       expect(table.code.storage.equals('A').parameters, ['A']);

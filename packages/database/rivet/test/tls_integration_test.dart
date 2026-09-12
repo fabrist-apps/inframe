@@ -8,7 +8,7 @@ import 'generated_consumer.dart';
 
 void main() {
   group('Rivet TLS integration', () {
-    final enabled = Platform.environment['RIVET_TEST_DATABASE_URL'] != null;
+    final enabled = Platform.environment['RIVET_TEST_TLS'] == '1';
     final image = Platform.environment['RIVET_POSTGRES_IMAGE'] ?? 'inframe/postgres:latest';
 
     test(
@@ -88,7 +88,7 @@ void main() {
           '--name',
           container,
           '--publish',
-          '127.0.0.1:15433:5432',
+          '127.0.0.1::5432',
           '--env',
           'POSTGRES_PASSWORD=test-password',
           '--env',
@@ -103,13 +103,14 @@ void main() {
           startPostgres,
         ]);
         await _waitForPostgres(container);
+        final port = await _publishedPort(container);
 
         late pg.Connection fixture;
         try {
           fixture = await pg.Connection.open(
             pg.Endpoint(
               host: 'localhost',
-              port: 15433,
+              port: port,
               database: 'inframe_test',
               username: 'postgres',
               password: 'test-password',
@@ -130,7 +131,7 @@ void main() {
           expect(
             await _read(
               RivetConnection.url(
-                'postgresql://postgres:test-password@localhost:15433/inframe_test',
+                'postgresql://postgres:test-password@localhost:$port/inframe_test',
                 securityContext: trusted,
               ),
             ),
@@ -142,7 +143,7 @@ void main() {
         await expectLater(
           _read(
             RivetConnection.url(
-              'postgresql://postgres:test-password@127.0.0.1:15433/inframe_test',
+              'postgresql://postgres:test-password@127.0.0.1:$port/inframe_test',
               securityContext: trusted,
             ),
           ),
@@ -151,7 +152,7 @@ void main() {
         await expectLater(
           _read(
             RivetConnection.url(
-              'postgresql://postgres:test-password@localhost:15433/inframe_test',
+              'postgresql://postgres:test-password@localhost:$port/inframe_test',
             ),
           ),
           throwsA(isA<RivetDatabaseException>()),
@@ -159,7 +160,7 @@ void main() {
         expect(
           await _read(
             RivetConnection.url(
-              'postgresql://postgres:test-password@127.0.0.1:15433/inframe_test',
+              'postgresql://postgres:test-password@127.0.0.1:$port/inframe_test',
               sslMode: RivetSslMode.require,
             ),
           ),
@@ -168,7 +169,7 @@ void main() {
         expect(
           await _read(
             RivetConnection.url(
-              'postgresql://postgres:test-password@127.0.0.1:15433/inframe_test',
+              'postgresql://postgres:test-password@127.0.0.1:$port/inframe_test',
               sslMode: RivetSslMode.disable,
             ),
           ),
@@ -176,9 +177,23 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 2)),
-      skip: enabled ? false : 'RIVET_TEST_DATABASE_URL is not configured.',
+      skip: enabled ? false : 'RIVET_TEST_TLS is not enabled.',
     );
   });
+}
+
+Future<int> _publishedPort(String container) async {
+  final result = await Process.run('docker', ['port', container, '5432/tcp']);
+  if (result.exitCode != 0) {
+    throw ProcessException(
+      'docker',
+      ['port', container, '5432/tcp'],
+      '${result.stdout}\n${result.stderr}',
+      result.exitCode,
+    );
+  }
+  final output = (result.stdout as String).trim();
+  return int.parse(output.substring(output.lastIndexOf(':') + 1));
 }
 
 Future<String> _read(RivetConnection connection) async {

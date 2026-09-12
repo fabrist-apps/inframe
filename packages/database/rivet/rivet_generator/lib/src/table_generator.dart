@@ -42,21 +42,16 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
     final renameMetadata = renamedFrom == null
         ? ''
         : '      renamedFrom: ${literal(renamedFrom)},\n';
+    const columnChecker = TypeChecker.typeNamed(RivetColumn, inPackage: 'rivet');
+    const relationChecker = TypeChecker.typeNamed(
+      RivetRelationDescriptor,
+      inPackage: 'rivet',
+    );
     final columns = element.fields
-        .where(
-          (field) =>
-              !field.isStatic &&
-              field.type.getDisplayString().contains('Rivet') &&
-              field.type.getDisplayString().contains('Column'),
-        )
+        .where((field) => !field.isStatic && columnChecker.isAssignableFromType(field.type))
         .toList(growable: false);
     final relations = element.fields
-        .where(
-          (field) =>
-              !field.isStatic &&
-              field.type.getDisplayString().contains('Rivet') &&
-              field.type.getDisplayString().contains('Relation<'),
-        )
+        .where((field) => !field.isStatic && relationChecker.isAssignableFromType(field.type))
         .toList(growable: false);
     if (columns.isEmpty) {
       throw InvalidGenerationSourceError(
@@ -198,7 +193,10 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
         targetRow = readString(ConstantReader(value), 'rowName', targetRow);
       }
     }
-    return type.element.displayName == 'RivetOneRelation'
+    return const TypeChecker.typeNamed(
+          RivetOneRelation,
+          inPackage: 'rivet',
+        ).isAssignableFromType(type)
         ? 'Relation<$targetRow?>'
         : 'Relation<List<$targetRow>>';
   }

@@ -1,7 +1,6 @@
 // The README documents the declaration DSL; consequential runtime contracts are documented here.
 // ignore_for_file: avoid_returning_this, library_private_types_in_public_api, public_member_api_docs
 
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:chrono_id/chrono_id.dart';
@@ -425,11 +424,10 @@ final class JsonData extends JsonValue {
   Object toDart() => value;
 
   @override
-  bool operator ==(Object other) =>
-      other is JsonData && jsonEncode(other.value) == jsonEncode(value);
+  bool operator ==(Object other) => other is JsonData && _jsonEquals(other.value, value);
 
   @override
-  int get hashCode => jsonEncode(value).hashCode;
+  int get hashCode => _jsonHash(value);
 }
 
 final class RivetJsonCodec extends RivetCodec<JsonValue> {
@@ -575,6 +573,34 @@ Object _validatedJson(Object value) {
 
   return freeze(value)!;
 }
+
+bool _jsonEquals(Object? left, Object? right) {
+  if (left is List<Object?> && right is List<Object?>) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (!_jsonEquals(left[index], right[index])) return false;
+    }
+    return true;
+  }
+  if (left is Map<String, Object?> && right is Map<String, Object?>) {
+    if (left.length != right.length) return false;
+    for (final entry in left.entries) {
+      if (!right.containsKey(entry.key) || !_jsonEquals(entry.value, right[entry.key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return left == right;
+}
+
+int _jsonHash(Object? value) => switch (value) {
+  final List<Object?> list => Object.hashAll(list.map(_jsonHash)),
+  final Map<String, Object?> map => Object.hashAllUnordered(
+    map.entries.map((entry) => Object.hash(entry.key, _jsonHash(entry.value))),
+  ),
+  _ => value.hashCode,
+};
 
 abstract interface class RivetTypeConverter<Domain, Storage> {
   Domain fromSql(Storage value);
