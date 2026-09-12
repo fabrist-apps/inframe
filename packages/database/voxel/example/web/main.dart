@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:turso/turso.dart';
 import 'package:voxel/voxel.dart';
 import 'package:voxel_fixture_app/posts.dart';
@@ -11,10 +13,52 @@ Future<void> main() async {
     await _verifyGeneratedTextStorage();
     await _verifyScalarStorage();
     await _verifyEnumStorage();
+    await _verifyVectorStorage();
     web.document.body!.textContent = 'PASS\nVoxel browser codec fixture';
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
   }
+}
+
+Future<void> _verifyVectorStorage() async {
+  final table = VectorValues.db.buildSchema().definition;
+  final database = await TursoDatabase.open(
+    TursoLocation.memory(),
+    web: TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js')),
+  );
+  try {
+    _expect(database.capabilities.vectorFunctions, 'vector functions unavailable');
+    await database.execute('CREATE TABLE vectorValues (embedding F32_BLOB(3))');
+    final value = Float32List.fromList([0.1, -2.5, 3.25]);
+    await database.execute(
+      'INSERT INTO vectorValues VALUES (vector32(?))',
+      parameters: [table.embedding.codec.encode(value)],
+    );
+    final stored = (await database.query(
+      'SELECT vector_extract(embedding) AS embedding FROM vectorValues',
+    )).rows.single;
+    _expect(
+      _listEquals(
+        table.embedding.codec.decode(stored.value('embedding'), isSqlNull: false),
+        value,
+      ),
+      'vector row mismatch',
+    );
+    _expectFailure(() => table.embedding.codec.encode(Float32List(2)));
+    _expectFailure(
+      () => table.embedding.codec.encode(Float32List.fromList([1, double.nan, 3])),
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+bool _listEquals<T>(List<T> left, List<T> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
 }
 
 Future<void> _verifyEnumStorage() async {

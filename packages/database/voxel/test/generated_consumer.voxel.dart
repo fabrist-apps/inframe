@@ -481,3 +481,103 @@ final class _$ScalarValuesDB
     );
   }
 }
+
+/// Generated row returned by reads from 'codec.vectorValues'.
+final class VectorValuesRow {
+  /// Creates a row from decoded column and relation values.
+  const VectorValuesRow({
+    required this.embedding,
+    required this.optionalEmbedding,
+  });
+
+  /// Value read from `embedding`.
+  final Float32List embedding;
+
+  /// Value read from `optionalEmbedding`.
+  final Float32List? optionalEmbedding;
+}
+
+/// Generated values accepted by mutations of 'codec.vectorValues'.
+final class VectorValuesCompanion implements VoxelCompanion<VectorValues> {
+  const VectorValuesCompanion._({
+    required this.embedding,
+    required this.optionalEmbedding,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory VectorValuesCompanion.insert({
+    required VoxelValue<VectorValues, Float32List, Float32List> embedding,
+    VoxelValue<VectorValues, Float32List?, Float32List?> optionalEmbedding =
+        const VoxelValue.absent(),
+  }) => VectorValuesCompanion._(
+    embedding: embedding,
+    optionalEmbedding: optionalEmbedding,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory VectorValuesCompanion.update({
+    VoxelValue<VectorValues, Float32List, Float32List> embedding =
+        const VoxelValue.absent(),
+    VoxelValue<VectorValues, Float32List?, Float32List?> optionalEmbedding =
+        const VoxelValue.absent(),
+  }) => VectorValuesCompanion._(
+    embedding: embedding,
+    optionalEmbedding: optionalEmbedding,
+  );
+
+  /// Mutation value for `embedding`.
+  final VoxelValue<VectorValues, Float32List, Float32List> embedding;
+
+  /// Mutation value for `optionalEmbedding`.
+  final VoxelValue<VectorValues, Float32List?, Float32List?> optionalEmbedding;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<VoxelAssignment<VectorValues>> operator [](VoxelCompanionKey key) => [
+    VoxelAssignment('embedding', embedding),
+    VoxelAssignment('optionalEmbedding', optionalEmbedding),
+  ];
+}
+
+final class _$VectorValuesDB
+    extends VoxelTableAccessor<VectorValues, VectorValuesRow> {
+  const _$VectorValuesDB();
+
+  @override
+  VoxelTableSchema<VectorValues, VectorValuesRow> buildSchema() {
+    VectorValues createDefinition() {
+      final definition = VectorValues();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    return VoxelTableSchema<VectorValues, VectorValuesRow>(
+      schemaName: 'codec',
+      tableName: 'vectorValues',
+      definition: definition,
+      definitionType: VectorValues,
+      rowType: VectorValuesRow,
+      columns: [
+        definition.embedding as VoxelColumn<Object?>,
+        definition.optionalEmbedding as VoxelColumn<Object?>,
+      ],
+      columnNames: ['embedding', 'optionalEmbedding'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.embedding as VoxelColumn<Object?>,
+        definition.optionalEmbedding as VoxelColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => VectorValuesRow(
+        embedding: definition.embedding.decodeValue(
+          values[0],
+          isSqlNull: sqlNulls[0],
+        ),
+        optionalEmbedding: definition.optionalEmbedding.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+      ),
+    );
+  }
+}

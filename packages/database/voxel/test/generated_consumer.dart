@@ -1,6 +1,8 @@
 // The declaration DSL relies on inferred field types for generated output.
 // ignore_for_file: specify_nonobvious_property_types
 
+import 'dart:typed_data';
+
 import 'package:voxel/voxel.dart';
 
 part 'generated_consumer.voxel.dart';
@@ -85,4 +87,12 @@ final class ScalarValues extends VoxelTableDefinition<ScalarValues> {
   late final code = text().map(const UserCodeConverter())();
   late final optionalCode = text().map(const UserCodeConverter()).nullable()();
   late final preferences = json().map(const PreferencesConverter())();
+}
+
+@VoxelTable(schema: 'codec')
+final class VectorValues extends VoxelTableDefinition<VectorValues> {
+  static const db = _$VectorValuesDB();
+
+  late final embedding = vector(dimensions: 3)();
+  late final optionalEmbedding = vector(dimensions: 3).nullable()();
 }

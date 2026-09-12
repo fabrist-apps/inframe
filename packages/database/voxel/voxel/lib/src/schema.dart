@@ -708,15 +708,16 @@ final class VoxelEnumCodec<E extends Enum> extends VoxelCodec<E> {
 
 final class VoxelVectorCodec extends VoxelCodec<Float32List> {
   VoxelVectorCodec(this.dimensions) {
-    if (dimensions <= 0 || dimensions > 16000) {
-      throw RangeError.range(dimensions, 1, 16000, 'dimensions');
-    }
+    if (dimensions <= 0) throw RangeError.value(dimensions, 'dimensions', 'must be positive');
   }
 
   final int dimensions;
 
   @override
   String get cast => 'f32_blob';
+
+  @override
+  String select(String columnSql) => 'vector_extract($columnSql)';
 
   @override
   Object encode(Float32List value) {
