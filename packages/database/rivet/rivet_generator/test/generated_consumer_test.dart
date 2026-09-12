@@ -58,8 +58,28 @@ final class RivetApp extends _$RivetApp {}
       await testBuilder(
         rivetBuilder(BuilderOptions.empty),
         {
-          'rivet_generator|lib/first.dart': 'final class Users {}',
-          'rivet_generator|lib/second.dart': 'final class Users {}',
+          'rivet_generator|lib/first.dart': r'''
+import 'package:rivet/rivet.dart';
+
+part 'first.rivet.dart';
+
+@RivetTable()
+final class Users extends RivetTableDefinition<Users> {
+  static const db = _$UsersDB();
+  late final id = integer()();
+}
+''',
+          'rivet_generator|lib/second.dart': r'''
+import 'package:rivet/rivet.dart';
+
+part 'second.rivet.dart';
+
+@RivetTable()
+final class Users extends RivetTableDefinition<Users> {
+  static const db = _$UsersDB();
+  late final id = integer()();
+}
+''',
           'rivet_generator|lib/prefixed_database.dart': r'''
 import 'package:rivet/rivet.dart';
 import 'first.dart' as first;
@@ -76,6 +96,12 @@ final class PrefixedDatabase extends _$PrefixedDatabase {}
         },
         readerWriter: readerWriter,
         outputs: {
+          'rivet_generator|lib/first.rivet.dart': decodedMatches(
+            contains(r'final class _$UsersDB'),
+          ),
+          'rivet_generator|lib/second.rivet.dart': decodedMatches(
+            contains(r'final class _$UsersDB'),
+          ),
           'rivet_generator|lib/prefixed_database.rivet.dart': decodedMatches(
             allOf(
               contains("name: 'prefixed'"),

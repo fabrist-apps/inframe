@@ -12,7 +12,7 @@ void main() {
     expect(packageUsers.definition.access.codec, isA<RivetEnumCodec<schema.AccessLevel>>());
     expect(schema.AccessLevelRivetEnum.codec.renamedFrom, 'role');
     expect(schema.AccessLevelRivetEnum.codec.renamedLabels, {'owner-label': 'admin-label'});
-    final appUsers = AppUsers.db.buildSchema();
+    final appUsers = PackageUsers.db.buildSchema();
     expect(appUsers.definition.access.codec, isA<RivetEnumCodec<schema.AccessLevel>>());
 
     final database = await FixtureAppDatabase().open(
@@ -23,7 +23,7 @@ void main() {
     );
     expect(database.tables.map((table) => table.definition.runtimeType), [
       schema.PackageUsers,
-      AppUsers,
+      PackageUsers,
     ]);
     expect(appUsers.relations['package']?.targetTable, schema.PackageUsers);
     await database.close();

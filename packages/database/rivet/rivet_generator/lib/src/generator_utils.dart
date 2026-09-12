@@ -45,13 +45,70 @@ String columnValueType(DartType type, LibraryElement library) {
 }
 
 String referenceToType(DartType type, LibraryElement from) {
-  if (type is! InterfaceType) return type.getDisplayString();
-  final arguments = type.typeArguments.isEmpty
-      ? ''
-      : '<${type.typeArguments.map((argument) => referenceToType(argument, from)).join(', ')}>';
-  final nullable = type.nullabilitySuffix == NullabilitySuffix.question ? '?' : '';
-  return '${referenceTo(type.element, from)}$arguments$nullable';
+  if (type.alias case final alias?) {
+    return '${referenceTo(alias.element, from)}${_typeArguments(alias.typeArguments, from)}'
+        '${_nullability(alias.nullabilitySuffix)}';
+  }
+  return switch (type) {
+    final InterfaceType interface =>
+      '${referenceTo(interface.element, from)}'
+          '${_typeArguments(interface.typeArguments, from)}'
+          '${_nullability(interface.nullabilitySuffix)}',
+    final RecordType record => _recordType(record, from),
+    final FunctionType function => _functionType(function, from),
+    _ => type.getDisplayString(),
+  };
 }
+
+String _typeArguments(List<DartType> arguments, LibraryElement from) => arguments.isEmpty
+    ? ''
+    : '<${arguments.map((argument) => referenceToType(argument, from)).join(', ')}>';
+
+String _recordType(RecordType type, LibraryElement from) {
+  final fields = <String>[
+    for (final field in type.positionalFields) referenceToType(field.type, from),
+  ];
+  if (type.positionalFields.length == 1 && type.namedFields.isEmpty) {
+    fields[0] = '${fields[0]},';
+  }
+  if (type.namedFields.isNotEmpty) {
+    fields.add(
+      '{${type.namedFields.map((field) => '${referenceToType(field.type, from)} ${field.name}').join(', ')}}',
+    );
+  }
+  return '(${fields.join(', ')})${_nullability(type.nullabilitySuffix)}';
+}
+
+String _functionType(FunctionType type, LibraryElement from) {
+  final required = <String>[];
+  final optional = <String>[];
+  final named = <String>[];
+  for (final parameter in type.formalParameters) {
+    final rendered = referenceToType(parameter.type, from);
+    if (parameter.isOptionalPositional) {
+      optional.add(rendered);
+    } else if (parameter.isNamed) {
+      named.add('${parameter.isRequiredNamed ? 'required ' : ''}$rendered ${parameter.name}');
+    } else {
+      required.add(rendered);
+    }
+  }
+  final parameters = <String>[
+    ...required,
+    if (optional.isNotEmpty) '[${optional.join(', ')}]',
+    if (named.isNotEmpty) '{${named.join(', ')}}',
+  ].join(', ');
+  final typeParameters = type.typeParameters.isEmpty
+      ? ''
+      : '<${type.typeParameters.map((parameter) {
+          final bound = parameter.bound;
+          return bound == null ? parameter.displayName : '${parameter.displayName} extends ${referenceToType(bound, from)}';
+        }).join(', ')}>';
+  return '${referenceToType(type.returnType, from)} Function$typeParameters($parameters)'
+      '${_nullability(type.nullabilitySuffix)}';
+}
+
+String _nullability(NullabilitySuffix suffix) => suffix == NullabilitySuffix.question ? '?' : '';
 
 String referenceTo(Element target, LibraryElement from) {
   final name = target.displayName;

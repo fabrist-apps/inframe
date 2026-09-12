@@ -8,11 +8,13 @@ part of 'app_database.dart';
 // **************************************************************************
 
 /// Generated row returned by reads from 'fixture.appUsers'.
-final class AppUsersRow {
+final class PackageUsersRow {
   /// Creates a row from decoded column and relation values.
-  const AppUsersRow({
+  const PackageUsersRow({
     required this.packageName,
     required this.access,
+    required this.accessRecord,
+    required this.accessCallback,
     this.package = const Relation.unloaded(),
   });
 
@@ -22,27 +24,36 @@ final class AppUsersRow {
   /// Value read from `access`.
   final schema.AccessLevel access;
 
+  /// Value read from `accessRecord`.
+  final (schema.AccessLevel, {schema.PackageUsers user}) accessRecord;
+
+  /// Value read from `accessCallback`.
+  final schema.AccessLevel Function(schema.PackageUsers) accessCallback;
+
   /// Loaded or unloaded `package` relation.
   final Relation<schema.PackageUsersRow?> package;
 }
 
-final class _$AppUsersDB extends RivetTableAccessor<AppUsers, AppUsersRow> {
-  const _$AppUsersDB();
+final class _$PackageUsersDB
+    extends RivetTableAccessor<PackageUsers, PackageUsersRow> {
+  const _$PackageUsersDB();
 
   @override
-  RivetTableSchema<AppUsers, AppUsersRow> buildSchema() {
-    final definition = AppUsers();
+  RivetTableSchema<PackageUsers, PackageUsersRow> buildSchema() {
+    final definition = PackageUsers();
     definition.access.configureEnum(schema.AccessLevelRivetEnum.codec);
-    return RivetTableSchema<AppUsers, AppUsersRow>(
+    return RivetTableSchema<PackageUsers, PackageUsersRow>(
       schemaName: 'fixture',
       tableName: 'appUsers',
       definition: definition,
       columns: [
         definition.packageName as RivetColumn<Object?>,
         definition.access as RivetColumn<Object?>,
+        definition.accessRecord as RivetColumn<Object?>,
+        definition.accessCallback as RivetColumn<Object?>,
       ],
-      columnNames: ['packageName', 'access'],
-      decode: (values, sqlNulls) => AppUsersRow(
+      columnNames: ['packageName', 'access', 'accessRecord', 'accessCallback'],
+      decode: (values, sqlNulls) => PackageUsersRow(
         packageName: definition.packageName.decodeValue(
           values[0],
           isSqlNull: sqlNulls[0],
@@ -50,6 +61,14 @@ final class _$AppUsersDB extends RivetTableAccessor<AppUsers, AppUsersRow> {
         access: definition.access.decodeValue(
           values[1],
           isSqlNull: sqlNulls[1],
+        ),
+        accessRecord: definition.accessRecord.decodeValue(
+          values[2],
+          isSqlNull: sqlNulls[2],
+        ),
+        accessCallback: definition.accessCallback.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
         ),
       ),
       relations: {
@@ -74,7 +93,7 @@ abstract class _$FixtureAppDatabase {
     tables: [
       schema.PackageUsers.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
-      AppUsers.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      PackageUsers.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }
