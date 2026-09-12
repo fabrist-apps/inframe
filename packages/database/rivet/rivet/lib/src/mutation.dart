@@ -397,13 +397,7 @@ RivetCompiledQuery _compileInsertMany<Definition, Row>(
     sql.write(_compileConflict(schema, conflict, parameters));
   }
   if (returning) {
-    sql
-      ..write(' RETURNING ')
-      ..write(
-        schema.columns.indexed
-            .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
-            .join(', '),
-      );
+    sql.write(_returning(schema));
   }
   return RivetCompiledQuery(sql.toString(), parameters);
 }
@@ -443,20 +437,7 @@ String _compileConflictUpdate<Definition, Row>(
   RivetPredicate? predicate,
   List<Object?> parameters,
 ) {
-  final supplied = {
-    for (final assignment in companion.assignments) assignment.columnName: assignment.value,
-  };
-  final assignments = <String>[];
-  for (final column in schema.columns) {
-    final value = supplied[column.dartName];
-    if (value == null) {
-      throw StateError('Generated companion omitted ${column.dartName}.');
-    }
-    final valueSql = _updateValue(schema, column, value, parameters);
-    if (valueSql != null) {
-      assignments.add('${quoteIdentifier(column.physicalName)} = $valueSql');
-    }
-  }
+  final assignments = _compileUpdateAssignments(schema, companion, parameters);
   if (assignments.isEmpty) {
     throw RivetEmptyUpdateException(
       'Conflict update ${schema.schemaName}.${schema.tableName} has no assignments.',
@@ -520,21 +501,8 @@ RivetCompiledQuery _compileUpdate<Definition, Row>(
   RivetPredicate? predicate, {
   required bool returning,
 }) {
-  final supplied = {
-    for (final assignment in companion.assignments) assignment.columnName: assignment.value,
-  };
   final parameters = <Object?>[];
-  final assignments = <String>[];
-  for (final column in schema.columns) {
-    final value = supplied[column.dartName];
-    if (value == null) {
-      throw StateError('Generated companion omitted ${column.dartName}.');
-    }
-    final valueSql = _updateValue(schema, column, value, parameters);
-    if (valueSql != null) {
-      assignments.add('${quoteIdentifier(column.physicalName)} = $valueSql');
-    }
-  }
+  final assignments = _compileUpdateAssignments(schema, companion, parameters);
   if (assignments.isEmpty) {
     throw RivetEmptyUpdateException(
       'Update ${schema.schemaName}.${schema.tableName} has no assignments.',
@@ -550,15 +518,31 @@ RivetCompiledQuery _compileUpdate<Definition, Row>(
     parameters.addAll(predicate.parameters);
   }
   if (returning) {
-    sql
-      ..write(' RETURNING ')
-      ..write(
-        schema.columns.indexed
-            .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
-            .join(', '),
-      );
+    sql.write(_returning(schema));
   }
   return RivetCompiledQuery(sql.toString(), parameters);
+}
+
+List<String> _compileUpdateAssignments<Definition, Row>(
+  RivetTableSchema<Definition, Row> schema,
+  RivetCompanion<Definition> companion,
+  List<Object?> parameters,
+) {
+  final supplied = {
+    for (final assignment in companion.assignments) assignment.columnName: assignment.value,
+  };
+  final assignments = <String>[];
+  for (final column in schema.columns) {
+    final value = supplied[column.dartName];
+    if (value == null) {
+      throw StateError('Generated companion omitted ${column.dartName}.');
+    }
+    final valueSql = _updateValue(schema, column, value, parameters);
+    if (valueSql != null) {
+      assignments.add('${quoteIdentifier(column.physicalName)} = $valueSql');
+    }
+  }
+  return assignments;
 }
 
 String? _updateValue<Definition, Row>(
@@ -603,13 +587,10 @@ RivetCompiledQuery _compileDelete<Definition, Row>(
     parameters.addAll(predicate.parameters);
   }
   if (returning) {
-    sql
-      ..write(' RETURNING ')
-      ..write(
-        schema.columns.indexed
-            .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
-            .join(', '),
-      );
+    sql.write(_returning(schema));
   }
   return RivetCompiledQuery(sql.toString(), parameters);
 }
+
+String _returning<Definition, Row>(RivetTableSchema<Definition, Row> schema) =>
+    ' RETURNING ${schema.columns.indexed.map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"').join(', ')}';
