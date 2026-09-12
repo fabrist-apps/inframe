@@ -6,7 +6,7 @@ part of 'generated_consumer.dart';
 // RivetTableGenerator
 // **************************************************************************
 
-/// Generated row returned by reads from `fbr116.userProfiles`.
+/// Generated row returned by reads from 'fbr116.userProfiles'.
 final class UserProfilesRow {
   /// Creates a row from decoded column and relation values.
   const UserProfilesRow({
@@ -50,7 +50,7 @@ final class _$UserProfilesDB extends RivetTableAccessor<UserProfiles, UserProfil
   }
 }
 
-/// Generated row returned by reads from `fbr116.posts`.
+/// Generated row returned by reads from 'fbr116.posts'.
 final class PostsRow {
   /// Creates a row from decoded column and relation values.
   const PostsRow({
@@ -91,7 +91,7 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
   }
 }
 
-/// Generated row returned by reads from `fbr119.scalarValues`.
+/// Generated row returned by reads from 'fbr119.scalarValues'.
 final class ScalarValuesRow {
   /// Creates a row from decoded column and relation values.
   const ScalarValuesRow({
@@ -197,7 +197,7 @@ final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValu
   }
 }
 
-/// Generated row returned by reads from `fbr120.enumValues`.
+/// Generated row returned by reads from 'fbr120.enumValues'.
 final class EnumValuesRow {
   /// Creates a row from decoded column and relation values.
   const EnumValuesRow({
@@ -292,7 +292,7 @@ final class _$EnumValuesDB extends RivetTableAccessor<EnumValues, EnumValuesRow>
   }
 }
 
-/// Generated row returned by reads from `fbr121.vectorValues`.
+/// Generated row returned by reads from 'fbr121.vectorValues'.
 final class VectorValuesRow {
   /// Creates a row from decoded column and relation values.
   const VectorValuesRow({
@@ -337,7 +337,7 @@ final class _$VectorValuesDB extends RivetTableAccessor<VectorValues, VectorValu
   }
 }
 
-/// Generated row returned by reads from `fbr122.arrayValues`.
+/// Generated row returned by reads from 'fbr122.arrayValues'.
 final class ArrayValuesRow {
   /// Creates a row from decoded column and relation values.
   const ArrayValuesRow({
@@ -439,7 +439,7 @@ final class _$ArrayValuesDB extends RivetTableAccessor<ArrayValues, ArrayValuesR
   }
 }
 
-/// Generated row returned by reads from `fbr122.malformedArrays`.
+/// Generated row returned by reads from 'fbr122.malformedArrays'.
 final class MalformedArraysRow {
   /// Creates a row from decoded column and relation values.
   const MalformedArraysRow({required this.ints});
@@ -468,7 +468,7 @@ final class _$MalformedArraysDB extends RivetTableAccessor<MalformedArrays, Malf
   }
 }
 
-/// Generated row returned by reads from `metadata.metadataColumns`.
+/// Generated row returned by reads from 'metadata.metadataColumns'.
 final class MetadataColumnsRow {
   /// Creates a row from decoded column and relation values.
   const MetadataColumnsRow({
@@ -536,7 +536,7 @@ final class _$MetadataColumnsDB extends RivetTableAccessor<MetadataColumns, Meta
   }
 }
 
-/// Generated row returned by reads from `metadata.textTargets`.
+/// Generated row returned by reads from 'metadata.textTargets'.
 final class TextTargetsRow {
   /// Creates a row from decoded column and relation values.
   const TextTargetsRow({required this.value});
@@ -565,7 +565,7 @@ final class _$TextTargetsDB extends RivetTableAccessor<TextTargets, TextTargetsR
   }
 }
 
-/// Generated row returned by reads from `metadata.invalidReferences`.
+/// Generated row returned by reads from 'metadata.invalidReferences'.
 final class InvalidReferencesRow {
   /// Creates a row from decoded column and relation values.
   const InvalidReferencesRow({required this.value});
@@ -595,7 +595,7 @@ final class _$InvalidReferencesDB
   }
 }
 
-/// Generated row returned by reads from `metadata.parameterNames`.
+/// Generated row returned by reads from 'metadata.parameterNames'.
 final class ParameterNamesRow {
   /// Creates a row from decoded column and relation values.
   const ParameterNamesRow({required this.value});

@@ -6,7 +6,7 @@ part of 'app_database.dart';
 // RivetTableGenerator
 // **************************************************************************
 
-/// Generated row returned by reads from `fixture.appUsers`.
+/// Generated row returned by reads from 'fixture.appUsers'.
 final class AppUsersRow {
   /// Creates a row from decoded column and relation values.
   const AppUsersRow({required this.access});

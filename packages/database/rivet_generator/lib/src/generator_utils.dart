@@ -27,7 +27,7 @@ String literal(String value) {
         0x24 => r'\$',
         0x27 => r"\'",
         0x5C => r'\\',
-        < 0x20 || 0x7F => '\\u${rune.toRadixString(16).padLeft(4, '0')}',
+        < 0x20 || 0x7F || 0x2028 || 0x2029 => '\\u${rune.toRadixString(16).padLeft(4, '0')}',
         _ => String.fromCharCode(rune),
       },
     );

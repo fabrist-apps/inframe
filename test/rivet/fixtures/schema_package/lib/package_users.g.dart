@@ -6,7 +6,7 @@ part of 'package_users.dart';
 // RivetTableGenerator
 // **************************************************************************
 
-/// Generated row returned by reads from `fixture.packageUsers`.
+/// Generated row returned by reads from 'fixture.packageUsers'.
 final class PackageUsersRow {
   /// Creates a row from decoded column and relation values.
   const PackageUsersRow({required this.name, required this.access});

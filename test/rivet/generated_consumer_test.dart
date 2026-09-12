@@ -135,7 +135,9 @@ void main() {
       expect(table.payload.defaultFn?.call(), JsonValue.from(const {}));
       expect(table.embedding.onUpdateFn?.call(), isA<Float32List>());
       expect(table.values.defaultFn?.call(), [1]);
-      expect(table.code.defaultFn?.call(), isA<UserCode>());
+      expect((table.code.defaultFn!()! as UserCode).value, 'code_generated');
+      expect((table.code.onUpdateFn!()! as UserCode).value, 'code_updated');
+      expect(table.code.storage.asc(), isA<RivetOrder>());
     });
 
     test('should reject incompatible foreign-key storage before connecting', () async {

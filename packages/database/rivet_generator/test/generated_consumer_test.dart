@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:build/build.dart';
 import 'package:build_test/build_test.dart';
 import 'package:rivet_generator/builder.dart';
@@ -99,10 +100,71 @@ final class Escaped extends RivetTableDefinition<Escaped> {
               contains(r"schemaName: 'schema\n\$value'"),
               contains(r"tableName: 'quote\'name'"),
               contains(r"'line\n\$value'"),
+              predicate<String>(
+                (output) => parseString(content: output).errors.isEmpty,
+                'valid generated Dart syntax',
+              ),
             ),
           ),
         },
       );
+    });
+
+    test('should discover an enum codec from the declared column type', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'enum_helper.g.dart';
+
+@RivetEnum()
+enum Status { ready }
+
+RivetColumn<Status> statusColumn(EnumHelper table) =>
+    table.enumText</* retained comment */ Status>()();
+
+@RivetTable()
+final class EnumHelper extends RivetTableDefinition<EnumHelper> {
+  static const db = _$EnumHelperDB();
+  late final RivetColumn<Status> status = statusColumn(this);
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/enum_helper.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/enum_helper.rivet.g.part': decodedMatches(
+            contains('definition.status.configureEnum(StatusRivetEnum.codec);'),
+          ),
+        },
+      );
+    });
+
+    test('should reject a repeated array declaration', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      final result = await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {
+          'rivet_generator|lib/repeated_array.dart': r'''
+import 'package:rivet/rivet.dart';
+
+part 'repeated_array.g.dart';
+
+@RivetTable()
+final class RepeatedArray extends RivetTableDefinition<RepeatedArray> {
+  static const db = _$RepeatedArrayDB();
+  late final values = integer().array().nullable().array()();
+}
+''',
+        },
+        readerWriter: readerWriter,
+      );
+
+      expect(result.succeeded, isFalse);
     });
 
     test('should reject duplicate native enum labels', () async {

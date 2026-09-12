@@ -864,6 +864,44 @@ final class RivetOrderableMappedColumnBuilder<Domain, Storage>
         renamedFrom: renamedFrom,
         metadata: _metadata.copy(),
       );
+
+  @override
+  RivetOrderableMappedColumnBuilder<Domain, Storage> primaryKey() {
+    super.primaryKey();
+    return this;
+  }
+
+  @override
+  RivetOrderableMappedColumnBuilder<Domain, Storage> references<Target>(
+    RivetColumn<dynamic> Function(Target table) reference, {
+    RivetReferentialAction onDelete = RivetReferentialAction.noAction,
+    RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
+  }) {
+    super.references(reference, onDelete: onDelete, onUpdate: onUpdate);
+    return this;
+  }
+
+  @override
+  RivetOrderableMappedColumnBuilder<Domain, Storage> defaultSql(String sql) {
+    super.defaultSql(sql);
+    return this;
+  }
+
+  @override
+  RivetOrderableMappedColumnBuilder<Domain, Storage> defaultValue(
+    Domain Function() value,
+  ) {
+    super.defaultValue(value);
+    return this;
+  }
+
+  @override
+  RivetOrderableMappedColumnBuilder<Domain, Storage> onUpdate(
+    Domain Function() value,
+  ) {
+    super.onUpdate(value);
+    return this;
+  }
 }
 
 final class _NullableConverter<Domain, Storage> implements RivetTypeConverter<Domain?, Storage?> {
@@ -1044,7 +1082,7 @@ final class RivetArrayColumnBuilder<Element> {
     ),
   );
 
-  RivetColumnBuilder<List<Element>?> nullable() => RivetColumnBuilder(
+  RivetNullableArrayColumnBuilder<Element> nullable() => RivetNullableArrayColumnBuilder(
     RivetNullableCodec(RivetArrayCodec(elementCodec)),
     name: name,
     renamedFrom: renamedFrom,
@@ -1081,8 +1119,63 @@ final class RivetArrayColumnBuilder<Element> {
   }
 }
 
+final class RivetNullableArrayColumnBuilder<Element> {
+  RivetNullableArrayColumnBuilder(
+    this.codec, {
+    this.name,
+    this.renamedFrom,
+    _RivetColumnMetadata? metadata,
+  }) : _metadata = metadata ?? _RivetColumnMetadata();
+
+  final RivetCodec<List<Element>?> codec;
+  final String? name;
+  final String? renamedFrom;
+  final _RivetColumnMetadata _metadata;
+
+  RivetColumn<List<Element>?> call() => _metadata.apply(
+    RivetColumn(codec, declaredName: name, renamedFrom: renamedFrom),
+  );
+
+  RivetNullableArrayColumnBuilder<Element> primaryKey() {
+    _metadata.isPrimaryKey = true;
+    return this;
+  }
+
+  RivetNullableArrayColumnBuilder<Element> references<Target>(
+    RivetColumn<dynamic> Function(Target table) reference, {
+    RivetReferentialAction onDelete = RivetReferentialAction.noAction,
+    RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
+  }) {
+    _metadata.foreignKey = _foreignKey(reference, onDelete, onUpdate);
+    return this;
+  }
+
+  RivetNullableArrayColumnBuilder<Element> defaultSql(String sql) {
+    _metadata.sqlDefault = sql;
+    return this;
+  }
+
+  RivetNullableArrayColumnBuilder<Element> defaultValue(
+    List<Element>? Function() value,
+  ) {
+    _metadata.defaultFn = value;
+    return this;
+  }
+
+  RivetNullableArrayColumnBuilder<Element> onUpdate(
+    List<Element>? Function() value,
+  ) {
+    _metadata.onUpdateFn = value;
+    return this;
+  }
+}
+
 final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
-  const RivetArrayCodec(this.elementCodec);
+  RivetArrayCodec(this.elementCodec) {
+    if (elementCodec is RivetArrayCodec<dynamic>) {
+      throw const FormatException('multidimensional arrays are not supported');
+    }
+  }
 
   final RivetCodec<Element> elementCodec;
 

@@ -158,7 +158,11 @@ final class MetadataColumns extends RivetTableDefinition<MetadataColumns> {
     dimensions: 3,
   ).onUpdate(() => Float32List.fromList([1, 2, 3]))();
   late final values = integer().array().defaultValue(() => [1])();
-  late final code = chronoID(prefix: 'code').map(const UserCodeConverter())();
+  late final code = chronoID(prefix: 'code')
+      .map(const UserCodeConverter())
+      .defaultSql("'code_default'")
+      .defaultValue(() => const UserCode('code_generated'))
+      .onUpdate(() => const UserCode('code_updated'))();
   late final _constraints = [check('positive', count.equals(1))];
   late final _indexes = [
     index('partial').where(count.equals(1)).on([count]),

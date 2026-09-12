@@ -2,6 +2,8 @@
 // ignore_for_file: public_member_api_docs
 
 import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:build/build.dart';
@@ -115,7 +117,7 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
         .join('\n    ');
 
     return '''
-/// Generated row returned by reads from `$schemaName.$tableName`.
+/// Generated row returned by reads from ${literal('$schemaName.$tableName')}.
 final class $rowName {
   /// Creates a row from decoded column and relation values.
   const $rowName({
@@ -150,12 +152,30 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   String? _enumType(FieldElement field) {
     final library = field.library;
     final parsed = library.session.getParsedLibraryByElement(library);
-    if (parsed is! ParsedLibraryResult) return null;
-    final source = parsed.getFragmentDeclaration(field.firstFragment)?.node.toSource();
-    if (source == null) return null;
-    return RegExp(
-      r'\benumText\s*<\s*((?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*)\s*>',
-    ).firstMatch(source)?.group(1);
+    if (parsed is ParsedLibraryResult) {
+      final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
+      if (declaration != null) {
+        final visitor = _EnumTextVisitor();
+        declaration.accept(visitor);
+        if (visitor.enumType case final enumType?) return enumType;
+      }
+    }
+    return _enumTypeFromColumn(field.type);
+  }
+
+  String? _enumTypeFromColumn(DartType type) {
+    if (type is! InterfaceType) return null;
+    for (final argument in type.typeArguments) {
+      if (argument.element case final element?
+          when const TypeChecker.typeNamed(
+            RivetEnum,
+            inPackage: 'rivet',
+          ).hasAnnotationOf(element)) {
+        return argument.getDisplayString().replaceAll('?', '');
+      }
+      if (_enumTypeFromColumn(argument) case final nested?) return nested;
+    }
+    return null;
   }
 
   String _relationValueType(FieldElement field) {
@@ -181,5 +201,20 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     return type.element.displayName == 'RivetOneRelation'
         ? 'Relation<$targetRow?>'
         : 'Relation<List<$targetRow>>';
+  }
+}
+
+final class _EnumTextVisitor extends RecursiveAstVisitor<void> {
+  String? enumType;
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    if (enumType == null && node.methodName.name == 'enumText') {
+      final arguments = node.typeArguments?.arguments;
+      if (arguments != null && arguments.length == 1) {
+        enumType = arguments.single.toSource();
+      }
+    }
+    super.visitMethodInvocation(node);
   }
 }

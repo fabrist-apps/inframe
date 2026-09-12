@@ -32,6 +32,10 @@ void main() {
         () => table.nullableInts.codec.encode([2147483648]),
         throwsRangeError,
       );
+      expect(
+        () => RivetArrayCodec(RivetArrayCodec(RivetIntegerCodec())),
+        throwsFormatException,
+      );
     });
 
     test(
