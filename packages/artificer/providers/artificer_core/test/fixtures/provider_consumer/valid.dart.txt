@@ -1,0 +1,89 @@
+import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
+import 'package:conflux/conflux.dart';
+
+Future<void> main() async {
+  try {
+    FixtureModel('');
+    throw StateError('Expected an empty model ID to fail.');
+  } on ArgumentError {
+    // Expected local invariant failure.
+  }
+  final concrete = FixtureModel('future-model');
+  final LanguageModel common = concrete;
+  final result = await common.generate(
+    GenerationRequest(messages: [UserMessage.text('hello')]),
+  ).runFuture();
+  final overridden = await concrete.generate(
+    GenerationRequest(messages: [UserMessage.text('hello')]),
+    options: const FixtureOptions(prefix: 'typed'),
+  ).runFuture();
+  final events = await concrete.stream(
+    GenerationRequest(messages: [UserMessage.text('hello')]),
+    options: const FixtureOptions(prefix: 'stream'),
+  ).runCollect().runFuture();
+
+  if (result.text != 'hello' || overridden.text != 'typed:hello') {
+    throw StateError('Unexpected generation result.');
+  }
+  if (events.single is! GenerationFinished) {
+    throw StateError('Unexpected stream result.');
+  }
+}
+
+final class FixtureOptions {
+  const FixtureOptions({this.prefix});
+
+  final String? prefix;
+}
+
+final class FixtureModel implements LanguageModel {
+  FixtureModel(this.modelId) {
+    if (modelId.isEmpty) throw ArgumentError.value(modelId, 'modelId');
+  }
+
+  @override
+  final String modelId;
+
+  @override
+  String get providerId => 'fixture';
+
+  @override
+  ModelCapabilities get capabilities => ModelCapabilities({
+    ModelCapability.textGeneration: CapabilitySupport.supported,
+    ModelCapability.streaming: CapabilitySupport.supported,
+  });
+
+  @override
+  Effect<GenerationResult, AiError> generate(
+    GenerationRequest request, {
+    FixtureOptions? options,
+  }) {
+    final text = (request.messages.single as UserMessage).parts.single as TextInputPart;
+    final prefix = options?.prefix;
+    return Effect.succeed(
+      _result(prefix == null ? text.text : '$prefix:${text.text}'),
+    );
+  }
+
+  @override
+  Flow<GenerationEvent, AiError> stream(
+    GenerationRequest request, {
+    FixtureOptions? options,
+  }) => Flow.defer(() => generate(request, options: options).asFlow().map(GenerationFinished.new));
+
+  GenerationResult _result(String text) {
+    final payload = NativePayload(
+      providerId: providerId,
+      api: 'fixture',
+      modelId: modelId,
+      json: JsonObject({'text': text}),
+    );
+    return GenerationResult(
+      message: AssistantMessage([TextOutputPart(text)]),
+      finishReason: FinishReason.stop,
+      nativePayload: payload,
+      metadata: ResponseMetadata(statusCode: 200),
+    );
+  }
+}
