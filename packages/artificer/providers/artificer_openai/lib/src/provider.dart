@@ -163,7 +163,11 @@ final class OpenAILanguageModel implements LanguageModel {
         );
       } else if (message case AssistantMessage(:final parts, :final replay)) {
         if (replay != null) {
-          input.addAll(replay.items.map((item) => OpenAIRawResponseInputItem(item.data)));
+          input.addAll(
+            replay.items
+                .where((item) => item.phase != 'unknown-event')
+                .map((item) => OpenAIRawResponseInputItem(item.data)),
+          );
           continue;
         }
         if (parts.any((part) => part is! TextOutputPart)) {

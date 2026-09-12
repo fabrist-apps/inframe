@@ -162,6 +162,58 @@ void main() {
     );
   });
 
+  test('stream replay reuses terminal items without submitting unknown events', () async {
+    Map<String, Object?>? secondBody;
+    var requests = 0;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      requests++;
+      final body = jsonDecode(await utf8.decoder.bind(request).join())! as Map<String, Object?>;
+      if (requests == 1) {
+        request.response.headers.contentType = ContentType('text', 'event-stream');
+        request.response
+          ..write(
+            'data: ${jsonEncode({'type': 'response.future.delta', 'sequence_number': 0})}\n\n',
+          )
+          ..write(
+            'data: ${jsonEncode({'type': 'response.completed', 'sequence_number': 1, 'response': _finalResponse})}\n\n',
+          );
+      } else {
+        secondBody = body;
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write(jsonEncode(_finalResponse));
+      }
+      await request.response.close();
+    });
+    final provider = _provider(server);
+    addTearDown(provider.close);
+    final model = provider.languageModel('gpt-future');
+    final first = await model
+        .stream(GenerationRequest(messages: [UserMessage.text('first')]))
+        .runCollect()
+        .runFuture();
+    final assistant = first.whereType<GenerationFinished>().single.result.message;
+
+    await model
+        .generate(
+          GenerationRequest(
+            messages: [UserMessage.text('first'), assistant, UserMessage.text('second')],
+          ),
+        )
+        .runFuture();
+
+    final input = secondBody!['input']! as List<Object?>;
+    expect(input, hasLength(6));
+    expect(
+      input.whereType<Map<String, Object?>>().any(
+        (item) => item['type'] == 'response.future.delta',
+      ),
+      isFalse,
+    );
+  });
+
   test('validates native stream limits before opening a request', () async {
     var requests = 0;
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

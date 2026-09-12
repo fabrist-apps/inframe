@@ -19,14 +19,19 @@ final class OpenAIFilesResource {
   Effect<NativeResponse<OpenAIFile>, AiError> create(
     UploadSource source, {
     required OpenAIFilePurpose purpose,
-  }) => _client
-      .sendMultipart(
-        ProviderMultipartRequest(path: 'files', fields: {'purpose': purpose.wireValue}),
-        source,
-        providerId: _providerId,
-        api: _api,
-      )
-      .flatMap((response) => _decode(response, OpenAIFile.fromJson));
+  }) {
+    if (purpose == OpenAIFilePurpose.unknown) {
+      throw ArgumentError.value(purpose, 'purpose', 'must be a documented upload purpose');
+    }
+    return _client
+        .sendMultipart(
+          ProviderMultipartRequest(path: 'files', fields: {'purpose': purpose.wireValue}),
+          source,
+          providerId: _providerId,
+          api: _api,
+        )
+        .flatMap((response) => _decode(response, OpenAIFile.fromJson));
+  }
 
   /// Lists one explicit page without polling or automatic pagination.
   Effect<NativeResponse<OpenAIFilePage>, AiError> list({

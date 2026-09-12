@@ -141,8 +141,8 @@ final class OpenAIFilePage {
     final value = raw.toDart();
     return OpenAIFilePage._(
       data: _list(value, 'data').map((item) => OpenAIFile.fromJson(JsonObject.fromDart(item))),
-      firstId: _string(value, 'first_id'),
-      lastId: _string(value, 'last_id'),
+      firstId: _optionalString(value, 'first_id'),
+      lastId: _optionalString(value, 'last_id'),
       hasMore: _boolean(value, 'has_more'),
       raw: raw,
       extensions: JsonObject(
@@ -164,10 +164,10 @@ final class OpenAIFilePage {
   final List<OpenAIFile> data;
 
   /// First file ID.
-  final String firstId;
+  final String? firstId;
 
   /// Last file ID.
-  final String lastId;
+  final String? lastId;
 
   /// Whether another page can be requested.
   final bool hasMore;

@@ -183,6 +183,14 @@ void main() {
         ),
         throwsArgumentError,
       );
+      expect(
+        () => UploadSource.bytes(
+          [256],
+          filename: 'data.bin',
+          mimeType: 'application/octet-stream',
+        ),
+        throwsArgumentError,
+      );
     });
 
     test('should cancel a stream after its first invalid byte error', () async {
