@@ -26,6 +26,13 @@ final class BasetenChatMessage {
     this.toolCallId,
     JsonObject? extraBody,
   }) : extraBody = extraBody ?? JsonObject({}) {
+    if (content is! JsonString && content is! JsonArray && content is! JsonNull) {
+      throw ArgumentError.value(
+        content,
+        'content',
+        'must be a string, content-part array, or null',
+      );
+    }
     _rejectCollisions(this.extraBody, {
       'role',
       'content',
@@ -91,8 +98,8 @@ final class BasetenChatRequest {
     if (maxTokens != null && maxTokens! <= 0) {
       throw ArgumentError.value(maxTokens, 'maxTokens', 'must be positive');
     }
-    if (topK != null && topK! <= 0) {
-      throw ArgumentError.value(topK, 'topK', 'must be positive');
+    if (topK != null && !_validTopK(topK!)) {
+      throw ArgumentError.value(topK, 'topK', 'must be positive or -1');
     }
     _rejectCollisions(this.extraBody, _requestFields);
   }
@@ -146,6 +153,8 @@ final class BasetenChatRequest {
     'stream': stream,
   });
 }
+
+bool _validTopK(int value) => value == -1 || value > 0;
 
 /// One typed native Baseten Chat Completions response.
 typedef BasetenChatCompletion = OpenAiCompatibleChatResponse;

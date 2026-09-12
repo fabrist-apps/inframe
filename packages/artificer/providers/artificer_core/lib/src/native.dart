@@ -17,6 +17,9 @@ final class NativePayload {
   factory NativePayload.fromJson(JsonObject json) {
     final value = json.toDart();
     _requireVersion(value);
+    if (!value.containsKey('json')) {
+      throw const FormatException('json is required.');
+    }
     return NativePayload(
       providerId: _requiredString(value, 'providerId'),
       api: _requiredString(value, 'api'),

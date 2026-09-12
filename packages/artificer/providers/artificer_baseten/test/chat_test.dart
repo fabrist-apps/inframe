@@ -3,10 +3,38 @@ import 'dart:io';
 
 import 'package:artificer_baseten/artificer_baseten.dart';
 import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
 import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('native chat validates message roots and the top-k disable sentinel', () {
+    for (final content in [JsonNumber(1), const JsonBoolean(value: true), JsonObject({})]) {
+      expect(
+        () => BasetenChatMessage(role: BasetenChatRole.user, content: content),
+        throwsArgumentError,
+      );
+    }
+
+    final request = BasetenChatRequest(
+      model: 'catalog/model',
+      messages: [BasetenChatMessage.userText('Hello')],
+      topK: -1,
+    );
+
+    expect(request.toJson(stream: false).toDart()['top_k'], -1);
+    for (final topK in [0, -2]) {
+      expect(
+        () => BasetenChatRequest(
+          model: 'catalog/model',
+          messages: [BasetenChatMessage.userText('Hello')],
+          topK: topK,
+        ),
+        throwsArgumentError,
+      );
+    }
+  });
+
   test('catalog and deployment keep endpoint and served model separate', () async {
     final requests = <({String path, String authorization, Map<String, Object?> body})>[];
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

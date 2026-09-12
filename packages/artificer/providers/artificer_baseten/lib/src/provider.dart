@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:artificer_baseten/src/chat/chat_resource.dart';
 import 'package:artificer_baseten/src/embeddings/embedding_models.dart';
@@ -122,11 +123,7 @@ final class BasetenProvider {
 }
 
 ({Uri baseUrl, String path}) _predictionBinding(Uri endpoint) {
-  if (!endpoint.isAbsolute ||
-      (endpoint.scheme != 'http' && endpoint.scheme != 'https') ||
-      endpoint.host.isEmpty) {
-    throw ArgumentError.value(endpoint, 'endpoint', 'must be an absolute HTTP(S) URL');
-  }
+  _validateEndpoint(endpoint, 'endpoint');
   if (endpoint.hasFragment) {
     throw ArgumentError.value(endpoint, 'endpoint', 'must not contain a fragment');
   }
@@ -218,10 +215,21 @@ final class BasetenLanguageModel implements LanguageModel {
 }
 
 Uri _directoryUri(Uri value) {
-  if (!value.isAbsolute || (value.scheme != 'http' && value.scheme != 'https')) {
-    throw ArgumentError.value(value, 'baseUrl', 'must be an absolute HTTP(S) URL');
-  }
+  _validateEndpoint(value, 'baseUrl');
   return value.path.endsWith('/') ? value : value.replace(path: '${value.path}/');
+}
+
+void _validateEndpoint(Uri value, String name) {
+  if (!value.isAbsolute ||
+      (value.scheme != 'http' && value.scheme != 'https') ||
+      value.host.isEmpty) {
+    throw ArgumentError.value(value, name, 'must be an absolute HTTP(S) URL');
+  }
+  final address = InternetAddress.tryParse(value.host);
+  final loopback = value.host == 'localhost' || (address?.isLoopback ?? false);
+  if (value.scheme != 'https' && !loopback) {
+    throw ArgumentError.value(value, name, 'must use HTTPS unless it targets loopback');
+  }
 }
 
 String _nonEmpty(String value, String name) {

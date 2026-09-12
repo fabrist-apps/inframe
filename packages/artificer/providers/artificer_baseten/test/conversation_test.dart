@@ -126,7 +126,28 @@ void main() {
         ]),
       ],
     );
+    final insecureImage = GenerationRequest(
+      messages: [
+        UserMessage([
+          MediaInputPart(
+            kind: MediaKind.image,
+            mimeType: 'image/png',
+            source: UrlMediaSource(Uri.parse('http://example.test/image.png')),
+          ),
+        ]),
+      ],
+    );
 
+    expect(
+      BasetenModelOptions(topK: const Setting.set(-1)).topK,
+      isA<SetSetting<int>>().having((setting) => setting.value, 'value', -1),
+    );
+    for (final topK in [0, -2]) {
+      expect(
+        () => BasetenModelOptions(topK: Setting.set(topK)),
+        throwsArgumentError,
+      );
+    }
     expect(
       () => BasetenModelOptions(extraBody: JsonObject({'top_k': 42})),
       throwsArgumentError,
@@ -137,6 +158,10 @@ void main() {
     );
     expect(
       await provider.languageModel('model').generate(unsupported).runFutureExit(),
+      isA<Failed<GenerationResult, AiError>>(),
+    );
+    expect(
+      await provider.languageModel('model').generate(insecureImage).runFutureExit(),
       isA<Failed<GenerationResult, AiError>>(),
     );
     expect(

@@ -8,6 +8,37 @@ import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('beta Messages validates sampling bounds', () {
+    BasetenMessageRequest(
+      model: 'catalog/model',
+      maxTokens: 1,
+      messages: [BasetenInputMessage.userText('Hello')],
+      temperature: 0,
+      topP: 1,
+    );
+
+    for (final temperature in [-0.1, 1.1, double.nan]) {
+      expect(() => _request(temperature: temperature), throwsArgumentError);
+    }
+    for (final topP in [0.0, 1.1, double.infinity]) {
+      expect(() => _request(topP: topP), throwsArgumentError);
+    }
+  });
+
+  test('beta Messages requires the pinned response envelope', () {
+    for (final mutation in <Map<String, Object?>>[
+      {'type': 'future_message'},
+      {'role': 'user'},
+      {'stop_reason': 'future_reason'},
+      {'usage': null},
+    ]) {
+      expect(
+        () => BasetenMessageResponse.fromJson(JsonObject({..._message, ...mutation})),
+        throwsFormatException,
+      );
+    }
+  });
+
   test('beta Messages uses Baseten authentication and retains native data', () async {
     Map<String, Object?>? body;
     String? authorization;
@@ -150,6 +181,14 @@ void main() {
     );
   });
 }
+
+BasetenMessageRequest _request({double? temperature, double? topP}) => BasetenMessageRequest(
+  model: 'catalog/model',
+  maxTokens: 1,
+  messages: [BasetenInputMessage.userText('Hello')],
+  temperature: temperature,
+  topP: topP,
+);
 
 Matcher _failedWith<E extends AiError>() => isA<Failed<Object?, AiError>>().having(
   (failure) => (failure.cause as Expected<AiError>).error,

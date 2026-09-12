@@ -10,6 +10,27 @@ import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
 
 void main() {
+  test('provider rejects credential-bearing non-loopback HTTP endpoints', () async {
+    expect(
+      () => BasetenProvider(
+        apiKey: 'secret',
+        catalogBaseUrl: Uri.parse('http://example.test/v1'),
+      ),
+      throwsArgumentError,
+    );
+
+    final provider = BasetenProvider(apiKey: 'secret');
+    addTearDown(provider.close);
+    expect(
+      () => provider.predictionEndpoint<int, int>(
+        endpoint: Uri.parse('http://example.test/predict'),
+        encode: JsonNumber.new,
+        decode: (value) => (value as JsonNumber).value.toInt(),
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('provider close interrupts catalog and deployment work', () async {
     final started = Completer<void>();
     var requests = 0;
@@ -44,7 +65,10 @@ void main() {
     final predictionRun = prediction.predictRawStream(1).runCollect().runFutureExit();
     await started.future;
 
-    await Future.wait([provider.close(), provider.close()]);
+    await Future.wait([
+      provider.close(),
+      provider.close(),
+    ]).timeout(const Duration(seconds: 5));
 
     expect(await catalogRun, isA<Failed<GenerationResult, AiError>>());
     expect(await deploymentRun, isA<Failed<GenerationResult, AiError>>());

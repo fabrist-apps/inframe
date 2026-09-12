@@ -68,6 +68,12 @@ final class BasetenMessageRequest {
     if (this.messages.isEmpty) {
       throw ArgumentError.value(messages, 'messages', 'must not be empty');
     }
+    if (temperature != null && (!temperature!.isFinite || temperature! < 0 || temperature! > 1)) {
+      throw ArgumentError.value(temperature, 'temperature', 'must be between 0 and 1');
+    }
+    if (topP != null && (!topP!.isFinite || topP! <= 0 || topP! > 1)) {
+      throw ArgumentError.value(topP, 'topP', 'must be greater than 0 and at most 1');
+    }
     _rejectCollisions(this.extraBody, _requestFields);
   }
 
@@ -122,16 +128,17 @@ final class BasetenMessageResponse {
   /// Decodes a beta Messages response while retaining unknown fields.
   factory BasetenMessageResponse.fromJson(JsonObject raw) {
     final value = raw.toDart();
+    _literal(value, 'type', 'message');
     final content = _list(value, 'content').map(
       (block) => _object(block, 'content item'),
     );
     return BasetenMessageResponse._(
       id: _string(value, 'id'),
       model: _string(value, 'model'),
-      role: _role(value['role']),
+      role: _responseRole(value['role']),
       content: content,
-      stopReason: _optionalString(value, 'stop_reason'),
-      usage: value['usage'] == null ? null : _object(value['usage'], 'usage'),
+      stopReason: _stopReason(value['stop_reason']),
+      usage: _object(value['usage'], 'usage'),
       raw: raw,
       extensions: JsonObject(
         _without(value, {
@@ -171,11 +178,11 @@ final class BasetenMessageResponse {
   /// Ordered content and tool blocks from the pinned beta schema.
   final List<JsonObject> content;
 
-  /// Native terminal reason, when present.
-  final String? stopReason;
+  /// Native terminal reason.
+  final String stopReason;
 
-  /// Native usage fields, when present.
-  final JsonObject? usage;
+  /// Native usage fields.
+  final JsonObject usage;
 
   /// Complete immutable native response.
   final JsonObject raw;
@@ -197,11 +204,23 @@ const _requestFields = {
   'stream',
 };
 
-BasetenMessageRole _role(Object? value) => switch (value) {
-  'user' => BasetenMessageRole.user,
+BasetenMessageRole _responseRole(Object? value) => switch (value) {
   'assistant' => BasetenMessageRole.assistant,
-  _ => throw FormatException('Unknown Messages role: $value'),
+  _ => throw const FormatException('Messages response role must be assistant.'),
 };
+
+String _stopReason(Object? value) {
+  if (value is! String || !_stopReasons.contains(value)) {
+    throw FormatException('Unknown Messages stop_reason: $value');
+  }
+  return value;
+}
+
+void _literal(Map<String, Object?> value, String key, String expected) {
+  if (value[key] != expected) {
+    throw FormatException('$key must be "$expected".');
+  }
+}
 
 void _rejectCollisions(JsonObject extraBody, Set<String> fields) {
   final collision = extraBody.toDart().keys.where(fields.contains).firstOrNull;
@@ -221,14 +240,6 @@ String _string(Map<String, Object?> value, String key) {
   return field;
 }
 
-String? _optionalString(Map<String, Object?> value, String key) {
-  final field = value[key];
-  if (field != null && field is! String) {
-    throw FormatException('$key must be a string or null.');
-  }
-  return field as String?;
-}
-
 List<Object?> _list(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! List<Object?>) throw FormatException('$key must be an array.');
@@ -244,3 +255,5 @@ JsonObject _object(Object? value, String name) {
 
 Map<String, Object?> _without(Map<String, Object?> value, Set<String> keys) =>
     Map.fromEntries(value.entries.where((entry) => !keys.contains(entry.key)));
+
+const _stopReasons = {'end_turn', 'max_tokens', 'stop_sequence', 'tool_use'};

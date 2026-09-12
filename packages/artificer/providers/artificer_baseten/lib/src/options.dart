@@ -15,8 +15,8 @@ final class BasetenModelOptions {
     if (collision != null) {
       throw ArgumentError.value(this.extraBody, 'extraBody', 'field "$collision" is typed');
     }
-    if (this.topK case SetSetting<int>(:final value) when value <= 0) {
-      throw ArgumentError.value(value, 'topK', 'must be positive');
+    if (this.topK case SetSetting<int>(:final value) when value != -1 && value <= 0) {
+      throw ArgumentError.value(value, 'topK', 'must be positive or -1');
     }
     if (this.repetitionPenalty case SetSetting<double>(:final value) when value <= 0) {
       throw ArgumentError.value(

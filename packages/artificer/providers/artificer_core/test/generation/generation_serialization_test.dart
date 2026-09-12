@@ -110,5 +110,23 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test('should distinguish a missing native JSON field from JSON null', () {
+      final fields = {
+        'schemaVersion': 1,
+        'providerId': 'provider',
+        'api': 'predictions',
+        'modelId': 'model',
+      };
+
+      expect(
+        () => NativePayload.fromJson(JsonObject(fields)),
+        throwsFormatException,
+      );
+      expect(
+        NativePayload.fromJson(JsonObject({...fields, 'json': null})).value,
+        isA<JsonNull>(),
+      );
+    });
   });
 }

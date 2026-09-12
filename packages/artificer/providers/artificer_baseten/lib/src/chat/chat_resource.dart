@@ -167,7 +167,11 @@ final class _BasetenChatDialect
             'image_url': {
               'url': switch (source) {
                 BytesMediaSource(:final bytes) => 'data:$mimeType;base64,${base64Encode(bytes)}',
-                UrlMediaSource(:final url) => url.toString(),
+                UrlMediaSource(:final url) when url.scheme == 'https' => url.toString(),
+                UrlMediaSource() => throw const UnsupportedFeatureError(
+                  'Baseten remote image inputs require HTTPS URLs.',
+                  feature: 'imageInputUrl',
+                ),
                 ProviderFileSource() => throw const UnsupportedFeatureError(
                   'Baseten compatible chat does not accept provider file references.',
                   feature: 'providerFileInput',
