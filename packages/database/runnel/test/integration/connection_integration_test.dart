@@ -127,6 +127,49 @@ void main() {
               ),
               'custom',
             );
+
+            final hash = 'runnel:integration:hash:$suffix';
+            expect(await client.hset(hash, {'name': 'Ada', 'visits': '2'}), 2);
+            expect(await client.hget(hash, 'name'), 'Ada');
+            expect(await client.hmget(hash, ['name', 'missing']), ['Ada', null]);
+            expect(await client.hgetall(hash), {'name': 'Ada', 'visits': '2'});
+            expect(await client.hexists(hash, 'name'), isTrue);
+            expect(await client.hlen(hash), 2);
+            expect(await client.hincrby(hash, 'visits', 3), 5);
+            expect(await client.hdel(hash, ['name']), 1);
+
+            final set = 'runnel:integration:set:$suffix';
+            expect(await client.sadd(set, ['a', 'b', 'a']), 2);
+            expect(await client.sismember(set, 'a'), isTrue);
+            expect(await client.smembers(set), {'a', 'b'});
+            expect(await client.scard(set), 2);
+            expect(await client.srem(set, ['a']), 1);
+
+            final list = 'runnel:integration:list:$suffix';
+            expect(await client.rpush(list, ['b', 'c']), 2);
+            expect(await client.lpush(list, ['a']), 3);
+            expect(await client.lrange(list, 0, -1), ['a', 'b', 'c']);
+            expect(await client.llen(list), 3);
+            await client.ltrim(list, 0, 1);
+            expect(await client.lpop(list), 'a');
+            expect(await client.rpop(list), 'b');
+            expect(await client.lpop(list), isNull);
+
+            final sorted = 'runnel:integration:sorted:$suffix';
+            expect(await client.zadd(sorted, {'a': 1, 'b': 2, 'c': 3}), 3);
+            expect(await client.zscore(sorted, 'missing'), isNull);
+            expect(await client.zscore(sorted, 'b'), 2);
+            expect(await client.zincrby(sorted, 0.5, 'b'), 2.5);
+            expect(await client.zrange(sorted, 0, -1), ['a', 'b', 'c']);
+            expect(await client.zrangeWithScores(sorted, 0, -1), [
+              (member: 'a', score: 1.0),
+              (member: 'b', score: 2.5),
+              (member: 'c', score: 3.0),
+            ]);
+            expect(await client.zrangebyscore(sorted, 1, 2.5), ['a', 'b']);
+            expect(await client.zremrangebyscore(sorted, 1, 1), 1);
+            expect(await client.zrem(sorted, ['c']), 1);
+            expect(await client.zcard(sorted), 1);
           },
         );
       }

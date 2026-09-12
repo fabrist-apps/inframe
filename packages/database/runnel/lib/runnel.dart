@@ -3,6 +3,7 @@ library;
 
 export 'src/client.dart';
 export 'src/command.dart';
+export 'src/commands/collections.dart';
 export 'src/commands/scalars.dart';
 export 'src/errors.dart';
 export 'src/limits.dart';
