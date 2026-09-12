@@ -87,6 +87,11 @@ jobs:
           dart test packages/artificer/providers/artificer_google/test --chain-stack-traces
           dart run packages/artificer/providers/artificer_google/example/text_generation.dart
 
+      - name: Run xAI provider tests and example
+        run: |
+          dart test packages/artificer/providers/artificer_xai/test --chain-stack-traces
+          dart run packages/artificer/providers/artificer_xai/example/text_generation.dart
+
       - name: Run Anthropic provider tests and example
         run: |
           dart test packages/artificer/providers/artificer_anthropic/test --chain-stack-traces

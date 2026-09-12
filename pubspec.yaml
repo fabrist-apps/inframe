@@ -9,6 +9,7 @@ workspace:
   - packages/artificer/providers/artificer_anthropic
   - packages/artificer/providers/artificer_google
   - packages/artificer/providers/artificer_openai
+  - packages/artificer/providers/artificer_xai
   - packages/context
   - packages/inlet
   - packages/database/clickhouse
