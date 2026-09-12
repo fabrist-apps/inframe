@@ -394,15 +394,10 @@ double? _nullableDouble(RespValue reply) => switch (reply) {
 };
 
 double _double(RespValue reply) {
-  final value = switch (reply) {
-    RespDouble(:final value) => value,
-    RespInteger(:final value) => value.toDouble(),
-    _ => double.tryParse(respText(reply)),
-  };
-  if (value == null || !value.isFinite) {
+  if (reply is! RespDouble || !reply.value.isFinite) {
     throw FormatException('Expected a finite score reply, received ${reply.runtimeType}.');
   }
-  return value;
+  return reply.value;
 }
 
 List<String?> _nullableTextList(RespValue reply) {

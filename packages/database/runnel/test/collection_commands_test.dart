@@ -121,8 +121,8 @@ void main() {
         ':2\r\n',
         ':1\r\n',
         ':2\r\n',
-        '\$4\r\n1.25\r\n',
-        '\$3\r\n2.5\r\n',
+        ',1.25\r\n',
+        ',2.5\r\n',
         '*2\r\n+first\r\n+second\r\n',
         '*2\r\n*2\r\n+first\r\n,1.25\r\n*2\r\n+second\r\n,2.5\r\n',
         '*2\r\n+first\r\n+second\r\n',
@@ -189,6 +189,14 @@ void main() {
         () => smembersCommand(
           'set',
         ).decode(RespArray([const RespSimpleString('member')])),
+        throwsFormatException,
+      );
+      expect(
+        () => zscoreCommand('sorted', 'member').decode(const RespSimpleString('1.25')),
+        throwsFormatException,
+      );
+      expect(
+        () => zincrbyCommand('sorted', 1, 'member').decode(const RespInteger(2)),
         throwsFormatException,
       );
     });
