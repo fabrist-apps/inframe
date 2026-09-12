@@ -6,6 +6,7 @@ import 'package:conflux/src/effect/cause.dart';
 import 'package:conflux/src/effect/effect.dart';
 import 'package:conflux/src/effect/execution.dart';
 import 'package:conflux/src/effect/exit.dart';
+import 'package:context/context.dart';
 
 /// Selects how long successful Cache values remain ready.
 final class CacheExpiry<K, A> {
@@ -14,15 +15,15 @@ final class CacheExpiry<K, A> {
   /// Uses one [duration] for every successful value.
   static CacheExpiry<K, A> fixed<K, A>(Duration duration) {
     _requireNonNegativeExpiry(duration);
-    return CacheExpiry._((_, _) => duration);
+    return CacheExpiry._((_, _, _) => duration);
   }
 
-  /// Computes each successful value's lifetime from its key and value.
+  /// Computes each successful value's lifetime in the Cache owner's Context.
   static CacheExpiry<K, A> byValue<K, A>(
-    Duration Function(K key, A value) expiry,
+    Duration Function(K key, A value, Context context) expiry,
   ) => CacheExpiry._(expiry);
 
-  final Duration Function(K key, A value) _durationFor;
+  final Duration Function(K key, A value, Context context) _durationFor;
 }
 
 /// A scoped loading cache that retains successful lookup results.
@@ -50,13 +51,14 @@ final class Cache<K, A, E> {
   /// [capacity] and [concurrency] must both be positive. Lookups for the same
   /// key share one execution, and cancelling one caller does not cancel work
   /// still awaited by other callers. Expiry durations must be non-negative.
+  /// [lookup] receives this Cache's captured owner Context.
   /// A thrown value-dependent expiry callback or negative returned duration is
   /// reported as a defect to the lookup or set operation that evaluates it.
   static Effect<Cache<K, A, E>, Never> make<K, A, E>({
     required int capacity,
     required int concurrency,
     required CacheExpiry<K, A> expiry,
-    required Effect<A, E> Function(K key) lookup,
+    required Effect<A, E> Function(K key, Context context) lookup,
   }) => EffectAccess.create((execution) async {
     if (capacity <= 0) {
       throw ArgumentError.value(capacity, 'capacity', 'Must be positive.');
@@ -98,7 +100,7 @@ final class Cache<K, A, E> {
   final int concurrency;
 
   final CacheExpiry<K, A> _expiry;
-  final Effect<A, E> Function(K key) _lookup;
+  final Effect<A, E> Function(K key, Context context) _lookup;
   final EffectExecution _ownerExecution;
 
   // Ready entries are ordered from least to most recently used. Only the load
@@ -165,14 +167,21 @@ final class Cache<K, A, E> {
     return const Succeeded(null);
   });
 
-  /// Invalidates ready entries matching [predicate] without inspecting loads.
+  /// Invalidates ready entries matching [predicate] in the caller's Context,
+  /// without inspecting loads.
   Effect<void, Never> invalidateWhere(
-    bool Function(K key, A value) predicate,
-  ) => EffectAccess.create((_) async {
+    bool Function(K key, A value, Context context) predicate,
+  ) => EffectAccess.create((caller) async {
     _ensureOpen();
     _removeExpiredEntries();
     _entries.entries
-        .where((entry) => predicate(entry.key, entry.value.value))
+        .where(
+          (entry) => predicate(
+            entry.key,
+            entry.value.value,
+            caller.context,
+          ),
+        )
         .map((entry) => entry.key)
         .toList()
         .forEach(_invalidate);
@@ -229,7 +238,7 @@ final class Cache<K, A, E> {
     _activeLoads += 1;
     final fiber = ScopeAccess.fork(
       _ownerExecution.scope,
-      Effect.defer((_) => _lookup(load.key)),
+      Effect.defer((context) => _lookup(load.key, context)),
       _ownerExecution,
     );
     unawaited(
@@ -284,7 +293,11 @@ final class Cache<K, A, E> {
   }
 
   void _retain(K key, A value) {
-    final duration = _expiry._durationFor(key, value);
+    final duration = _expiry._durationFor(
+      key,
+      value,
+      _ownerExecution.context,
+    );
     _requireNonNegativeExpiry(duration);
     _removeExpiredEntries();
     final entry = _CacheEntry(

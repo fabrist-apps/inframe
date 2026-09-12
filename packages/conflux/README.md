@@ -78,7 +78,7 @@ final cachedLengths = Effect.build<(int, int), Never>(($) async {
       capacity: 100,
       concurrency: 8,
       expiry: CacheExpiry.fixed(const Duration(minutes: 5)),
-      lookup: (key) => Effect.sync(key.length),
+      lookup: (key, _) => Effect.succeed(key.length),
     ),
   );
 
@@ -88,10 +88,13 @@ final cachedLengths = Effect.build<(int, int), Never>(($) async {
 });
 ```
 
-`Cache.make` captures its creation scope's Context and Clock. A lookup started
-by another caller still uses those dependencies. Put request-dependent data in
-the key or acquire the Cache inside the request scope. Cache coordination is
-confined to one isolate.
+`Cache.make` captures its creation scope's Context and Clock. Its lookup
+callback receives `(key, context)`, and a lookup started by another caller still
+uses those captured dependencies. Value-dependent expiry receives
+`(key, value, context)` from the same owner. `invalidateWhere` instead receives
+the calling Effect's Context. Put request-dependent data in the key or acquire
+the Cache inside the request scope. Cache coordination is confined to one
+isolate.
 
 Concurrent requests for one key and generation share a load. Cancelling one
 waiter leaves that owner-scoped load available to other waiters. `concurrency`
