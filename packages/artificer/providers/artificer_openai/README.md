@@ -59,3 +59,8 @@ Native lifecycle calls are explicit cold operations: `responses.retrieve`, `resp
 `responses.compact` never poll, paginate, or carry state between calls. `models.list` returns one
 page and `models.retrieve` resolves one exact model ID. Background create results preserve queued
 and in-progress states for the caller to inspect and advance explicitly.
+
+`chatCompletions.create` and `chatCompletions.stream` expose the pinned native Chat Completions
+shape without changing the common language model's Responses backend. Normalizing a completion
+with multiple choices requires an explicit `choiceIndex`. Legacy text Completions and stored Chat
+Completions administration are intentionally outside this package's endpoint snapshot.

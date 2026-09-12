@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
+import 'package:artificer_openai/src/chat/chat_completions_resource.dart';
 import 'package:artificer_openai/src/models/models_resource.dart';
 import 'package:artificer_openai/src/options.dart';
 import 'package:artificer_openai/src/responses/response_models.dart';
@@ -31,11 +32,15 @@ final class OpenAIProvider {
            if (project != null) 'openai-project': _nonEmpty(project, 'project'),
          },
        ) {
+    chatCompletions = OpenAIChatCompletionsResource(_client);
     responses = OpenAIResponsesResource(_client);
     models = OpenAIModelsResource(_client);
   }
 
   final ProviderHttpClient _client;
+
+  /// Typed native Chat Completions operations.
+  late final OpenAIChatCompletionsResource chatCompletions;
 
   /// Typed native Responses operations.
   late final OpenAIResponsesResource responses;
