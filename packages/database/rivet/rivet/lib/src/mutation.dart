@@ -53,6 +53,9 @@ extension RivetMutationAccess<Definition, Row> on RivetTableAccessor<Definition,
     RivetCompanion<Definition> companion, {
     RivetWhere<Definition>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  RivetDelete<Definition, Row> delete({RivetWhere<Definition>? where}) =>
+      RivetDelete(buildSchema(), where: where);
 }
 
 final class RivetInsert<Definition, Row> {
@@ -121,6 +124,43 @@ final class RivetReturningUpdate<Definition, Row> {
 
   Future<List<Row>> get(RivetExecutor executor) => executor.execute(
     _compileUpdate(_schema, _companion, _predicate, returning: true),
+    _schema.decode,
+  );
+}
+
+final class RivetDelete<Definition, Row> {
+  RivetDelete(
+    this._schema, {
+    RivetWhere<Definition>? where,
+  }) : _predicate = where?.call(_schema.definition) {
+    if (_predicate?.columns.any((column) => !column.belongsTo(_schema)) ?? false) {
+      throw const RivetUnsupportedQueryException(
+        'A delete predicate can only reference columns from its target table.',
+      );
+    }
+  }
+
+  final RivetTableSchema<Definition, Row> _schema;
+  final RivetPredicate? _predicate;
+
+  RivetDelete<Definition, Row> prepare() => this;
+
+  Future<int> execute(RivetExecutor executor) =>
+      executor.executeAffected(_compileDelete(_schema, _predicate, returning: false));
+
+  RivetReturningDelete<Definition, Row> returning() => RivetReturningDelete(_schema, _predicate);
+}
+
+final class RivetReturningDelete<Definition, Row> {
+  const RivetReturningDelete(this._schema, this._predicate);
+
+  final RivetTableSchema<Definition, Row> _schema;
+  final RivetPredicate? _predicate;
+
+  RivetReturningDelete<Definition, Row> prepare() => this;
+
+  Future<List<Row>> get(RivetExecutor executor) => executor.execute(
+    _compileDelete(_schema, _predicate, returning: true),
     _schema.decode,
   );
 }
@@ -273,4 +313,27 @@ String? _updateValue<Definition, Row>(
       parameters.add(column.encodeValue(hook()));
       return '\$${parameters.length}::${column.codec.cast}';
   }
+}
+
+RivetCompiledQuery _compileDelete<Definition, Row>(
+  RivetTableSchema<Definition, Row> schema,
+  RivetPredicate? predicate, {
+  required bool returning,
+}) {
+  final sql = StringBuffer('DELETE FROM ${schema.qualifiedName}');
+  final parameters = <Object?>[];
+  if (predicate != null) {
+    sql.write(' WHERE ${predicate.renderParameters()}');
+    parameters.addAll(predicate.parameters);
+  }
+  if (returning) {
+    sql
+      ..write(' RETURNING ')
+      ..write(
+        schema.columns.indexed
+            .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
+            .join(', '),
+      );
+  }
+  return RivetCompiledQuery(sql.toString(), parameters);
 }

@@ -100,6 +100,7 @@ final class Users extends RivetTableDefinition<Users> {
               ),
               contains('RivetInsert<Users, UsersRow> insert(UsersCompanion companion)'),
               contains('RivetUpdate<Users, UsersRow> update('),
+              contains('RivetDelete<Users, UsersRow> delete({'),
             ),
           ),
         },

@@ -86,6 +86,11 @@ final class _$UserProfilesDB
     UserProfilesCompanion companion, {
     RivetWhere<UserProfiles>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<UserProfiles, UserProfilesRow> delete({
+    RivetWhere<UserProfiles>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr116.posts'.
@@ -161,6 +166,10 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
     PostsCompanion companion, {
     RivetWhere<Posts>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<Posts, PostsRow> delete({RivetWhere<Posts>? where}) =>
+      RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr119.scalarValues'.
@@ -386,6 +395,11 @@ final class _$ScalarValuesDB
     ScalarValuesCompanion companion, {
     RivetWhere<ScalarValues>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<ScalarValues, ScalarValuesRow> delete({
+    RivetWhere<ScalarValues>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr120.enumValues'.
@@ -584,6 +598,11 @@ final class _$EnumValuesDB
     EnumValuesCompanion companion, {
     RivetWhere<EnumValues>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<EnumValues, EnumValuesRow> delete({
+    RivetWhere<EnumValues>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr121.vectorValues'.
@@ -683,6 +702,11 @@ final class _$VectorValuesDB
     VectorValuesCompanion companion, {
     RivetWhere<VectorValues>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<VectorValues, VectorValuesRow> delete({
+    RivetWhere<VectorValues>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr122.arrayValues'.
@@ -903,6 +927,11 @@ final class _$ArrayValuesDB
     ArrayValuesCompanion companion, {
     RivetWhere<ArrayValues>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<ArrayValues, ArrayValuesRow> delete({
+    RivetWhere<ArrayValues>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr122.malformedArrays'.
@@ -970,6 +999,11 @@ final class _$MalformedArraysDB
     MalformedArraysCompanion companion, {
     RivetWhere<MalformedArrays>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MalformedArrays, MalformedArraysRow> delete({
+    RivetWhere<MalformedArrays>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'metadata.metadataColumns'.
@@ -1125,6 +1159,11 @@ final class _$MetadataColumnsDB
     MetadataColumnsCompanion companion, {
     RivetWhere<MetadataColumns>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MetadataColumns, MetadataColumnsRow> delete({
+    RivetWhere<MetadataColumns>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'metadata.textTargets'.
@@ -1190,6 +1229,11 @@ final class _$TextTargetsDB
     TextTargetsCompanion companion, {
     RivetWhere<TextTargets>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<TextTargets, TextTargetsRow> delete({
+    RivetWhere<TextTargets>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'metadata.invalidReferences'.
@@ -1256,6 +1300,11 @@ final class _$InvalidReferencesDB
     InvalidReferencesCompanion companion, {
     RivetWhere<InvalidReferences>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<InvalidReferences, InvalidReferencesRow> delete({
+    RivetWhere<InvalidReferences>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'metadata.parameterNames'.
@@ -1322,6 +1371,11 @@ final class _$ParameterNamesDB
     ParameterNamesCompanion companion, {
     RivetWhere<ParameterNames>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<ParameterNames, ParameterNamesRow> delete({
+    RivetWhere<ParameterNames>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr139.mutationCatalog'.
@@ -1790,6 +1844,11 @@ final class _$MutationCatalogDB
     MutationCatalogCompanion companion, {
     RivetWhere<MutationCatalog>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationCatalog, MutationCatalogRow> delete({
+    RivetWhere<MutationCatalog>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr138.mutationUsers'.
@@ -1986,6 +2045,11 @@ final class _$MutationUsersDB
     MutationUsersCompanion companion, {
     RivetWhere<MutationUsers>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationUsers, MutationUsersRow> delete({
+    RivetWhere<MutationUsers>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr138.mutationParents'.
@@ -2076,6 +2140,11 @@ final class _$MutationParentsDB
     MutationParentsCompanion companion, {
     RivetWhere<MutationParents>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationParents, MutationParentsRow> delete({
+    RivetWhere<MutationParents>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr138.mutationChildren'.
@@ -2168,6 +2237,11 @@ final class _$MutationChildrenDB
     MutationChildrenCompanion companion, {
     RivetWhere<MutationChildren>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationChildren, MutationChildrenRow> delete({
+    RivetWhere<MutationChildren>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr140.mutationUpdateUsers'.
@@ -2388,6 +2462,11 @@ final class _$MutationUpdateUsersDB
     MutationUpdateUsersCompanion companion, {
     RivetWhere<MutationUpdateUsers>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationUpdateUsers, MutationUpdateUsersRow> delete({
+    RivetWhere<MutationUpdateUsers>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 /// Generated row returned by reads from 'fbr140.mutationUpdateChildren'.
@@ -2484,6 +2563,338 @@ final class _$MutationUpdateChildrenDB
     MutationUpdateChildrenCompanion companion, {
     RivetWhere<MutationUpdateChildren>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationUpdateChildren, MutationUpdateChildrenRow> delete({
+    RivetWhere<MutationUpdateChildren>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Generated row returned by reads from 'fbr141.delete Parents'.
+final class MutationDeleteParentsRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationDeleteParentsRow({
+    required this.id,
+    required this.label,
+    this.cascadeChildren = const Relation.unloaded(),
+    this.restrictChildren = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `label`.
+  final String label;
+
+  /// Loaded or unloaded `cascadeChildren` relation.
+  final Relation<List<MutationCascadeChildrenRow>> cascadeChildren;
+
+  /// Loaded or unloaded `restrictChildren` relation.
+  final Relation<List<MutationRestrictChildrenRow>> restrictChildren;
+}
+
+/// Generated values accepted by mutations of 'fbr141.delete Parents'.
+final class MutationDeleteParentsCompanion
+    implements RivetCompanion<MutationDeleteParents> {
+  const MutationDeleteParentsCompanion._({
+    required this.id,
+    required this.label,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationDeleteParentsCompanion.insert({
+    required RivetValue<MutationDeleteParents, int, int> id,
+    required RivetValue<MutationDeleteParents, String, String> label,
+  }) => MutationDeleteParentsCompanion._(id: id, label: label);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationDeleteParentsCompanion.update({
+    RivetValue<MutationDeleteParents, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationDeleteParents, String, String> label =
+        const RivetValue.absent(),
+  }) => MutationDeleteParentsCompanion._(id: id, label: label);
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationDeleteParents, int, int> id;
+
+  /// Mutation value for `label`.
+  final RivetValue<MutationDeleteParents, String, String> label;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationDeleteParents>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('label', label),
+  ];
+}
+
+final class _$MutationDeleteParentsDB
+    extends
+        RivetTableAccessor<MutationDeleteParents, MutationDeleteParentsRow> {
+  const _$MutationDeleteParentsDB();
+
+  @override
+  RivetTableSchema<MutationDeleteParents, MutationDeleteParentsRow>
+  buildSchema() {
+    final definition = MutationDeleteParents();
+
+    return RivetTableSchema<MutationDeleteParents, MutationDeleteParentsRow>(
+      schemaName: 'fbr141',
+      tableName: 'delete Parents',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.label as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'label'],
+      decode: (values, sqlNulls) => MutationDeleteParentsRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        label: definition.label.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      ),
+      relations: {
+        'cascadeChildren':
+            definition.cascadeChildren as RivetRelationDescriptor<Object?>,
+        'restrictChildren':
+            definition.restrictChildren as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationDeleteParents, MutationDeleteParentsRow> insert(
+    MutationDeleteParentsCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationDeleteParents, MutationDeleteParentsRow> update(
+    MutationDeleteParentsCompanion companion, {
+    RivetWhere<MutationDeleteParents>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationDeleteParents, MutationDeleteParentsRow> delete({
+    RivetWhere<MutationDeleteParents>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Generated row returned by reads from 'fbr141.cascade Children'.
+final class MutationCascadeChildrenRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationCascadeChildrenRow({
+    required this.id,
+    required this.parentId,
+    this.parent = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `parentId`.
+  final int parentId;
+
+  /// Loaded or unloaded `parent` relation.
+  final Relation<MutationDeleteParentsRow?> parent;
+}
+
+/// Generated values accepted by mutations of 'fbr141.cascade Children'.
+final class MutationCascadeChildrenCompanion
+    implements RivetCompanion<MutationCascadeChildren> {
+  const MutationCascadeChildrenCompanion._({
+    required this.id,
+    required this.parentId,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationCascadeChildrenCompanion.insert({
+    required RivetValue<MutationCascadeChildren, int, int> id,
+    required RivetValue<MutationCascadeChildren, int, int> parentId,
+  }) => MutationCascadeChildrenCompanion._(id: id, parentId: parentId);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationCascadeChildrenCompanion.update({
+    RivetValue<MutationCascadeChildren, int, int> id =
+        const RivetValue.absent(),
+    RivetValue<MutationCascadeChildren, int, int> parentId =
+        const RivetValue.absent(),
+  }) => MutationCascadeChildrenCompanion._(id: id, parentId: parentId);
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationCascadeChildren, int, int> id;
+
+  /// Mutation value for `parentId`.
+  final RivetValue<MutationCascadeChildren, int, int> parentId;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationCascadeChildren>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('parentId', parentId),
+  ];
+}
+
+final class _$MutationCascadeChildrenDB
+    extends
+        RivetTableAccessor<
+          MutationCascadeChildren,
+          MutationCascadeChildrenRow
+        > {
+  const _$MutationCascadeChildrenDB();
+
+  @override
+  RivetTableSchema<MutationCascadeChildren, MutationCascadeChildrenRow>
+  buildSchema() {
+    final definition = MutationCascadeChildren();
+
+    return RivetTableSchema<
+      MutationCascadeChildren,
+      MutationCascadeChildrenRow
+    >(
+      schemaName: 'fbr141',
+      tableName: 'cascade Children',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.parentId as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'parentId'],
+      decode: (values, sqlNulls) => MutationCascadeChildrenRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        parentId: definition.parentId.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+      ),
+      relations: {
+        'parent': definition.parent as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationCascadeChildren, MutationCascadeChildrenRow> insert(
+    MutationCascadeChildrenCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationCascadeChildren, MutationCascadeChildrenRow> update(
+    MutationCascadeChildrenCompanion companion, {
+    RivetWhere<MutationCascadeChildren>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationCascadeChildren, MutationCascadeChildrenRow> delete({
+    RivetWhere<MutationCascadeChildren>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Generated row returned by reads from 'fbr141.restrict Children'.
+final class MutationRestrictChildrenRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationRestrictChildrenRow({
+    required this.id,
+    required this.parentId,
+    this.parent = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `parentId`.
+  final int parentId;
+
+  /// Loaded or unloaded `parent` relation.
+  final Relation<MutationDeleteParentsRow?> parent;
+}
+
+/// Generated values accepted by mutations of 'fbr141.restrict Children'.
+final class MutationRestrictChildrenCompanion
+    implements RivetCompanion<MutationRestrictChildren> {
+  const MutationRestrictChildrenCompanion._({
+    required this.id,
+    required this.parentId,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationRestrictChildrenCompanion.insert({
+    required RivetValue<MutationRestrictChildren, int, int> id,
+    required RivetValue<MutationRestrictChildren, int, int> parentId,
+  }) => MutationRestrictChildrenCompanion._(id: id, parentId: parentId);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationRestrictChildrenCompanion.update({
+    RivetValue<MutationRestrictChildren, int, int> id =
+        const RivetValue.absent(),
+    RivetValue<MutationRestrictChildren, int, int> parentId =
+        const RivetValue.absent(),
+  }) => MutationRestrictChildrenCompanion._(id: id, parentId: parentId);
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationRestrictChildren, int, int> id;
+
+  /// Mutation value for `parentId`.
+  final RivetValue<MutationRestrictChildren, int, int> parentId;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationRestrictChildren>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('parentId', parentId),
+  ];
+}
+
+final class _$MutationRestrictChildrenDB
+    extends
+        RivetTableAccessor<
+          MutationRestrictChildren,
+          MutationRestrictChildrenRow
+        > {
+  const _$MutationRestrictChildrenDB();
+
+  @override
+  RivetTableSchema<MutationRestrictChildren, MutationRestrictChildrenRow>
+  buildSchema() {
+    final definition = MutationRestrictChildren();
+
+    return RivetTableSchema<
+      MutationRestrictChildren,
+      MutationRestrictChildrenRow
+    >(
+      schemaName: 'fbr141',
+      tableName: 'restrict Children',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.parentId as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'parentId'],
+      decode: (values, sqlNulls) => MutationRestrictChildrenRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        parentId: definition.parentId.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+      ),
+      relations: {
+        'parent': definition.parent as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationRestrictChildren, MutationRestrictChildrenRow> insert(
+    MutationRestrictChildrenCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationRestrictChildren, MutationRestrictChildrenRow> update(
+    MutationRestrictChildrenCompanion companion, {
+    RivetWhere<MutationRestrictChildren>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationRestrictChildren, MutationRestrictChildrenRow> delete({
+    RivetWhere<MutationRestrictChildren>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 // **************************************************************************
@@ -2515,6 +2926,12 @@ abstract class _$RivetTestDatabase {
       MutationUpdateUsers.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
       MutationUpdateChildren.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      MutationDeleteParents.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      MutationCascadeChildren.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      MutationRestrictChildren.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
     ],
   );

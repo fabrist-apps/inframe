@@ -222,6 +222,11 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     RivetWhere<$className>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
 
+  /// Creates a reusable delete plan.
+  RivetDelete<$className, $rowName> delete({
+    RivetWhere<$className>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+
 }
 ''';
   }

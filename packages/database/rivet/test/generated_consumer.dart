@@ -388,6 +388,49 @@ final class MutationUpdateChildren extends RivetTableDefinition<MutationUpdateCh
   )();
 }
 
+@RivetTable(schema: 'fbr141', name: 'delete Parents')
+final class MutationDeleteParents extends RivetTableDefinition<MutationDeleteParents> {
+  static const db = _$MutationDeleteParentsDB();
+
+  late final id = integer().primaryKey()();
+  late final label = text(name: 'display Name')();
+  late final cascadeChildren = many<MutationCascadeChildren>(
+    relation: (child) => child.parent,
+  )();
+  late final restrictChildren = many<MutationRestrictChildren>(
+    relation: (child) => child.parent,
+  )();
+}
+
+@RivetTable(schema: 'fbr141', name: 'cascade Children')
+final class MutationCascadeChildren extends RivetTableDefinition<MutationCascadeChildren> {
+  static const db = _$MutationCascadeChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationDeleteParents>(
+    (parent) => parent.id,
+    onDelete: RivetReferentialAction.cascade,
+  )();
+  late final parent = one<MutationDeleteParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
+@RivetTable(schema: 'fbr141', name: 'restrict Children')
+final class MutationRestrictChildren extends RivetTableDefinition<MutationRestrictChildren> {
+  static const db = _$MutationRestrictChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationDeleteParents>(
+    (parent) => parent.id,
+  )();
+  late final parent = one<MutationDeleteParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -406,6 +449,9 @@ final class MutationUpdateChildren extends RivetTableDefinition<MutationUpdateCh
     MutationCatalog,
     MutationUpdateUsers,
     MutationUpdateChildren,
+    MutationDeleteParents,
+    MutationCascadeChildren,
+    MutationRestrictChildren,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

@@ -215,6 +215,11 @@ final class _$PackageUsersDB
     PackageUsersCompanion companion, {
     RivetWhere<PackageUsers>? where,
   }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<PackageUsers, PackageUsersRow> delete({
+    RivetWhere<PackageUsers>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 // **************************************************************************
