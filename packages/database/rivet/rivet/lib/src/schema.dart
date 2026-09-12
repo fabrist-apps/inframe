@@ -1674,15 +1674,15 @@ String _postgresLiteral(Object? value) => switch (value) {
   final num number => number.toString(),
   final DateTime timestamp => _quotedLiteral(timestamp.toIso8601String()),
   final String string => _quotedLiteral(string),
-  final List<Object?> list => _quotedLiteral(jsonEncode(list)),
-  final Map<String, Object?> map => _quotedLiteral(jsonEncode(map)),
-  _ => _quotedLiteral(value.toString()),
+  _ => throw RivetUnsupportedQueryException(
+    'Cannot render ${value.runtimeType} as a PostgreSQL literal.',
+  ),
 };
 
 String _postgresJsonbArrayLiteral(List<Object?> values) =>
     'ARRAY[${values.map((value) => value is pg.TypedValue<Object> && value.isSqlNull ? 'NULL' : '${_quotedLiteral(jsonEncode(value))}::jsonb').join(', ')}]';
 
-String _quotedLiteral(String value) => "'${value.replaceAll("'", "''")}'";
+String _quotedLiteral(String value) => "E'${value.replaceAll(r'\', r'\\').replaceAll("'", "''")}'";
 
 String quoteIdentifier(String identifier) {
   if (identifier.isEmpty || identifier.contains('\u0000')) {

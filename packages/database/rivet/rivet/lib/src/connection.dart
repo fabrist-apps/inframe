@@ -113,6 +113,7 @@ final class RivetDb implements RivetExecutor {
     RivetCompiledQuery query,
     RivetRowDecoder<Row> decode,
   ) async {
+    _rejectUseInsideOwnTransaction();
     _acceptWork();
     try {
       return await _executeWith(_pool.run, query, decode);
@@ -123,6 +124,7 @@ final class RivetDb implements RivetExecutor {
 
   @override
   Future<int> executeAffected(RivetCompiledQuery query) async {
+    _rejectUseInsideOwnTransaction();
     _acceptWork();
     try {
       return await _executeAffectedWith(_pool.run, query);
@@ -182,6 +184,14 @@ final class RivetDb implements RivetExecutor {
       );
     } finally {
       _finishWork();
+    }
+  }
+
+  void _rejectUseInsideOwnTransaction() {
+    if (Zone.current[_transactionDatabaseZoneKey] == this) {
+      throw const RivetExecutorClosedException(
+        'Use the transaction executor inside this database transaction.',
+      );
     }
   }
 

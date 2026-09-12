@@ -38,7 +38,7 @@ void main() {
       expect(
         query.sql,
         contains(
-          'ON CONFLICT ("name") WHERE NOT ("name" = \'\'::text) '
+          'ON CONFLICT ("name") WHERE NOT ("name" = E\'\'::text) '
           'DO UPDATE SET "age" = "excluded"."age", '
           '"active" = "mutationUpsertUsers"."active"',
         ),

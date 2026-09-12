@@ -48,7 +48,7 @@ void main() {
         executor.queries[2].sql,
         contains(
           'ON CONFLICT ("email") WHERE '
-          '("active" = TRUE::bool) AND ("name" = \'O\'\'Reilly\'::text) '
+          '("active" = TRUE::bool) AND ("name" = E\'O\'\'Reilly\'::text) '
           'DO NOTHING RETURNING',
         ),
       );
@@ -131,19 +131,23 @@ void main() {
 
       expect(
         table.payload.equals(JsonValue.from('active')).renderLiterals(),
-        '"payload" = \'"active"\'::jsonb',
+        '"payload" = E\'"active"\'::jsonb',
       );
       expect(
         table.payload.equals(const JsonNull()).renderLiterals(),
-        '"payload" = \'null\'::jsonb',
+        '"payload" = E\'null\'::jsonb',
       );
       expect(
         table.jsonValues.equals(const [JsonNull(), null]).renderLiterals(),
-        '"jsonValues" = ARRAY[\'null\'::jsonb, NULL]::jsonb[]',
+        '"jsonValues" = ARRAY[E\'null\'::jsonb, NULL]::jsonb[]',
       );
       expect(
         table.score.equals(double.infinity).renderLiterals(),
-        '"score" = \'Infinity\'::float8',
+        '"score" = E\'Infinity\'::float8',
+      );
+      expect(
+        table.textValue.equals(r"path\to O'Reilly").renderLiterals(),
+        '"textValue" = E\'path\\\\to O\'\'Reilly\'::text',
       );
     });
   });

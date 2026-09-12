@@ -3,11 +3,28 @@
 Rivet generates typed Dart reads for existing PostgreSQL schemas. Opening a database creates an owned connection pool; it never creates application tables or applies migrations.
 
 ```dart
+final class Email {
+  const Email(this.value);
+
+  final String value;
+}
+
+final class EmailConverter implements RivetTypeConverter<Email, String> {
+  const EmailConverter();
+
+  @override
+  Email fromSql(String value) => Email(value);
+
+  @override
+  String toSql(Email value) => value.value;
+}
+
 @RivetTable(schema: 'auth', name: 'users')
 final class Users extends RivetTableDefinition<Users> {
   static const db = _$UsersDB();
 
   late final name = text()();
+  late final email = text().map(const EmailConverter())();
   late final age = integer()();
 }
 
@@ -43,6 +60,7 @@ Generated companions keep insert values typed and defer runtime defaults until e
 final insert = Users.db.insert(
   UsersCompanion.insert(
     name: const RivetValue.present('Ada'),
+    email: const RivetValue.present(Email('ada@example.com')),
     age: const RivetValue.present(30),
   ),
 );
@@ -50,15 +68,17 @@ final affected = await insert.execute(db);
 final rows = await insert.returning().get(db);
 ```
 
-Non-nullable fields without a SQL or runtime default are required named arguments. Nullable and defaulted fields begin as `RivetValue.absent()`. At execution, an omitted insert field uses `defaultFn`, then `onUpdateFn`, then the PostgreSQL `DEFAULT`, and finally SQL NULL when the column is nullable. Explicit values, nulls, and typed SQL expressions suppress those fallbacks. Each terminal executes one statement; `returning()` decodes complete rows without another SELECT.
+Non-nullable fields without a SQL or runtime default are required named arguments. Nullable and defaulted fields begin as `RivetValue.absent()`. At execution, an omitted insert field uses `defaultValue`, then `onUpdate`, then the PostgreSQL `DEFAULT`, and finally SQL NULL when the column is nullable. Explicit values, nulls, and typed SQL expressions suppress those fallbacks. Each terminal executes one statement; `returning()` decodes complete rows without another SELECT.
 
 For mapped columns, `present` takes the domain type. Expression assignments take the storage type through the column's `storage` view, so the expression bypasses the Dart converter and the returned row still decodes through it:
 
 ```dart
 UsersCompanion.insert(
+  name: const RivetValue.present('Ada'),
   email: RivetValue.expression(
     (users) => users.email.storage.value('ada@example.com'),
   ),
+  age: const RivetValue.present(30),
 );
 ```
 
