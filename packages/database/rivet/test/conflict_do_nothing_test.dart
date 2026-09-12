@@ -125,6 +125,27 @@ void main() {
       }
       expect(executor.queries, isEmpty);
     });
+
+    test('should preserve JSON values in partial-index literals', () {
+      final table = MutationCatalog.db.buildSchema().definition;
+
+      expect(
+        table.payload.equals(JsonValue.from('active')).renderLiterals(),
+        '"payload" = \'"active"\'::jsonb',
+      );
+      expect(
+        table.payload.equals(const JsonNull()).renderLiterals(),
+        '"payload" = \'null\'::jsonb',
+      );
+      expect(
+        table.jsonValues.equals(const [JsonNull(), null]).renderLiterals(),
+        '"jsonValues" = ARRAY[\'null\'::jsonb, NULL]::jsonb[]',
+      );
+      expect(
+        table.score.equals(double.infinity).renderLiterals(),
+        '"score" = \'Infinity\'::float8',
+      );
+    });
   });
 }
 

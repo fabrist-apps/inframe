@@ -1663,8 +1663,14 @@ final class RivetPredicate {
 String _postgresLiteral(Object? value) => switch (value) {
   null => 'NULL',
   final pg.TypedValue<Object> typed when typed.isSqlNull => 'NULL',
+  final pg.TypedValue<Object> typed
+      when typed.type == pg.Type.json || typed.type == pg.Type.jsonb =>
+    _quotedLiteral(jsonEncode(typed.value)),
+  final pg.TypedValue<Object> typed when typed.type == pg.Type.jsonbArray =>
+    _postgresJsonbArrayLiteral(typed.value! as List<Object?>),
   final pg.TypedValue<Object> typed => _postgresLiteral(typed.value),
   final bool boolean => boolean ? 'TRUE' : 'FALSE',
+  final double number when !number.isFinite => _quotedLiteral(number.toString()),
   final num number => number.toString(),
   final DateTime timestamp => _quotedLiteral(timestamp.toIso8601String()),
   final String string => _quotedLiteral(string),
@@ -1672,6 +1678,9 @@ String _postgresLiteral(Object? value) => switch (value) {
   final Map<String, Object?> map => _quotedLiteral(jsonEncode(map)),
   _ => _quotedLiteral(value.toString()),
 };
+
+String _postgresJsonbArrayLiteral(List<Object?> values) =>
+    'ARRAY[${values.map((value) => value is pg.TypedValue<Object> && value.isSqlNull ? 'NULL' : '${_quotedLiteral(jsonEncode(value))}::jsonb').join(', ')}]';
 
 String _quotedLiteral(String value) => "'${value.replaceAll("'", "''")}'";
 

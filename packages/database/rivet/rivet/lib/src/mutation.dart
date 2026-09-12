@@ -1,5 +1,5 @@
 // Mutation plans retain values and callbacks, then compile them at execution time.
-// ignore_for_file: avoid_returning_this, prefer_initializing_formals, public_member_api_docs
+// ignore_for_file: avoid_returning_this, one_member_abstracts, prefer_initializing_formals, public_member_api_docs
 
 import 'package:rivet/src/errors.dart';
 import 'package:rivet/src/query.dart';
@@ -41,8 +41,10 @@ final class RivetAssignment<Definition> {
   final RivetValue<Definition, dynamic, dynamic> value;
 }
 
+enum RivetCompanionKey { assignments }
+
 abstract interface class RivetCompanion<Definition> {
-  List<RivetAssignment<Definition>> get assignments;
+  List<RivetAssignment<Definition>> operator [](RivetCompanionKey key);
 }
 
 typedef RivetConflictTarget<Definition> = List<RivetColumn<dynamic>> Function(Definition table);
@@ -377,7 +379,8 @@ RivetCompiledQuery _compileInsertMany<Definition, Row>(
   final rowsSql = <String>[];
   for (final companion in companions) {
     final supplied = {
-      for (final assignment in companion.assignments) assignment.columnName: assignment.value,
+      for (final assignment in companion[RivetCompanionKey.assignments])
+        assignment.columnName: assignment.value,
     };
     final valuesSql = <String>[];
     for (final column in schema.columns) {
@@ -529,7 +532,8 @@ List<String> _compileUpdateAssignments<Definition, Row>(
   List<Object?> parameters,
 ) {
   final supplied = {
-    for (final assignment in companion.assignments) assignment.columnName: assignment.value,
+    for (final assignment in companion[RivetCompanionKey.assignments])
+      assignment.columnName: assignment.value,
   };
   final assignments = <String>[];
   for (final column in schema.columns) {

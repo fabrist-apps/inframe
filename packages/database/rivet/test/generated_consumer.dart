@@ -569,6 +569,14 @@ final class MutationUpsertUsers extends RivetTableDefinition<MutationUpsertUsers
       .onUpdate(upsertCodeUpdate)();
 }
 
+@RivetTable(schema: 'fbr144')
+final class MutationAssignmentNames extends RivetTableDefinition<MutationAssignmentNames> {
+  static const db = _$MutationAssignmentNamesDB();
+
+  late final assignments = integer()();
+  late final key = integer()();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -596,6 +604,7 @@ final class MutationUpsertUsers extends RivetTableDefinition<MutationUpsertUsers
     MutationConflictParents,
     MutationConflictChildren,
     MutationUpsertUsers,
+    MutationAssignmentNames,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

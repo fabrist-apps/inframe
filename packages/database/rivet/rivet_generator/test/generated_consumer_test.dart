@@ -147,6 +147,39 @@ final class Values extends RivetTableDefinition<Values> {
       );
     });
 
+    test('should preserve a companion column named assignments', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'assignment_column.rivet.dart';
+
+@RivetTable()
+final class Jobs extends RivetTableDefinition<Jobs> {
+  static const db = _$JobsDB();
+  late final assignments = integer()();
+  late final key = integer()();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/assignment_column.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/assignment_column.rivet.dart': decodedMatches(
+            allOf(
+              contains('final RivetValue<Jobs, int, int> assignments;'),
+              contains("RivetAssignment('key', this.key)"),
+              contains('operator [](RivetCompanionKey key)'),
+              isNot(contains('get assignments =>')),
+            ),
+          ),
+        },
+      );
+    });
+
     test('should reject mapped hooks declared with the storage type', () async {
       final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
       await readerWriter.testing.loadIsolateSources();

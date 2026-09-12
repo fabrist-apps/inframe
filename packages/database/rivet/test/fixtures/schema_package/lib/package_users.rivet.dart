@@ -44,7 +44,7 @@ final class PackageUsersCompanion implements RivetCompanion<PackageUsers> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<PackageUsers>> get assignments => [
+  List<RivetAssignment<PackageUsers>> operator [](RivetCompanionKey key) => [
     RivetAssignment('name', name),
     RivetAssignment('access', access),
   ];

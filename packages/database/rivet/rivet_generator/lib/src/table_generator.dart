@@ -150,7 +150,7 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
         .map(
           (field) =>
               '    RivetAssignment(${literal(field.element.displayName)}, '
-              '${field.element.displayName}),',
+              '${field.element.displayName == 'key' ? 'this.' : ''}${field.element.displayName}),',
         )
         .join('\n');
 
@@ -189,7 +189,7 @@ $companionFields
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<$className>> get assignments => [
+  List<RivetAssignment<$className>> operator [](RivetCompanionKey key) => [
 $companionAssignments
   ];
 }

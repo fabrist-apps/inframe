@@ -42,7 +42,7 @@ final class UserProfilesCompanion implements RivetCompanion<UserProfiles> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<UserProfiles>> get assignments => [
+  List<RivetAssignment<UserProfiles>> operator [](RivetCompanionKey key) => [
     RivetAssignment('displayName', displayName),
   ];
 }
@@ -143,7 +143,7 @@ final class PostsCompanion implements RivetCompanion<Posts> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<Posts>> get assignments => [
+  List<RivetAssignment<Posts>> operator [](RivetCompanionKey key) => [
     RivetAssignment('authorName', authorName),
   ];
 }
@@ -342,7 +342,7 @@ final class ScalarValuesCompanion implements RivetCompanion<ScalarValues> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<ScalarValues>> get assignments => [
+  List<RivetAssignment<ScalarValues>> operator [](RivetCompanionKey key) => [
     RivetAssignment('id', id),
     RivetAssignment('count', count),
     RivetAssignment('score', score),
@@ -573,7 +573,7 @@ final class EnumValuesCompanion implements RivetCompanion<EnumValues> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<EnumValues>> get assignments => [
+  List<RivetAssignment<EnumValues>> operator [](RivetCompanionKey key) => [
     RivetAssignment('status', status),
     RivetAssignment('optionalStatus', optionalStatus),
     RivetAssignment('nullableStatuses', nullableStatuses),
@@ -734,7 +734,7 @@ final class VectorValuesCompanion implements RivetCompanion<VectorValues> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<VectorValues>> get assignments => [
+  List<RivetAssignment<VectorValues>> operator [](RivetCompanionKey key) => [
     RivetAssignment('embedding', embedding),
     RivetAssignment('optionalEmbedding', optionalEmbedding),
   ];
@@ -937,7 +937,7 @@ final class ArrayValuesCompanion implements RivetCompanion<ArrayValues> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<ArrayValues>> get assignments => [
+  List<RivetAssignment<ArrayValues>> operator [](RivetCompanionKey key) => [
     RivetAssignment('ints', ints),
     RivetAssignment('nullableInts', nullableInts),
     RivetAssignment('optionalInts', optionalInts),
@@ -1082,7 +1082,7 @@ final class MalformedArraysCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MalformedArrays>> get assignments => [
+  List<RivetAssignment<MalformedArrays>> operator [](RivetCompanionKey key) => [
     RivetAssignment('ints', ints),
   ];
 }
@@ -1231,7 +1231,7 @@ final class MetadataColumnsCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MetadataColumns>> get assignments => [
+  List<RivetAssignment<MetadataColumns>> operator [](RivetCompanionKey key) => [
     RivetAssignment('count', count),
     RivetAssignment('payload', payload),
     RivetAssignment('embedding', embedding),
@@ -1346,7 +1346,7 @@ final class TextTargetsCompanion implements RivetCompanion<TextTargets> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<TextTargets>> get assignments => [
+  List<RivetAssignment<TextTargets>> operator [](RivetCompanionKey key) => [
     RivetAssignment('value', value),
   ];
 }
@@ -1431,9 +1431,8 @@ final class InvalidReferencesCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<InvalidReferences>> get assignments => [
-    RivetAssignment('value', value),
-  ];
+  List<RivetAssignment<InvalidReferences>> operator [](RivetCompanionKey key) =>
+      [RivetAssignment('value', value)];
 }
 
 final class _$InvalidReferencesDB
@@ -1516,7 +1515,7 @@ final class ParameterNamesCompanion implements RivetCompanion<ParameterNames> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<ParameterNames>> get assignments => [
+  List<RivetAssignment<ParameterNames>> operator [](RivetCompanionKey key) => [
     RivetAssignment('value', value),
   ];
 }
@@ -1874,7 +1873,7 @@ final class MutationCatalogCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationCatalog>> get assignments => [
+  List<RivetAssignment<MutationCatalog>> operator [](RivetCompanionKey key) => [
     RivetAssignment('id', id),
     RivetAssignment('textValue', textValue),
     RivetAssignment('count', count),
@@ -2196,7 +2195,7 @@ final class MutationUsersCompanion implements RivetCompanion<MutationUsers> {
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationUsers>> get assignments => [
+  List<RivetAssignment<MutationUsers>> operator [](RivetCompanionKey key) => [
     RivetAssignment('id', id),
     RivetAssignment('name', name),
     RivetAssignment('nickname', nickname),
@@ -2348,7 +2347,7 @@ final class MutationParentsCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationParents>> get assignments => [
+  List<RivetAssignment<MutationParents>> operator [](RivetCompanionKey key) => [
     RivetAssignment('id', id),
     RivetAssignment('name', name),
   ];
@@ -2459,10 +2458,8 @@ final class MutationChildrenCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationChildren>> get assignments => [
-    RivetAssignment('id', id),
-    RivetAssignment('parentId', parentId),
-  ];
+  List<RivetAssignment<MutationChildren>> operator [](RivetCompanionKey key) =>
+      [RivetAssignment('id', id), RivetAssignment('parentId', parentId)];
 }
 
 final class _$MutationChildrenDB
@@ -2665,7 +2662,9 @@ final class MutationUpdateUsersCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationUpdateUsers>> get assignments => [
+  List<RivetAssignment<MutationUpdateUsers>> operator [](
+    RivetCompanionKey key,
+  ) => [
     RivetAssignment('id', id),
     RivetAssignment('name', name),
     RivetAssignment('age', age),
@@ -2825,10 +2824,9 @@ final class MutationUpdateChildrenCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationUpdateChildren>> get assignments => [
-    RivetAssignment('id', id),
-    RivetAssignment('userId', userId),
-  ];
+  List<RivetAssignment<MutationUpdateChildren>> operator [](
+    RivetCompanionKey key,
+  ) => [RivetAssignment('id', id), RivetAssignment('userId', userId)];
 }
 
 final class _$MutationUpdateChildrenDB
@@ -2947,10 +2945,9 @@ final class MutationDeleteParentsCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationDeleteParents>> get assignments => [
-    RivetAssignment('id', id),
-    RivetAssignment('label', label),
-  ];
+  List<RivetAssignment<MutationDeleteParents>> operator [](
+    RivetCompanionKey key,
+  ) => [RivetAssignment('id', id), RivetAssignment('label', label)];
 }
 
 final class _$MutationDeleteParentsDB
@@ -3068,10 +3065,9 @@ final class MutationCascadeChildrenCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationCascadeChildren>> get assignments => [
-    RivetAssignment('id', id),
-    RivetAssignment('parentId', parentId),
-  ];
+  List<RivetAssignment<MutationCascadeChildren>> operator [](
+    RivetCompanionKey key,
+  ) => [RivetAssignment('id', id), RivetAssignment('parentId', parentId)];
 }
 
 final class _$MutationCascadeChildrenDB
@@ -3196,10 +3192,9 @@ final class MutationRestrictChildrenCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationRestrictChildren>> get assignments => [
-    RivetAssignment('id', id),
-    RivetAssignment('parentId', parentId),
-  ];
+  List<RivetAssignment<MutationRestrictChildren>> operator [](
+    RivetCompanionKey key,
+  ) => [RivetAssignment('id', id), RivetAssignment('parentId', parentId)];
 }
 
 final class _$MutationRestrictChildrenDB
@@ -3371,7 +3366,9 @@ final class MutationBatchParentsCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationBatchParents>> get assignments => [
+  List<RivetAssignment<MutationBatchParents>> operator [](
+    RivetCompanionKey key,
+  ) => [
     RivetAssignment('id', id),
     RivetAssignment('name', name),
     RivetAssignment('createdAt', createdAt),
@@ -3508,10 +3505,9 @@ final class MutationBatchChildrenCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationBatchChildren>> get assignments => [
-    RivetAssignment('id', id),
-    RivetAssignment('parentId', parentId),
-  ];
+  List<RivetAssignment<MutationBatchChildren>> operator [](
+    RivetCompanionKey key,
+  ) => [RivetAssignment('id', id), RivetAssignment('parentId', parentId)];
 }
 
 final class _$MutationBatchChildrenDB
@@ -3609,9 +3605,9 @@ final class MutationConflictGroupsCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationConflictGroups>> get assignments => [
-    RivetAssignment('id', id),
-  ];
+  List<RivetAssignment<MutationConflictGroups>> operator [](
+    RivetCompanionKey key,
+  ) => [RivetAssignment('id', id)];
 }
 
 final class _$MutationConflictGroupsDB
@@ -3817,7 +3813,9 @@ final class MutationConflictParentsCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationConflictParents>> get assignments => [
+  List<RivetAssignment<MutationConflictParents>> operator [](
+    RivetCompanionKey key,
+  ) => [
     RivetAssignment('id', id),
     RivetAssignment('email', email),
     RivetAssignment('username', username),
@@ -3995,10 +3993,9 @@ final class MutationConflictChildrenCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationConflictChildren>> get assignments => [
-    RivetAssignment('id', id),
-    RivetAssignment('parentId', parentId),
-  ];
+  List<RivetAssignment<MutationConflictChildren>> operator [](
+    RivetCompanionKey key,
+  ) => [RivetAssignment('id', id), RivetAssignment('parentId', parentId)];
 }
 
 final class _$MutationConflictChildrenDB
@@ -4218,7 +4215,9 @@ final class MutationUpsertUsersCompanion
 
   /// The generated column assignments in declaration order.
   @override
-  List<RivetAssignment<MutationUpsertUsers>> get assignments => [
+  List<RivetAssignment<MutationUpsertUsers>> operator [](
+    RivetCompanionKey key,
+  ) => [
     RivetAssignment('id', id),
     RivetAssignment('email', email),
     RivetAssignment('name', name),
@@ -4329,6 +4328,129 @@ final class _$MutationUpsertUsersDB
   }) => RivetDelete(buildSchema(), where: where);
 }
 
+/// Generated row returned by reads from 'fbr144.mutationAssignmentNames'.
+final class MutationAssignmentNamesRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationAssignmentNamesRow({
+    required this.assignments,
+    required this.key,
+  });
+
+  /// Value read from `assignments`.
+  final int assignments;
+
+  /// Value read from `key`.
+  final int key;
+}
+
+/// Generated values accepted by mutations of 'fbr144.mutationAssignmentNames'.
+final class MutationAssignmentNamesCompanion
+    implements RivetCompanion<MutationAssignmentNames> {
+  const MutationAssignmentNamesCompanion._({
+    required this.assignments,
+    required this.key,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationAssignmentNamesCompanion.insert({
+    required RivetValue<MutationAssignmentNames, int, int> assignments,
+    required RivetValue<MutationAssignmentNames, int, int> key,
+  }) => MutationAssignmentNamesCompanion._(assignments: assignments, key: key);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationAssignmentNamesCompanion.update({
+    RivetValue<MutationAssignmentNames, int, int> assignments =
+        const RivetValue.absent(),
+    RivetValue<MutationAssignmentNames, int, int> key =
+        const RivetValue.absent(),
+  }) => MutationAssignmentNamesCompanion._(assignments: assignments, key: key);
+
+  /// Mutation value for `assignments`.
+  final RivetValue<MutationAssignmentNames, int, int> assignments;
+
+  /// Mutation value for `key`.
+  final RivetValue<MutationAssignmentNames, int, int> key;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationAssignmentNames>> operator [](
+    RivetCompanionKey key,
+  ) => [
+    RivetAssignment('assignments', assignments),
+    RivetAssignment('key', this.key),
+  ];
+}
+
+final class _$MutationAssignmentNamesDB
+    extends
+        RivetTableAccessor<
+          MutationAssignmentNames,
+          MutationAssignmentNamesRow
+        > {
+  const _$MutationAssignmentNamesDB();
+
+  @override
+  RivetTableSchema<MutationAssignmentNames, MutationAssignmentNamesRow>
+  buildSchema() {
+    MutationAssignmentNames createDefinition() {
+      final definition = MutationAssignmentNames();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    return RivetTableSchema<
+      MutationAssignmentNames,
+      MutationAssignmentNamesRow
+    >(
+      schemaName: 'fbr144',
+      tableName: 'mutationAssignmentNames',
+      definition: definition,
+      columns: [
+        definition.assignments as RivetColumn<Object?>,
+        definition.key as RivetColumn<Object?>,
+      ],
+      columnNames: ['assignments', 'key'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.assignments as RivetColumn<Object?>,
+        definition.key as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => MutationAssignmentNamesRow(
+        assignments: definition.assignments.decodeValue(
+          values[0],
+          isSqlNull: sqlNulls[0],
+        ),
+        key: definition.key.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      ),
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationAssignmentNames, MutationAssignmentNamesRow> insert(
+    MutationAssignmentNamesCompanion companion, {
+    RivetOnConflict<MutationAssignmentNames>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationAssignmentNames, MutationAssignmentNamesRow>
+  insertMany(
+    Iterable<MutationAssignmentNamesCompanion> companions, {
+    RivetOnConflict<MutationAssignmentNames>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationAssignmentNames, MutationAssignmentNamesRow> update(
+    MutationAssignmentNamesCompanion companion, {
+    RivetWhere<MutationAssignmentNames>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationAssignmentNames, MutationAssignmentNamesRow> delete({
+    RivetWhere<MutationAssignmentNames>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -4376,6 +4498,8 @@ abstract class _$RivetTestDatabase {
       MutationConflictChildren.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
       MutationUpsertUsers.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      MutationAssignmentNames.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
     ],
   );
