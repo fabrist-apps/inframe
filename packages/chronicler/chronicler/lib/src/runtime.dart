@@ -118,6 +118,16 @@ final class ChroniclerRecorder {
         anonymousId: anonymousId,
         userId: userId,
       );
+
+  /// Records explicit user properties to set for [userId].
+  void setUserProperties({
+    required String userId,
+    required Map<String, Object?> properties,
+  }) => _runtime._recordUserPropertiesSet(
+    _attribution,
+    userId: userId,
+    properties: properties,
+  );
 }
 
 final class _RecorderAttribution {
@@ -566,6 +576,29 @@ final class ChroniclerRuntime {
         IdentityLinkRecord(
           envelope: _envelope(attribution),
           payload: IdentityLinkPayload(anonymousId: anonymousId, userId: userId),
+        ),
+      );
+    } on RecordValidationException {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    }
+  }
+
+  void _recordUserPropertiesSet(
+    _RecorderAttribution attribution, {
+    required String userId,
+    required Map<String, Object?> properties,
+  }) {
+    if (properties.isEmpty) return;
+    if (!_canRecord(ChroniclerSignal.events, null)) return;
+    try {
+      _validateRequiredId(userId, 'userId');
+      final snapshot = validator.snapshotAttributes(properties);
+      _finalizeAndEnqueue(
+        UserPropertiesSetRecord(
+          envelope: _envelope(attribution),
+          payload: UserPropertiesSetPayload(userId: userId, properties: snapshot),
         ),
       );
     } on RecordValidationException {

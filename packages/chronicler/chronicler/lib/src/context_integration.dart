@@ -60,6 +60,15 @@ final class ChroniclerEvents {
   /// profile processing.
   void identify({required String anonymousId, required String userId}) =>
       _recorder.identify(anonymousId: anonymousId, userId: userId);
+
+  /// Records explicit user properties to set for [userId].
+  ///
+  /// An empty [properties] map is a no-op. Null is retained as a value; use an
+  /// explicit unset operation to express deletion.
+  void setUserProperties({
+    required String userId,
+    required Map<String, Object?> properties,
+  }) => _recorder.setUserProperties(userId: userId, properties: properties);
 }
 
 /// Records structured logs without waiting for transport work.

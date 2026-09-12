@@ -52,6 +52,19 @@ The link is scoped to the configured App and travels through normal bounded deli
 association intent for downstream processing; it does not mutate any Context, merge accounts,
 authenticate the supplied IDs, or confirm that stored history has been updated.
 
+User-property updates also name their target explicitly:
+
+```dart
+context.events.setUserProperties(
+  userId: userId,
+  properties: {'plan': 'pro', 'companySize': 12},
+);
+```
+
+A set operation replaces only the supplied keys when processed. Omitted keys remain untouched, and
+null is a stored value rather than deletion intent. Empty updates are no-ops. Updates use bounded
+event delivery but bypass random sampling; enqueueing does not confirm a stored profile change.
+
 The defaults retain up to 5,000 records or 8 MiB, export batches of up to 100 records or 512 KiB
 within five seconds, run one export at a time, and make five total attempts. An attempt times out
 after ten seconds. `ChroniclerOptions` can change those bounds, sampling, redaction, diagnostics,
