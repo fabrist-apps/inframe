@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:chronicler/chronicler.dart';
+import 'package:chronicler/src/runtime.dart' show ChroniclerTracingFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
@@ -231,6 +233,73 @@ void main() {
       expect(span.payload.durationMicros, isNonNegative);
       expect(span.envelope.timestamp.isUtc, isTrue);
     });
+
+    test('should measure duration with a monotonic clock', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter);
+      var elapsed = Duration.zero;
+      var wallClock = DateTime.utc(2026, 9, 12, 10);
+      ChroniclerTracingFixture.overrideClocks(
+        chronicler,
+        now: () => wallClock,
+        elapsed: () => elapsed,
+      );
+
+      await Context()
+          .withChronicler(chronicler.recorder)
+          .span(
+            'clock',
+            run: (_) {
+              wallClock = DateTime.utc(2020);
+              elapsed = const Duration(microseconds: 1234);
+            },
+          );
+      await Future<void>.delayed(Duration.zero);
+
+      final span = exporter.batches.single.records.single as SpanRecord;
+      expect(span.envelope.timestamp, DateTime.utc(2026, 9, 12, 10));
+      expect(span.payload.durationMicros, 1234);
+    });
+
+    test('should fail setup when secure randomness is unavailable', () {
+      expect(
+        () => ChroniclerTracingFixture.create(
+          appId: 'app',
+          release: 'release',
+          source: ChroniclerSource.server,
+          exporter: TestExporter(),
+          secureRandom: () => throw UnsupportedError('unavailable'),
+        ),
+        throwsA(
+          isA<ChroniclerConfigurationException>().having(
+            (error) => error.setting,
+            'setting',
+            'secureRandom',
+          ),
+        ),
+      );
+    });
+
+    test('should preserve application work when ID generation fails', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter);
+      ChroniclerTracingFixture.overrideSecureRandom(chronicler, _ThrowingRandom());
+      final context = Context().withChronicler(chronicler.recorder);
+      var calls = 0;
+
+      final result = await context.span(
+        'random failure',
+        run: (_) {
+          calls++;
+          return 12;
+        },
+      );
+
+      expect(result, 12);
+      expect(calls, 1);
+      expect(exporter.batches, isEmpty);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+    });
   });
 }
 
@@ -243,3 +312,14 @@ Chronicler _chronicler(TestExporter exporter, {int maxBatchRecords = 1}) => Chro
     delivery: DeliveryOptions(maxBatchRecords: maxBatchRecords),
   ),
 );
+
+final class _ThrowingRandom implements Random {
+  @override
+  bool nextBool() => throw UnsupportedError('unavailable');
+
+  @override
+  double nextDouble() => throw UnsupportedError('unavailable');
+
+  @override
+  int nextInt(int max) => throw UnsupportedError('unavailable');
+}

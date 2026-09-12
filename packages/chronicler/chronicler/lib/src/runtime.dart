@@ -30,6 +30,8 @@ final class Chronicler {
          options: options,
        );
 
+  Chronicler._fromRuntime(this._runtime);
+
   /// Default field-name terms replaced before buffering.
   static const Set<String> defaultSensitiveFieldTerms =
       ChroniclerOptions.defaultSensitiveFieldTerms;
@@ -248,6 +250,7 @@ final class ChroniclerRuntime {
     required ChroniclerExporter exporter,
     required String? buildId,
     required ChroniclerOptions options,
+    Random Function()? secureRandomFactory,
   }) {
     final snapshot = _validateAndSnapshotOptions(options);
     final validator = RecordValidator(snapshot.limits);
@@ -256,7 +259,7 @@ final class ChroniclerRuntime {
     if (buildId != null) {
       _validateConfiguredLabel(validator, buildId, 'buildId', snapshot.limits.maxLabelBytes);
     }
-    final secureRandom = _createSecureRandom();
+    final secureRandom = _createSecureRandom(secureRandomFactory);
     return ChroniclerRuntime._(
       appId: appId,
       release: release,
@@ -294,12 +297,14 @@ final class ChroniclerRuntime {
 
   /// Payload-free runtime diagnostic channel.
   final DiagnosticChannel diagnostics;
-  final Random _secureRandom;
+  Random _secureRandom;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
   final _flushWaiters = <_FlushWaiter>{};
   final _flushFinalizations = Queue<List<ChroniclerRecord>>();
   final _elapsed = Stopwatch()..start();
+  DateTime Function()? _nowOverride;
+  Duration Function()? _elapsedOverride;
   late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
   late bool _propagationEnabled = options.tracing.propagationEnabled;
   late final Random _random = Random();
@@ -318,6 +323,10 @@ final class ChroniclerRuntime {
 
   /// An immutable snapshot of exact diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
+
+  DateTime get _now => (_nowOverride?.call() ?? DateTime.now()).toUtc();
+
+  Duration get _elapsedNow => _elapsedOverride?.call() ?? _elapsed.elapsed;
 
   ChroniclerRecorder _withIdentity(
     ChroniclerRecorder recorder, {
@@ -412,8 +421,15 @@ final class ChroniclerRuntime {
   }) {
     final current = recorder._attribution.span;
     final activeParent = !forceRoot && current != null && !current.ended ? current : null;
-    final traceId = activeParent?.traceId ?? _traceId();
-    final spanId = _spanId();
+    late final String traceId;
+    late final String spanId;
+    try {
+      traceId = activeParent?.traceId ?? _traceId();
+      spanId = _spanId();
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+      return _StartedSpan(null, recorder);
+    }
     var snapshot = const <String, Object?>{};
     var payloadValid = true;
     try {
@@ -434,8 +450,8 @@ final class ChroniclerRuntime {
       name: name,
       kind: kind,
       attributes: snapshot,
-      startedAt: _elapsed.elapsed,
-      timestamp: DateTime.now().toUtc(),
+      startedAt: _elapsedNow,
+      timestamp: _now,
       recordPayload: payloadValid && collectionEnabled,
       lineageRecording: collectionEnabled,
       attribution: recorder._attribution,
@@ -456,11 +472,12 @@ final class ChroniclerRuntime {
     );
   }
 
-  void _finishSpan(_SpanState span, SpanStatus status) {
+  void _finishSpan(_SpanState? span, SpanStatus status) {
+    if (span == null) return;
     if (span.ended) return;
     span.ended = true;
     if (!span.recordPayload) return;
-    final durationMicros = (_elapsed.elapsed - span.startedAt).inMicroseconds;
+    final durationMicros = (_elapsedNow - span.startedAt).inMicroseconds;
     final attribution = span.attribution;
     _finalizeAndEnqueue(
       SpanRecord(
@@ -1497,10 +1514,51 @@ final class ChroniclerCaptureFixture {
   );
 }
 
+/// Internal fixture bridge for deterministic tracing tests.
+final class ChroniclerTracingFixture {
+  const ChroniclerTracingFixture._();
+
+  /// Creates a runtime using [secureRandom] for startup validation and IDs.
+  static Chronicler create({
+    required String appId,
+    required String release,
+    required ChroniclerSource source,
+    required ChroniclerExporter exporter,
+    required Random Function() secureRandom,
+    ChroniclerOptions options = const ChroniclerOptions(),
+  }) => Chronicler._fromRuntime(
+    ChroniclerRuntime.create(
+      appId: appId,
+      release: release,
+      source: source,
+      exporter: exporter,
+      buildId: null,
+      options: options,
+      secureRandomFactory: secureRandom,
+    ),
+  );
+
+  /// Replaces wall and monotonic clocks for span-lifetime tests.
+  static void overrideClocks(
+    Chronicler chronicler, {
+    required DateTime Function() now,
+    required Duration Function() elapsed,
+  }) {
+    chronicler._runtime
+      .._nowOverride = now
+      .._elapsedOverride = elapsed;
+  }
+
+  /// Replaces the ID source after setup for recording-failure tests.
+  static void overrideSecureRandom(Chronicler chronicler, Random random) {
+    chronicler._runtime._secureRandom = random;
+  }
+}
+
 final class _StartedSpan {
   const _StartedSpan(this.state, this.recorder);
 
-  final _SpanState state;
+  final _SpanState? state;
   final ChroniclerRecorder recorder;
 }
 
@@ -1618,9 +1676,9 @@ void _validateConfiguredLabel(
   }
 }
 
-Random _createSecureRandom() {
+Random _createSecureRandom(Random Function()? factory) {
   try {
-    final random = Random.secure()..nextInt(256);
+    final random = (factory?.call() ?? Random.secure())..nextInt(256);
     return random;
   } on Object {
     throw const ChroniclerConfigurationException('secureRandom', 'is unavailable');
