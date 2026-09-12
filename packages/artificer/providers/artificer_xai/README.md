@@ -57,3 +57,9 @@ shape while common generation continues to use Responses. Native requests type x
 reasoning, cache routing, service, tool, search, stop, and End User fields. Normalizing a response
 with multiple choices requires an explicit `choiceIndex`; SSE success requires the native `[DONE]`
 sentinel.
+
+`embeddingModel` supports ordered text batches through the common synchronous embedding
+contract. Native callers can use `embeddings.create` for float or base64 output and xAI's preview
+flag. Model discovery is always explicit: `models` exposes the compatible `/models` view plus the
+detailed `/language-models` and `/embedding-models` resources. Discovery metadata does not enable
+new common-adapter modalities; the embedding adapter remains text-only.

@@ -13,7 +13,7 @@ Future<void> main() async {
     final create = provider.chatCompletions.create(request);
     final stream = provider.chatCompletions.stream(request).runCollect();
 
-    if (const bool.fromEnvironment('RUN_OPENAI_EXAMPLE')) {
+    if (const bool.fromEnvironment('RUN_XAI_EXAMPLE')) {
       final native = await create.runFuture();
       provider.chatCompletions.normalize(native, choiceIndex: 0);
       await stream.runFuture();

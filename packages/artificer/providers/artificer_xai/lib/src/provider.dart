@@ -4,6 +4,9 @@ import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:artificer_xai/src/chat/chat_completions_resource.dart';
+import 'package:artificer_xai/src/embeddings/embedding_models.dart';
+import 'package:artificer_xai/src/embeddings/embeddings_resource.dart';
+import 'package:artificer_xai/src/models/models_resource.dart';
 import 'package:artificer_xai/src/options.dart';
 import 'package:artificer_xai/src/responses/response_models.dart';
 import 'package:artificer_xai/src/responses/responses_resource.dart';
@@ -28,6 +31,8 @@ final class XaiProvider {
          },
        ) {
     chatCompletions = XaiChatCompletionsResource(_client);
+    embeddings = XaiEmbeddingsResource(_client);
+    models = XaiModelsResource(_client);
     responses = XaiResponsesResource(_client);
   }
 
@@ -35,6 +40,12 @@ final class XaiProvider {
 
   /// Typed native Chat Completions operations.
   late final XaiChatCompletionsResource chatCompletions;
+
+  /// Typed native embedding operations.
+  late final XaiEmbeddingsResource embeddings;
+
+  /// Typed native model discovery operations.
+  late final XaiModelsResource models;
 
   /// Typed native Responses operations.
   late final XaiResponsesResource responses;
@@ -45,6 +56,14 @@ final class XaiProvider {
     _nonEmpty(modelId, 'modelId'),
     options ?? XaiModelOptions(),
   );
+
+  /// Creates a common synchronous text embedding model.
+  XaiEmbeddingModel embeddingModel(String modelId, {XaiEmbeddingOptions? options}) =>
+      XaiEmbeddingModel(
+        embeddings,
+        _nonEmpty(modelId, 'modelId'),
+        options ?? XaiEmbeddingOptions(),
+      );
 
   /// Interrupts this provider's work and releases its owned HTTP client.
   Future<void> close() => _client.close();
