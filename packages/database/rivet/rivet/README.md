@@ -8,6 +8,7 @@ final class Users extends RivetTableDefinition<Users> {
   static const db = _$UsersDB();
 
   late final name = text()();
+  late final age = integer()();
 }
 
 @RivetDatabase(name: 'app', tables: [Users])
@@ -42,6 +43,7 @@ Generated companions keep insert values typed and defer runtime defaults until e
 final insert = Users.db.insert(
   UsersCompanion.insert(
     name: const RivetValue.present('Ada'),
+    age: const RivetValue.present(30),
   ),
 );
 final affected = await insert.execute(db);
@@ -58,6 +60,19 @@ UsersCompanion.insert(
     (users) => users.email.storage.value('ada@example.com'),
   ),
 );
+```
+
+Update companions make every field optional. Absent fields run `onUpdate` when configured and otherwise remain untouched. Supply a root-table predicate to restrict the statement, or omit `where` to update every row:
+
+```dart
+final changed = await Users.db
+    .update(
+      UsersCompanion.update(
+        age: RivetValue.expression((users) => users.age + 1),
+      ),
+      where: (users) => users.name.equals('Ada'),
+    )
+    .execute(db);
 ```
 
 The column catalog is `chronoID`, `text`, `integer`, `real`, `boolean`, `dateTime`, `json`, `enumText`, and fixed-dimension `vector`. Add `.map(converter)` for domain values and `.array()` for one-dimensional native PostgreSQL arrays. Nullability before `.array()` applies to elements; nullability after it applies to the array column.

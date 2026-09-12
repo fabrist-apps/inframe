@@ -336,6 +336,58 @@ final class MutationChildren extends RivetTableDefinition<MutationChildren> {
   )();
 }
 
+int updateTimestampCalls = 0;
+int updateNullableCalls = 0;
+int updateCodeCalls = 0;
+int updateDefaultOnlyCalls = 0;
+
+DateTime updateTimestamp() {
+  updateTimestampCalls++;
+  return DateTime.utc(2026, 9, 12, 12, 30, updateTimestampCalls);
+}
+
+String? updateNullable() {
+  updateNullableCalls++;
+  return null;
+}
+
+MutationCode updateCode() {
+  updateCodeCalls++;
+  return MutationCode('hook-$updateCodeCalls');
+}
+
+String updateDefaultOnly() {
+  updateDefaultOnlyCalls++;
+  return 'default-only';
+}
+
+@RivetTable(schema: 'fbr140')
+final class MutationUpdateUsers extends RivetTableDefinition<MutationUpdateUsers> {
+  static const db = _$MutationUpdateUsersDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final age = integer()();
+  late final updatedAt = dateTime().onUpdate(updateTimestamp)();
+  late final nullableNote = text().nullable().onUpdate(updateNullable)();
+  late final code = text().map(const MutationCodeConverter()).onUpdate(updateCode)();
+  late final defaultOnly = text().defaultValue(updateDefaultOnly)();
+  late final serverOnly = integer().defaultSql('42')();
+  late final children = many<MutationUpdateChildren>(relation: (child) => child.user)();
+}
+
+@RivetTable(schema: 'fbr140')
+final class MutationUpdateChildren extends RivetTableDefinition<MutationUpdateChildren> {
+  static const db = _$MutationUpdateChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final userId = integer().references<MutationUpdateUsers>((user) => user.id)();
+  late final user = one<MutationUpdateUsers>(
+    fields: [userId],
+    references: (user) => [user.id],
+  )();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -352,6 +404,8 @@ final class MutationChildren extends RivetTableDefinition<MutationChildren> {
     MutationParents,
     MutationChildren,
     MutationCatalog,
+    MutationUpdateUsers,
+    MutationUpdateChildren,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

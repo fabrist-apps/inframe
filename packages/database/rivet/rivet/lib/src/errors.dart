@@ -16,6 +16,7 @@ sealed class RivetException implements Exception {
         RivetCardinalityException() => 'RivetCardinalityException',
         RivetUnsupportedQueryException() => 'RivetUnsupportedQueryException',
         RivetMissingValueException() => 'RivetMissingValueException',
+        RivetEmptyUpdateException() => 'RivetEmptyUpdateException',
         RivetExecutorClosedException() => 'RivetExecutorClosedException',
         AfterCommitException() => 'AfterCommitException',
       }}: $message';
@@ -60,6 +61,11 @@ final class RivetMissingValueException extends RivetException {
 
   final String table;
   final String column;
+}
+
+/// An update had no explicit or runtime-hook assignments.
+final class RivetEmptyUpdateException extends RivetException {
+  const RivetEmptyUpdateException(super.message);
 }
 
 /// An executor was used outside its valid lifetime.

@@ -31,6 +31,12 @@ final class UserProfilesCompanion implements RivetCompanion<UserProfiles> {
     required RivetValue<UserProfiles, String, String> displayName,
   }) => UserProfilesCompanion._(displayName: displayName);
 
+  /// Creates values for an update, leaving untouched columns absent.
+  factory UserProfilesCompanion.update({
+    RivetValue<UserProfiles, String, String> displayName =
+        const RivetValue.absent(),
+  }) => UserProfilesCompanion._(displayName: displayName);
+
   /// Mutation value for `displayName`.
   final RivetValue<UserProfiles, String, String> displayName;
 
@@ -74,6 +80,12 @@ final class _$UserProfilesDB
   RivetInsert<UserProfiles, UserProfilesRow> insert(
     UserProfilesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<UserProfiles, UserProfilesRow> update(
+    UserProfilesCompanion companion, {
+    RivetWhere<UserProfiles>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr116.posts'.
@@ -98,6 +110,11 @@ final class PostsCompanion implements RivetCompanion<Posts> {
   /// Creates values for an insert, leaving defaulted columns absent.
   factory PostsCompanion.insert({
     required RivetValue<Posts, String, String> authorName,
+  }) => PostsCompanion._(authorName: authorName);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory PostsCompanion.update({
+    RivetValue<Posts, String, String> authorName = const RivetValue.absent(),
   }) => PostsCompanion._(authorName: authorName);
 
   /// Mutation value for `authorName`.
@@ -138,6 +155,12 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
   /// Creates a reusable insert plan.
   RivetInsert<Posts, PostsRow> insert(PostsCompanion companion) =>
       RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<Posts, PostsRow> update(
+    PostsCompanion companion, {
+    RivetWhere<Posts>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr119.scalarValues'.
@@ -207,6 +230,33 @@ final class ScalarValuesCompanion implements RivetCompanion<ScalarValues> {
     required RivetValue<ScalarValues, Preferences, JsonValue> preferences,
     required RivetValue<ScalarValues, UserCode, String> code,
     RivetValue<ScalarValues, String, String> id = const RivetValue.absent(),
+    RivetValue<ScalarValues, UserCode?, String?> optionalCode =
+        const RivetValue.absent(),
+  }) => ScalarValuesCompanion._(
+    id: id,
+    count: count,
+    score: score,
+    active: active,
+    createdAt: createdAt,
+    payload: payload,
+    preferences: preferences,
+    code: code,
+    optionalCode: optionalCode,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ScalarValuesCompanion.update({
+    RivetValue<ScalarValues, String, String> id = const RivetValue.absent(),
+    RivetValue<ScalarValues, int, int> count = const RivetValue.absent(),
+    RivetValue<ScalarValues, double, double> score = const RivetValue.absent(),
+    RivetValue<ScalarValues, bool, bool> active = const RivetValue.absent(),
+    RivetValue<ScalarValues, DateTime, DateTime> createdAt =
+        const RivetValue.absent(),
+    RivetValue<ScalarValues, JsonValue, JsonValue> payload =
+        const RivetValue.absent(),
+    RivetValue<ScalarValues, Preferences, JsonValue> preferences =
+        const RivetValue.absent(),
+    RivetValue<ScalarValues, UserCode, String> code = const RivetValue.absent(),
     RivetValue<ScalarValues, UserCode?, String?> optionalCode =
         const RivetValue.absent(),
   }) => ScalarValuesCompanion._(
@@ -330,6 +380,12 @@ final class _$ScalarValuesDB
   RivetInsert<ScalarValues, ScalarValuesRow> insert(
     ScalarValuesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<ScalarValues, ScalarValuesRow> update(
+    ScalarValuesCompanion companion, {
+    RivetWhere<ScalarValues>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr120.enumValues'.
@@ -387,6 +443,32 @@ final class EnumValuesCompanion implements RivetCompanion<EnumValues> {
         const RivetValue.absent(),
     RivetValue<EnumValues, List<WorkStatus?>?, List<WorkStatus?>?>
         optionalNullableStatuses =
+        const RivetValue.absent(),
+  }) => EnumValuesCompanion._(
+    status: status,
+    optionalStatus: optionalStatus,
+    nullableStatuses: nullableStatuses,
+    optionalStatuses: optionalStatuses,
+    optionalNullableStatuses: optionalNullableStatuses,
+    mappedStatus: mappedStatus,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory EnumValuesCompanion.update({
+    RivetValue<EnumValues, WorkStatus, WorkStatus> status =
+        const RivetValue.absent(),
+    RivetValue<EnumValues, WorkStatus?, WorkStatus?> optionalStatus =
+        const RivetValue.absent(),
+    RivetValue<EnumValues, List<WorkStatus?>, List<WorkStatus?>>
+        nullableStatuses =
+        const RivetValue.absent(),
+    RivetValue<EnumValues, List<WorkStatus>?, List<WorkStatus>?>
+        optionalStatuses =
+        const RivetValue.absent(),
+    RivetValue<EnumValues, List<WorkStatus?>?, List<WorkStatus?>?>
+        optionalNullableStatuses =
+        const RivetValue.absent(),
+    RivetValue<EnumValues, WorkState, WorkStatus> mappedStatus =
         const RivetValue.absent(),
   }) => EnumValuesCompanion._(
     status: status,
@@ -496,6 +578,12 @@ final class _$EnumValuesDB
   RivetInsert<EnumValues, EnumValuesRow> insert(
     EnumValuesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<EnumValues, EnumValuesRow> update(
+    EnumValuesCompanion companion, {
+    RivetWhere<EnumValues>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr121.vectorValues'.
@@ -523,6 +611,17 @@ final class VectorValuesCompanion implements RivetCompanion<VectorValues> {
   /// Creates values for an insert, leaving defaulted columns absent.
   factory VectorValuesCompanion.insert({
     required RivetValue<VectorValues, Float32List, Float32List> embedding,
+    RivetValue<VectorValues, Float32List?, Float32List?> optionalEmbedding =
+        const RivetValue.absent(),
+  }) => VectorValuesCompanion._(
+    embedding: embedding,
+    optionalEmbedding: optionalEmbedding,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory VectorValuesCompanion.update({
+    RivetValue<VectorValues, Float32List, Float32List> embedding =
+        const RivetValue.absent(),
     RivetValue<VectorValues, Float32List?, Float32List?> optionalEmbedding =
         const RivetValue.absent(),
   }) => VectorValuesCompanion._(
@@ -578,6 +677,12 @@ final class _$VectorValuesDB
   RivetInsert<VectorValues, VectorValuesRow> insert(
     VectorValuesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<VectorValues, VectorValuesRow> update(
+    VectorValuesCompanion companion, {
+    RivetWhere<VectorValues>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr122.arrayValues'.
@@ -646,6 +751,35 @@ final class ArrayValuesCompanion implements RivetCompanion<ArrayValues> {
     RivetValue<ArrayValues, List<int>?, List<int>?> optionalInts =
         const RivetValue.absent(),
     RivetValue<ArrayValues, List<int?>?, List<int?>?> optionalNullableInts =
+        const RivetValue.absent(),
+  }) => ArrayValuesCompanion._(
+    ints: ints,
+    nullableInts: nullableInts,
+    optionalInts: optionalInts,
+    optionalNullableInts: optionalNullableInts,
+    jsonValues: jsonValues,
+    vectors: vectors,
+    statuses: statuses,
+    codes: codes,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ArrayValuesCompanion.update({
+    RivetValue<ArrayValues, List<int>, List<int>> ints =
+        const RivetValue.absent(),
+    RivetValue<ArrayValues, List<int?>, List<int?>> nullableInts =
+        const RivetValue.absent(),
+    RivetValue<ArrayValues, List<int>?, List<int>?> optionalInts =
+        const RivetValue.absent(),
+    RivetValue<ArrayValues, List<int?>?, List<int?>?> optionalNullableInts =
+        const RivetValue.absent(),
+    RivetValue<ArrayValues, List<JsonValue?>, List<JsonValue?>> jsonValues =
+        const RivetValue.absent(),
+    RivetValue<ArrayValues, List<Float32List>, List<Float32List>> vectors =
+        const RivetValue.absent(),
+    RivetValue<ArrayValues, List<WorkStatus>, List<WorkStatus>> statuses =
+        const RivetValue.absent(),
+    RivetValue<ArrayValues, List<UserCode?>, List<String?>> codes =
         const RivetValue.absent(),
   }) => ArrayValuesCompanion._(
     ints: ints,
@@ -763,6 +897,12 @@ final class _$ArrayValuesDB
   RivetInsert<ArrayValues, ArrayValuesRow> insert(
     ArrayValuesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<ArrayValues, ArrayValuesRow> update(
+    ArrayValuesCompanion companion, {
+    RivetWhere<ArrayValues>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr122.malformedArrays'.
@@ -782,6 +922,12 @@ final class MalformedArraysCompanion
   /// Creates values for an insert, leaving defaulted columns absent.
   factory MalformedArraysCompanion.insert({
     required RivetValue<MalformedArrays, List<int>, List<int>> ints,
+  }) => MalformedArraysCompanion._(ints: ints);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MalformedArraysCompanion.update({
+    RivetValue<MalformedArrays, List<int>, List<int>> ints =
+        const RivetValue.absent(),
   }) => MalformedArraysCompanion._(ints: ints);
 
   /// Mutation value for `ints`.
@@ -818,6 +964,12 @@ final class _$MalformedArraysDB
   RivetInsert<MalformedArrays, MalformedArraysRow> insert(
     MalformedArraysCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MalformedArrays, MalformedArraysRow> update(
+    MalformedArraysCompanion companion, {
+    RivetWhere<MalformedArrays>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'metadata.metadataColumns'.
@@ -860,6 +1012,25 @@ final class MetadataColumnsCompanion
 
   /// Creates values for an insert, leaving defaulted columns absent.
   factory MetadataColumnsCompanion.insert({
+    RivetValue<MetadataColumns, int?, int?> count = const RivetValue.absent(),
+    RivetValue<MetadataColumns, JsonValue, JsonValue> payload =
+        const RivetValue.absent(),
+    RivetValue<MetadataColumns, Float32List, Float32List> embedding =
+        const RivetValue.absent(),
+    RivetValue<MetadataColumns, List<int>, List<int>> values =
+        const RivetValue.absent(),
+    RivetValue<MetadataColumns, UserCode, String> code =
+        const RivetValue.absent(),
+  }) => MetadataColumnsCompanion._(
+    count: count,
+    payload: payload,
+    embedding: embedding,
+    values: values,
+    code: code,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MetadataColumnsCompanion.update({
     RivetValue<MetadataColumns, int?, int?> count = const RivetValue.absent(),
     RivetValue<MetadataColumns, JsonValue, JsonValue> payload =
         const RivetValue.absent(),
@@ -948,6 +1119,12 @@ final class _$MetadataColumnsDB
   RivetInsert<MetadataColumns, MetadataColumnsRow> insert(
     MetadataColumnsCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MetadataColumns, MetadataColumnsRow> update(
+    MetadataColumnsCompanion companion, {
+    RivetWhere<MetadataColumns>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'metadata.textTargets'.
@@ -966,6 +1143,11 @@ final class TextTargetsCompanion implements RivetCompanion<TextTargets> {
   /// Creates values for an insert, leaving defaulted columns absent.
   factory TextTargetsCompanion.insert({
     required RivetValue<TextTargets, String, String> value,
+  }) => TextTargetsCompanion._(value: value);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory TextTargetsCompanion.update({
+    RivetValue<TextTargets, String, String> value = const RivetValue.absent(),
   }) => TextTargetsCompanion._(value: value);
 
   /// Mutation value for `value`.
@@ -1002,6 +1184,12 @@ final class _$TextTargetsDB
   RivetInsert<TextTargets, TextTargetsRow> insert(
     TextTargetsCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<TextTargets, TextTargetsRow> update(
+    TextTargetsCompanion companion, {
+    RivetWhere<TextTargets>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'metadata.invalidReferences'.
@@ -1021,6 +1209,11 @@ final class InvalidReferencesCompanion
   /// Creates values for an insert, leaving defaulted columns absent.
   factory InvalidReferencesCompanion.insert({
     required RivetValue<InvalidReferences, int, int> value,
+  }) => InvalidReferencesCompanion._(value: value);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory InvalidReferencesCompanion.update({
+    RivetValue<InvalidReferences, int, int> value = const RivetValue.absent(),
   }) => InvalidReferencesCompanion._(value: value);
 
   /// Mutation value for `value`.
@@ -1057,6 +1250,12 @@ final class _$InvalidReferencesDB
   RivetInsert<InvalidReferences, InvalidReferencesRow> insert(
     InvalidReferencesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<InvalidReferences, InvalidReferencesRow> update(
+    InvalidReferencesCompanion companion, {
+    RivetWhere<InvalidReferences>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'metadata.parameterNames'.
@@ -1075,6 +1274,12 @@ final class ParameterNamesCompanion implements RivetCompanion<ParameterNames> {
   /// Creates values for an insert, leaving defaulted columns absent.
   factory ParameterNamesCompanion.insert({
     required RivetValue<ParameterNames, String, String> value,
+  }) => ParameterNamesCompanion._(value: value);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ParameterNamesCompanion.update({
+    RivetValue<ParameterNames, String, String> value =
+        const RivetValue.absent(),
   }) => ParameterNamesCompanion._(value: value);
 
   /// Mutation value for `value`.
@@ -1111,6 +1316,12 @@ final class _$ParameterNamesDB
   RivetInsert<ParameterNames, ParameterNamesRow> insert(
     ParameterNamesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<ParameterNames, ParameterNamesRow> update(
+    ParameterNamesCompanion companion, {
+    RivetWhere<ParameterNames>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr139.mutationCatalog'.
@@ -1260,6 +1471,71 @@ final class MutationCatalogCompanion
         const RivetValue.absent(),
     RivetValue<MutationCatalog, List<MutationCode?>, List<String?>>
         mappedCodes =
+        const RivetValue.absent(),
+  }) => MutationCatalogCompanion._(
+    id: id,
+    textValue: textValue,
+    count: count,
+    score: score,
+    active: active,
+    createdAt: createdAt,
+    payload: payload,
+    nullablePayload: nullablePayload,
+    preferences: preferences,
+    code: code,
+    optionalCode: optionalCode,
+    status: status,
+    statuses: statuses,
+    timestamps: timestamps,
+    nullableInts: nullableInts,
+    optionalInts: optionalInts,
+    jsonValues: jsonValues,
+    mappedCodes: mappedCodes,
+    embedding: embedding,
+    embeddings: embeddings,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationCatalogCompanion.update({
+    RivetValue<MutationCatalog, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationCatalog, String, String> textValue =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, int, int> count = const RivetValue.absent(),
+    RivetValue<MutationCatalog, double, double> score =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, bool, bool> active = const RivetValue.absent(),
+    RivetValue<MutationCatalog, DateTime, DateTime> createdAt =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, JsonValue, JsonValue> payload =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, JsonValue?, JsonValue?> nullablePayload =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, Preferences, JsonValue> preferences =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, MutationCode, String> code =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, MutationCode?, String?> optionalCode =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, MutationStatus, MutationStatus> status =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<MutationStatus>, List<MutationStatus>>
+        statuses =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<DateTime>, List<DateTime>> timestamps =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<int?>, List<int?>> nullableInts =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<int>?, List<int>?> optionalInts =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<JsonValue?>, List<JsonValue?>> jsonValues =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<MutationCode?>, List<String?>>
+        mappedCodes =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, Float32List, Float32List> embedding =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<Float32List>, List<Float32List>>
+        embeddings =
         const RivetValue.absent(),
   }) => MutationCatalogCompanion._(
     id: id,
@@ -1508,6 +1784,12 @@ final class _$MutationCatalogDB
   RivetInsert<MutationCatalog, MutationCatalogRow> insert(
     MutationCatalogCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationCatalog, MutationCatalogRow> update(
+    MutationCatalogCompanion companion, {
+    RivetWhere<MutationCatalog>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr138.mutationUsers'.
@@ -1561,6 +1843,29 @@ final class MutationUsersCompanion implements RivetCompanion<MutationUsers> {
   factory MutationUsersCompanion.insert({
     required RivetValue<MutationUsers, int, int> id,
     required RivetValue<MutationUsers, String, String> name,
+    RivetValue<MutationUsers, String?, String?> nickname =
+        const RivetValue.absent(),
+    RivetValue<MutationUsers, DateTime, DateTime> createdAt =
+        const RivetValue.absent(),
+    RivetValue<MutationUsers, DateTime, DateTime> updatedAt =
+        const RivetValue.absent(),
+    RivetValue<MutationUsers, String?, String?> nullableDefault =
+        const RivetValue.absent(),
+    RivetValue<MutationUsers, int, int> serverValue = const RivetValue.absent(),
+  }) => MutationUsersCompanion._(
+    id: id,
+    name: name,
+    nickname: nickname,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+    nullableDefault: nullableDefault,
+    serverValue: serverValue,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationUsersCompanion.update({
+    RivetValue<MutationUsers, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationUsers, String, String> name = const RivetValue.absent(),
     RivetValue<MutationUsers, String?, String?> nickname =
         const RivetValue.absent(),
     RivetValue<MutationUsers, DateTime, DateTime> createdAt =
@@ -1675,6 +1980,12 @@ final class _$MutationUsersDB
   RivetInsert<MutationUsers, MutationUsersRow> insert(
     MutationUsersCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationUsers, MutationUsersRow> update(
+    MutationUsersCompanion companion, {
+    RivetWhere<MutationUsers>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr138.mutationParents'.
@@ -1705,6 +2016,13 @@ final class MutationParentsCompanion
   factory MutationParentsCompanion.insert({
     required RivetValue<MutationParents, int, int> id,
     required RivetValue<MutationParents, String, String> name,
+  }) => MutationParentsCompanion._(id: id, name: name);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationParentsCompanion.update({
+    RivetValue<MutationParents, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationParents, String, String> name =
+        const RivetValue.absent(),
   }) => MutationParentsCompanion._(id: id, name: name);
 
   /// Mutation value for `id`.
@@ -1752,6 +2070,12 @@ final class _$MutationParentsDB
   RivetInsert<MutationParents, MutationParentsRow> insert(
     MutationParentsCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationParents, MutationParentsRow> update(
+    MutationParentsCompanion companion, {
+    RivetWhere<MutationParents>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 /// Generated row returned by reads from 'fbr138.mutationChildren'.
@@ -1782,6 +2106,12 @@ final class MutationChildrenCompanion
   factory MutationChildrenCompanion.insert({
     required RivetValue<MutationChildren, int, int> id,
     required RivetValue<MutationChildren, int, int> parentId,
+  }) => MutationChildrenCompanion._(id: id, parentId: parentId);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationChildrenCompanion.update({
+    RivetValue<MutationChildren, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationChildren, int, int> parentId = const RivetValue.absent(),
   }) => MutationChildrenCompanion._(id: id, parentId: parentId);
 
   /// Mutation value for `id`.
@@ -1832,6 +2162,328 @@ final class _$MutationChildrenDB
   RivetInsert<MutationChildren, MutationChildrenRow> insert(
     MutationChildrenCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationChildren, MutationChildrenRow> update(
+    MutationChildrenCompanion companion, {
+    RivetWhere<MutationChildren>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+}
+
+/// Generated row returned by reads from 'fbr140.mutationUpdateUsers'.
+final class MutationUpdateUsersRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationUpdateUsersRow({
+    required this.id,
+    required this.name,
+    required this.age,
+    required this.updatedAt,
+    required this.nullableNote,
+    required this.code,
+    required this.defaultOnly,
+    required this.serverOnly,
+    this.children = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `name`.
+  final String name;
+
+  /// Value read from `age`.
+  final int age;
+
+  /// Value read from `updatedAt`.
+  final DateTime updatedAt;
+
+  /// Value read from `nullableNote`.
+  final String? nullableNote;
+
+  /// Value read from `code`.
+  final MutationCode code;
+
+  /// Value read from `defaultOnly`.
+  final String defaultOnly;
+
+  /// Value read from `serverOnly`.
+  final int serverOnly;
+
+  /// Loaded or unloaded `children` relation.
+  final Relation<List<MutationUpdateChildrenRow>> children;
+}
+
+/// Generated values accepted by mutations of 'fbr140.mutationUpdateUsers'.
+final class MutationUpdateUsersCompanion
+    implements RivetCompanion<MutationUpdateUsers> {
+  const MutationUpdateUsersCompanion._({
+    required this.id,
+    required this.name,
+    required this.age,
+    required this.updatedAt,
+    required this.nullableNote,
+    required this.code,
+    required this.defaultOnly,
+    required this.serverOnly,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationUpdateUsersCompanion.insert({
+    required RivetValue<MutationUpdateUsers, int, int> id,
+    required RivetValue<MutationUpdateUsers, String, String> name,
+    required RivetValue<MutationUpdateUsers, int, int> age,
+    RivetValue<MutationUpdateUsers, DateTime, DateTime> updatedAt =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, String?, String?> nullableNote =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, MutationCode, String> code =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, String, String> defaultOnly =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, int, int> serverOnly =
+        const RivetValue.absent(),
+  }) => MutationUpdateUsersCompanion._(
+    id: id,
+    name: name,
+    age: age,
+    updatedAt: updatedAt,
+    nullableNote: nullableNote,
+    code: code,
+    defaultOnly: defaultOnly,
+    serverOnly: serverOnly,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationUpdateUsersCompanion.update({
+    RivetValue<MutationUpdateUsers, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, String, String> name =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, int, int> age = const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, DateTime, DateTime> updatedAt =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, String?, String?> nullableNote =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, MutationCode, String> code =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, String, String> defaultOnly =
+        const RivetValue.absent(),
+    RivetValue<MutationUpdateUsers, int, int> serverOnly =
+        const RivetValue.absent(),
+  }) => MutationUpdateUsersCompanion._(
+    id: id,
+    name: name,
+    age: age,
+    updatedAt: updatedAt,
+    nullableNote: nullableNote,
+    code: code,
+    defaultOnly: defaultOnly,
+    serverOnly: serverOnly,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationUpdateUsers, int, int> id;
+
+  /// Mutation value for `name`.
+  final RivetValue<MutationUpdateUsers, String, String> name;
+
+  /// Mutation value for `age`.
+  final RivetValue<MutationUpdateUsers, int, int> age;
+
+  /// Mutation value for `updatedAt`.
+  final RivetValue<MutationUpdateUsers, DateTime, DateTime> updatedAt;
+
+  /// Mutation value for `nullableNote`.
+  final RivetValue<MutationUpdateUsers, String?, String?> nullableNote;
+
+  /// Mutation value for `code`.
+  final RivetValue<MutationUpdateUsers, MutationCode, String> code;
+
+  /// Mutation value for `defaultOnly`.
+  final RivetValue<MutationUpdateUsers, String, String> defaultOnly;
+
+  /// Mutation value for `serverOnly`.
+  final RivetValue<MutationUpdateUsers, int, int> serverOnly;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationUpdateUsers>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('name', name),
+    RivetAssignment('age', age),
+    RivetAssignment('updatedAt', updatedAt),
+    RivetAssignment('nullableNote', nullableNote),
+    RivetAssignment('code', code),
+    RivetAssignment('defaultOnly', defaultOnly),
+    RivetAssignment('serverOnly', serverOnly),
+  ];
+}
+
+final class _$MutationUpdateUsersDB
+    extends RivetTableAccessor<MutationUpdateUsers, MutationUpdateUsersRow> {
+  const _$MutationUpdateUsersDB();
+
+  @override
+  RivetTableSchema<MutationUpdateUsers, MutationUpdateUsersRow> buildSchema() {
+    final definition = MutationUpdateUsers();
+
+    return RivetTableSchema<MutationUpdateUsers, MutationUpdateUsersRow>(
+      schemaName: 'fbr140',
+      tableName: 'mutationUpdateUsers',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+        definition.age as RivetColumn<Object?>,
+        definition.updatedAt as RivetColumn<Object?>,
+        definition.nullableNote as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+        definition.defaultOnly as RivetColumn<Object?>,
+        definition.serverOnly as RivetColumn<Object?>,
+      ],
+      columnNames: [
+        'id',
+        'name',
+        'age',
+        'updatedAt',
+        'nullableNote',
+        'code',
+        'defaultOnly',
+        'serverOnly',
+      ],
+      decode: (values, sqlNulls) => MutationUpdateUsersRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        name: definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+        age: definition.age.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+        updatedAt: definition.updatedAt.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
+        ),
+        nullableNote: definition.nullableNote.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+        code: definition.code.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+        defaultOnly: definition.defaultOnly.decodeValue(
+          values[6],
+          isSqlNull: sqlNulls[6],
+        ),
+        serverOnly: definition.serverOnly.decodeValue(
+          values[7],
+          isSqlNull: sqlNulls[7],
+        ),
+      ),
+      relations: {
+        'children': definition.children as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationUpdateUsers, MutationUpdateUsersRow> insert(
+    MutationUpdateUsersCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationUpdateUsers, MutationUpdateUsersRow> update(
+    MutationUpdateUsersCompanion companion, {
+    RivetWhere<MutationUpdateUsers>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+}
+
+/// Generated row returned by reads from 'fbr140.mutationUpdateChildren'.
+final class MutationUpdateChildrenRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationUpdateChildrenRow({
+    required this.id,
+    required this.userId,
+    this.user = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `userId`.
+  final int userId;
+
+  /// Loaded or unloaded `user` relation.
+  final Relation<MutationUpdateUsersRow?> user;
+}
+
+/// Generated values accepted by mutations of 'fbr140.mutationUpdateChildren'.
+final class MutationUpdateChildrenCompanion
+    implements RivetCompanion<MutationUpdateChildren> {
+  const MutationUpdateChildrenCompanion._({
+    required this.id,
+    required this.userId,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationUpdateChildrenCompanion.insert({
+    required RivetValue<MutationUpdateChildren, int, int> id,
+    required RivetValue<MutationUpdateChildren, int, int> userId,
+  }) => MutationUpdateChildrenCompanion._(id: id, userId: userId);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationUpdateChildrenCompanion.update({
+    RivetValue<MutationUpdateChildren, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationUpdateChildren, int, int> userId =
+        const RivetValue.absent(),
+  }) => MutationUpdateChildrenCompanion._(id: id, userId: userId);
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationUpdateChildren, int, int> id;
+
+  /// Mutation value for `userId`.
+  final RivetValue<MutationUpdateChildren, int, int> userId;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationUpdateChildren>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('userId', userId),
+  ];
+}
+
+final class _$MutationUpdateChildrenDB
+    extends
+        RivetTableAccessor<MutationUpdateChildren, MutationUpdateChildrenRow> {
+  const _$MutationUpdateChildrenDB();
+
+  @override
+  RivetTableSchema<MutationUpdateChildren, MutationUpdateChildrenRow>
+  buildSchema() {
+    final definition = MutationUpdateChildren();
+
+    return RivetTableSchema<MutationUpdateChildren, MutationUpdateChildrenRow>(
+      schemaName: 'fbr140',
+      tableName: 'mutationUpdateChildren',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.userId as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'userId'],
+      decode: (values, sqlNulls) => MutationUpdateChildrenRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        userId: definition.userId.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+      ),
+      relations: {'user': definition.user as RivetRelationDescriptor<Object?>},
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationUpdateChildren, MutationUpdateChildrenRow> insert(
+    MutationUpdateChildrenCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationUpdateChildren, MutationUpdateChildrenRow> update(
+    MutationUpdateChildrenCompanion companion, {
+    RivetWhere<MutationUpdateChildren>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 // **************************************************************************
@@ -1860,6 +2512,10 @@ abstract class _$RivetTestDatabase {
       MutationParents.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       MutationChildren.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       MutationCatalog.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      MutationUpdateUsers.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      MutationUpdateChildren.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
     ],
   );
 }

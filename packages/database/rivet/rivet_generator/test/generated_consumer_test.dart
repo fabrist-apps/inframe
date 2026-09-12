@@ -79,20 +79,27 @@ final class Users extends RivetTableDefinition<Users> {
         outputs: {
           'rivet_generator|lib/mutations.rivet.dart': decodedMatches(
             allOf(
-              contains('final class UsersCompanion implements RivetCompanion<Users>'),
-              contains('factory UsersCompanion.insert({'),
-              contains('required RivetValue<Users, String, String> name,'),
-              contains(
-                'RivetValue<Users, String, String> id = const RivetValue.absent(),',
+              allOf(
+                contains('final class UsersCompanion implements RivetCompanion<Users>'),
+                contains('factory UsersCompanion.insert({'),
+                contains('required RivetValue<Users, String, String> name,'),
+                contains(
+                  'RivetValue<Users, String, String> id = const RivetValue.absent(),',
+                ),
+                contains(
+                  'RivetValue<Users, String?, String?> nickname = const RivetValue.absent(),',
+                ),
+                contains(
+                  'RivetValue<Users, DateTime, DateTime> updatedAt = '
+                  'const RivetValue.absent(),',
+                ),
               ),
+              contains('factory UsersCompanion.update({'),
               contains(
-                'RivetValue<Users, String?, String?> nickname = const RivetValue.absent(),',
-              ),
-              contains(
-                'RivetValue<Users, DateTime, DateTime> updatedAt = '
-                'const RivetValue.absent(),',
+                'RivetValue<Users, String, String> name = const RivetValue.absent(),',
               ),
               contains('RivetInsert<Users, UsersRow> insert(UsersCompanion companion)'),
+              contains('RivetUpdate<Users, UsersRow> update('),
             ),
           ),
         },

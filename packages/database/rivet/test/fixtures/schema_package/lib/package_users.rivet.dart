@@ -29,6 +29,13 @@ final class PackageUsersCompanion implements RivetCompanion<PackageUsers> {
     required RivetValue<PackageUsers, AccessLevel, AccessLevel> access,
   }) => PackageUsersCompanion._(name: name, access: access);
 
+  /// Creates values for an update, leaving untouched columns absent.
+  factory PackageUsersCompanion.update({
+    RivetValue<PackageUsers, String, String> name = const RivetValue.absent(),
+    RivetValue<PackageUsers, AccessLevel, AccessLevel> access =
+        const RivetValue.absent(),
+  }) => PackageUsersCompanion._(name: name, access: access);
+
   /// Mutation value for `name`.
   final RivetValue<PackageUsers, String, String> name;
 
@@ -74,6 +81,12 @@ final class _$PackageUsersDB
   RivetInsert<PackageUsers, PackageUsersRow> insert(
     PackageUsersCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<PackageUsers, PackageUsersRow> update(
+    PackageUsersCompanion companion, {
+    RivetWhere<PackageUsers>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 // **************************************************************************

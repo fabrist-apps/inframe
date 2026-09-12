@@ -137,6 +137,12 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
     final companionInitializers = mutationFields
         .map((field) => '      ${field.element.displayName}: ${field.element.displayName},')
         .join('\n');
+    final companionUpdateParameters = mutationFields
+        .map((field) {
+          final type = 'RivetValue<$className, ${field.domainType}, ${field.storageType}>';
+          return '    $type ${field.element.displayName} = const RivetValue.absent(),';
+        })
+        .join('\n');
     final companionPrivateParameters = mutationFields
         .map((field) => '    required this.${field.element.displayName},')
         .join('\n');
@@ -172,6 +178,13 @@ $companionConstructorParameters
 $companionInitializers
   );
 
+  /// Creates values for an update, leaving untouched columns absent.
+  factory $companionName.update({
+$companionUpdateParameters
+  }) => $companionName._(
+$companionInitializers
+  );
+
 $companionFields
 
   /// The generated column assignments in declaration order.
@@ -202,6 +215,12 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   /// Creates a reusable insert plan.
   RivetInsert<$className, $rowName> insert($companionName companion) =>
       RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<$className, $rowName> update(
+    $companionName companion, {
+    RivetWhere<$className>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 
 }
 ''';

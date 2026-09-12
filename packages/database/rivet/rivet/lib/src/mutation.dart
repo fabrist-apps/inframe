@@ -45,9 +45,14 @@ abstract interface class RivetCompanion<Definition> {
   List<RivetAssignment<Definition>> get assignments;
 }
 
-extension RivetInsertAccess<Definition, Row> on RivetTableAccessor<Definition, Row> {
+extension RivetMutationAccess<Definition, Row> on RivetTableAccessor<Definition, Row> {
   RivetInsert<Definition, Row> insert(RivetCompanion<Definition> companion) =>
       RivetInsert(buildSchema(), companion);
+
+  RivetUpdate<Definition, Row> update(
+    RivetCompanion<Definition> companion, {
+    RivetWhere<Definition>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
 }
 
 final class RivetInsert<Definition, Row> {
@@ -74,6 +79,48 @@ final class RivetReturningInsert<Definition, Row> {
 
   Future<List<Row>> get(RivetExecutor executor) => executor.execute(
     _compileInsert(_schema, _companion, returning: true),
+    _schema.decode,
+  );
+}
+
+final class RivetUpdate<Definition, Row> {
+  RivetUpdate(
+    this._schema,
+    this._companion, {
+    RivetWhere<Definition>? where,
+  }) : _predicate = where?.call(_schema.definition) {
+    if (_predicate?.columns.any((column) => !column.belongsTo(_schema)) ?? false) {
+      throw const RivetUnsupportedQueryException(
+        'An update predicate can only reference columns from its target table.',
+      );
+    }
+  }
+
+  final RivetTableSchema<Definition, Row> _schema;
+  final RivetCompanion<Definition> _companion;
+  final RivetPredicate? _predicate;
+
+  RivetUpdate<Definition, Row> prepare() => this;
+
+  Future<int> execute(RivetExecutor executor) => executor.executeAffected(
+    _compileUpdate(_schema, _companion, _predicate, returning: false),
+  );
+
+  RivetReturningUpdate<Definition, Row> returning() =>
+      RivetReturningUpdate(_schema, _companion, _predicate);
+}
+
+final class RivetReturningUpdate<Definition, Row> {
+  const RivetReturningUpdate(this._schema, this._companion, this._predicate);
+
+  final RivetTableSchema<Definition, Row> _schema;
+  final RivetCompanion<Definition> _companion;
+  final RivetPredicate? _predicate;
+
+  RivetReturningUpdate<Definition, Row> prepare() => this;
+
+  Future<List<Row>> get(RivetExecutor executor) => executor.execute(
+    _compileUpdate(_schema, _companion, _predicate, returning: true),
     _schema.decode,
   );
 }
@@ -148,5 +195,82 @@ String _insertValue<Definition, Row>(
         table: '${schema.schemaName}.${schema.tableName}',
         column: column.physicalName,
       );
+  }
+}
+
+RivetCompiledQuery _compileUpdate<Definition, Row>(
+  RivetTableSchema<Definition, Row> schema,
+  RivetCompanion<Definition> companion,
+  RivetPredicate? predicate, {
+  required bool returning,
+}) {
+  final supplied = {
+    for (final assignment in companion.assignments) assignment.columnName: assignment.value,
+  };
+  final parameters = <Object?>[];
+  final assignments = <String>[];
+  for (final column in schema.columns) {
+    final value = supplied[column.dartName];
+    if (value == null) {
+      throw StateError('Generated companion omitted ${column.dartName}.');
+    }
+    final valueSql = _updateValue(schema, column, value, parameters);
+    if (valueSql != null) {
+      assignments.add('${quoteIdentifier(column.physicalName)} = $valueSql');
+    }
+  }
+  if (assignments.isEmpty) {
+    throw RivetEmptyUpdateException(
+      'Update ${schema.schemaName}.${schema.tableName} has no assignments.',
+    );
+  }
+  final sql = StringBuffer(
+    'UPDATE ${schema.qualifiedName} SET ${assignments.join(', ')}',
+  );
+  if (predicate != null) {
+    sql.write(
+      ' WHERE ${predicate.renderParameters(startAt: parameters.length + 1)}',
+    );
+    parameters.addAll(predicate.parameters);
+  }
+  if (returning) {
+    sql
+      ..write(' RETURNING ')
+      ..write(
+        schema.columns.indexed
+            .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
+            .join(', '),
+      );
+  }
+  return RivetCompiledQuery(sql.toString(), parameters);
+}
+
+String? _updateValue<Definition, Row>(
+  RivetTableSchema<Definition, Row> schema,
+  RivetColumn<Object?> column,
+  RivetValue<Definition, dynamic, dynamic> value,
+  List<Object?> parameters,
+) {
+  switch (value) {
+    case RivetPresent(value: final present):
+      parameters.add(column.encodeValue(present));
+      return '\$${parameters.length}::${column.codec.cast}';
+    case RivetExpressionValue(expression: final build):
+      final expression = build(schema.definition);
+      if (expression.columns.any((source) => !source.belongsTo(schema))) {
+        throw const RivetUnsupportedQueryException(
+          'A mutation expression can only reference its target table.',
+        );
+      }
+      final rendered = expression.renderParameters(
+        startAt: parameters.length + 1,
+      );
+      parameters.addAll(expression.parameters);
+      return rendered;
+    case RivetAbsent():
+      final hook = column.onUpdateFn;
+      if (hook == null) return null;
+      parameters.add(column.encodeValue(hook()));
+      return '\$${parameters.length}::${column.codec.cast}';
   }
 }

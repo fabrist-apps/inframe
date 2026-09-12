@@ -46,6 +46,17 @@ void invalidInsertCalls() {
   MetadataColumnsCompanion.insert(
     code: RivetValue.expression((values) => values.code.value(const UserCode('domain'))),
   );
+  MutationUpdateUsersCompanion.update(
+    age: const RivetValue.present('wrong'),
+  );
+  MutationUpdateUsersCompanion.update(
+    code: const RivetValue.present('storage'),
+  );
+  MutationUpdateUsersCompanion.update(
+    code: RivetValue.expression(
+      (values) => values.code.value(const MutationCode('domain')),
+    ),
+  );
 }
 ''');
 
