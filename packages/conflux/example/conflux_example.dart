@@ -10,7 +10,7 @@ Future<void> main() async {
       $.context.users.connect(),
       release: (connection) => connection.closeEffect(),
     );
-    $.addFinalizer(Effect.sync(() => users.events.add('finished')));
+    $.addFinalizer(Effect.sync((_) => users.events.add('finished')));
     return $(connection.loadUser(userId));
   });
 
@@ -46,10 +46,10 @@ final class _Users {
   final events = <String>[];
 
   Effect<_Connection, String> connect() {
-    return Effect.sync(() {
+    return Effect.sync((_) {
       events.add('connected');
       return _Connection(events);
-    }).mapError((error) => '$error');
+    }).mapError((error, _) => '$error');
   }
 }
 
@@ -60,5 +60,5 @@ final class _Connection {
 
   Effect<String, String> loadUser(String id) => Effect.succeed('User $id');
 
-  Effect<void, Never> closeEffect() => Effect.sync(() => events.add('closed'));
+  Effect<void, Never> closeEffect() => Effect.sync((_) => events.add('closed'));
 }

@@ -43,7 +43,7 @@ final class GoogleInteractionsResource {
           api: _api,
           modelId: request.model,
         )
-        .flatMap((response) => _decode(response, GoogleInteraction.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleInteraction.fromJson));
   }
 
   /// Creates and streams one interaction without reconnecting or polling.
@@ -78,7 +78,7 @@ final class GoogleInteractionsResource {
           api: _api,
           modelId: _modelId,
         )
-        .flatMap((response) => _decode(response, GoogleInteraction.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleInteraction.fromJson));
   }
 
   /// Streams one stored interaction from an optional caller-supplied cursor.
@@ -129,7 +129,7 @@ final class GoogleInteractionsResource {
           api: _api,
           modelId: _modelId,
         )
-        .flatMap((response) => _decode(response, GoogleInteraction.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleInteraction.fromJson));
   }
 
   /// Deletes one stored interaction and accepts the stable v1 empty success body.
@@ -147,7 +147,7 @@ final class GoogleInteractionsResource {
           allowEmptySuccess: true,
         )
         .map(
-          (response) => NativeResponse(
+          (response, _) => NativeResponse(
             value: GoogleInteractionDeleteResult(response.value),
             payload: response.payload,
             metadata: response.metadata,

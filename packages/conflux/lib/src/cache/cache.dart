@@ -80,7 +80,7 @@ final class Cache<K, A, E> {
     );
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync(cache._close),
+      Effect.sync((_) => cache._close()),
       execution.context,
       execution.clock,
     );
@@ -229,7 +229,7 @@ final class Cache<K, A, E> {
     _activeLoads += 1;
     final fiber = ScopeAccess.fork(
       _ownerExecution.scope,
-      Effect.defer(() => _lookup(load.key)),
+      Effect.defer((_) => _lookup(load.key)),
       _ownerExecution,
     );
     unawaited(

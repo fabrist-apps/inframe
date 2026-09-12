@@ -121,9 +121,9 @@ void main() {
                   () => secondary.stream,
                   onError: (error, stackTrace) => '$error',
                 ).tap(
-                  (value) => Effect.sync(() {
+                  (value) => Effect.sync((_) {
                     if (value == 11) secondLatestObserved.complete();
-                  }).mapError<String>(_widenNever),
+                  }).mapError<String>((value, _) => _widenNever(value! as Never)),
                 ),
                 (trigger, latest) => trigger + latest,
               )

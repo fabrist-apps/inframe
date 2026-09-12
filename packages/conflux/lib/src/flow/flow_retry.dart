@@ -132,7 +132,7 @@ final class _RetryAttempt<A, E> {
       clock: parent.clock,
       cancellation: cancellation,
     );
-    final opened = await EffectAccess.evaluate(Effect.defer(upstream), execution);
+    final opened = await EffectAccess.evaluate(Effect.defer((_) => upstream()), execution);
     return switch (opened) {
       Succeeded<FlowSourceCursor<A, E>, E>(:final value) => Succeeded(
         _RetryAttempt(value, execution, cancellation, stopParentCancellation),

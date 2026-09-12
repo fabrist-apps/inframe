@@ -29,7 +29,7 @@ final class XaiChatCompletionsResource {
         api: _api,
         modelId: request.model,
       )
-      .flatMap(_decode);
+      .flatMap((value, _) => _decode(value));
 
   /// Streams typed native chunks and a terminal done event.
   Flow<XaiChatEvent, AiError> stream(

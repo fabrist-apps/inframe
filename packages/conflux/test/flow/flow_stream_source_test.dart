@@ -69,13 +69,18 @@ void main() {
       final source = StreamController<int>(sync: true);
       addTearDown(source.close);
       final seen = <int>[];
-      final flow = Flow.fromStream<int, String>(
-        () => source.stream,
-        onError: (error, stackTrace) => '$error',
-        capacity: 2,
-        overflow: FlowOverflowPolicy.fail,
-        onOverflow: (overflow) => 'capacity ${overflow.capacity}',
-      ).tap((value) => Effect.sync(() => seen.add(value)).mapError(_widenNever));
+      final flow =
+          Flow.fromStream<int, String>(
+            () => source.stream,
+            onError: (error, stackTrace) => '$error',
+            capacity: 2,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: (overflow) => 'capacity ${overflow.capacity}',
+          ).tap(
+            (value) =>
+                Effect.sync((_) => seen.add(value))
+                    .mapError((value, _) => _widenNever(value! as Never)),
+          );
       final exitFuture = flow.runDrain().runFutureExit();
       await _waitForListener(source);
       source

@@ -6,7 +6,7 @@ void main() {
   group('Effect builder', () {
     test('should stay lazy and use fresh state on every run', () async {
       var runs = 0;
-      final effect = Effect.defer(() {
+      final effect = Effect.defer((_) {
         runs += 1;
         return Effect.succeed<int, String>(runs);
       });
@@ -39,7 +39,7 @@ void main() {
         } on Object {
           try {
             await $(
-              Effect.defer(() {
+              Effect.defer((_) {
                 laterWorkStarted = true;
                 return Effect.succeed<int, String>(1);
               }),
@@ -60,7 +60,7 @@ void main() {
 
     test('should capture synchronous throws and builder throws as defects', () async {
       final syncExit = await Runtime().run(
-        Effect.sync<int>(() => throw StateError('sync')),
+        Effect.sync<int>((_) => throw StateError('sync')),
       );
       final buildExit = await Runtime().run(
         Effect.build<int, Never>((_) => throw StateError('build')),

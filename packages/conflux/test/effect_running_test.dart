@@ -6,7 +6,7 @@ void main() {
     test('should finish cleanup before returning a successful Exit', () async {
       var cleaned = false;
       final effect = Effect.build<int, Never>(($) {
-        $.addFinalizer(Effect.sync(() => cleaned = true));
+        $.addFinalizer(Effect.sync((_) => cleaned = true));
         return 42;
       });
 
@@ -42,14 +42,14 @@ void main() {
       final effect =
           Effect.fromOption<int, String>(
                 const Some(2),
-                () => 'missing',
+                (_) => 'missing',
               )
-              .filterOrFail((value) => value.isEven, (_) => 'odd')
-              .map((value) => Effect.fromResult<int, String>(Success(value * 2)))
+              .filterOrFail((value, _) => value.isEven, (_, _) => 'odd')
+              .map((value, _) => Effect.fromResult<int, String>(Success(value * 2)))
               .flatten()
               .match(
-                onSuccess: (value) => 'value:$value',
-                onFailure: (error) => 'error:$error',
+                onSuccess: (value, _) => 'value:$value',
+                onFailure: (error, _) => 'error:$error',
               );
 
       final exit = await effect.runFutureExit();
@@ -61,14 +61,14 @@ void main() {
       var calls = 0;
       final present = Effect.fromOption<int, String>(
         const Some(1),
-        () {
+        (_) {
           calls += 1;
           return 'missing';
         },
       );
       final absent = Effect.fromOption<int, String>(
         const None(),
-        () {
+        (_) {
           calls += 1;
           return 'missing';
         },
@@ -85,13 +85,13 @@ void main() {
       final events = <String>[];
       await Effect.succeed<int, String>(1)
           .tap(
-            (value) =>
-                Effect.sync(() => events.add('success:$value')).mapError((error) => '$error'),
+            (value, _) =>
+                Effect.sync((_) => events.add('success:$value')).mapError((error, _) => '$error'),
           )
           .asVoid()
           .runFutureExit();
       await Effect.fail<int, String>('failed')
-          .tapError((error) => Effect.sync(() => events.add('failure:$error')))
+          .tapError((error, _) => Effect.sync((_) => events.add('failure:$error')))
           .runFutureExit();
 
       expect(events, ['success:1', 'failure:failed']);

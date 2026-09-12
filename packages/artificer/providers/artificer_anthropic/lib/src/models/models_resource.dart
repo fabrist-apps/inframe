@@ -39,7 +39,7 @@ final class AnthropicModelsResource {
           api: _api,
           modelId: 'models',
         )
-        .flatMap((response) => decodeNativeResponse(response, AnthropicModelPage.fromJson));
+        .flatMap((response, _) => decodeNativeResponse(response, AnthropicModelPage.fromJson));
   }
 
   /// Retrieves one model by its exact provider-local identifier.
@@ -55,7 +55,7 @@ final class AnthropicModelsResource {
           api: _api,
           modelId: id,
         )
-        .flatMap((response) => decodeNativeResponse(response, AnthropicModel.fromJson));
+        .flatMap((response, _) => decodeNativeResponse(response, AnthropicModel.fromJson));
   }
 }
 

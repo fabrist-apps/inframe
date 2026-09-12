@@ -46,7 +46,7 @@ void main() {
       final pending = fixture.runtime.fork(
         Flow.fromQueue(fixture.queue)
             .ensuring(
-              Effect.sync(() => throw StateError('cleanup failed')),
+              Effect.sync((_) => throw StateError('cleanup failed')),
             )
             .runDrain(),
       );
@@ -161,7 +161,7 @@ void main() {
       final remaining = await fixture.subscribe();
       final failed = fixture.runtime.fork(
         Flow.fromPubSub(fixture.pubsub)
-            .tap((_) => Effect.sync(() => throw StateError('consumer failed')))
+            .tap((_) => Effect.sync((_) => throw StateError('consumer failed')))
             .runDrain(),
       );
       await _flushMicrotasks();

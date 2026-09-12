@@ -95,7 +95,11 @@ void main() {
       var pulled = 0;
       final source = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
-          .tap((_) => Effect.sync(() => pulled += 1).mapError(_widenNever));
+          .tap(
+            (_) =>
+                Effect.sync((_) => pulled += 1)
+                    .mapError((value, _) => _widenNever(value! as Never)),
+          );
       final runtime = Runtime();
       addTearDown(runtime.close);
       final fiber = runtime.fork(

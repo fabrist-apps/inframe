@@ -127,7 +127,7 @@ void main() {
       final clock = FakeClock();
       var executions = 0;
       final program =
-          Effect.sync(() {
+          Effect.sync((_) {
             executions += 1;
             if (executions == 2) {
               clock.advance(const Duration(seconds: 30));
@@ -154,7 +154,7 @@ void main() {
                 const Duration(seconds: 10),
               )
               .tap((_) {
-                return Effect.sync(() {
+                return Effect.sync((_) {
                   clock.advanceMonotonic(const Duration(seconds: 20));
                 });
               })
@@ -260,7 +260,7 @@ void main() {
       final observed = <int>[];
       final driver = Schedule.recurs<Object?>(1)
           .tap(
-            (decision) => Effect.sync(() => observed.add(decision.output)),
+            (decision) => Effect.sync((_) => observed.add(decision.output)),
           )
           .driver();
 
@@ -273,7 +273,7 @@ void main() {
     test('should retain a tap defect', () async {
       final driver = Schedule.recurs<Object?>(1)
           .tap(
-            (_) => Effect.sync(() => throw StateError('tap failed')),
+            (_) => Effect.sync((_) => throw StateError('tap failed')),
           )
           .driver();
 

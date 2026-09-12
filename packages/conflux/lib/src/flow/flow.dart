@@ -51,7 +51,7 @@ final class Flow<A, E> {
   /// Creates a cold Flow whose iterator is acquired for each consumption.
   static Flow<A, Never> fromIterable<A>(Iterable<A> values) => Flow._(
     () => Effect.defer(
-      () => Effect.succeed(_IteratorCursor<A, Never>(values.iterator)),
+      (_) => Effect.succeed(_IteratorCursor<A, Never>(values.iterator)),
     ),
   );
 
@@ -60,7 +60,7 @@ final class Flow<A, E> {
   /// The factory runs inside the consumption boundary. A thrown object becomes
   /// a defect with its original stack trace.
   static Flow<A, E> defer<A, E>(Flow<A, E> Function() factory) => Flow._(
-    () => Effect.defer(() => factory().open()),
+    () => Effect.defer((_) => factory().open()),
   );
 
   /// Consumes [queue] as a shared competing source.
@@ -173,7 +173,7 @@ final class Flow<A, E> {
       cancellation: cancellation,
     );
 
-    final opened = await EffectAccess.evaluate(Effect.defer(_openCursor), child);
+    final opened = await EffectAccess.evaluate(Effect.defer((_) => _openCursor()), child);
     switch (opened) {
       case Failed<FlowSourceCursor<A, E>, E>(:final cause):
         stopParentCancellation();
@@ -210,17 +210,17 @@ final class Flow<A, E> {
 
   /// Transforms each emitted value while preserving the failure channel.
   Flow<B, E> map<B>(B Function(A value) transform) => Flow._(
-    () => open().map((cursor) => _MapCursor(cursor, transform)),
+    () => open().map((cursor, _) => _MapCursor(cursor, transform)),
   );
 
   /// Emits only values accepted by [predicate].
   Flow<A, E> filter(bool Function(A value) predicate) => Flow._(
-    () => open().map((cursor) => _FilterCursor(cursor, predicate)),
+    () => open().map((cursor, _) => _FilterCursor(cursor, predicate)),
   );
 
   /// Transforms values and emits only present results.
   Flow<B, E> filterMap<B>(Option<B> Function(A value) transform) => Flow._(
-    () => open().map((cursor) => _FilterMapCursor(cursor, transform)),
+    () => open().map((cursor, _) => _FilterMapCursor(cursor, transform)),
   );
 
   /// Discards the first [count] values.
@@ -230,18 +230,18 @@ final class Flow<A, E> {
     }
     if (count == 0) return this;
     return Flow._(
-      () => open().map((cursor) => _SkipCursor(cursor, count)),
+      () => open().map((cursor, _) => _SkipCursor(cursor, count)),
     );
   }
 
   /// Emits the longest prefix accepted by [predicate].
   Flow<A, E> takeWhile(bool Function(A value) predicate) => Flow._(
-    () => open().map((cursor) => _TakeWhileCursor(cursor, predicate)),
+    () => open().map((cursor, _) => _TakeWhileCursor(cursor, predicate)),
   );
 
   /// Discards the longest prefix accepted by [predicate].
   Flow<A, E> skipWhile(bool Function(A value) predicate) => Flow._(
-    () => open().map((cursor) => _SkipWhileCursor(cursor, predicate)),
+    () => open().map((cursor, _) => _SkipWhileCursor(cursor, predicate)),
   );
 
   /// Suppresses values equal to the immediately preceding value.
@@ -250,20 +250,20 @@ final class Flow<A, E> {
   /// value.
   Flow<A, E> distinctUntilChanged({bool Function(A previous, A current)? equals}) => Flow._(
     () => open().map(
-      (cursor) => _DistinctCursor(cursor, equals ?? (previous, current) => previous == current),
+      (cursor, _) => _DistinctCursor(cursor, equals ?? (previous, current) => previous == current),
     ),
   );
 
   /// Consumes this Flow to completion before opening and consuming [other].
   Flow<A, E> concat(Flow<A, E> other) => Flow._(
     () => open().map(
-      (cursor) => _ConcatCursor(cursor, other.open),
+      (cursor, _) => _ConcatCursor(cursor, other.open),
     ),
   );
 
   /// Emits each accumulated state after combining an upstream value.
   Flow<B, E> scan<B>(B initial, B Function(B state, A value) combine) => Flow._(
-    () => open().map((cursor) => _ScanCursor(cursor, initial, combine)),
+    () => open().map((cursor, _) => _ScanCursor(cursor, initial, combine)),
   );
 
   /// Emits [values] before opening this Flow.
@@ -273,18 +273,18 @@ final class Flow<A, E> {
   /// Uses [fallback] only after normal completion without an emitted value.
   Flow<A, E> switchIfEmpty(Flow<A, E> Function() fallback) => Flow._(
     () => open().map(
-      (cursor) => _SwitchIfEmptyCursor(cursor, fallback),
+      (cursor, _) => _SwitchIfEmptyCursor(cursor, fallback),
     ),
   );
 
   /// Sequences one effectful transformation at a time in source order.
   Flow<B, E> mapEffect<B>(Effect<B, E> Function(A value) transform) => Flow._(
-    () => open().map((cursor) => _MapEffectCursor(cursor, transform)),
+    () => open().map((cursor, _) => _MapEffectCursor(cursor, transform)),
   );
 
   /// Consumes each transformed inner Flow fully before opening the next one.
   Flow<B, E> concatMap<B>(Flow<B, E> Function(A value) transform) => Flow._(
-    () => open().map((cursor) => _ConcatMapCursor(cursor, transform)),
+    () => open().map((cursor, _) => _ConcatMapCursor(cursor, transform)),
   );
 
   /// Concurrently consumes mapped inner Flows and emits available values.
@@ -512,7 +512,9 @@ final class Flow<A, E> {
 
   /// Transforms every expected error leaf while preserving cause structure.
   Flow<A, F> mapError<F>(F Function(E error) transform) => Flow._(
-    () => open().mapError(transform).map((cursor) => _MapErrorCursor(cursor, transform)),
+    () => open()
+        .mapError((value, _) => transform(value))
+        .map((cursor, _) => _MapErrorCursor(cursor, transform)),
   );
 
   /// Recovers once from an all-expected terminal cause.
@@ -522,17 +524,21 @@ final class Flow<A, E> {
 
   /// Runs an effectful observer after each value and retains that value.
   Flow<A, E> tap(Effect<void, E> Function(A value) observe) => Flow._(
-    () => open().map((cursor) => _TapCursor(cursor, observe)),
+    () => open().map((cursor, _) => _TapCursor(cursor, observe)),
   );
 
   /// Observes the primary expected error without recovering it.
   Flow<A, E> tapError(Effect<void, Never> Function(E error) observe) => Flow._(
-    () => open().tapError(observe).map((cursor) => _TapErrorCursor(cursor, observe)),
+    () => open()
+        .tapError((value, _) => observe(value))
+        .map((cursor, _) => _TapErrorCursor(cursor, observe)),
   );
 
   /// Observes a complete terminal cause without recovering it.
   Flow<A, E> tapCause(Effect<void, Never> Function(Cause<E> cause) observe) => Flow._(
-    () => open().tapCause(observe).map((cursor) => _TapCauseCursor(cursor, observe)),
+    () => open()
+        .tapCause((value, _) => observe(value))
+        .map((cursor, _) => _TapCauseCursor(cursor, observe)),
   );
 
   /// Runs [finalizer] once after every terminal outcome.
@@ -550,7 +556,7 @@ final class Flow<A, E> {
     }
     if (count == 0) return Flow.empty();
     return Flow._(
-      () => open().map((cursor) => _TakeCursor(cursor, count)),
+      () => open().map((cursor, _) => _TakeCursor(cursor, count)),
     );
   }
 
@@ -580,7 +586,7 @@ final class Flow<A, E> {
         while (true) {
           switch (await $(cursor.next())) {
             case Some<A>(:final value):
-              await $(Effect.defer(() => consume(value)));
+              await $(Effect.defer((_) => consume(value)));
             case None():
               return;
           }
@@ -641,7 +647,7 @@ Effect<FlowSourceCursor<A, E>, E> _openWithExitHook<A, E>(
   OpenFlowCursor<A, E> open,
   Effect<void, Never> Function(Exit<void, E> exit) finalizer,
 ) => EffectAccess.create((execution) async {
-  final opened = await EffectAccess.evaluate(Effect.defer(open), execution);
+  final opened = await EffectAccess.evaluate(Effect.defer((_) => open()), execution);
   return switch (opened) {
     Succeeded<FlowSourceCursor<A, E>, E>(
       value: final _ExitHookCursor<A, E> existingCursor,
@@ -649,8 +655,8 @@ Effect<FlowSourceCursor<A, E>, E> _openWithExitHook<A, E>(
       Succeeded(
         _ExitHookCursor(
           existingCursor._upstream,
-          (exit) => Effect.defer(() => existingCursor.finalizer(exit)).ensuring(
-            Effect.defer(() => finalizer(exit)),
+          (exit) => Effect.defer((_) => existingCursor.finalizer(exit)).ensuring(
+            Effect.defer((_) => finalizer(exit)),
           ),
         ),
       ),
@@ -835,7 +841,7 @@ final class _ValueCursor<A, E> implements FlowSourceCursor<A, E> {
   var _emitted = false;
 
   @override
-  Effect<Option<A>, E> next() => Effect.defer(() {
+  Effect<Option<A>, E> next() => Effect.defer((_) {
     if (_emitted) return Effect.succeed(const None());
     _emitted = true;
     return Effect.succeed(Some(_value));
@@ -869,7 +875,7 @@ final class _MapCursor<A, B, E> implements FlowSourceCursor<B, E> {
   final B Function(A value) _transform;
 
   @override
-  Effect<Option<B>, E> next() => _upstream.next().map((option) {
+  Effect<Option<B>, E> next() => _upstream.next().map((option, _) {
     return switch (option) {
       Some<A>(:final value) => Some(_transform(value)),
       None() => const None(),
@@ -887,7 +893,7 @@ final class _MapEffectCursor<A, B, E> implements FlowSourceCursor<B, E> {
   Effect<Option<B>, E> next() => Effect.build(($) async {
     return switch (await $(_upstream.next())) {
       Some<A>(:final value) => Some(
-        await $(Effect.defer(() => _transform(value))),
+        await $(Effect.defer((_) => _transform(value))),
       ),
       None() => const None(),
     };
@@ -901,7 +907,7 @@ final class _MapErrorCursor<A, E, F> implements FlowSourceCursor<A, F> {
   final F Function(E error) _transform;
 
   @override
-  Effect<Option<A>, F> next() => _upstream.next().mapError(_transform);
+  Effect<Option<A>, F> next() => _upstream.next().mapError((value, _) => _transform(value));
 }
 
 final class _CatchErrorCursor<A, E> implements FlowSourceCursor<A, E> {
@@ -913,23 +919,23 @@ final class _CatchErrorCursor<A, E> implements FlowSourceCursor<A, E> {
   var _recovered = false;
 
   @override
-  Effect<Option<A>, E> next() => Effect.defer(() {
+  Effect<Option<A>, E> next() => Effect.defer((_) {
     final active = _active;
     if (active != null) {
       final pull = active.next();
-      return _recovered ? pull : pull.catchError(_recoverAndPull);
+      return _recovered ? pull : pull.catchError((value, _) => _recoverAndPull(value));
     }
-    return Effect.defer(_openUpstream)
-        .flatMap((cursor) {
+    return Effect.defer((_) => _openUpstream())
+        .flatMap((cursor, _) {
           _active = cursor;
           return cursor.next();
         })
-        .catchError(_recoverAndPull);
+        .catchError((value, _) => _recoverAndPull(value));
   });
 
   Effect<Option<A>, E> _recoverAndPull(E error) {
     _recovered = true;
-    return Effect.defer(() => _recover(error).open()).flatMap((cursor) {
+    return Effect.defer((_) => _recover(error).open()).flatMap((cursor, _) {
       _active = cursor;
       return cursor.next();
     });
@@ -943,9 +949,9 @@ final class _TapCursor<A, E> implements FlowSourceCursor<A, E> {
   final Effect<void, E> Function(A value) _observe;
 
   @override
-  Effect<Option<A>, E> next() => _upstream.next().flatMap((option) {
+  Effect<Option<A>, E> next() => _upstream.next().flatMap((option, _) {
     return switch (option) {
-      Some<A>(:final value) => Effect.defer(() => _observe(value)).map((_) => option),
+      Some<A>(:final value) => Effect.defer((_) => _observe(value)).map((_, _) => option),
       None() => Effect.succeed(const None()),
     };
   });
@@ -958,7 +964,7 @@ final class _TapErrorCursor<A, E> implements FlowSourceCursor<A, E> {
   final Effect<void, Never> Function(E error) _observe;
 
   @override
-  Effect<Option<A>, E> next() => _upstream.next().tapError(_observe);
+  Effect<Option<A>, E> next() => _upstream.next().tapError((value, _) => _observe(value));
 }
 
 final class _TapCauseCursor<A, E> implements FlowSourceCursor<A, E> {
@@ -968,7 +974,7 @@ final class _TapCauseCursor<A, E> implements FlowSourceCursor<A, E> {
   final Effect<void, Never> Function(Cause<E> cause) _observe;
 
   @override
-  Effect<Option<A>, E> next() => _upstream.next().tapCause(_observe);
+  Effect<Option<A>, E> next() => _upstream.next().tapCause((value, _) => _observe(value));
 }
 
 final class _ExitHookCursor<A, E> implements FlowSourceCursor<A, E>, _FlowSourceCursorFinalizer<E> {
@@ -1002,7 +1008,7 @@ final class _ConcatMapCursor<A, B, E> implements FlowSourceCursor<B, E> {
 
       switch (await $(_upstream.next())) {
         case Some<A>(:final value):
-          _inner = await $(Effect.defer(() => _transform(value).open()));
+          _inner = await $(Effect.defer((_) => _transform(value).open()));
         case None():
           return const None();
       }
@@ -1079,7 +1085,7 @@ final class _TakeWhileCursor<A, E> implements FlowSourceCursor<A, E> {
   @override
   Effect<Option<A>, E> next() {
     if (_done) return Effect.succeed(const None());
-    return _upstream.next().map((option) {
+    return _upstream.next().map((option, _) {
       if (option case Some<A>(:final value) when !_predicate(value)) {
         _done = true;
         return const None();
@@ -1160,7 +1166,7 @@ final class _ConcatCursor<A, E> implements FlowSourceCursor<A, E> {
       activeSecond = existingSecond;
     } else {
       activeSecond = await $(
-        Effect.defer<FlowSourceCursor<A, E>, E>(_openSecond),
+        Effect.defer<FlowSourceCursor<A, E>, E>((_) => _openSecond()),
       );
       _second = activeSecond;
     }
@@ -1176,7 +1182,7 @@ final class _ScanCursor<A, B, E> implements FlowSourceCursor<B, E> {
   B _state;
 
   @override
-  Effect<Option<B>, E> next() => _upstream.next().map((option) {
+  Effect<Option<B>, E> next() => _upstream.next().map((option, _) {
     return switch (option) {
       Some<A>(:final value) => Some(_state = _combine(_state, value)),
       None() => const None(),
@@ -1211,7 +1217,7 @@ final class _SwitchIfEmptyCursor<A, E> implements FlowSourceCursor<A, E> {
       activeFallback = existingFallback;
     } else {
       activeFallback = await $(
-        Effect.defer<FlowSourceCursor<A, E>, E>(() => _fallback().open()),
+        Effect.defer<FlowSourceCursor<A, E>, E>((_) => _fallback().open()),
       );
       _fallbackCursor = activeFallback;
     }
@@ -1228,7 +1234,7 @@ final class _TakeCursor<A, E> implements FlowSourceCursor<A, E> {
   @override
   Effect<Option<A>, E> next() {
     if (_remaining == 0) return Effect.succeed(const None());
-    return _upstream.next().map((option) {
+    return _upstream.next().map((option, _) {
       if (option case Some<A>()) _remaining -= 1;
       return option;
     });
@@ -1259,7 +1265,7 @@ final class _EffectCursor<A, E> implements FlowSourceCursor<A, E> {
   Effect<Option<A>, E> next() {
     if (_emitted) return Effect.succeed(const None());
     _emitted = true;
-    return _effect.map<Option<A>>(Some.new);
+    return _effect.map<Option<A>>((value, _) => Some(value));
   }
 }
 

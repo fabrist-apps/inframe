@@ -65,7 +65,7 @@ void main() {
       final clock = FakeClock();
       var started = false;
       final fiber = Runtime(clock: clock).fork(
-        Effect.sync(() {
+        Effect.sync((_) {
           started = true;
           return 42;
         }).delay(const Duration(seconds: 5)),
@@ -83,7 +83,7 @@ void main() {
 
     test('should measure elapsed time monotonically', () async {
       final clock = FakeClock();
-      final effect = Effect.sync(() {
+      final effect = Effect.sync((_) {
         clock
           ..adjustWall(const Duration(days: 2))
           ..advanceMonotonic(const Duration(seconds: 3));
@@ -173,7 +173,7 @@ void main() {
               onError: (error, _) => '$error',
             )
             .onCancel(
-              Effect.sync(() => throw StateError('cleanup')),
+              Effect.sync((_) => throw StateError('cleanup')),
             )
             .timeout(const Duration(seconds: 5), onTimeout: () => 'timeout'),
       );
@@ -192,7 +192,7 @@ void main() {
       final clock = FakeClock();
       var started = false;
       final fiber = Runtime(clock: clock).fork(
-        Effect.sync(() => started = true).delay(const Duration(seconds: 5)),
+        Effect.sync((_) => started = true).delay(const Duration(seconds: 5)),
       );
       await Future<void>.delayed(Duration.zero);
 

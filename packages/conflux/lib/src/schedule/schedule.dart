@@ -113,7 +113,7 @@ final class Schedule<I, O, E> {
     return Schedule.fromDriver(() {
       var recurrence = 0;
       return ScheduleDriver(
-        (_) => Effect.sync(() {
+        (_) => Effect.sync((_) {
           final delay = _scaledDuration(base, pow(factor, recurrence).toDouble());
           recurrence += 1;
           return ScheduleContinue<Duration>(delay, delay);
@@ -250,7 +250,7 @@ extension ScheduleErrorMapping<I, O, E> on Schedule<I, O, E> {
   Schedule<I, O, F> mapError<F>(F Function(E error) transform) {
     return Schedule.fromDriver(() {
       final source = driver();
-      return ScheduleDriver((input) => source.step(input).mapError(transform));
+      return ScheduleDriver((input) => source.step(input).mapError((value, _) => transform(value)));
     });
   }
 }
@@ -262,7 +262,7 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
     return Schedule.fromDriver(() {
       final source = driver();
       return ScheduleDriver(
-        (input) => source.step(input).map((decision) {
+        (input) => source.step(input).map((decision, _) {
           return switch (decision) {
             ScheduleStop<O>() => decision,
             ScheduleContinue<O>(:final output, :final delay) => () {
@@ -328,7 +328,7 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
     return Schedule.fromDriver(() {
       final source = driver();
       return ScheduleDriver(
-        (input) => source.step(input).map((decision) {
+        (input) => source.step(input).map((decision, _) {
           if (decision is ScheduleContinue<O> && !predicate(input)) {
             return ScheduleStop(decision.output);
           }
@@ -346,7 +346,7 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
       return ScheduleDriver((input) {
         final active = second;
         if (active != null) return active.step(input);
-        return first.step(input).flatMap((decision) {
+        return first.step(input).flatMap((decision, _) {
           if (decision is ScheduleContinue<O>) return Effect.succeed(decision);
           final next = other.driver();
           second = next;
@@ -363,9 +363,11 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
     return Schedule.fromDriver(() {
       final source = driver();
       return ScheduleDriver(
-        (input) => source.step(input).flatMap((decision) {
+        (input) => source.step(input).flatMap((decision, _) {
           if (decision is! ScheduleContinue<O>) return Effect.succeed(decision);
-          return observe(decision).mapError<E>(_absurd).map((_) => decision);
+          return observe(decision)
+              .mapError<E>((value, _) => _absurd(value! as Never))
+              .map((_, _) => decision);
         }),
       );
     });

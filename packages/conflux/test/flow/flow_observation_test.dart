@@ -44,8 +44,8 @@ void main() {
         recoveries += 1;
         return Flow.succeed(error.length);
       });
-      final defective = Effect.sync<int>(() => throw StateError('broken'))
-          .mapError<String>(_widenNever)
+      final defective = Effect.sync<int>((_) => throw StateError('broken'))
+          .mapError<String>((value, _) => _widenNever(value! as Never))
           .asFlow()
           .catchError((error) {
             recoveries += 1;
@@ -74,11 +74,13 @@ void main() {
     test('should sequence value and failure observations without recovery', () async {
       final seen = <String>[];
       final success = Flow.succeed<int, String>(1).tap(
-        (value) => Effect.sync(() => seen.add('value $value')).mapError(_widenNever),
+        (value) =>
+            Effect.sync((_) => seen.add('value $value'))
+                .mapError((value, _) => _widenNever(value! as Never)),
       );
       final failed = Flow.fail<int, String>('source')
-          .tapError((error) => Effect.sync(() => seen.add('error $error')))
-          .tapCause((cause) => Effect.sync(() => seen.add('cause ${cause.expectedErrors}')));
+          .tapError((error) => Effect.sync((_) => seen.add('error $error')))
+          .tapCause((cause) => Effect.sync((_) => seen.add('cause ${cause.expectedErrors}')));
 
       expect(await success.runCollect().runFuture(), [1]);
       final exit = await failed.runCollect().runFutureExit();
@@ -88,8 +90,8 @@ void main() {
 
     test('should append observer and finalizer defects after source failure', () async {
       final flow = Flow.fail<int, String>('source')
-          .tapError((_) => Effect.sync(() => throw StateError('observer')))
-          .ensuring(Effect.sync(() => throw StateError('finalizer')));
+          .tapError((_) => Effect.sync((_) => throw StateError('observer')))
+          .ensuring(Effect.sync((_) => throw StateError('finalizer')));
 
       final exit = await flow.runCollect().runFutureExit();
       final cause = (exit as Failed<List<int>, String>).cause;
@@ -102,10 +104,10 @@ void main() {
     test('should run onExit once for success, failure, and cancellation', () async {
       final exits = <Exit<void, String>>[];
       final success = Flow.succeed<int, String>(1).onExit(
-        (exit) => Effect.sync(() => exits.add(exit)),
+        (exit) => Effect.sync((_) => exits.add(exit)),
       );
       final failure = Flow.fail<int, String>('failed').onExit(
-        (exit) => Effect.sync(() => exits.add(exit)),
+        (exit) => Effect.sync((_) => exits.add(exit)),
       );
       final started = Completer<void>();
       final pending = Completer<int>();
@@ -115,7 +117,7 @@ void main() {
           return pending.future;
         },
         onError: (error, stackTrace) => '$error',
-      ).asFlow().onExit((exit) => Effect.sync(() => exits.add(exit)));
+      ).asFlow().onExit((exit) => Effect.sync((_) => exits.add(exit)));
       final runtime = Runtime();
       addTearDown(runtime.close);
 
@@ -137,12 +139,12 @@ void main() {
       final flow = Flow.fromIterable([1, 2])
           .onExit(
             (exit) => Effect.sync(
-              () => events.add('source ${exit is Succeeded<void, Never>}'),
+              (_) => events.add('source ${exit is Succeeded<void, Never>}'),
             ),
           )
           .map((value) => value * 2)
-          .onExit((_) => Effect.sync(() => events.add('mapped')))
-          .ensuring(Effect.sync(() => events.add('outer')));
+          .onExit((_) => Effect.sync((_) => events.add('mapped')))
+          .ensuring(Effect.sync((_) => events.add('outer')));
 
       expect(await flow.runCollect().runFuture(), [2, 4]);
       expect(events, ['source true', 'mapped', 'outer']);
@@ -151,10 +153,10 @@ void main() {
     test('should finalize concatenated source scopes in consumption order', () async {
       final events = <String>[];
       final first = Flow.succeed<int, Never>(1).ensuring(
-        Effect.sync(() => events.add('first')),
+        Effect.sync((_) => events.add('first')),
       );
       final second = Flow.succeed<int, Never>(2).ensuring(
-        Effect.sync(() => events.add('second')),
+        Effect.sync((_) => events.add('second')),
       );
 
       expect(await first.concat(second).runCollect().runFuture(), [1, 2]);

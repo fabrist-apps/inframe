@@ -16,7 +16,7 @@ abstract final class CombinationFlowSource {
   ) => Effect.build(($) async {
     final cursors = <FlowSourceCursor<A, E>>[];
     for (final source in sources) {
-      cursors.add(await $(Effect.defer(source)));
+      cursors.add(await $(Effect.defer((_) => source())));
     }
     return _ZipCursor(cursors);
   });
@@ -72,7 +72,7 @@ bool _registerCombinationCleanup<A, E>(
 ) {
   final registered = ScopeAccess.addFinalizer(
     execution.scope,
-    Effect.sync(() {
+    Effect.sync((_) {
       closeCoordinator();
       mailbox.close();
     }),
@@ -298,9 +298,9 @@ final class _WithLatestCoordinator<A, B, C, E> {
     return EffectAccess.evaluate(_mailbox.offer(combined), execution);
   });
 
-  Effect<void, E> _acceptSecondary(B value) => Effect.sync(() {
+  Effect<void, E> _acceptSecondary(B value) => Effect.sync((_) {
     if (!_terminalizing && !_closed) _latest = Some(value);
-  }).mapError<E>(_widenNever);
+  }).mapError<E>((value, _) => _widenNever(value! as Never));
 
   Future<void> _finished(
     int index,

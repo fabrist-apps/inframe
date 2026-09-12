@@ -7,7 +7,7 @@ void main() {
   group('Effect scheduling', () {
     test('should retry at most three times before succeeding', () async {
       var attempts = 0;
-      final effect = Effect.defer<int, String>(() {
+      final effect = Effect.defer<int, String>((_) {
         attempts += 1;
         return attempts < 4 ? Effect.fail('failure $attempts') : Effect.succeed(42);
       }).retry(Schedule.recurs(3));
@@ -20,7 +20,7 @@ void main() {
 
     test('should stop retrying after the configured recurrences', () async {
       var attempts = 0;
-      final effect = Effect.defer<int, String>(() {
+      final effect = Effect.defer<int, String>((_) {
         attempts += 1;
         return Effect.fail('failure $attempts');
       }).retry(Schedule.recurs(3));
@@ -33,7 +33,7 @@ void main() {
 
     test('should repeat immediately with a fresh driver on each run', () async {
       var executions = 0;
-      final effect = Effect.sync(() => ++executions).repeat(
+      final effect = Effect.sync((_) => ++executions).repeat(
         Schedule.recurs(3),
       );
 
@@ -47,7 +47,7 @@ void main() {
 
     test('should schedule only after the first continuing decision', () async {
       var executions = 0;
-      final effect = Effect.sync<int>(() => ++executions).schedule(
+      final effect = Effect.sync<int>((_) => ++executions).schedule(
         Schedule.recurs(3),
       );
 
@@ -61,10 +61,10 @@ void main() {
       var repeated = 0;
       var scheduled = 0;
 
-      final repeatOutput = await Effect.sync(() => ++repeated)
+      final repeatOutput = await Effect.sync((_) => ++repeated)
           .repeat(Schedule.recurs(0))
           .runFuture();
-      final scheduleOutput = await Effect.sync(() => ++scheduled)
+      final scheduleOutput = await Effect.sync((_) => ++scheduled)
           .schedule(Schedule.recurs(0))
           .runFuture();
 
@@ -105,7 +105,7 @@ void main() {
           );
         }),
       );
-      final effect = Effect.defer<int, String>(() {
+      final effect = Effect.defer<int, String>((_) {
         attempts += 1;
         return attempts == 1
             ? Effect.failCause(
@@ -146,7 +146,7 @@ void main() {
       final policy = Schedule<String, int, String>.fromDriver(
         () => ScheduleDriver((_) => Effect.fail('policy failed')),
       );
-      final effect = Effect.defer<int, String>(() {
+      final effect = Effect.defer<int, String>((_) {
         attempts += 1;
         return Effect.fail('operation failed');
       }).retry(policy);
@@ -182,7 +182,7 @@ void main() {
       final clock = FakeClock();
       var attempts = 0;
       final fiber = Runtime(clock: clock).fork(
-        Effect.defer<int, String>(() {
+        Effect.defer<int, String>((_) {
           attempts += 1;
           return attempts == 1 ? Effect.fail('again') : Effect.succeed(42);
         }).retry(Schedule.spaced(const Duration(seconds: 5))),
@@ -202,7 +202,7 @@ void main() {
       final clock = FakeClock();
       var attempts = 0;
       final fiber = Runtime(clock: clock).fork(
-        Effect.defer<int, String>(() {
+        Effect.defer<int, String>((_) {
           attempts += 1;
           return Effect.fail('again');
         }).retry(Schedule.spaced(const Duration(seconds: 5))),
@@ -234,7 +234,7 @@ void main() {
       final policy = Schedule<String, int, String>.fromDriver(
         () => ScheduleDriver(
           (_) => Effect.build<ScheduleDecision<int>, String>(($) {
-            $.addFinalizer(Effect.sync(() => cleaned = true));
+            $.addFinalizer(Effect.sync((_) => cleaned = true));
             return $.sync(const Failure('policy failed'));
           }),
         ),

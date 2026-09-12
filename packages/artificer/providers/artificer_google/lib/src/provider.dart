@@ -120,7 +120,7 @@ final class GoogleLanguageModel implements LanguageModel {
     return switch (native) {
       AiError() => Effect.fail(native),
       GoogleGenerateContentRequest() =>
-        _resource.create(native).flatMap((response) => _normalizeCommon(response, native)),
+        _resource.create(native).flatMap((response, _) => _normalizeCommon(response, native)),
       _ => throw StateError('Unexpected common Google request encoding result.'),
     };
   }

@@ -68,7 +68,7 @@ abstract final class ConcurrentFlowSource {
     );
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync(() {
+      Effect.sync((_) {
         coordinator.close();
         mailbox.close();
       }),
@@ -101,7 +101,7 @@ abstract final class ConcurrentFlowSource {
     );
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync(() {
+      Effect.sync((_) {
         coordinator.close();
         mailbox.close();
       }),
@@ -125,7 +125,7 @@ abstract final class ConcurrentFlowSource {
   }) {
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync(() {
+      Effect.sync((_) {
         coordinator.close();
         gate?.close();
         mailbox.close();
@@ -176,19 +176,19 @@ final class _MergeCoordinator<A, E> {
     _gate = gate;
     _startPump(
       upstream,
-      (value) => gate.acquire().mapError<E>(_widenNever).tap((_) {
-        return Effect.sync(() {
+      (value) => gate.acquire().mapError<E>((value, _) => _widenNever(value! as Never)).tap((_, _) {
+        return Effect.sync((_) {
           if (_closed || _terminalizing) {
             gate.release();
             return;
           }
           _activeInners += 1;
           _startPump(
-            () => Effect.defer(() => transform(value)()),
+            () => Effect.defer((_) => transform(value)()),
             _mailbox.offer,
             _PumpKind.inner,
           );
-        }).mapError<E>(_widenNever);
+        }).mapError<E>((value, _) => _widenNever(value! as Never));
       }),
       _PumpKind.outer,
     );
@@ -293,7 +293,9 @@ final class _SwitchCoordinator<Outer, A, E> {
       _execution.scope,
       pumpFlow(
         _upstream,
-        (value) => Effect.sync(() => _slot.put(value)).mapError<E>(_widenNever),
+        (value) =>
+            Effect.sync((_) => _slot.put(value))
+                .mapError<E>((value, _) => _widenNever(value! as Never)),
       ),
       _execution,
     );
@@ -341,7 +343,7 @@ final class _SwitchCoordinator<Outer, A, E> {
     final inner = ScopeAccess.fork(
       _execution.scope,
       pumpFlow(
-        () => Effect.defer(() => _transform(value)()),
+        () => Effect.defer((_) => _transform(value)()),
         (value) => _mailbox.offer(_GenerationValue(value, generation)),
       ),
       _execution,
@@ -466,19 +468,19 @@ final class _ExhaustCoordinator<Outer, A, E> {
     unawaited(outer.exit.then((exit) => _outerFinished(outer, exit)));
   }
 
-  Effect<void, E> _accept(Outer value) => Effect.sync(() {
+  Effect<void, E> _accept(Outer value) => Effect.sync((_) {
     if (_inner != null || _terminalizing || _closed) return;
     final inner = ScopeAccess.fork(
       _execution.scope,
       pumpFlow(
-        () => Effect.defer(() => _transform(value)()),
+        () => Effect.defer((_) => _transform(value)()),
         _mailbox.offer,
       ),
       _execution,
     );
     _inner = inner;
     unawaited(inner.exit.then((exit) => _innerFinished(inner, exit)));
-  }).mapError<E>(_widenNever);
+  }).mapError<E>((value, _) => _widenNever(value! as Never));
 
   Future<void> _outerFinished(Fiber<void, E> outer, Exit<void, E> exit) async {
     if (identical(_outer, outer)) _outer = null;
@@ -546,7 +548,7 @@ final class _LatestSlot<A> {
     return pending;
   }
 
-  Effect<void, Never> wait() => Effect.defer(() {
+  Effect<void, Never> wait() => Effect.defer((_) {
     final waiter = CoordinationWaiter<void>();
     return waiter.awaitValue(
       onStart: () {
@@ -614,7 +616,7 @@ final class _ConcurrencyGate {
   var _active = 0;
   var _closed = false;
 
-  Effect<void, Never> acquire() => Effect.defer(() {
+  Effect<void, Never> acquire() => Effect.defer((_) {
     final waiter = CoordinationWaiter<void>();
     return waiter.awaitValue(
       onStart: () {

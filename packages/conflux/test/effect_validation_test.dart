@@ -6,7 +6,7 @@ void main() {
     test('should return immutable successful values in input order', () async {
       final effect = Effect.validate<int, int, String>(
         [1, 2, 3],
-        (value) => Effect.succeed(value * 2),
+        (value, _) => Effect.succeed(value * 2),
       );
 
       final exit = await Runtime().run(effect);
@@ -18,7 +18,7 @@ void main() {
 
     test('should accumulate every expected leaf in input order', () async {
       final visited = <int>[];
-      final effect = Effect.validate<int, int, String>([1, 2, 3], (value) {
+      final effect = Effect.validate<int, int, String>([1, 2, 3], (value, _) {
         visited.add(value);
         if (value == 1) {
           return Effect.failCause(
@@ -40,7 +40,7 @@ void main() {
       final defect = Defect<String>(StateError('bad'), StackTrace.current);
       final mixed = Sequential<String>([const Expected('expected'), defect]);
       var visitedSecond = false;
-      final effect = Effect.validate<int, int, String>([1, 2], (value) {
+      final effect = Effect.validate<int, int, String>([1, 2], (value, _) {
         if (value == 1) return Effect.failCause(mixed);
         visitedSecond = true;
         return Effect.succeed(value);
@@ -61,7 +61,7 @@ void main() {
 
     test('should abort without visiting later inputs after interruption', () async {
       var visitedSecond = false;
-      final effect = Effect.validate<int, int, String>([1, 2], (value) {
+      final effect = Effect.validate<int, int, String>([1, 2], (value, _) {
         if (value == 1) {
           return Effect.failCause(const Interrupted<String>('stopped'));
         }
@@ -80,7 +80,7 @@ void main() {
 
     test('should support empty input', () async {
       final exit = await Runtime().run(
-        Effect.validate<int, int, String>(const [], Effect.succeed),
+        Effect.validate<int, int, String>(const [], (value, _) => Effect.succeed(value)),
       );
 
       expect(

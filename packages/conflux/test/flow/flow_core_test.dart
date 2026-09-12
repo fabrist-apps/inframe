@@ -83,8 +83,8 @@ void main() {
       final events = <String>[];
       final source = Effect.build<int, Never>(($) async {
         await $.acquireRelease(
-          Effect.sync(() => events.add('acquire')),
-          release: (_) => Effect.sync(() => events.add('release')),
+          Effect.sync((_) => events.add('acquire')),
+          release: (_) => Effect.sync((_) => events.add('release')),
         );
         return 1;
       }).asFlow();
@@ -99,7 +99,7 @@ void main() {
 
     test('should preserve typed Effect failures and cleanup defects', () async {
       final flow = Effect.fail<int, String>('source')
-          .ensuring(Effect.sync(() => throw StateError('cleanup')))
+          .ensuring(Effect.sync((_) => throw StateError('cleanup')))
           .asFlow();
 
       final exit = await flow.runCollect().runFutureExit();

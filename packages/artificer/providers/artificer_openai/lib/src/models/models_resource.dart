@@ -21,7 +21,7 @@ final class OpenAIModelsResource {
         api: _api,
         modelId: 'models',
       )
-      .flatMap((response) => _decode(response, OpenAIModelPage.fromJson));
+      .flatMap((response, _) => _decode(response, OpenAIModelPage.fromJson));
 
   /// Retrieves one model by its exact provider-local ID.
   Effect<NativeResponse<OpenAIModel>, AiError> retrieve(String modelId) {
@@ -33,7 +33,7 @@ final class OpenAIModelsResource {
           api: _api,
           modelId: id,
         )
-        .flatMap((response) => _decode(response, OpenAIModel.fromJson));
+        .flatMap((response, _) => _decode(response, OpenAIModel.fromJson));
   }
 }
 

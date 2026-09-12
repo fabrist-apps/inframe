@@ -36,7 +36,7 @@ final class AnthropicMessagesResource {
         modelId: request.model,
       )
       .flatMap(
-        (response) => decodeNativeResponse(response, AnthropicMessageTokensCount.fromJson),
+        (response, _) => decodeNativeResponse(response, AnthropicMessageTokensCount.fromJson),
       );
 
   /// Creates one native Message.
@@ -53,7 +53,7 @@ final class AnthropicMessagesResource {
             api: _api,
             modelId: request.model,
           )
-          .flatMap((response) => decodeNativeResponse(response, AnthropicMessage.fromJson));
+          .flatMap((response, _) => decodeNativeResponse(response, AnthropicMessage.fromJson));
 
   /// Streams typed native Messages events.
   Flow<AnthropicMessageEvent, AiError> stream(

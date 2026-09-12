@@ -20,7 +20,7 @@ Future<void> main() async {
   );
   final Effect<Result<int, _BaseError>, _BaseError> captured = widened.result();
   final recovered = widened.catchError(
-    (_) => Effect.succeed<int, _BaseError>(1),
+    (_, _) => Effect.succeed<int, _BaseError>(1),
   );
   final capturedExit = await Runtime().run(captured);
   final widenedExit = await Runtime().run(recovered);

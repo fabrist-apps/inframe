@@ -109,7 +109,8 @@ final class XaiLanguageModel implements LanguageModel {
     final native = _encodeCommon(request, options, stream: false);
     return switch (native) {
       AiError() => Effect.fail(native),
-      XaiResponseRequest() => _responses.create(native).map(_responses.normalize),
+      XaiResponseRequest() =>
+        _responses.create(native).map((value, _) => _responses.normalize(value)),
       _ => throw StateError('Unexpected common request encoding result.'),
     };
   }

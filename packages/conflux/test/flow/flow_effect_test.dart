@@ -56,8 +56,9 @@ void main() {
       final flow = Flow.fromIterable([1, 2]).widenError<String>().concatMap(
         (value) => Effect.build<int, String>(($) async {
           await $.acquireRelease(
-            Effect.sync(() => events.add('acquire $value')).mapError(_widenNever),
-            release: (_) => Effect.sync(() => events.add('release $value')),
+            Effect.sync((_) => events.add('acquire $value'))
+                .mapError((value, _) => _widenNever(value! as Never)),
+            release: (_) => Effect.sync((_) => events.add('release $value')),
           );
           return value;
         }).asFlow(),

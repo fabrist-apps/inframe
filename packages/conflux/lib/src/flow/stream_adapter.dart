@@ -19,13 +19,13 @@ abstract final class StreamFlowSource {
   }) => Effect.build<FlowSourceCursor<A, E>, E>(($) async {
     return $.acquireRelease<_StreamCursor<A, E>>(
       Effect.sync<_StreamCursor<A, E>>(
-        () => _StreamCursor<A, E>(
+        (_) => _StreamCursor<A, E>(
           capacity,
           overflow,
           onError,
           onOverflow,
         )..start(source),
-      ).mapError<E>(_widenNever),
+      ).mapError<E>((value, _) => _widenNever(value! as Never)),
       release: (cursor) => cursor.close(),
     );
   });

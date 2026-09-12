@@ -41,7 +41,11 @@ void main() {
               const Duration(seconds: 5),
               maxSize: 2,
             )
-            .runForEach((batch) => Effect.sync(() => batches.add(batch)).mapError(_widenNever)),
+            .runForEach(
+              (batch) =>
+                  Effect.sync((_) => batches.add(batch))
+                      .mapError((value, _) => _widenNever(value! as Never)),
+            ),
       );
 
       await listening.future;
@@ -73,7 +77,9 @@ void main() {
           .concat(Flow.fail('count failed'))
           .bufferCount(2)
           .runForEach(
-            (batch) => Effect.sync(() => countBatches.add(batch)).mapError(_widenNever),
+            (batch) =>
+                Effect.sync((_) => countBatches.add(batch))
+                    .mapError((value, _) => _widenNever(value! as Never)),
           )
           .runFutureExit();
 
@@ -82,7 +88,9 @@ void main() {
           .concat(Flow.fail('time failed'))
           .bufferTime(const Duration(days: 1), maxSize: 2)
           .runForEach(
-            (batch) => Effect.sync(() => timedBatches.add(batch)).mapError(_widenNever),
+            (batch) =>
+                Effect.sync((_) => timedBatches.add(batch))
+                    .mapError((value, _) => _widenNever(value! as Never)),
           )
           .runFutureExit();
 
@@ -156,7 +164,11 @@ void main() {
       final batches = <List<int>>[];
       final flow = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
-          .tap((_) => Effect.sync(() => pulled += 1).mapError(_widenNever))
+          .tap(
+            (_) =>
+                Effect.sync((_) => pulled += 1)
+                    .mapError((value, _) => _widenNever(value! as Never)),
+          )
           .bufferTime(
             const Duration(days: 1),
             maxSize: 2,

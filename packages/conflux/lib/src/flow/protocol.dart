@@ -19,11 +19,11 @@ Effect<void, E> pumpFlow<A, E>(
   OpenFlowCursor<A, E> open,
   Effect<void, E> Function(A value) emit,
 ) => Effect.build((resolve) async {
-  final cursor = await resolve(Effect.defer(open));
+  final cursor = await resolve(Effect.defer((_) => open()));
   while (true) {
     switch (await resolve(cursor.next())) {
       case Some<A>(:final value):
-        await resolve(Effect.defer(() => emit(value)));
+        await resolve(Effect.defer((_) => emit(value)));
       case None():
         return;
     }

@@ -311,7 +311,7 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   /// Registers [close] in [execution]'s scope.
   bool registerClose(EffectExecution execution) => ScopeAccess.addFinalizer(
     execution.scope,
-    Effect.sync(close),
+    Effect.sync((_) => close()),
     execution.context,
     execution.clock,
   );

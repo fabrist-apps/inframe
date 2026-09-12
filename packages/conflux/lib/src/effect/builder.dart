@@ -75,7 +75,7 @@ final class EffectBuilder<E> {
     A resource,
     Effect<void, Never> Function(A resource) release,
   ) async {
-    final finalizer = Effect.defer<void, Never>(() => release(resource));
+    final finalizer = Effect.defer<void, Never>((_) => release(resource));
     if (ScopeAccess.addFinalizer(
       _execution.scope,
       finalizer,

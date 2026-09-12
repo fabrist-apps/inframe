@@ -24,7 +24,11 @@ void main() {
             .debounce(
               const Duration(seconds: 5),
             )
-            .runForEach((value) => Effect.sync(() => values.add(value)).mapError(_widenNever)),
+            .runForEach(
+              (value) =>
+                  Effect.sync((_) => values.add(value))
+                      .mapError((value, _) => _widenNever(value! as Never)),
+            ),
       );
 
       await listening.future;
@@ -60,7 +64,9 @@ void main() {
           .concat(Flow.fail('failed'))
           .debounce(const Duration(days: 1))
           .runForEach(
-            (value) => Effect.sync(() => failedValues.add(value)).mapError(_widenNever),
+            (value) =>
+                Effect.sync((_) => failedValues.add(value))
+                    .mapError((value, _) => _widenNever(value! as Never)),
           )
           .runFutureExit();
 
@@ -85,7 +91,7 @@ void main() {
             .throttle(
               const Duration(seconds: 5),
             )
-            .runForEach((value) => Effect.sync(() => values.add(value))),
+            .runForEach((value) => Effect.sync((_) => values.add(value))),
       );
 
       await listening.future;
@@ -142,7 +148,11 @@ void main() {
       final values = <int>[];
       final flow = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
-          .tap((_) => Effect.sync(() => pulled += 1).mapError(_widenNever))
+          .tap(
+            (_) =>
+                Effect.sync((_) => pulled += 1)
+                    .mapError((value, _) => _widenNever(value! as Never)),
+          )
           .debounce(Duration.zero, capacity: 1);
       final subscription = flow.subscribe((value) {
         values.add(value);

@@ -24,7 +24,7 @@ final class GoogleCachedContentsResource {
         api: _api,
         modelId: 'cachedContents',
       )
-      .flatMap((response) => _decode(response, GoogleCachedContent.fromJson));
+      .flatMap((response, _) => _decode(response, GoogleCachedContent.fromJson));
 
   /// Lists exactly one requested page without following its page token.
   Effect<NativeResponse<GoogleCachedContentPage>, AiError> list({
@@ -49,7 +49,7 @@ final class GoogleCachedContentsResource {
           api: _api,
           modelId: 'cachedContents',
         )
-        .flatMap((response) => _decode(response, GoogleCachedContentPage.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleCachedContentPage.fromJson));
   }
 
   /// Retrieves one cache metadata record without polling or refreshing it.
@@ -65,7 +65,7 @@ final class GoogleCachedContentsResource {
           api: _api,
           modelId: 'cachedContents',
         )
-        .flatMap((response) => _decode(response, GoogleCachedContent.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleCachedContent.fromJson));
   }
 
   /// Changes only one expiration field using a matching update mask.
@@ -85,7 +85,7 @@ final class GoogleCachedContentsResource {
           api: _api,
           modelId: 'cachedContents',
         )
-        .flatMap((response) => _decode(response, GoogleCachedContent.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleCachedContent.fromJson));
   }
 
   /// Explicitly deletes one cache and accepts Google's empty success body.

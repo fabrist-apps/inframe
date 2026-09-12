@@ -10,7 +10,7 @@ void main() {
   group('Queue', () {
     test('should lazily acquire independent bounded queues', () async {
       var acquisitions = 0;
-      final acquisition = Queue.bounded<int>(2).tap((_) {
+      final acquisition = Queue.bounded<int>(2).tap((_, _) {
         acquisitions += 1;
         return Effect.succeed(null);
       });
@@ -357,7 +357,7 @@ Effect<A, E> _afterEvaluationSteps<A, E>(Effect<A, E> effect, int count) {
   var wrapped = effect;
   for (var index = 0; index < count; index += 1) {
     final inner = wrapped;
-    wrapped = Effect.defer(() => inner);
+    wrapped = Effect.defer((_) => inner);
   }
   return wrapped;
 }

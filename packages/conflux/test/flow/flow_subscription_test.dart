@@ -10,8 +10,8 @@ void main() {
       final values = <int>[];
       final events = <String>[];
       final subscription = Flow.fromIterable([1, 2])
-          .ensuring(Effect.sync(() => events.add('cleanup')))
-          .subscribe((value) => Effect.sync(() => values.add(value)));
+          .ensuring(Effect.sync((_) => events.add('cleanup')))
+          .subscribe((value) => Effect.sync((_) => values.add(value)));
 
       final exit = await subscription.completion;
 
@@ -33,7 +33,7 @@ void main() {
             onError: (error, stackTrace) => '$error',
           ).asFlow().ensuring(
             Effect.sleep(const Duration(milliseconds: 20)).tap(
-              (_) => Effect.sync(() => cleaned += 1),
+              (_, _) => Effect.sync((_) => cleaned += 1),
             ),
           );
       final subscription = flow.subscribe((_) => Effect.succeed(null));
@@ -72,7 +72,7 @@ void main() {
       final first = Completer<void>();
       final done = Completer<void>();
       final stream = Flow.fromIterable([1, 2, 3])
-          .tap((_) => Effect.sync(() => pulled += 1))
+          .tap((_) => Effect.sync((_) => pulled += 1))
           .toStream();
 
       subscription = stream.listen(
@@ -166,7 +166,7 @@ void main() {
               .asFlow()
               .ensuring(
                 Effect.sleep(const Duration(milliseconds: 20)).tap(
-                  (_) => Effect.sync(() => cleaned = true),
+                  (_, _) => Effect.sync((_) => cleaned = true),
                 ),
               )
               .toStream();

@@ -81,7 +81,7 @@ final class XaiFilesResource {
           providerId: _providerId,
           api: _api,
         )
-        .flatMap((response) => _decode(response, XaiFile.fromJson));
+        .flatMap((response, _) => _decode(response, XaiFile.fromJson));
   }
 
   /// Lists one page without automatic pagination.
@@ -113,7 +113,7 @@ final class XaiFilesResource {
           api: _api,
           modelId: 'files',
         )
-        .flatMap((response) => _decode(response, XaiFilePage.fromJson));
+        .flatMap((response, _) => _decode(response, XaiFilePage.fromJson));
   }
 
   /// Retrieves native file metadata.
@@ -124,7 +124,7 @@ final class XaiFilesResource {
         api: _api,
         modelId: 'files',
       )
-      .flatMap((response) => _decode(response, XaiFile.fromJson));
+      .flatMap((response, _) => _decode(response, XaiFile.fromJson));
 
   /// Streams immutable raw file byte chunks without buffering the response.
   Flow<Uint8List, AiError> content(
@@ -158,7 +158,7 @@ final class XaiFilesResource {
         api: _api,
         modelId: 'files',
       )
-      .flatMap((response) => _decode(response, XaiDeletedFile.fromJson));
+      .flatMap((response, _) => _decode(response, XaiDeletedFile.fromJson));
 }
 
 Effect<NativeResponse<T>, AiError> _decode<T>(

@@ -35,7 +35,7 @@ final class GoogleGenerateContentResource {
           modelId: modelId,
         )
         .flatMap(
-          (response) => _decodeTyped(
+          (response, _) => _decodeTyped(
             response,
             GoogleGenerateContentResponse.fromJson,
           ),
@@ -58,7 +58,7 @@ final class GoogleGenerateContentResource {
           api: _api,
           modelId: modelId,
         )
-        .flatMap((response) => _decodeTyped(response, GoogleCountTokensResponse.fromJson));
+        .flatMap((response, _) => _decodeTyped(response, GoogleCountTokensResponse.fromJson));
   }
 
   /// Streams native GenerateContent response fragments until normal EOF.

@@ -428,7 +428,7 @@ final class ProviderHttpClient {
   Effect<A, AiError> _execute<A>(
     Effect<A, AiError> Function(_RequestLifetime lifetime) operation,
   ) {
-    return Effect.defer(() {
+    return Effect.defer((_) {
       if (_state != _ClientState.open) return Effect.fail(const ClientClosedError());
       final lifetime = _RequestLifetime();
       _active.add(lifetime);

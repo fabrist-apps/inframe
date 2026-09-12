@@ -51,7 +51,7 @@ final class GoogleFilesResource {
           providerId: _providerId,
           api: _api,
         )
-        .flatMap(_decodeUploadedFile);
+        .flatMap((value, _) => _decodeUploadedFile(value));
   }
 
   /// Lists exactly one requested page without following its page token.
@@ -74,7 +74,7 @@ final class GoogleFilesResource {
           api: _api,
           modelId: 'files',
         )
-        .flatMap((response) => _decode(response, GoogleFilePage.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleFilePage.fromJson));
   }
 
   /// Retrieves one authoritative `files/{id}` resource without polling.
@@ -90,7 +90,7 @@ final class GoogleFilesResource {
           api: _api,
           modelId: 'files',
         )
-        .flatMap((response) => _decode(response, GoogleFile.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleFile.fromJson));
   }
 
   /// Deletes one authoritative `files/{id}` resource.

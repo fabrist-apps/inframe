@@ -55,7 +55,7 @@ abstract final class FlowSchedulingSource {
     final output = FlowMailbox<A, E>(capacity, overflow, onOverflow);
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync(() {
+      Effect.sync((_) {
         input.close();
         output.close();
       }),

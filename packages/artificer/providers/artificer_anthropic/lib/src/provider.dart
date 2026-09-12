@@ -106,7 +106,9 @@ final class AnthropicLanguageModel implements LanguageModel {
     return switch (native) {
       AiError() => Effect.fail(native),
       AnthropicMessageRequest() =>
-        _messages.create(native).map((response) => _messages.normalize(response, request: native)),
+        _messages
+            .create(native)
+            .map((response, _) => _messages.normalize(response, request: native)),
       _ => throw StateError('Unexpected common request encoding result.'),
     };
   }

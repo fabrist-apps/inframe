@@ -71,7 +71,7 @@ final class GoogleModelsResource {
           api: _api,
           modelId: 'models',
         )
-        .flatMap((response) => _decode(response, GoogleModelPage.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleModelPage.fromJson));
   }
 
   /// Retrieves one authoritative `models/{id}` resource without discovery.
@@ -87,7 +87,7 @@ final class GoogleModelsResource {
           api: _api,
           modelId: modelId,
         )
-        .flatMap((response) => _decode(response, GoogleModel.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleModel.fromJson));
   }
 }
 

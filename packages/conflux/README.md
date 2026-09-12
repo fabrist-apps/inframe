@@ -139,7 +139,7 @@ to its driver, `repeat` runs immediately and feeds successful values, and
 
 ```dart
 var attempts = 0;
-final loaded = Effect.defer<int, String>(() {
+final loaded = Effect.defer<int, String>((_) {
   attempts += 1;
   return attempts < 3 ? Effect.fail('try again') : Effect.succeed(42);
 }).retry(Schedule.recurs(3));
@@ -232,7 +232,7 @@ final cron = switch (Cron.parse('0 9 * * mon-fri', location)) {
   Failure(error: final error) => throw FormatException('$error'),
 };
 final policy = Schedule.cron<void>(cron).mapError<JobError>(InvalidCalendar.new);
-final Effect<void, JobError> job = Effect.sync(() => print('run job'));
+final Effect<void, JobError> job = Effect.sync((_) => print('run job'));
 final scheduled = job.repeat(policy);
 ```
 

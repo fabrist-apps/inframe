@@ -233,7 +233,11 @@ void main() {
       final releaseConsumer = Completer<void>();
       final source = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
-          .tap((_) => Effect.sync(() => pulled += 1).mapError(_widenNever))
+          .tap(
+            (_) =>
+                Effect.sync((_) => pulled += 1)
+                    .mapError((value, _) => _widenNever(value! as Never)),
+          )
           .share(capacity: 1, replay: 2);
       final subscription = source.subscribe((_) {
         return Effect.tryFuture<void, String>(

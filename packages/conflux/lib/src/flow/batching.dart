@@ -13,7 +13,7 @@ abstract final class BatchingFlowSource {
   static Effect<FlowSourceCursor<List<A>, E>, E> openCount<A, E>(
     OpenFlowCursor<A, E> upstream,
     int count,
-  ) => upstream().map((cursor) => _CountBatchCursor(cursor, count));
+  ) => upstream().map((cursor, _) => _CountBatchCursor(cursor, count));
 
   /// Opens a timed cursor backed by a bounded source read-ahead mailbox.
   static Effect<FlowSourceCursor<List<A>, E>, E> openTime<A, E>(

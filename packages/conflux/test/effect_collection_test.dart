@@ -11,7 +11,7 @@ void main() {
       final fiber = runtime.fork(
         Effect.forEach<int, int, Never>(
           List.generate(10000, (index) => index),
-          (index) => Effect.sync(() {
+          (index, _) => Effect.sync((_) {
             started += 1;
             return index;
           }),
@@ -28,8 +28,8 @@ void main() {
 
     test('should run sequentially by default and preserve input order', () async {
       final events = <String>[];
-      final effect = Effect.forEach<int, int, Never>([1, 2, 3], (value) {
-        return Effect.sync(() {
+      final effect = Effect.forEach<int, int, Never>([1, 2, 3], (value, _) {
+        return Effect.sync((_) {
           events.add('start$value');
           return value;
         });
@@ -50,7 +50,7 @@ void main() {
       final started = List.generate(4, (_) => Completer<void>());
       final effect = Effect.forEach<int, int?, String>(
         [0, 1, 2, 3],
-        (index) => Effect.tryFuture<int?, String>(
+        (index, _) => Effect.tryFuture<int?, String>(
           () async {
             active += 1;
             maximumActive = active > maximumActive ? active : maximumActive;

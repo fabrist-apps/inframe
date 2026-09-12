@@ -40,7 +40,7 @@ void main() {
     test('should retry a failed lookup without caching its error', () async {
       var lookups = 0;
       final fixture = await _CacheFixture.start(
-        lookup: (_) => Effect.defer(() {
+        lookup: (_) => Effect.defer((_) {
           lookups += 1;
           return lookups == 1
               ? Effect.fail<int, String>('unavailable')
@@ -142,7 +142,7 @@ void main() {
       final lookups = <String, int>{};
       final fixture = await _CacheFixture.start(
         capacity: 2,
-        lookup: (key) => Effect.sync(() {
+        lookup: (key) => Effect.sync((_) {
           lookups.update(key, (count) => count + 1, ifAbsent: () => 1);
           return key.codeUnitAt(0);
         }),
@@ -225,7 +225,7 @@ void main() {
       final started = <String>[];
       final fixture = await _CacheFixture.start(
         concurrency: 1,
-        lookup: (key) => Effect.defer(() {
+        lookup: (key) => Effect.defer((_) {
           started.add(key);
           return key == 'a' ? Effect.fail<int, String>('failed') : Effect.succeed<int, String>(2);
         }),
@@ -294,7 +294,7 @@ void main() {
       final values = <String, _BorrowedValue>{};
       final fixture = await _CacheFixture.start(
         capacity: 1,
-        lookup: (key) => Effect.sync(() {
+        lookup: (key) => Effect.sync((_) {
           return values.putIfAbsent(key, _BorrowedValue.new);
         }),
       );
@@ -420,7 +420,7 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 1)),
-        lookup: (_) => Effect.sync(() => ++lookups),
+        lookup: (_) => Effect.sync((_) => ++lookups),
       );
       addTearDown(fixture.close);
 
@@ -436,7 +436,7 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (key) => Effect.defer(() {
+        lookup: (key) => Effect.defer((_) {
           lookups += 1;
           return key == 'pending'
               ? Effect.tryFuture<int, String>(
@@ -581,7 +581,7 @@ void main() {
       final pending = Completer<int>();
       final lookups = <String, int>{};
       final fixture = await _CacheFixture.start<int>(
-        lookup: (key) => Effect.defer(() {
+        lookup: (key) => Effect.defer((_) {
           lookups.update(key, (count) => count + 1, ifAbsent: () => 1);
           return key == 'pending'
               ? Effect.tryFuture<int, String>(
@@ -728,7 +728,7 @@ void main() {
       final refreshGate = Completer<int>();
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.defer(() {
+        lookup: (_) => Effect.defer((_) {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
@@ -773,7 +773,7 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (_) => Effect.defer(() {
+        lookup: (_) => Effect.defer((_) {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
@@ -808,7 +808,7 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (_) => Effect.sync(() => ++lookups),
+        lookup: (_) => Effect.sync((_) => ++lookups),
       );
       addTearDown(fixture.close);
       await fixture.cache.get('key').runFuture();
@@ -827,7 +827,7 @@ void main() {
       final refreshGate = Completer<int>();
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.defer(() {
+        lookup: (_) => Effect.defer((_) {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
@@ -886,7 +886,7 @@ void main() {
       var lookups = 0;
       var cancelled = false;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.defer(() {
+        lookup: (_) => Effect.defer((_) {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
@@ -919,7 +919,7 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         capacity: 2,
         concurrency: 1,
-        lookup: (key) => Effect.defer(() {
+        lookup: (key) => Effect.defer((_) {
           final count = lookups.update(key, (value) => value + 1, ifAbsent: () => 1);
           if (count == 1) return Effect.succeed(key.codeUnitAt(0));
           startedRefreshes.add(key);
