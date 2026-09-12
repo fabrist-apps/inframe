@@ -64,3 +64,8 @@ and in-progress states for the caller to inspect and advance explicitly.
 shape without changing the common language model's Responses backend. Normalizing a completion
 with multiple choices requires an explicit `choiceIndex`. Legacy text Completions and stored Chat
 Completions administration are intentionally outside this package's endpoint snapshot.
+
+`embeddingModel` sends one synchronous text batch and restores vectors by native index. Every
+common input must contain exactly one text part; media and multipart inputs fail before I/O. Native
+`embeddings.create` additionally accepts explicit token-ID inputs and base64 output, without local
+tokenization, vector normalization, retries, or asynchronous batch jobs.

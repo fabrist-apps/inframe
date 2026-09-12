@@ -4,6 +4,8 @@ import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:artificer_openai/src/chat/chat_completions_resource.dart';
+import 'package:artificer_openai/src/embeddings/embedding_models.dart';
+import 'package:artificer_openai/src/embeddings/embeddings_resource.dart';
 import 'package:artificer_openai/src/models/models_resource.dart';
 import 'package:artificer_openai/src/options.dart';
 import 'package:artificer_openai/src/responses/response_models.dart';
@@ -33,6 +35,7 @@ final class OpenAIProvider {
          },
        ) {
     chatCompletions = OpenAIChatCompletionsResource(_client);
+    embeddings = OpenAIEmbeddingsResource(_client);
     responses = OpenAIResponsesResource(_client);
     models = OpenAIModelsResource(_client);
   }
@@ -41,6 +44,9 @@ final class OpenAIProvider {
 
   /// Typed native Chat Completions operations.
   late final OpenAIChatCompletionsResource chatCompletions;
+
+  /// Typed native embedding operations.
+  late final OpenAIEmbeddingsResource embeddings;
 
   /// Typed native Responses operations.
   late final OpenAIResponsesResource responses;
@@ -54,6 +60,14 @@ final class OpenAIProvider {
         responses,
         _nonEmpty(modelId, 'modelId'),
         options ?? OpenAIModelOptions(),
+      );
+
+  /// Creates a common synchronous embedding model.
+  OpenAIEmbeddingModel embeddingModel(String modelId, {OpenAIEmbeddingOptions? options}) =>
+      OpenAIEmbeddingModel(
+        embeddings,
+        _nonEmpty(modelId, 'modelId'),
+        options ?? OpenAIEmbeddingOptions(),
       );
 
   /// Interrupts this provider's work and releases its owned HTTP client.

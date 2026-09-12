@@ -16,7 +16,11 @@ Future<void> main() async {
         .stream(GenerationRequest(messages: [UserMessage.text('Explain this change.')]))
         .runCollect();
     if (const bool.fromEnvironment('RUN_OPENAI_EXAMPLE')) {
-      await operation.runFuture();
+      final result = await operation.runFuture();
+      await provider
+          .embeddingModel('caller-supplied-embedding-model')
+          .embed(EmbeddingRequest(items: [EmbeddingInput.text(result.text)]))
+          .runFuture();
       await stream.runFuture();
     }
   } finally {
