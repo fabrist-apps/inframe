@@ -22,3 +22,9 @@ a new message and retains replay only when the caller passes it explicitly.
 provider options. Provider adapters must reject known unsupported features and conflicting native
 fields before I/O; they must not silently drop options or validate generated JSON against application
 schemas.
+
+`ProviderHttpClient.close()` rejects new work, interrupts and awaits the operations registered by
+that provider, then closes only its owned client. Caller cancellation aborts acquisition and cancels
+an acquired response body. A borrowed client must honor abortable requests and response-subscription
+cancellation; arbitrary borrowed clients can make cleanup unbounded. Cancellation does not prove that
+remote inference stopped. Callers compose inference and read-idle timeouts through Conflux.
