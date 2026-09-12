@@ -31,23 +31,40 @@ void main() {
 
     test('should restart the full interval after a partial flush', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final chronicler = _chronicler(
-        exporter,
-        metricInterval: const Duration(milliseconds: 100),
+      final timers = <_ManualTimer>[];
+      await runZoned(
+        () async {
+          final chronicler = _chronicler(
+            exporter,
+            metricInterval: const Duration(milliseconds: 100),
+          );
+          final counter = chronicler.recorder.metrics.counter('requests')..add(1);
+
+          await chronicler.flush();
+          counter.add(2);
+          final staleTimer = timers.first;
+          final currentTimer = timers.last;
+
+          staleTimer.fire();
+          await Future<void>.delayed(Duration.zero);
+          expect(_sums(exporter), [1]);
+
+          currentTimer.fire();
+          await _waitFor(() => _sums(exporter).length == 2);
+          expect(_sums(exporter), [1, 2]);
+          await chronicler.close();
+        },
+        zoneSpecification: ZoneSpecification(
+          createTimer: (self, parent, zone, duration, callback) {
+            if (duration == const Duration(milliseconds: 100)) {
+              final timer = _ManualTimer(callback);
+              timers.add(timer);
+              return timer;
+            }
+            return parent.createTimer(zone, duration, callback);
+          },
+        ),
       );
-      final counter = Context().withChronicler(chronicler.recorder).metrics.counter('requests');
-
-      await Future<void>.delayed(const Duration(milliseconds: 40));
-      counter.add(1);
-      await chronicler.flush();
-      counter.add(2);
-      await Future<void>.delayed(const Duration(milliseconds: 70));
-
-      expect(_sums(exporter), [1]);
-      await _waitFor(() => _sums(exporter).length == 2);
-      expect(_sums(exporter), [1, 2]);
-
-      await chronicler.close();
     });
 
     test('should discard unfinished and queued metrics while retaining handles', () async {
@@ -280,6 +297,42 @@ void main() {
 
       expect(metricTimers, 0);
     });
+
+    test('should retain only one active timer when first enabled', () async {
+      final timers = <_ManualTimer>[];
+      await runZoned(
+        () async {
+          final chronicler = Chronicler(
+            appId: 'app',
+            release: 'release',
+            source: ChroniclerSource.server,
+            exporter: TestExporter(acceptImmediately: true),
+            options: const ChroniclerOptions(
+              enabledSignals: {
+                ChroniclerSignal.logs,
+                ChroniclerSignal.events,
+                ChroniclerSignal.traces,
+                ChroniclerSignal.errors,
+              },
+              metrics: MetricOptions(interval: Duration(milliseconds: 10)),
+            ),
+          )..setCollectionEnabled(ChroniclerSignal.metrics, true);
+
+          expect(timers.where((timer) => timer.isActive), hasLength(1));
+          await chronicler.close();
+        },
+        zoneSpecification: ZoneSpecification(
+          createTimer: (self, parent, zone, duration, callback) {
+            if (duration == const Duration(milliseconds: 10)) {
+              final timer = _ManualTimer(callback);
+              timers.add(timer);
+              return timer;
+            }
+            return parent.createTimer(zone, duration, callback);
+          },
+        ),
+      );
+    });
   });
 }
 
@@ -322,4 +375,26 @@ Future<void> _waitFor(bool Function() condition) async {
     await Future<void>.delayed(const Duration(milliseconds: 2));
   }
   expect(condition(), isTrue);
+}
+
+final class _ManualTimer implements Timer {
+  _ManualTimer(this._callback);
+
+  final void Function() _callback;
+
+  @override
+  int tick = 0;
+
+  @override
+  bool isActive = true;
+
+  @override
+  void cancel() => isActive = false;
+
+  void fire() {
+    if (!isActive) return;
+    isActive = false;
+    tick = 1;
+    _callback();
+  }
 }

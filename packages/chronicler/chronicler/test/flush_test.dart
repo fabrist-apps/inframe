@@ -151,6 +151,29 @@ void main() {
       _expectCompleteAccounting(report, 2);
     });
 
+    test('includes every internal finalization batch queued for that call', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter, maxBatchRecords: 2);
+      ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
+        _logRecord('first'),
+      ]);
+      ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
+        _logRecord('second'),
+      ]);
+
+      final reportFuture = chronicler.flush();
+      await _waitFor(() => exporter.attempts.isNotEmpty);
+      exporter.attempts.single.completer.complete(const ExportResult.accepted());
+      final report = await reportFuture;
+
+      expect(report.accepted, 2);
+      _expectCompleteAccounting(report, 2);
+      expect(
+        exporter.batches.single.records.cast<LogRecord>().map((record) => record.payload.message),
+        ['first', 'second'],
+      );
+    });
+
     test('returns an empty snapshot and rejects non-positive overrides', () async {
       final chronicler = _chronicler(TestExporter());
 

@@ -86,6 +86,25 @@ void main() {
       );
     });
 
+    test('should reject definitions outside the shared label byte limit', () async {
+      final chronicler = _chronicler(
+        TestExporter(),
+        limits: const ChroniclerLimits(maxLabelBytes: 7),
+      );
+      final metrics = chronicler.recorder.metrics;
+
+      expect(
+        () => metrics.counter('requests'),
+        throwsA(isA<ChroniclerConfigurationException>()),
+      );
+      expect(
+        () => metrics.counter('ok', unit: 'seconds2'),
+        throwsA(isA<ChroniclerConfigurationException>()),
+      );
+
+      await chronicler.close();
+    });
+
     test('should canonicalize and redact dimensions before selecting a series', () async {
       final exporter = TestExporter(acceptImmediately: true);
       final clock = _MetricClock();
@@ -256,6 +275,7 @@ void main() {
 
 Chronicler _chronicler(
   TestExporter exporter, {
+  ChroniclerLimits limits = const ChroniclerLimits(),
   MetricOptions metrics = const MetricOptions(),
 }) => Chronicler(
   appId: 'app',
@@ -264,6 +284,7 @@ Chronicler _chronicler(
   exporter: exporter,
   options: ChroniclerOptions(
     delivery: const DeliveryOptions(maxBatchRecords: 1),
+    limits: limits,
     metrics: metrics,
   ),
 );

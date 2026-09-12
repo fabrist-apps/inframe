@@ -176,19 +176,20 @@ final class MetricAggregation implements ChroniclerMetrics {
   }
 
   void _validateDefinition(String name, String unit) {
-    if (!_instrumentName.hasMatch(name)) {
+    if (!_instrumentName.hasMatch(name) || utf8.encode(name).length > _limits.maxLabelBytes) {
       throw const ChroniclerConfigurationException(
         'metric name',
-        'must match the Chronicler instrument name grammar',
+        'must match the Chronicler instrument name grammar and shared label limit',
       );
     }
     final unitBytes = utf8.encode(unit);
     if (unitBytes.isEmpty ||
         unitBytes.length > 63 ||
+        unitBytes.length > _limits.maxLabelBytes ||
         unit.codeUnits.any((unit) => unit < 0x20 || unit > 0x7e)) {
       throw const ChroniclerConfigurationException(
         'metric unit',
-        'must be 1 to 63 printable ASCII bytes',
+        'must be printable ASCII within the metric and shared label limits',
       );
     }
   }
@@ -362,6 +363,7 @@ final class MetricAggregation implements ChroniclerMetrics {
   }
 
   void _scheduleInterval() {
+    _timer?.cancel();
     final generation = _generation;
     _timer = Timer(_options.interval, () => _onInterval(generation));
   }

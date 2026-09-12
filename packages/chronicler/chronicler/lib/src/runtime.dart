@@ -734,7 +734,7 @@ final class ChroniclerRuntime {
       for (final record in _metrics.seal()) {
         finalizedByCall.add(_finalizeForFlush(record));
       }
-      if (_flushFinalizations.isNotEmpty) {
+      while (_flushFinalizations.isNotEmpty) {
         for (final record in _flushFinalizations.removeFirst()) {
           finalizedByCall.add(_finalizeForFlush(record));
         }
