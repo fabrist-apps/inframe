@@ -656,12 +656,13 @@ final class ChroniclerRuntime {
   }
 
   String _randomHex(int byteCount) {
-    while (true) {
+    for (var attempt = 0; attempt < 8; attempt++) {
       final bytes = List<int>.generate(byteCount, (_) => _secureRandom.nextInt(256));
       if (bytes.any((byte) => byte != 0)) {
         return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
       }
     }
+    throw StateError('Secure randomness produced only zero identifiers');
   }
 
   /// Flushes the current record snapshot within [timeout].

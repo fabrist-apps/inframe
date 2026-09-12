@@ -12,7 +12,7 @@ import 'support/exporter.dart';
 void main() {
   group('Chronicler tracing', () {
     test('should record nested callback spans and correlate logs', () async {
-      final exporter = TestExporter();
+      final exporter = TestExporter(acceptImmediately: true);
       final chronicler = _chronicler(exporter, maxBatchRecords: 3);
       final context = Context().withChronicler(chronicler.recorder);
 
@@ -28,7 +28,7 @@ void main() {
           },
         ),
       );
-      await Future<void>.delayed(Duration.zero);
+      await chronicler.flush();
 
       expect(result, 42);
       final records = exporter.batches.single.records;
@@ -345,6 +345,26 @@ void main() {
       expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
     });
 
+    test('should stop retrying an all-zero secure random source', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter);
+      ChroniclerTracingFixture.overrideSecureRandom(chronicler, _ZeroRandom());
+      var calls = 0;
+
+      final result = await chronicler.recorder.span(
+        'zero IDs',
+        run: (_) {
+          calls++;
+          return 8;
+        },
+      );
+
+      expect(result, 8);
+      expect(calls, 1);
+      expect(exporter.batches, isEmpty);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+    });
+
     test('should update active attributes atomically and snapshot values', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter);
@@ -621,6 +641,17 @@ final class _SequenceRandom implements Random {
 
   @override
   int nextInt(int max) => (nextDouble() * max).floor();
+}
+
+final class _ZeroRandom implements Random {
+  @override
+  bool nextBool() => false;
+
+  @override
+  double nextDouble() => 0;
+
+  @override
+  int nextInt(int max) => 0;
 }
 
 final class _UnreadableAttributes extends MapBase<String, Object?> {

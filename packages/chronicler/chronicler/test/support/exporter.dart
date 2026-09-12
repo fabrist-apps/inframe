@@ -4,6 +4,9 @@ import 'dart:collection';
 import 'package:chronicler/chronicler.dart';
 
 final class TestExporter implements ChroniclerExporter {
+  TestExporter({this.acceptImmediately = false});
+
+  final bool acceptImmediately;
   final batches = <ChroniclerBatch>[];
   final attempts = <TestExportAttempt>[];
   final _nextBatch = StreamController<ChroniclerBatch>.broadcast(sync: true);
@@ -23,6 +26,9 @@ final class TestExporter implements ChroniclerExporter {
     if (_exportFailures.isNotEmpty) throw _exportFailures.removeFirst();
     final attempt = TestExportAttempt();
     attempts.add(attempt);
+    if (acceptImmediately) {
+      attempt.completer.complete(const ExportResult.accepted());
+    }
     return attempt;
   }
 

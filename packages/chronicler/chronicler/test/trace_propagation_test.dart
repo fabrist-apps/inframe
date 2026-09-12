@@ -44,6 +44,12 @@ void main() {
       expect(parent.tracestate, isEmpty);
       expect(
         TracePropagation.extract({
+          'traceparent': '01-$traceId-$parentId-01-opaque--extension',
+        })?.traceId,
+        traceId,
+      );
+      expect(
+        TracePropagation.extract({
           'TraceParent': '00-$traceId-$parentId-01',
           'traceparent': '00-$traceId-$parentId-01',
         }),

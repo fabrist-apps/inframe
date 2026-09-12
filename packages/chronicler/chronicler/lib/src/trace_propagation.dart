@@ -42,8 +42,7 @@ abstract final class TracePropagation {
     final version = fields[0];
     if (!_byte.hasMatch(version) || version == 'ff') return null;
     if (version == '00' && (fields.length != 4 || traceparent.length != 55)) return null;
-    if (version != '00' &&
-        (traceparent.length < 55 || fields.skip(4).any((field) => field.isEmpty))) {
+    if (version != '00' && traceparent.length < 55) {
       return null;
     }
     final traceId = fields[1];
