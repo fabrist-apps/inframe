@@ -102,11 +102,9 @@ void main() {
       );
       await sourceListening.future;
 
-      final interrupted = fiber.interrupt('caller');
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final exit = await fiber.interrupt('caller').timeout(const Duration(seconds: 2));
       expect(transport.abortSeen, isTrue);
       expect(sourceCancelled, isTrue);
-      final exit = await interrupted.timeout(const Duration(seconds: 2));
 
       expect((exit as Failed<Object?, AiError>).cause.containsInterruption, isTrue);
       expect(sourceCancelled, isTrue);
@@ -174,6 +172,34 @@ void main() {
       expect(exit, _expectedError<InvalidRequestError>());
       final error = ((exit as Failed<Object?, AiError>).cause as Expected<AiError>).error;
       expect((error as InvalidRequestError).remoteResourceId, 'upload-1');
+    });
+
+    test('should cancel a stream after its first invalid byte error', () async {
+      var sourceCancelled = false;
+      final source = StreamController<List<int>>(
+        sync: true,
+        onCancel: () => sourceCancelled = true,
+      );
+      final errors = <Object>[];
+      final done = Completer<void>();
+      UploadSource.stream(
+        () => source.stream,
+        length: 2,
+        filename: 'data.bin',
+        mimeType: 'application/octet-stream',
+      ).openRead().listen(
+        (_) {},
+        onError: errors.add,
+        onDone: done.complete,
+      );
+
+      source.add([256]);
+      await done.future;
+      source.add([257]);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(errors, [isA<UploadInvalidByte>()]);
+      expect(sourceCancelled, isTrue);
     });
   });
 }

@@ -56,7 +56,7 @@ final class GenerationOptions {
       throw const FormatException('stopSequences must contain strings.');
     }
     return GenerationOptions(
-      maxOutputTokens: value['maxOutputTokens']! as int,
+      maxOutputTokens: _integer(value, 'maxOutputTokens'),
       temperature: (value['temperature'] as num?)?.toDouble(),
       topP: (value['topP'] as num?)?.toDouble(),
       stopSequences: stops.cast<String>(),
@@ -339,9 +339,9 @@ final class Usage {
   factory Usage.fromDart(Object? value) {
     final map = _object(value, 'usage');
     return Usage(
-      inputTokens: map['inputTokens'] as int?,
-      outputTokens: map['outputTokens'] as int?,
-      totalTokens: map['totalTokens'] as int?,
+      inputTokens: _optionalInteger(map, 'inputTokens'),
+      outputTokens: _optionalInteger(map, 'outputTokens'),
+      totalTokens: _optionalInteger(map, 'totalTokens'),
     );
   }
 
@@ -694,6 +694,19 @@ Map<String, Object?> _object(Object? value, String name) {
 String _string(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! String) throw FormatException('$key must be a string.');
+  return field;
+}
+
+int _integer(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field is! int) throw FormatException('$key must be an integer.');
+  return field;
+}
+
+int? _optionalInteger(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field == null) return null;
+  if (field is! int) throw FormatException('$key must be an integer or null.');
   return field;
 }
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:artificer_core/src/errors.dart';
 import 'package:artificer_core/src/json/json_value.dart';
@@ -80,15 +81,13 @@ final class _SseTerminal extends _SseSignal {
 /// A one-attempt HTTP client shared by one provider's models and endpoints.
 final class ProviderHttpClient {
   /// Creates a [ProviderHttpClient].
-  ProviderHttpClient({
-    required this.baseUrl,
+  factory ProviderHttpClient({
+    required Uri baseUrl,
     Map<String, String> headers = const {},
     http.Client? client,
     Duration connectionTimeout = const Duration(seconds: 30),
-    this.maxResponseBytes = 64 * 1024 * 1024,
-  }) : headers = Map.unmodifiable(headers),
-       _ownsClient = client == null,
-       _client = client ?? _ownedClient(connectionTimeout) {
+    int maxResponseBytes = 64 * 1024 * 1024,
+  }) {
     if (!baseUrl.isAbsolute || (baseUrl.scheme != 'http' && baseUrl.scheme != 'https')) {
       throw ArgumentError.value(baseUrl, 'baseUrl', 'must be an absolute HTTP(S) URL');
     }
@@ -98,7 +97,22 @@ final class ProviderHttpClient {
     if (maxResponseBytes <= 0) {
       throw ArgumentError.value(maxResponseBytes, 'maxResponseBytes', 'must be positive');
     }
+    return ProviderHttpClient._(
+      baseUrl: baseUrl,
+      headers: Map.unmodifiable(headers),
+      client: client ?? _ownedClient(connectionTimeout),
+      ownsClient: client == null,
+      maxResponseBytes: maxResponseBytes,
+    );
   }
+
+  ProviderHttpClient._({
+    required this.baseUrl,
+    required this.headers,
+    required this._client,
+    required this._ownsClient,
+    required this.maxResponseBytes,
+  });
 
   /// The base url.
   final Uri baseUrl;
@@ -628,11 +642,11 @@ Future<List<int>> _readBody(
   int limit,
 ) {
   final completion = Completer<List<int>>();
-  final bytes = <int>[];
+  final bytes = BytesBuilder(copy: false);
   late final StreamSubscription<List<int>> subscription;
   subscription = response.stream.listen(
     (chunk) {
-      bytes.addAll(chunk);
+      bytes.add(chunk);
       if (bytes.length > limit && !completion.isCompleted) {
         completion.completeError(_ResponseTooLarge(bytes.length), StackTrace.current);
         unawaited(subscription.cancel());
@@ -642,7 +656,7 @@ Future<List<int>> _readBody(
       if (!completion.isCompleted) completion.completeError(error, stackTrace);
     },
     onDone: () {
-      if (!completion.isCompleted) completion.complete(List.unmodifiable(bytes));
+      if (!completion.isCompleted) completion.complete(bytes.takeBytes());
     },
     cancelOnError: false,
   );

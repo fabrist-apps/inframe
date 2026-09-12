@@ -46,7 +46,7 @@ final class EmbeddingRequest {
     final value = _versioned(json);
     return EmbeddingRequest(
       items: _list(value, 'items').map(EmbeddingInput.fromDart),
-      dimensions: value['dimensions'] as int?,
+      dimensions: _optionalInt(value, 'dimensions'),
     );
   }
 
@@ -154,8 +154,9 @@ final class EmbeddingResult {
       inputCount: vectors.length,
       modelId: _string(value, 'modelId'),
       usage: switch (value['usage']) {
+        null => null,
         final Map<String, Object?> usage => Usage.fromDart(usage),
-        _ => null,
+        _ => throw const FormatException('usage must be an object or null.'),
       },
       nativePayload: NativePayload.fromJson(JsonObject.fromDart(value['nativePayload'])),
       metadata: ResponseMetadata.fromJson(JsonObject.fromDart(value['metadata'])),
@@ -274,5 +275,12 @@ List<Object?> _list(Map<String, Object?> value, String key) {
 String _string(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! String) throw FormatException('$key must be a string.');
+  return field;
+}
+
+int? _optionalInt(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field == null) return null;
+  if (field is! int) throw FormatException('$key must be an integer or null.');
   return field;
 }

@@ -50,6 +50,29 @@ void main() {
       expect(concurrent, everyElement(hasLength(2)));
     });
 
+    test('dispatches a final event terminated by a bare carriage-return line', () async {
+      final client = ProviderHttpClient(
+        baseUrl: Uri.parse('https://example.test/'),
+        client: _ResponseClient(
+          () => http.StreamedResponse(
+            Stream.value(utf8.encode('data: final\n\r')),
+            200,
+          ),
+        ),
+      );
+      addTearDown(client.close);
+
+      final events = await client
+          .sendSse<SseEvent>(
+            ProviderHttpRequest(method: 'GET', path: 'stream'),
+            createProtocol: _PassthroughProtocol.new,
+          )
+          .runCollect()
+          .runFuture();
+
+      expect(events.map((event) => event.data), ['final']);
+    });
+
     test('enforces independent exact event and response byte limits', () async {
       Future<Object> run(String body, {required int eventLimit, required int streamLimit}) async {
         final client = ProviderHttpClient(

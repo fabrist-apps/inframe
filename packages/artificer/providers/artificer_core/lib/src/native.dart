@@ -64,7 +64,7 @@ final class ResponseMetadata {
       throw const FormatException('headers must be an object.');
     }
     return ResponseMetadata(
-      statusCode: value['statusCode']! as int,
+      statusCode: _requiredInt(value, 'statusCode'),
       requestId: value['requestId'] as String?,
       headers: headers.map((key, value) {
         if (value is! String) throw const FormatException('header values must be strings.');
@@ -127,5 +127,11 @@ void _requireVersion(Map<String, Object?> value) {
 String _requiredString(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! String) throw FormatException('$key must be a string.');
+  return field;
+}
+
+int _requiredInt(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field is! int) throw FormatException('$key must be an integer.');
   return field;
 }

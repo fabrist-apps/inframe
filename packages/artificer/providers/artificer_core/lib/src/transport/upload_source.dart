@@ -46,7 +46,7 @@ final class BytesUploadSource extends UploadSource {
     required String filename,
     required String mimeType,
   }) {
-    final copy = List<int>.unmodifiable(Uint8List.fromList(bytes.toList(growable: false)));
+    final copy = Uint8List.fromList(bytes.toList(growable: false)).asUnmodifiableView();
     return BytesUploadSource._(copy, filename: filename, mimeType: mimeType);
   }
 
@@ -84,13 +84,17 @@ Stream<List<int>> _validateLength(Stream<List<int>> source, int expected) {
   return source.transform(
     StreamTransformer.fromHandlers(
       handleData: (chunk, sink) {
-        if (chunk.any((byte) => byte < 0 || byte > 255)) {
-          sink.addError(const UploadInvalidByte());
+        if (chunk is! Uint8List && chunk.any((byte) => byte < 0 || byte > 255)) {
+          sink
+            ..addError(const UploadInvalidByte())
+            ..close();
           return;
         }
         actual += chunk.length;
         if (actual > expected) {
-          sink.addError(UploadLengthMismatch(expected: expected, actual: actual));
+          sink
+            ..addError(UploadLengthMismatch(expected: expected, actual: actual))
+            ..close();
           return;
         }
         sink.add(List.unmodifiable(chunk));

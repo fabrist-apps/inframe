@@ -37,7 +37,7 @@ final class _SsePump<A> {
   void Function()? _onOutputDone;
   void Function(Object error, StackTrace stackTrace)? _onOutputFailure;
   var _outputDrainScheduled = false;
-  List<int>? _chunk;
+  Uint8List? _chunk;
   var _chunkIndex = 0;
   var _streamBytes = 0;
   var _paused = false;
@@ -154,7 +154,7 @@ final class _SsePump<A> {
       );
       return;
     }
-    _chunk = List<int>.unmodifiable(bytes);
+    _chunk = Uint8List.fromList(bytes);
     _chunkIndex = 0;
     _drainChunk();
   }
@@ -449,7 +449,7 @@ final class _SseParser {
   _SseParser(this.maxEventBytes);
 
   final int maxEventBytes;
-  final List<int> _line = [];
+  final BytesBuilder _line = BytesBuilder(copy: false);
   final List<String> _data = [];
   String? _event;
   String? _id;
@@ -467,21 +467,23 @@ final class _SseParser {
       );
     }
     if (byte != 0x0a) {
-      _line.add(byte);
+      _line.addByte(byte);
       return null;
     }
     return _finishLine();
   }
 
   SseEvent? close() {
-    if (_line.isNotEmpty) _finishLine();
+    if (_line.isNotEmpty) {
+      final event = _finishLine();
+      if (event != null) return event;
+    }
     return _dispatch();
   }
 
   SseEvent? _finishLine() {
-    if (_line.isNotEmpty && _line.last == 0x0d) _line.removeLast();
-    final line = utf8.decode(_line);
-    _line.clear();
+    var line = utf8.decode(_line.takeBytes());
+    if (line.endsWith('\r')) line = line.substring(0, line.length - 1);
     if (line.isEmpty) return _dispatch();
     if (line.startsWith(':')) return null;
     final colon = line.indexOf(':');

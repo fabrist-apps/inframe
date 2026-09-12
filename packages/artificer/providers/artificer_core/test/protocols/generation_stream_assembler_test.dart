@@ -104,18 +104,23 @@ void main() {
   });
 
   test('rejects a usage snapshot that is not cumulative', () {
-    final assembler =
-        GenerationStreamAssembler(
-            providerId: 'fixture',
-            api: 'responses',
-            modelId: 'model-1',
-          )
-          ..start(ResponseMetadata(statusCode: 200))
-          ..updateUsage(const Usage(totalTokens: 8));
+    final decreases = [
+      const Usage(inputTokens: 7, outputTokens: 8, totalTokens: 8),
+      const Usage(inputTokens: 8, outputTokens: 7, totalTokens: 8),
+      const Usage(inputTokens: 8, outputTokens: 8, totalTokens: 7),
+    ];
 
-    expect(
-      () => assembler.updateUsage(const Usage(totalTokens: 7)),
-      throwsA(isA<ProtocolError>()),
-    );
+    for (final usage in decreases) {
+      final assembler =
+          GenerationStreamAssembler(
+              providerId: 'fixture',
+              api: 'responses',
+              modelId: 'model-1',
+            )
+            ..start(ResponseMetadata(statusCode: 200))
+            ..updateUsage(const Usage(inputTokens: 8, outputTokens: 8, totalTokens: 8));
+
+      expect(() => assembler.updateUsage(usage), throwsA(isA<ProtocolError>()));
+    }
   });
 }

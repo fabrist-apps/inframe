@@ -86,5 +86,29 @@ void main() {
         throwsArgumentError,
       );
     });
+
+    test('should reject wrong-shaped serialized integer fields', () {
+      expect(
+        () => GenerationOptions.fromDart({
+          'maxOutputTokens': '12',
+          'stopSequences': <Object?>[],
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => Usage.fromDart({'inputTokens': '2'}),
+        throwsFormatException,
+      );
+      expect(
+        () => ResponseMetadata.fromJson(
+          JsonObject({
+            'schemaVersion': 1,
+            'statusCode': '200',
+            'headers': <String, Object?>{},
+          }),
+        ),
+        throwsFormatException,
+      );
+    });
   });
 }

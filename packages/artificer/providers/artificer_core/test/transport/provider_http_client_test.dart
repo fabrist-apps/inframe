@@ -8,6 +8,29 @@ import 'package:test/test.dart';
 
 void main() {
   group('ProviderHttpClient', () {
+    test('should validate configuration before creating an owned client', () {
+      expect(
+        () => ProviderHttpClient(
+          baseUrl: Uri.parse('https://example.test/'),
+          connectionTimeout: Duration.zero,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => ProviderHttpClient(
+          baseUrl: Uri.parse('relative'),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => ProviderHttpClient(
+          baseUrl: Uri.parse('https://example.test/'),
+          maxResponseBytes: 0,
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('should make one request and retain native response metadata', () async {
       var requests = 0;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -150,6 +173,7 @@ void main() {
 
     test('should map malformed responses and connection failures', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
       final port = server.port;
       server.listen((request) async {
         request.response.write('not-json');

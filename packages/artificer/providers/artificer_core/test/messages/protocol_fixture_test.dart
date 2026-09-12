@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
@@ -7,8 +8,8 @@ import 'package:test/test.dart';
 
 void main() {
   group('Incompatible protocol fixtures', () {
-    test('should preserve OpenAI-style malformed calls and unknown fields', () {
-      final native = _fixture('openai_response.json');
+    test('should preserve OpenAI-style malformed calls and unknown fields', () async {
+      final native = await _fixture('openai_response.json');
       final output = native.toDart()['output']! as List<Object?>;
       final call = output[1]! as Map<String, Object?>;
       final message = AssistantMessage(
@@ -40,8 +41,8 @@ void main() {
       expect(decoded.replay?.items.single.data.toDart()['unknown_future_field'], {'keep': true});
     });
 
-    test('should preserve Anthropic-style provider-owned pending work', () {
-      final native = _fixture('anthropic_message.json');
+    test('should preserve Anthropic-style provider-owned pending work', () async {
+      final native = await _fixture('anthropic_message.json');
       final content = native.toDart()['content']! as List<Object?>;
       final serverTool = content[1]! as Map<String, Object?>;
       final message = AssistantMessage([
@@ -68,9 +69,13 @@ void main() {
   });
 }
 
-JsonObject _fixture(String name) {
-  final source = File(
-    'packages/artificer/providers/artificer_core/test/fixtures/protocols/$name',
-  ).readAsStringSync();
+Future<JsonObject> _fixture(String name) async {
+  final library = await Isolate.resolvePackageUri(
+    Uri.parse('package:artificer_core/artificer_core.dart'),
+  );
+  if (library == null) throw StateError('Could not resolve the artificer_core package.');
+  final source = await File.fromUri(
+    library.resolve('../test/fixtures/protocols/$name'),
+  ).readAsString();
   return JsonObject.fromDart(jsonDecode(source) as Object?);
 }

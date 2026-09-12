@@ -210,6 +210,29 @@ void main() {
       );
     });
 
+    test('keeps empty native tool arguments inspectable as malformed JSON', () {
+      final codec = OpenAiCompatibleChatCodec(
+        _Dialect(providerId: 'xai', field: 'search_parameters'),
+      );
+      final normalized = _success(
+        codec.normalize(
+          _success(
+            codec.decodeNative(
+              _rawResponse(
+                JsonObject.fromDart(_response('', toolArguments: '  ')),
+                providerId: 'xai',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final arguments =
+          (normalized.message.parts.single as ApplicationToolCallPart).arguments
+              as MalformedToolArguments;
+      expect(arguments.originalText, '  ');
+    });
+
     test('common and typed streams share framing while preserving malformed arguments', () async {
       final codec = OpenAiCompatibleChatCodec(
         _Dialect(providerId: 'xai', field: 'search_parameters'),

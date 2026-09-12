@@ -52,6 +52,35 @@ void main() {
         isA<UnsupportedFeatureError>(),
       );
     });
+
+    test('should reject wrong-shaped optional serialized fields', () {
+      expect(
+        () => EmbeddingRequest.fromJson(
+          JsonObject({
+            'schemaVersion': 1,
+            'items': [
+              {
+                'parts': [
+                  {'type': 'text', 'text': 'hello'},
+                ],
+              },
+            ],
+            'dimensions': '3',
+          }),
+        ),
+        throwsFormatException,
+      );
+      final result = Map<String, Object?>.from(
+        _result([
+          IndexedEmbedding(index: 0, vector: [1, 2]),
+        ]).toJson().toDart(),
+      );
+      result['usage'] = 'invalid';
+      expect(
+        () => EmbeddingResult.fromJson(JsonObject.fromDart(result)),
+        throwsFormatException,
+      );
+    });
   });
 
   group('EmbeddingResult', () {
