@@ -113,9 +113,21 @@ final class RivetDb implements RivetExecutor {
     RivetCompiledQuery query,
     RivetRowDecoder<Row> decode,
   ) async {
+    _rejectUseInsideOwnTransaction();
     _acceptWork();
     try {
       return await _executeWith(_pool.run, query, decode);
+    } finally {
+      _finishWork();
+    }
+  }
+
+  @override
+  Future<int> executeAffected(RivetCompiledQuery query) async {
+    _rejectUseInsideOwnTransaction();
+    _acceptWork();
+    try {
+      return await _executeAffectedWith(_pool.run, query);
     } finally {
       _finishWork();
     }
@@ -175,6 +187,14 @@ final class RivetDb implements RivetExecutor {
     }
   }
 
+  void _rejectUseInsideOwnTransaction() {
+    if (Zone.current[_transactionDatabaseZoneKey] == this) {
+      throw const RivetExecutorClosedException(
+        'Use the transaction executor inside this database transaction.',
+      );
+    }
+  }
+
   void _acceptWork() {
     if (_closing) {
       throw const RivetExecutorClosedException('The database is closing or closed.');
@@ -211,6 +231,26 @@ final class RivetDb implements RivetExecutor {
       rethrow;
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL query failed.', error);
+    }
+  }
+
+  Future<int> _executeAffectedWith(
+    Future<T> Function<T>(Future<T> Function(pg.Session session) operation) run,
+    RivetCompiledQuery query,
+  ) async {
+    try {
+      _connection.onStatement?.call(query.sql);
+      final result = await run(
+        (session) => session.execute(
+          pg.Sql(query.sql, types: List.filled(query.parameters.length, pg.Type.unspecified)),
+          parameters: query.parameters,
+        ),
+      );
+      return result.affectedRows;
+    } on RivetException {
+      rethrow;
+    } catch (error) {
+      throw RivetDatabaseException('PostgreSQL mutation failed.', error);
     }
   }
 
@@ -297,6 +337,25 @@ final class RivetTransaction implements RivetExecutor {
       rethrow;
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL transaction query failed.', error);
+    }
+  }
+
+  @override
+  Future<int> executeAffected(RivetCompiledQuery query) async {
+    if (!_active) {
+      throw const RivetExecutorClosedException('The transaction executor has expired.');
+    }
+    try {
+      _connection.onStatement?.call(query.sql);
+      final result = await _session.execute(
+        pg.Sql(query.sql, types: List.filled(query.parameters.length, pg.Type.unspecified)),
+        parameters: query.parameters,
+      );
+      return result.affectedRows;
+    } on RivetException {
+      rethrow;
+    } catch (error) {
+      throw RivetDatabaseException('PostgreSQL transaction mutation failed.', error);
     }
   }
 

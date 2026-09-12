@@ -51,6 +51,176 @@ final class RivetApp extends _$RivetApp {}
       );
     });
 
+    test('should generate typed insert companions from column defaults', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'mutations.rivet.dart';
+
+@RivetTable()
+final class Users extends RivetTableDefinition<Users> {
+  static const db = _$UsersDB();
+
+  late final id = chronoID(prefix: 'usr')();
+  late final name = text()();
+  late final nickname = text().nullable()();
+  late final createdAt = dateTime().defaultValue(DateTime.now)();
+  late final updatedAt = dateTime().onUpdate(DateTime.now)();
+  late final sequence = integer().defaultSql("nextval('users_seq')")();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/mutations.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/mutations.rivet.dart': decodedMatches(
+            allOf(
+              allOf(
+                contains('final class UsersCompanion implements RivetCompanion<Users>'),
+                contains('factory UsersCompanion.insert({'),
+                contains('required RivetValue<Users, String, String> name,'),
+                contains(
+                  'RivetValue<Users, String, String> id = const RivetValue.absent(),',
+                ),
+                contains(
+                  'RivetValue<Users, String?, String?> nickname = const RivetValue.absent(),',
+                ),
+                contains(
+                  'RivetValue<Users, DateTime, DateTime> updatedAt = '
+                  'const RivetValue.absent(),',
+                ),
+              ),
+              contains('factory UsersCompanion.update({'),
+              contains(
+                'RivetValue<Users, String, String> name = const RivetValue.absent(),',
+              ),
+              contains('RivetOnConflict<Users>? onConflict,'),
+              contains('RivetInsertMany<Users, UsersRow> insertMany('),
+              contains('RivetUpdate<Users, UsersRow> update('),
+              contains('RivetDelete<Users, UsersRow> delete({'),
+            ),
+          ),
+        },
+      );
+    });
+
+    test('should preserve mapped array domain and storage mutation types', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'mapped_mutations.rivet.dart';
+
+final class Code {}
+
+final class CodeConverter implements RivetTypeConverter<Code, String> {
+  const CodeConverter();
+  @override
+  Code fromSql(String value) => Code();
+  @override
+  String toSql(Code value) => 'code';
+}
+
+@RivetTable()
+final class Values extends RivetTableDefinition<Values> {
+  static const db = _$ValuesDB();
+  late final codes = text().map(const CodeConverter()).nullable().array()();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/mapped_mutations.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/mapped_mutations.rivet.dart': decodedMatches(
+            contains(
+              'required RivetValue<Values, List<Code?>, List<String?>> codes,',
+            ),
+          ),
+        },
+      );
+    });
+
+    test('should preserve a companion column named assignments', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'assignment_column.rivet.dart';
+
+@RivetTable()
+final class Jobs extends RivetTableDefinition<Jobs> {
+  static const db = _$JobsDB();
+  late final assignments = integer()();
+  late final key = integer()();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/assignment_column.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/assignment_column.rivet.dart': decodedMatches(
+            allOf(
+              contains('final RivetValue<Jobs, int, int> assignments;'),
+              contains("RivetAssignment('key', this.key)"),
+              contains('operator [](RivetCompanionKey key)'),
+              isNot(contains('get assignments =>')),
+            ),
+          ),
+        },
+      );
+    });
+
+    test('should reject mapped hooks declared with the storage type', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      final result = await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {
+          'rivet_generator|lib/invalid_mapped_hook.dart': r'''
+import 'package:rivet/rivet.dart';
+
+part 'invalid_mapped_hook.rivet.dart';
+
+final class Code {
+  const Code(this.value);
+  final String value;
+}
+
+final class CodeConverter implements RivetTypeConverter<Code, String> {
+  const CodeConverter();
+  @override
+  Code fromSql(String value) => Code(value);
+  @override
+  String toSql(Code value) => value.value;
+}
+
+@RivetTable()
+final class Values extends RivetTableDefinition<Values> {
+  static const db = _$ValuesDB();
+  late final code = text().defaultValue(() => 'storage').map(const CodeConverter())();
+}
+''',
+        },
+        readerWriter: readerWriter,
+      );
+
+      expect(result.succeeded, isFalse);
+      expect(
+        result.errors.single,
+        contains('Mapped runtime hooks must be declared after map'),
+      );
+    });
+
     test('should preserve prefixes for tables with the same class name', () async {
       final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
       await readerWriter.testing.loadIsolateSources();

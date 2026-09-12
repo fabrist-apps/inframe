@@ -110,5 +110,33 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should reject root reads and mutations inside its own transaction',
+      () async {
+        await database.transaction((transaction) async {
+          await expectLater(
+            UserProfiles.db.find().get(database),
+            throwsA(isA<RivetExecutorClosedException>()),
+          );
+          await expectLater(
+            UserProfiles.db
+                .insert(
+                  UserProfilesCompanion.insert(
+                    displayName: const RivetValue.present('Grace'),
+                  ),
+                )
+                .execute(database),
+            throwsA(isA<RivetExecutorClosedException>()),
+          );
+
+          expect(
+            (await UserProfiles.db.find().getSingle(transaction)).displayName,
+            'Ada',
+          );
+        });
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }

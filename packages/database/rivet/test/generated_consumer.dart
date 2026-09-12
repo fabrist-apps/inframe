@@ -190,6 +190,393 @@ final class ParameterNames extends RivetTableDefinition<ParameterNames> {
   late final value = text(name: 'a@value')();
 }
 
+int mutationDefaultCalls = 0;
+int mutationUpdateCalls = 0;
+int mutationNullableCalls = 0;
+
+DateTime mutationDefault() {
+  mutationDefaultCalls++;
+  return DateTime.utc(2026, 9, 12, 10, 11, mutationDefaultCalls);
+}
+
+DateTime mutationUpdate() {
+  mutationUpdateCalls++;
+  return DateTime.utc(2026, 9, 12, 11, 12, mutationUpdateCalls);
+}
+
+String? mutationNullableDefault() {
+  mutationNullableCalls++;
+  return null;
+}
+
+final class MutationCode {
+  const MutationCode(this.value);
+
+  final String value;
+}
+
+final class MutationCodeConverter implements RivetTypeConverter<MutationCode, String> {
+  const MutationCodeConverter();
+
+  @override
+  MutationCode fromSql(String value) {
+    if (!value.startsWith('code:')) {
+      throw const FormatException('expected a code-prefixed value');
+    }
+    return MutationCode(value.substring(5));
+  }
+
+  @override
+  String toSql(MutationCode value) {
+    mutationCodeEncodeCalls++;
+    return 'code:${value.value}';
+  }
+}
+
+@RivetEnum(schema: 'fbr139', name: 'mutationStatus')
+enum MutationStatus {
+  @RivetEnumValue(name: 'waiting')
+  queued,
+  @RivetEnumValue(name: 'finished')
+  complete,
+}
+
+int mappedCodeDefaultCalls = 0;
+int mutationCodeEncodeCalls = 0;
+int enumDefaultCalls = 0;
+int timestampDefaultCalls = 0;
+int mappedArrayDefaultCalls = 0;
+
+MutationCode mappedCodeDefault() {
+  mappedCodeDefaultCalls++;
+  return const MutationCode('default');
+}
+
+MutationStatus enumDefault() {
+  enumDefaultCalls++;
+  return MutationStatus.complete;
+}
+
+DateTime timestampDefault() {
+  timestampDefaultCalls++;
+  return DateTime.utc(1969, 12, 31, 23, 59, 59, 999, 999);
+}
+
+List<MutationCode?> mappedArrayDefault() {
+  mappedArrayDefaultCalls++;
+  return const [MutationCode('array-default'), null];
+}
+
+@RivetTable(schema: 'fbr139')
+final class MutationCatalog extends RivetTableDefinition<MutationCatalog> {
+  static const db = _$MutationCatalogDB();
+
+  late final id = integer().primaryKey()();
+  late final textValue = text()();
+  late final count = integer()();
+  late final score = real()();
+  late final active = boolean()();
+  late final createdAt = dateTime().defaultValue(timestampDefault)();
+  late final payload = json()();
+  late final nullablePayload = json().nullable()();
+  late final preferences = json().map(const PreferencesConverter())();
+  late final code = text().map(const MutationCodeConverter()).defaultValue(mappedCodeDefault)();
+  late final optionalCode = text().map(const MutationCodeConverter()).nullable()();
+  late final status = enumText<MutationStatus>().defaultValue(enumDefault)();
+  late final statuses = enumText<MutationStatus>().array().defaultValue(
+    () => [MutationStatus.queued, MutationStatus.complete],
+  )();
+  late final timestamps = dateTime().array()();
+  late final nullableInts = integer().nullable().array()();
+  late final optionalInts = integer().array().nullable()();
+  late final jsonValues = json().nullable().array()();
+  late final mappedCodes = text()
+      .map(const MutationCodeConverter())
+      .nullable()
+      .array()
+      .defaultValue(mappedArrayDefault)();
+  late final embedding = vector(dimensions: 3)();
+  late final embeddings = vector(dimensions: 3).array()();
+}
+
+@RivetTable(schema: 'fbr138')
+final class MutationUsers extends RivetTableDefinition<MutationUsers> {
+  static const db = _$MutationUsersDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final nickname = text().nullable()();
+  late final createdAt = dateTime()
+      .defaultSql('CURRENT_TIMESTAMP')
+      .defaultValue(mutationDefault)
+      .onUpdate(mutationUpdate)();
+  late final updatedAt = dateTime().onUpdate(mutationUpdate)();
+  late final nullableDefault = text().nullable().defaultValue(mutationNullableDefault)();
+  late final serverValue = integer().defaultSql('40 + 2')();
+}
+
+@RivetTable(schema: 'fbr138')
+final class MutationParents extends RivetTableDefinition<MutationParents> {
+  static const db = _$MutationParentsDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final children = many<MutationChildren>(relation: (child) => child.parent)();
+}
+
+@RivetTable(schema: 'fbr138')
+final class MutationChildren extends RivetTableDefinition<MutationChildren> {
+  static const db = _$MutationChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationParents>((parent) => parent.id)();
+  late final parent = one<MutationParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
+int updateTimestampCalls = 0;
+int updateNullableCalls = 0;
+int updateCodeCalls = 0;
+int updateDefaultOnlyCalls = 0;
+
+DateTime updateTimestamp() {
+  updateTimestampCalls++;
+  return DateTime.utc(2026, 9, 12, 12, 30, updateTimestampCalls);
+}
+
+String? updateNullable() {
+  updateNullableCalls++;
+  return null;
+}
+
+MutationCode updateCode() {
+  updateCodeCalls++;
+  return MutationCode('hook-$updateCodeCalls');
+}
+
+String updateDefaultOnly() {
+  updateDefaultOnlyCalls++;
+  return 'default-only';
+}
+
+@RivetTable(schema: 'fbr140')
+final class MutationUpdateUsers extends RivetTableDefinition<MutationUpdateUsers> {
+  static const db = _$MutationUpdateUsersDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final age = integer()();
+  late final updatedAt = dateTime().onUpdate(updateTimestamp)();
+  late final nullableNote = text().nullable().onUpdate(updateNullable)();
+  late final code = text().map(const MutationCodeConverter()).onUpdate(updateCode)();
+  late final defaultOnly = text().defaultValue(updateDefaultOnly)();
+  late final serverOnly = integer().defaultSql('42')();
+  late final children = many<MutationUpdateChildren>(relation: (child) => child.user)();
+}
+
+@RivetTable(schema: 'fbr140')
+final class MutationUpdateChildren extends RivetTableDefinition<MutationUpdateChildren> {
+  static const db = _$MutationUpdateChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final userId = integer().references<MutationUpdateUsers>((user) => user.id)();
+  late final user = one<MutationUpdateUsers>(
+    fields: [userId],
+    references: (user) => [user.id],
+  )();
+}
+
+@RivetTable(schema: 'fbr141', name: 'delete Parents')
+final class MutationDeleteParents extends RivetTableDefinition<MutationDeleteParents> {
+  static const db = _$MutationDeleteParentsDB();
+
+  late final id = integer().primaryKey()();
+  late final label = text(name: 'display Name')();
+  late final cascadeChildren = many<MutationCascadeChildren>(
+    relation: (child) => child.parent,
+  )();
+  late final restrictChildren = many<MutationRestrictChildren>(
+    relation: (child) => child.parent,
+  )();
+}
+
+@RivetTable(schema: 'fbr141', name: 'cascade Children')
+final class MutationCascadeChildren extends RivetTableDefinition<MutationCascadeChildren> {
+  static const db = _$MutationCascadeChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationDeleteParents>(
+    (parent) => parent.id,
+    onDelete: RivetReferentialAction.cascade,
+  )();
+  late final parent = one<MutationDeleteParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
+@RivetTable(schema: 'fbr141', name: 'restrict Children')
+final class MutationRestrictChildren extends RivetTableDefinition<MutationRestrictChildren> {
+  static const db = _$MutationRestrictChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationDeleteParents>(
+    (parent) => parent.id,
+  )();
+  late final parent = one<MutationDeleteParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
+int batchCreatedCalls = 0;
+
+DateTime batchCreated() {
+  batchCreatedCalls++;
+  return DateTime.utc(2026, 9, 12, 14, 0, batchCreatedCalls);
+}
+
+@RivetTable(schema: 'fbr142')
+final class MutationBatchParents extends RivetTableDefinition<MutationBatchParents> {
+  static const db = _$MutationBatchParentsDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final createdAt = dateTime().defaultValue(batchCreated)();
+  late final nickname = text().nullable()();
+  late final serverValue = integer().defaultSql('42')();
+  late final children = many<MutationBatchChildren>(relation: (child) => child.parent)();
+}
+
+@RivetTable(schema: 'fbr142')
+final class MutationBatchChildren extends RivetTableDefinition<MutationBatchChildren> {
+  static const db = _$MutationBatchChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationBatchParents>((parent) => parent.id)();
+  late final parent = one<MutationBatchParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
+int conflictDefaultCalls = 0;
+int conflictUpdateCalls = 0;
+
+DateTime conflictDefault() {
+  conflictDefaultCalls++;
+  return DateTime.utc(2026, 9, 12, 15, 0, conflictDefaultCalls);
+}
+
+DateTime conflictUpdate() {
+  conflictUpdateCalls++;
+  return DateTime.utc(2026, 9, 12, 16, 0, conflictUpdateCalls);
+}
+
+@RivetTable(schema: 'fbr143')
+final class MutationConflictGroups extends RivetTableDefinition<MutationConflictGroups> {
+  static const db = _$MutationConflictGroupsDB();
+
+  late final id = integer().primaryKey()();
+}
+
+@RivetTable(schema: 'fbr143')
+final class MutationConflictParents extends RivetTableDefinition<MutationConflictParents> {
+  static const db = _$MutationConflictParentsDB();
+
+  late final id = integer().primaryKey()();
+  late final email = text()();
+  late final username = text()();
+  late final active = boolean()();
+  late final name = text()();
+  late final age = integer()();
+  late final createdAt = dateTime().defaultValue(conflictDefault).onUpdate(conflictUpdate)();
+  late final requiredByDatabase = text().nullable()();
+  late final groupId = integer().nullable().references<MutationConflictGroups>(
+    (group) => group.id,
+  )();
+  late final children = many<MutationConflictChildren>(relation: (child) => child.parent)();
+}
+
+@RivetTable(schema: 'fbr143')
+final class MutationConflictChildren extends RivetTableDefinition<MutationConflictChildren> {
+  static const db = _$MutationConflictChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationConflictParents>((parent) => parent.id)();
+  late final parent = one<MutationConflictParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
+int upsertTimestampDefaultCalls = 0;
+int upsertTimestampUpdateCalls = 0;
+int upsertNoteDefaultCalls = 0;
+int upsertNoteUpdateCalls = 0;
+int upsertCodeDefaultCalls = 0;
+int upsertCodeUpdateCalls = 0;
+
+DateTime upsertTimestampDefault() {
+  upsertTimestampDefaultCalls++;
+  return DateTime.utc(2026, 9, 12, 17, 0, upsertTimestampDefaultCalls);
+}
+
+DateTime upsertTimestampUpdate() {
+  upsertTimestampUpdateCalls++;
+  return DateTime.utc(2026, 9, 12, 18, 0, upsertTimestampUpdateCalls);
+}
+
+String? upsertNoteDefault() {
+  upsertNoteDefaultCalls++;
+  return 'insert-$upsertNoteDefaultCalls';
+}
+
+String? upsertNoteUpdate() {
+  upsertNoteUpdateCalls++;
+  return 'update-$upsertNoteUpdateCalls';
+}
+
+MutationCode upsertCodeDefault() {
+  upsertCodeDefaultCalls++;
+  return MutationCode('insert-$upsertCodeDefaultCalls');
+}
+
+MutationCode upsertCodeUpdate() {
+  upsertCodeUpdateCalls++;
+  return MutationCode('update-$upsertCodeUpdateCalls');
+}
+
+@RivetTable(schema: 'fbr144')
+final class MutationUpsertUsers extends RivetTableDefinition<MutationUpsertUsers> {
+  static const db = _$MutationUpsertUsersDB();
+
+  late final id = integer().primaryKey()();
+  late final email = text()();
+  late final name = text()();
+  late final age = integer()();
+  late final active = boolean()();
+  late final conditionValue = integer().nullable()();
+  late final updatedAt = dateTime()
+      .defaultValue(upsertTimestampDefault)
+      .onUpdate(upsertTimestampUpdate)();
+  late final note = text().nullable().defaultValue(upsertNoteDefault).onUpdate(upsertNoteUpdate)();
+  late final code = text()
+      .map(const MutationCodeConverter())
+      .defaultValue(upsertCodeDefault)
+      .onUpdate(upsertCodeUpdate)();
+}
+
+@RivetTable(schema: 'fbr144')
+final class MutationAssignmentNames extends RivetTableDefinition<MutationAssignmentNames> {
+  static const db = _$MutationAssignmentNamesDB();
+
+  late final assignments = integer()();
+  late final key = integer()();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -202,6 +589,22 @@ final class ParameterNames extends RivetTableDefinition<ParameterNames> {
     MalformedArrays,
     MetadataColumns,
     ParameterNames,
+    MutationUsers,
+    MutationParents,
+    MutationChildren,
+    MutationCatalog,
+    MutationUpdateUsers,
+    MutationUpdateChildren,
+    MutationDeleteParents,
+    MutationCascadeChildren,
+    MutationRestrictChildren,
+    MutationBatchParents,
+    MutationBatchChildren,
+    MutationConflictGroups,
+    MutationConflictParents,
+    MutationConflictChildren,
+    MutationUpsertUsers,
+    MutationAssignmentNames,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

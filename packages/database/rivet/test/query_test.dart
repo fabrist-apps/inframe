@@ -116,4 +116,10 @@ final class _RecordingExecutor implements RivetExecutor {
     queries.add(query);
     return [for (final row in rows) decode(row.$1, row.$2)];
   }
+
+  @override
+  Future<int> executeAffected(RivetCompiledQuery query) async {
+    queries.add(query);
+    return rows.length;
+  }
 }

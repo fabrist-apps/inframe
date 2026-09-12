@@ -38,14 +38,132 @@ final class PackageUsersRow {
   final Relation<schema.PackageUsersRow?> package;
 }
 
+/// Generated values accepted by mutations of 'fixture.appUsers'.
+final class PackageUsersCompanion implements RivetCompanion<PackageUsers> {
+  const PackageUsersCompanion._({
+    required this.packageName,
+    required this.access,
+    required this.accessRecord,
+    required this.accessCallback,
+    required this.packageAccess,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory PackageUsersCompanion.insert({
+    required RivetValue<PackageUsers, String, String> packageName,
+    required RivetValue<PackageUsers, schema.AccessLevel, schema.AccessLevel>
+    access,
+    required RivetValue<
+      PackageUsers,
+      (schema.AccessLevel, {schema.PackageUsers user}),
+      String
+    >
+    accessRecord,
+    required RivetValue<
+      PackageUsers,
+      schema.AccessLevel Function(schema.PackageUsers),
+      String
+    >
+    accessCallback,
+    required RivetValue<
+      PackageUsers,
+      (schema.AccessLevel, schema.PackageUsers),
+      String
+    >
+    packageAccess,
+  }) => PackageUsersCompanion._(
+    packageName: packageName,
+    access: access,
+    accessRecord: accessRecord,
+    accessCallback: accessCallback,
+    packageAccess: packageAccess,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory PackageUsersCompanion.update({
+    RivetValue<PackageUsers, String, String> packageName =
+        const RivetValue.absent(),
+    RivetValue<PackageUsers, schema.AccessLevel, schema.AccessLevel> access =
+        const RivetValue.absent(),
+    RivetValue<
+          PackageUsers,
+          (schema.AccessLevel, {schema.PackageUsers user}),
+          String
+        >
+        accessRecord =
+        const RivetValue.absent(),
+    RivetValue<
+          PackageUsers,
+          schema.AccessLevel Function(schema.PackageUsers),
+          String
+        >
+        accessCallback =
+        const RivetValue.absent(),
+    RivetValue<PackageUsers, (schema.AccessLevel, schema.PackageUsers), String>
+        packageAccess =
+        const RivetValue.absent(),
+  }) => PackageUsersCompanion._(
+    packageName: packageName,
+    access: access,
+    accessRecord: accessRecord,
+    accessCallback: accessCallback,
+    packageAccess: packageAccess,
+  );
+
+  /// Mutation value for `packageName`.
+  final RivetValue<PackageUsers, String, String> packageName;
+
+  /// Mutation value for `access`.
+  final RivetValue<PackageUsers, schema.AccessLevel, schema.AccessLevel> access;
+
+  /// Mutation value for `accessRecord`.
+  final RivetValue<
+    PackageUsers,
+    (schema.AccessLevel, {schema.PackageUsers user}),
+    String
+  >
+  accessRecord;
+
+  /// Mutation value for `accessCallback`.
+  final RivetValue<
+    PackageUsers,
+    schema.AccessLevel Function(schema.PackageUsers),
+    String
+  >
+  accessCallback;
+
+  /// Mutation value for `packageAccess`.
+  final RivetValue<
+    PackageUsers,
+    (schema.AccessLevel, schema.PackageUsers),
+    String
+  >
+  packageAccess;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<PackageUsers>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('packageName', packageName),
+    RivetAssignment('access', access),
+    RivetAssignment('accessRecord', accessRecord),
+    RivetAssignment('accessCallback', accessCallback),
+    RivetAssignment('packageAccess', packageAccess),
+  ];
+}
+
 final class _$PackageUsersDB
     extends RivetTableAccessor<PackageUsers, PackageUsersRow> {
   const _$PackageUsersDB();
 
   @override
   RivetTableSchema<PackageUsers, PackageUsersRow> buildSchema() {
-    final definition = PackageUsers();
-    definition.access.configureEnum(schema.AccessLevelRivetEnum.codec);
+    PackageUsers createDefinition() {
+      final definition = PackageUsers();
+      definition.access.configureEnum(schema.AccessLevelRivetEnum.codec);
+      return definition;
+    }
+
+    final definition = createDefinition();
     return RivetTableSchema<PackageUsers, PackageUsersRow>(
       schemaName: 'fixture',
       tableName: 'appUsers',
@@ -63,6 +181,14 @@ final class _$PackageUsersDB
         'accessRecord',
         'accessCallback',
         'packageAccess',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.packageName as RivetColumn<Object?>,
+        definition.access as RivetColumn<Object?>,
+        definition.accessRecord as RivetColumn<Object?>,
+        definition.accessCallback as RivetColumn<Object?>,
+        definition.packageAccess as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => PackageUsersRow(
         packageName: definition.packageName.decodeValue(
@@ -91,6 +217,29 @@ final class _$PackageUsersDB
       },
     );
   }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<PackageUsers, PackageUsersRow> insert(
+    PackageUsersCompanion companion, {
+    RivetOnConflict<PackageUsers>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<PackageUsers, PackageUsersRow> insertMany(
+    Iterable<PackageUsersCompanion> companions, {
+    RivetOnConflict<PackageUsers>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<PackageUsers, PackageUsersRow> update(
+    PackageUsersCompanion companion, {
+    RivetWhere<PackageUsers>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<PackageUsers, PackageUsersRow> delete({
+    RivetWhere<PackageUsers>? where,
+  }) => RivetDelete(buildSchema(), where: where);
 }
 
 // **************************************************************************

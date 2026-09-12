@@ -3,11 +3,29 @@
 Rivet generates typed Dart reads for existing PostgreSQL schemas. Opening a database creates an owned connection pool; it never creates application tables or applies migrations.
 
 ```dart
+final class Email {
+  const Email(this.value);
+
+  final String value;
+}
+
+final class EmailConverter implements RivetTypeConverter<Email, String> {
+  const EmailConverter();
+
+  @override
+  Email fromSql(String value) => Email(value);
+
+  @override
+  String toSql(Email value) => value.value;
+}
+
 @RivetTable(schema: 'auth', name: 'users')
 final class Users extends RivetTableDefinition<Users> {
   static const db = _$UsersDB();
 
   late final name = text()();
+  late final email = text().map(const EmailConverter())();
+  late final age = integer()();
 }
 
 @RivetDatabase(name: 'app', tables: [Users])
@@ -35,6 +53,75 @@ await db.transaction((tx) async {
 ```
 
 Transactions reserve one pooled connection. Their executors expire when the transaction callback ends. After-commit callbacks run sequentially after commit and after the reservation is returned; callback failures are reported as `AfterCommitException` with `alreadyCommitted == true`.
+
+Generated companions keep insert values typed and defer runtime defaults until execution:
+
+```dart
+final insert = Users.db.insert(
+  UsersCompanion.insert(
+    name: const RivetValue.present('Ada'),
+    email: const RivetValue.present(Email('ada@example.com')),
+    age: const RivetValue.present(30),
+  ),
+);
+final affected = await insert.execute(db);
+final rows = await insert.returning().get(db);
+```
+
+Non-nullable fields without a SQL or runtime default are required named arguments. Nullable and defaulted fields begin as `RivetValue.absent()`. At execution, an omitted insert field uses `defaultValue`, then `onUpdate`, then the PostgreSQL `DEFAULT`, and finally SQL NULL when the column is nullable. Explicit values, nulls, and typed SQL expressions suppress those fallbacks. Each terminal executes one statement; `returning()` decodes complete rows without another SELECT.
+
+For mapped columns, `present` takes the domain type. Expression assignments take the storage type through the column's `storage` view, so the expression bypasses the Dart converter and the returned row still decodes through it:
+
+```dart
+UsersCompanion.insert(
+  name: const RivetValue.present('Ada'),
+  email: RivetValue.expression(
+    (users) => users.email.storage.value('ada@example.com'),
+  ),
+  age: const RivetValue.present(30),
+);
+```
+
+Update companions make every field optional. Absent fields run `onUpdate` when configured and otherwise remain untouched. Supply a root-table predicate to restrict the statement, or omit `where` to update every row:
+
+```dart
+final changed = await Users.db
+    .update(
+      UsersCompanion.update(
+        age: RivetValue.expression((users) => users.age + 1),
+      ),
+      where: (users) => users.name.equals('Ada'),
+    )
+    .execute(db);
+```
+
+Deletes use the same optional root predicate and terminal shape. Omitting `where` deletes every row in the target table; PostgreSQL performs declared foreign-key cascades inside that statement.
+
+`insertMany` submits every supplied companion in one statement and evaluates omitted runtime defaults independently for each row. Empty batches return zero or an empty returned-row list without executing SQL. Callers can submit their own chunks as separate mutations inside an explicit transaction.
+
+Both insert builders accept typed conflict handling. `conflict.doNothing()` handles any eligible uniqueness conflict; select target columns to restrict it and add `targetWhere` when PostgreSQL must infer a partial unique index:
+
+```dart
+onConflict: (conflict) => conflict.doNothing(
+  target: (users) => [users.name],
+  targetWhere: (users) => ~users.name.equals(''),
+),
+```
+
+Use `conflict.update` with an explicit target to upsert. The `set` callback receives typed SQL scopes for the existing row and PostgreSQL's excluded row. `targetWhere` selects a partial unique index; `where` decides whether the conflicting row is updated:
+
+```dart
+onConflict: (conflict) => conflict.update(
+  target: (user) => [user.name],
+  targetWhere: (user) => ~user.name.equals(''),
+  set: (old, excluded) => UsersCompanion.update(
+    age: RivetValue.expression((_) => excluded.age),
+  ),
+  where: (old, excluded) => old.age.lessThanExpression(excluded.age),
+),
+```
+
+Absent fields in the conflict update run their `onUpdate` callbacks once when the statement is prepared for execution. Empty batches run no conflict, default, or update callbacks.
 
 The column catalog is `chronoID`, `text`, `integer`, `real`, `boolean`, `dateTime`, `json`, `enumText`, and fixed-dimension `vector`. Add `.map(converter)` for domain values and `.array()` for one-dimensional native PostgreSQL arrays. Nullability before `.array()` applies to elements; nullability after it applies to the array column.
 
