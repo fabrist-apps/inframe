@@ -83,13 +83,6 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
         .map((field) => 'definition.${field.displayName} as RivetColumn<Object?>')
         .join(', ');
     final names = columns.map((field) => literal(field.displayName)).join(', ');
-    final decodes = columns.indexed
-        .map((entry) {
-          final index = entry.$1;
-          final field = entry.$2;
-          return '${field.displayName}: definition.${field.displayName}.decodeValue(values[$index], isSqlNull: sqlNulls[$index])';
-        })
-        .join(', ');
     final relatedDecodes = [
       ...columns.indexed.map((entry) {
         final index = entry.$1;
@@ -200,9 +193,8 @@ final class ${className}Include {
 $includeMethods
 }
 ''';
-    final rowDecoder = relations.isEmpty
-        ? ''
-        : '''
+    final rowDecoder =
+        '''
     $rowName decodeRow(
       List<Object?> values,
       List<bool> sqlNulls,
@@ -210,9 +202,7 @@ $includeMethods
       required bool transport,
     }) => $rowName($relatedDecodes);
 ''';
-    final schemaDecoders = relations.isEmpty
-        ? '      decode: (values, sqlNulls) => $rowName($decodes),\n'
-        : '''
+    const schemaDecoders = '''
       decode: (values, sqlNulls) => decodeRow(
         values,
         sqlNulls,

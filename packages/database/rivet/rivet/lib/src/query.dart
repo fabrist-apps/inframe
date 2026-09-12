@@ -175,8 +175,9 @@ final class RivetFind<Definition, Row> {
     }
     final sql = StringBuffer('SELECT ${columns.join(', ')} FROM ${_schema.qualifiedName}');
     if (_predicate case final predicate?) {
+      final rendered = predicate.renderParameters(startAt: parameters.length + 1);
       parameters.addAll(predicate.parameters);
-      sql.write(' WHERE ${predicate.renderParameters()}');
+      sql.write(' WHERE $rendered');
     }
     if (_orders.isNotEmpty) {
       sql.write(' ORDER BY ${_renderOrders(_orders, parameters)}');

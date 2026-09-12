@@ -484,8 +484,16 @@ void main() {
             )
             .getSingle(database);
         expect(filteredCount.name, 'Ada');
+
+        final fewerPostsThanId = await RelationalUsers.db
+            .find(
+              where: (user) => user.authoredPosts.count().lessThanExpression(user.id),
+              orderBy: (user) => [user.id.asc()],
+            )
+            .get(database);
+        expect(fewerPostsThanId.map((user) => user.name), ['Grace', 'Linus']);
         expect(ordered.every((user) => !user.authoredPosts.isLoaded), isTrue);
-        expect(statements, hasLength(4));
+        expect(statements, hasLength(5));
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
@@ -512,6 +520,12 @@ void main() {
         expect(single.score, 1.0);
         expect(single.row.author.isLoaded, isFalse);
 
+        final bound = await RelationalPosts.db
+            .find(where: (post) => post.id.equals(11))
+            .withScore((post) => post.weight.value(1.5))
+            .getSingle(database);
+        expect(bound.score, 1.5);
+
         final missing = await RelationalPosts.db
             .find(where: (post) => post.id.equals(99))
             .withScore((post) => post.quality)
@@ -536,7 +550,7 @@ void main() {
               .getSingle(tx);
           expect(nullable.score, isNull);
         });
-        expect(statements, hasLength(6));
+        expect(statements, hasLength(7));
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

@@ -1797,12 +1797,16 @@ final class RivetPredicate {
     String operator,
     RivetExpression<dynamic> right,
   ) : this._(
-        (placeholder, _) =>
-            '${left.renderPlaceholders(placeholder)} $operator '
-            '${right.renderPlaceholders((index) => placeholder(left.parameters.length + index))}',
+        (placeholder, nextAlias) =>
+            '${_renderPredicateExpression(left, placeholder, nextAlias)} $operator '
+            '${_renderPredicateExpression(
+              right,
+              (index) => placeholder(left.parameters.length + index),
+              nextAlias,
+            )}',
         [...left.parameters, ...right.parameters],
         [...left.columns, ...right.columns],
-        false,
+        _usesRelationAliases(left) || _usesRelationAliases(right),
       );
 
   final String Function(
@@ -1861,6 +1865,23 @@ final class RivetPredicate {
     String Function()? nextAlias,
   ) => _renderSql(placeholder, nextAlias);
 }
+
+bool _usesRelationAliases(RivetExpression<dynamic> expression) =>
+    expression is RivetAliasedExpression<dynamic> && expression.usesRelations;
+
+String _renderPredicateExpression(
+  RivetExpression<dynamic> expression,
+  String Function(int index) placeholder,
+  String Function()? nextAlias,
+) => expression is RivetAliasedExpression<dynamic> && expression.usesRelations
+    ? expression.renderWith(
+        placeholder,
+        nextAlias ??
+            (throw const RivetUnsupportedQueryException(
+              'The expression requires an aliased query context.',
+            )),
+      )
+    : expression.renderPlaceholders(placeholder);
 
 String _postgresLiteral(Object? value) => switch (value) {
   null => 'NULL',

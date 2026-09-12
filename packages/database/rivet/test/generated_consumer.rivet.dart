@@ -2780,6 +2780,73 @@ final class _$ScalarValuesDB
     }
 
     final definition = createDefinition();
+    ScalarValuesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => ScalarValuesRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      count: transport
+          ? definition.count.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.count.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      score: transport
+          ? definition.score.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.score.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      active: transport
+          ? definition.active.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.active.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      createdAt: transport
+          ? definition.createdAt.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.createdAt.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      payload: transport
+          ? definition.payload.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.payload.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+      preferences: transport
+          ? definition.preferences.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.preferences.decodeValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            ),
+      code: transport
+          ? definition.code.decodeTransportValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            )
+          : definition.code.decodeValue(values[7], isSqlNull: sqlNulls[7]),
+      optionalCode: transport
+          ? definition.optionalCode.decodeTransportValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            )
+          : definition.optionalCode.decodeValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            ),
+    );
 
     return RivetTableSchema<ScalarValues, ScalarValuesRow>(
       schemaName: 'fbr119',
@@ -2819,32 +2886,13 @@ final class _$ScalarValuesDB
         definition.code as RivetColumn<Object?>,
         definition.optionalCode as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => ScalarValuesRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        count: definition.count.decodeValue(values[1], isSqlNull: sqlNulls[1]),
-        score: definition.score.decodeValue(values[2], isSqlNull: sqlNulls[2]),
-        active: definition.active.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        createdAt: definition.createdAt.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
-        payload: definition.payload.decodeValue(
-          values[5],
-          isSqlNull: sqlNulls[5],
-        ),
-        preferences: definition.preferences.decodeValue(
-          values[6],
-          isSqlNull: sqlNulls[6],
-        ),
-        code: definition.code.decodeValue(values[7], isSqlNull: sqlNulls[7]),
-        optionalCode: definition.optionalCode.decodeValue(
-          values[8],
-          isSqlNull: sqlNulls[8],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -3016,6 +3064,64 @@ final class _$EnumValuesDB
     }
 
     final definition = createDefinition();
+    EnumValuesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => EnumValuesRow(
+      status: transport
+          ? definition.status.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.status.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      optionalStatus: transport
+          ? definition.optionalStatus.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.optionalStatus.decodeValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            ),
+      nullableStatuses: transport
+          ? definition.nullableStatuses.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.nullableStatuses.decodeValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            ),
+      optionalStatuses: transport
+          ? definition.optionalStatuses.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.optionalStatuses.decodeValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            ),
+      optionalNullableStatuses: transport
+          ? definition.optionalNullableStatuses.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.optionalNullableStatuses.decodeValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            ),
+      mappedStatus: transport
+          ? definition.mappedStatus.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.mappedStatus.decodeValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            ),
+    );
 
     return RivetTableSchema<EnumValues, EnumValuesRow>(
       schemaName: 'fbr120',
@@ -3046,30 +3152,13 @@ final class _$EnumValuesDB
         definition.optionalNullableStatuses as RivetColumn<Object?>,
         definition.mappedStatus as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => EnumValuesRow(
-        status: definition.status.decodeValue(
-          values[0],
-          isSqlNull: sqlNulls[0],
-        ),
-        optionalStatus: definition.optionalStatus.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
-        nullableStatuses: definition.nullableStatuses.decodeValue(
-          values[2],
-          isSqlNull: sqlNulls[2],
-        ),
-        optionalStatuses: definition.optionalStatuses.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        optionalNullableStatuses: definition.optionalNullableStatuses
-            .decodeValue(values[4], isSqlNull: sqlNulls[4]),
-        mappedStatus: definition.mappedStatus.decodeValue(
-          values[5],
-          isSqlNull: sqlNulls[5],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -3167,6 +3256,28 @@ final class _$VectorValuesDB
     }
 
     final definition = createDefinition();
+    VectorValuesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => VectorValuesRow(
+      embedding: transport
+          ? definition.embedding.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.embedding.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      optionalEmbedding: transport
+          ? definition.optionalEmbedding.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.optionalEmbedding.decodeValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            ),
+    );
 
     return RivetTableSchema<VectorValues, VectorValuesRow>(
       schemaName: 'fbr121',
@@ -3182,16 +3293,13 @@ final class _$VectorValuesDB
         definition.embedding as RivetColumn<Object?>,
         definition.optionalEmbedding as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => VectorValuesRow(
-        embedding: definition.embedding.decodeValue(
-          values[0],
-          isSqlNull: sqlNulls[0],
-        ),
-        optionalEmbedding: definition.optionalEmbedding.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -3377,6 +3485,73 @@ final class _$ArrayValuesDB
     }
 
     final definition = createDefinition();
+    ArrayValuesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => ArrayValuesRow(
+      ints: transport
+          ? definition.ints.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.ints.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      nullableInts: transport
+          ? definition.nullableInts.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.nullableInts.decodeValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            ),
+      optionalInts: transport
+          ? definition.optionalInts.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.optionalInts.decodeValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            ),
+      optionalNullableInts: transport
+          ? definition.optionalNullableInts.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.optionalNullableInts.decodeValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            ),
+      jsonValues: transport
+          ? definition.jsonValues.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.jsonValues.decodeValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            ),
+      vectors: transport
+          ? definition.vectors.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.vectors.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+      statuses: transport
+          ? definition.statuses.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.statuses.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+      codes: transport
+          ? definition.codes.decodeTransportValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            )
+          : definition.codes.decodeValue(values[7], isSqlNull: sqlNulls[7]),
+    );
 
     return RivetTableSchema<ArrayValues, ArrayValuesRow>(
       schemaName: 'fbr122',
@@ -3413,34 +3588,13 @@ final class _$ArrayValuesDB
         definition.statuses as RivetColumn<Object?>,
         definition.codes as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => ArrayValuesRow(
-        ints: definition.ints.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        nullableInts: definition.nullableInts.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
-        optionalInts: definition.optionalInts.decodeValue(
-          values[2],
-          isSqlNull: sqlNulls[2],
-        ),
-        optionalNullableInts: definition.optionalNullableInts.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        jsonValues: definition.jsonValues.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
-        vectors: definition.vectors.decodeValue(
-          values[5],
-          isSqlNull: sqlNulls[5],
-        ),
-        statuses: definition.statuses.decodeValue(
-          values[6],
-          isSqlNull: sqlNulls[6],
-        ),
-        codes: definition.codes.decodeValue(values[7], isSqlNull: sqlNulls[7]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -4463,6 +4617,19 @@ final class _$MalformedArraysDB
     }
 
     final definition = createDefinition();
+    MalformedArraysRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MalformedArraysRow(
+      ints: transport
+          ? definition.ints.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.ints.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+    );
 
     return RivetTableSchema<MalformedArrays, MalformedArraysRow>(
       schemaName: 'fbr122',
@@ -4472,9 +4639,13 @@ final class _$MalformedArraysDB
       columnNames: ['ints'],
       createDefinition: createDefinition,
       columnsFor: (definition) => [definition.ints as RivetColumn<Object?>],
-      decode: (values, sqlNulls) => MalformedArraysRow(
-        ints: definition.ints.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -4617,6 +4788,43 @@ final class _$MetadataColumnsDB
     }
 
     final definition = createDefinition();
+    MetadataColumnsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MetadataColumnsRow(
+      count: transport
+          ? definition.count.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.count.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      payload: transport
+          ? definition.payload.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.payload.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      embedding: transport
+          ? definition.embedding.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.embedding.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      values: transport
+          ? definition.values.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.values.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      code: transport
+          ? definition.code.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.code.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+    );
 
     return RivetTableSchema<MetadataColumns, MetadataColumnsRow>(
       schemaName: 'metadata',
@@ -4638,22 +4846,13 @@ final class _$MetadataColumnsDB
         definition.values as RivetColumn<Object?>,
         definition.code as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MetadataColumnsRow(
-        count: definition.count.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        payload: definition.payload.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
-        embedding: definition.embedding.decodeValue(
-          values[2],
-          isSqlNull: sqlNulls[2],
-        ),
-        values: definition.values.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        code: definition.code.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
 
       indexes: () => definition._indexes,
       constraints: () => definition._constraints,
@@ -4730,6 +4929,19 @@ final class _$TextTargetsDB
     }
 
     final definition = createDefinition();
+    TextTargetsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => TextTargetsRow(
+      value: transport
+          ? definition.value.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+    );
 
     return RivetTableSchema<TextTargets, TextTargetsRow>(
       schemaName: 'metadata',
@@ -4739,9 +4951,13 @@ final class _$TextTargetsDB
       columnNames: ['value'],
       createDefinition: createDefinition,
       columnsFor: (definition) => [definition.value as RivetColumn<Object?>],
-      decode: (values, sqlNulls) => TextTargetsRow(
-        value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -4815,6 +5031,19 @@ final class _$InvalidReferencesDB
     }
 
     final definition = createDefinition();
+    InvalidReferencesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => InvalidReferencesRow(
+      value: transport
+          ? definition.value.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+    );
 
     return RivetTableSchema<InvalidReferences, InvalidReferencesRow>(
       schemaName: 'metadata',
@@ -4824,9 +5053,13 @@ final class _$InvalidReferencesDB
       columnNames: ['value'],
       createDefinition: createDefinition,
       columnsFor: (definition) => [definition.value as RivetColumn<Object?>],
-      decode: (values, sqlNulls) => InvalidReferencesRow(
-        value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -4901,6 +5134,19 @@ final class _$ParameterNamesDB
     }
 
     final definition = createDefinition();
+    ParameterNamesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => ParameterNamesRow(
+      value: transport
+          ? definition.value.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+    );
 
     return RivetTableSchema<ParameterNames, ParameterNamesRow>(
       schemaName: 'metadata',
@@ -4910,9 +5156,13 @@ final class _$ParameterNamesDB
       columnNames: ['value'],
       createDefinition: createDefinition,
       columnsFor: (definition) => [definition.value as RivetColumn<Object?>],
-      decode: (values, sqlNulls) => ParameterNamesRow(
-        value: definition.value.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -5280,6 +5530,166 @@ final class _$MutationCatalogDB
     }
 
     final definition = createDefinition();
+    MutationCatalogRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationCatalogRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      textValue: transport
+          ? definition.textValue.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.textValue.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      count: transport
+          ? definition.count.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.count.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      score: transport
+          ? definition.score.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.score.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      active: transport
+          ? definition.active.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.active.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      createdAt: transport
+          ? definition.createdAt.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.createdAt.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+      payload: transport
+          ? definition.payload.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.payload.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+      nullablePayload: transport
+          ? definition.nullablePayload.decodeTransportValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            )
+          : definition.nullablePayload.decodeValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            ),
+      preferences: transport
+          ? definition.preferences.decodeTransportValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            )
+          : definition.preferences.decodeValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            ),
+      code: transport
+          ? definition.code.decodeTransportValue(
+              values[9],
+              isSqlNull: sqlNulls[9],
+            )
+          : definition.code.decodeValue(values[9], isSqlNull: sqlNulls[9]),
+      optionalCode: transport
+          ? definition.optionalCode.decodeTransportValue(
+              values[10],
+              isSqlNull: sqlNulls[10],
+            )
+          : definition.optionalCode.decodeValue(
+              values[10],
+              isSqlNull: sqlNulls[10],
+            ),
+      status: transport
+          ? definition.status.decodeTransportValue(
+              values[11],
+              isSqlNull: sqlNulls[11],
+            )
+          : definition.status.decodeValue(values[11], isSqlNull: sqlNulls[11]),
+      statuses: transport
+          ? definition.statuses.decodeTransportValue(
+              values[12],
+              isSqlNull: sqlNulls[12],
+            )
+          : definition.statuses.decodeValue(
+              values[12],
+              isSqlNull: sqlNulls[12],
+            ),
+      timestamps: transport
+          ? definition.timestamps.decodeTransportValue(
+              values[13],
+              isSqlNull: sqlNulls[13],
+            )
+          : definition.timestamps.decodeValue(
+              values[13],
+              isSqlNull: sqlNulls[13],
+            ),
+      nullableInts: transport
+          ? definition.nullableInts.decodeTransportValue(
+              values[14],
+              isSqlNull: sqlNulls[14],
+            )
+          : definition.nullableInts.decodeValue(
+              values[14],
+              isSqlNull: sqlNulls[14],
+            ),
+      optionalInts: transport
+          ? definition.optionalInts.decodeTransportValue(
+              values[15],
+              isSqlNull: sqlNulls[15],
+            )
+          : definition.optionalInts.decodeValue(
+              values[15],
+              isSqlNull: sqlNulls[15],
+            ),
+      jsonValues: transport
+          ? definition.jsonValues.decodeTransportValue(
+              values[16],
+              isSqlNull: sqlNulls[16],
+            )
+          : definition.jsonValues.decodeValue(
+              values[16],
+              isSqlNull: sqlNulls[16],
+            ),
+      mappedCodes: transport
+          ? definition.mappedCodes.decodeTransportValue(
+              values[17],
+              isSqlNull: sqlNulls[17],
+            )
+          : definition.mappedCodes.decodeValue(
+              values[17],
+              isSqlNull: sqlNulls[17],
+            ),
+      embedding: transport
+          ? definition.embedding.decodeTransportValue(
+              values[18],
+              isSqlNull: sqlNulls[18],
+            )
+          : definition.embedding.decodeValue(
+              values[18],
+              isSqlNull: sqlNulls[18],
+            ),
+      embeddings: transport
+          ? definition.embeddings.decodeTransportValue(
+              values[19],
+              isSqlNull: sqlNulls[19],
+            )
+          : definition.embeddings.decodeValue(
+              values[19],
+              isSqlNull: sqlNulls[19],
+            ),
+    );
 
     return RivetTableSchema<MutationCatalog, MutationCatalogRow>(
       schemaName: 'fbr139',
@@ -5352,76 +5762,13 @@ final class _$MutationCatalogDB
         definition.embedding as RivetColumn<Object?>,
         definition.embeddings as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationCatalogRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        textValue: definition.textValue.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
-        count: definition.count.decodeValue(values[2], isSqlNull: sqlNulls[2]),
-        score: definition.score.decodeValue(values[3], isSqlNull: sqlNulls[3]),
-        active: definition.active.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
-        createdAt: definition.createdAt.decodeValue(
-          values[5],
-          isSqlNull: sqlNulls[5],
-        ),
-        payload: definition.payload.decodeValue(
-          values[6],
-          isSqlNull: sqlNulls[6],
-        ),
-        nullablePayload: definition.nullablePayload.decodeValue(
-          values[7],
-          isSqlNull: sqlNulls[7],
-        ),
-        preferences: definition.preferences.decodeValue(
-          values[8],
-          isSqlNull: sqlNulls[8],
-        ),
-        code: definition.code.decodeValue(values[9], isSqlNull: sqlNulls[9]),
-        optionalCode: definition.optionalCode.decodeValue(
-          values[10],
-          isSqlNull: sqlNulls[10],
-        ),
-        status: definition.status.decodeValue(
-          values[11],
-          isSqlNull: sqlNulls[11],
-        ),
-        statuses: definition.statuses.decodeValue(
-          values[12],
-          isSqlNull: sqlNulls[12],
-        ),
-        timestamps: definition.timestamps.decodeValue(
-          values[13],
-          isSqlNull: sqlNulls[13],
-        ),
-        nullableInts: definition.nullableInts.decodeValue(
-          values[14],
-          isSqlNull: sqlNulls[14],
-        ),
-        optionalInts: definition.optionalInts.decodeValue(
-          values[15],
-          isSqlNull: sqlNulls[15],
-        ),
-        jsonValues: definition.jsonValues.decodeValue(
-          values[16],
-          isSqlNull: sqlNulls[16],
-        ),
-        mappedCodes: definition.mappedCodes.decodeValue(
-          values[17],
-          isSqlNull: sqlNulls[17],
-        ),
-        embedding: definition.embedding.decodeValue(
-          values[18],
-          isSqlNull: sqlNulls[18],
-        ),
-        embeddings: definition.embeddings.decodeValue(
-          values[19],
-          isSqlNull: sqlNulls[19],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -5589,6 +5936,61 @@ final class _$MutationUsersDB
     }
 
     final definition = createDefinition();
+    MutationUsersRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationUsersRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      nickname: transport
+          ? definition.nickname.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.nickname.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      createdAt: transport
+          ? definition.createdAt.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.createdAt.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      updatedAt: transport
+          ? definition.updatedAt.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.updatedAt.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      nullableDefault: transport
+          ? definition.nullableDefault.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.nullableDefault.decodeValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            ),
+      serverValue: transport
+          ? definition.serverValue.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.serverValue.decodeValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            ),
+    );
 
     return RivetTableSchema<MutationUsers, MutationUsersRow>(
       schemaName: 'fbr138',
@@ -5622,30 +6024,13 @@ final class _$MutationUsersDB
         definition.nullableDefault as RivetColumn<Object?>,
         definition.serverValue as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationUsersRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        name: definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
-        nickname: definition.nickname.decodeValue(
-          values[2],
-          isSqlNull: sqlNulls[2],
-        ),
-        createdAt: definition.createdAt.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        updatedAt: definition.updatedAt.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
-        nullableDefault: definition.nullableDefault.decodeValue(
-          values[5],
-          isSqlNull: sqlNulls[5],
-        ),
-        serverValue: definition.serverValue.decodeValue(
-          values[6],
-          isSqlNull: sqlNulls[6],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -7855,6 +8240,19 @@ final class _$MutationConflictGroupsDB
     }
 
     final definition = createDefinition();
+    MutationConflictGroupsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationConflictGroupsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+    );
 
     return RivetTableSchema<MutationConflictGroups, MutationConflictGroupsRow>(
       schemaName: 'fbr143',
@@ -7864,9 +8262,13 @@ final class _$MutationConflictGroupsDB
       columnNames: ['id'],
       createDefinition: createDefinition,
       columnsFor: (definition) => [definition.id as RivetColumn<Object?>],
-      decode: (values, sqlNulls) => MutationConflictGroupsRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -8670,6 +9072,70 @@ final class _$MutationUpsertUsersDB
     }
 
     final definition = createDefinition();
+    MutationUpsertUsersRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationUpsertUsersRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      email: transport
+          ? definition.email.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.email.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.name.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      age: transport
+          ? definition.age.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.age.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      active: transport
+          ? definition.active.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.active.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      conditionValue: transport
+          ? definition.conditionValue.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.conditionValue.decodeValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            ),
+      updatedAt: transport
+          ? definition.updatedAt.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.updatedAt.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+      note: transport
+          ? definition.note.decodeTransportValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            )
+          : definition.note.decodeValue(values[7], isSqlNull: sqlNulls[7]),
+      code: transport
+          ? definition.code.decodeTransportValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            )
+          : definition.code.decodeValue(values[8], isSqlNull: sqlNulls[8]),
+    );
 
     return RivetTableSchema<MutationUpsertUsers, MutationUpsertUsersRow>(
       schemaName: 'fbr144',
@@ -8709,26 +9175,13 @@ final class _$MutationUpsertUsersDB
         definition.note as RivetColumn<Object?>,
         definition.code as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationUpsertUsersRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        email: definition.email.decodeValue(values[1], isSqlNull: sqlNulls[1]),
-        name: definition.name.decodeValue(values[2], isSqlNull: sqlNulls[2]),
-        age: definition.age.decodeValue(values[3], isSqlNull: sqlNulls[3]),
-        active: definition.active.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
-        conditionValue: definition.conditionValue.decodeValue(
-          values[5],
-          isSqlNull: sqlNulls[5],
-        ),
-        updatedAt: definition.updatedAt.decodeValue(
-          values[6],
-          isSqlNull: sqlNulls[6],
-        ),
-        note: definition.note.decodeValue(values[7], isSqlNull: sqlNulls[7]),
-        code: definition.code.decodeValue(values[8], isSqlNull: sqlNulls[8]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 
@@ -8827,6 +9280,28 @@ final class _$MutationAssignmentNamesDB
     }
 
     final definition = createDefinition();
+    MutationAssignmentNamesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationAssignmentNamesRow(
+      assignments: transport
+          ? definition.assignments.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.assignments.decodeValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            ),
+      key: transport
+          ? definition.key.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.key.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+    );
 
     return RivetTableSchema<
       MutationAssignmentNames,
@@ -8845,13 +9320,13 @@ final class _$MutationAssignmentNamesDB
         definition.assignments as RivetColumn<Object?>,
         definition.key as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationAssignmentNamesRow(
-        assignments: definition.assignments.decodeValue(
-          values[0],
-          isSqlNull: sqlNulls[0],
-        ),
-        key: definition.key.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 

@@ -63,6 +63,25 @@ final class _$PackageUsersDB
     }
 
     final definition = createDefinition();
+    PackageUsersRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => PackageUsersRow(
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.name.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      access: transport
+          ? definition.access.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.access.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+    );
 
     return RivetTableSchema<PackageUsers, PackageUsersRow>(
       schemaName: 'fixture',
@@ -78,13 +97,13 @@ final class _$PackageUsersDB
         definition.name as RivetColumn<Object?>,
         definition.access as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => PackageUsersRow(
-        name: definition.name.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        access: definition.access.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
     );
   }
 

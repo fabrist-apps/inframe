@@ -102,6 +102,49 @@ void main() {
       expect(executor.queries.single.parameters, ['Ada', 'Grace']);
     });
 
+    test('should decode transport values for generated tables without relations', () {
+      final row = MalformedArrays.db.buildSchema().decodeRow(
+        [
+          {
+            'dimensions': 1,
+            'lower': 1,
+            'upper': 2,
+            'elements': [
+              [false, 1],
+              [false, 2],
+            ],
+          },
+        ],
+        [false],
+        transport: true,
+      );
+
+      expect(row.ints, [1, 2]);
+    });
+
+    test('should offset root predicate parameters after a bound score', () async {
+      await RelationalPosts.db
+          .find(where: (post) => post.id.equals(11))
+          .withScore((post) => post.weight.value(1.5))
+          .get(executor);
+
+      expect(executor.queries.single.parameters, [1.5, 11]);
+      expect(executor.queries.single.sql, contains(r'$1::float8 AS "__rivet_score"'));
+      expect(executor.queries.single.sql, contains(r'"id" = $2::int4'));
+    });
+
+    test('should compare a relation aggregate with a root column', () async {
+      await RelationalUsers.db
+          .find(
+            where: (user) => user.authoredPosts.count().lessThanExpression(user.id),
+          )
+          .get(executor);
+
+      expect(executor.queries.single.parameters, isEmpty);
+      expect(executor.queries.single.sql, contains('SELECT count(*)'));
+      expect(executor.queries.single.sql, contains('< "__rivet_t0"."id"'));
+    });
+
     test('should load one relation and preserve missing and duplicate cardinality', () async {
       executor.rows = [
         (
