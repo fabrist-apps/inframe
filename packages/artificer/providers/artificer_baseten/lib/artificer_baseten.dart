@@ -1,0 +1,7 @@
+/// Baseten model adapters and typed native inference resources.
+library;
+
+export 'src/chat/chat_models.dart';
+export 'src/chat/chat_resource.dart';
+export 'src/options.dart';
+export 'src/provider.dart';
