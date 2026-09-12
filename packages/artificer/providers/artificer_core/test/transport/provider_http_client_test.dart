@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:artificer_core/artificer_core.dart';
@@ -204,6 +205,53 @@ void main() {
 
       expect(malformed, _expectedError<ProtocolError>());
       expect(unavailable, _expectedError<TransportError>());
+    });
+
+    test('should send and retain arbitrary JSON root values', () async {
+      final responses = <Object?>[
+        [1, 2],
+        'value',
+        null,
+      ];
+      final received = <Object?>[];
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        received.add(JsonValue.parse(await utf8.decoder.bind(request).join()).toDart());
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write(jsonEncode(responses[received.length - 1]));
+        await request.response.close();
+      });
+      final client = ProviderHttpClient(
+        baseUrl: Uri.parse('http://${server.address.address}:${server.port}/'),
+      );
+      addTearDown(client.close);
+
+      final results = <Object?>[];
+      for (final value in responses) {
+        final response = await client
+            .sendJsonValue(
+              ProviderHttpRequest(
+                method: 'POST',
+                path: 'predict',
+                body: JsonValue.fromDart(value),
+              ),
+              providerId: 'fixture',
+              api: 'predict',
+              modelId: 'custom',
+            )
+            .runFuture();
+        results.add(response.value.toDart());
+        expect(response.payload.value.toDart(), value);
+        expect(
+          NativePayload.fromJson(response.payload.toJson()).value.toDart(),
+          value,
+        );
+      }
+
+      expect(received, responses);
+      expect(results, responses);
     });
   });
 }

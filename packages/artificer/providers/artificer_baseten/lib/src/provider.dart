@@ -5,7 +5,9 @@ import 'package:artificer_baseten/src/embeddings/embedding_models.dart';
 import 'package:artificer_baseten/src/embeddings/embeddings_resource.dart';
 import 'package:artificer_baseten/src/messages/messages_resource.dart';
 import 'package:artificer_baseten/src/options.dart';
+import 'package:artificer_baseten/src/prediction/prediction_endpoint.dart';
 import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:conflux/conflux.dart';
 import 'package:http/http.dart' as http;
@@ -68,6 +70,24 @@ final class BasetenProvider {
     );
   }
 
+  /// Binds caller-defined JSON codecs to one exact custom prediction URL.
+  ///
+  /// [encode] and [decode] must be pure because every execution invokes them
+  /// independently and concurrent executions may overlap.
+  BasetenPredictionEndpoint<I, O> predictionEndpoint<I, O>({
+    required Uri endpoint,
+    required JsonValue Function(I input) encode,
+    required O Function(JsonValue json) decode,
+  }) {
+    final binding = _predictionBinding(endpoint);
+    final client = _newClient(
+      binding.baseUrl,
+      authorization: 'Api-Key $_apiKey',
+    );
+    _clients.add(client);
+    return BasetenPredictionEndpoint(client, binding.path, encode, decode);
+  }
+
   ProviderHttpClient _newClient(
     Uri baseUrl, {
     required String authorization,
@@ -80,6 +100,22 @@ final class BasetenProvider {
   /// Interrupts provider-owned work and releases all owned HTTP resources.
   Future<void> close() => _closeFuture ??= Future.wait(
     _clients.map((client) => client.close()),
+  );
+}
+
+({Uri baseUrl, String path}) _predictionBinding(Uri endpoint) {
+  if (!endpoint.isAbsolute ||
+      (endpoint.scheme != 'http' && endpoint.scheme != 'https') ||
+      endpoint.host.isEmpty) {
+    throw ArgumentError.value(endpoint, 'endpoint', 'must be an absolute HTTP(S) URL');
+  }
+  if (endpoint.hasFragment) {
+    throw ArgumentError.value(endpoint, 'endpoint', 'must not contain a fragment');
+  }
+  final path = endpoint.hasQuery ? '${endpoint.path}?${endpoint.query}' : endpoint.path;
+  return (
+    baseUrl: endpoint.replace(path: '/', queryParameters: const {}),
+    path: path,
   );
 }
 

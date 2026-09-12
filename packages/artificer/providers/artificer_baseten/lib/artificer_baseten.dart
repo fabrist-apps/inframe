@@ -9,4 +9,5 @@ export 'src/messages/message_events.dart';
 export 'src/messages/message_models.dart';
 export 'src/messages/messages_resource.dart';
 export 'src/options.dart';
+export 'src/prediction/prediction_endpoint.dart';
 export 'src/provider.dart';

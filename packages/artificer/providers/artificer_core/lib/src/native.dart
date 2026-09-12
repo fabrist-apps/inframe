@@ -7,10 +7,11 @@ final class NativePayload {
     required String providerId,
     required String api,
     required String modelId,
-    required this.json,
+    required JsonValue json,
   }) : providerId = _nonEmpty(providerId, 'providerId'),
        api = _nonEmpty(api, 'api'),
-       modelId = _nonEmpty(modelId, 'modelId');
+       modelId = _nonEmpty(modelId, 'modelId'),
+       _value = json;
 
   /// Deserializes and validates a schema-versioned value.
   factory NativePayload.fromJson(JsonObject json) {
@@ -20,7 +21,7 @@ final class NativePayload {
       providerId: _requiredString(value, 'providerId'),
       api: _requiredString(value, 'api'),
       modelId: _requiredString(value, 'modelId'),
-      json: JsonObject.fromDart(value['json']),
+      json: JsonValue.fromDart(value['json']),
     );
   }
 
@@ -33,8 +34,21 @@ final class NativePayload {
   /// The provider-local model identifier.
   final String modelId;
 
-  /// The immutable native JSON object.
-  final JsonObject json;
+  final JsonValue _value;
+
+  /// The immutable native JSON value.
+  JsonValue get value => _value;
+
+  /// The immutable native JSON object for object-based APIs.
+  ///
+  /// Use [value] for APIs whose response root can also be an array or scalar.
+  JsonObject get json {
+    final value = _value;
+    if (value is! JsonObject) {
+      throw StateError('This native payload does not contain a JSON object.');
+    }
+    return value;
+  }
 
   /// Serializes this value using schema version 1.
   JsonObject toJson() => JsonObject({
@@ -42,7 +56,7 @@ final class NativePayload {
     'providerId': providerId,
     'api': api,
     'modelId': modelId,
-    'json': json.toDart(),
+    'json': _value.toDart(),
   });
 }
 

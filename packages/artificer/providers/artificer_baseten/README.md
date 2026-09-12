@@ -105,3 +105,22 @@ and event envelopes. This preserves beta additions without claiming a stable exh
 Streaming requires `message_stop`; unknown event kinds remain inspectable, while error events,
 premature EOF, malformed payloads, and configured limits fail through `AiError`. Common catalog
 generation continues to use Chat Completions.
+
+Custom prediction endpoints keep their complete configured path and query and use `Api-Key`
+authentication. The caller owns the input and output types and supplies pure JSON codecs:
+
+```dart
+final endpoint = provider.predictionEndpoint<List<double>, double>(
+  endpoint: Uri.parse('https://model.example.run/predict?environment=production'),
+  encode: (input) => JsonArray(input),
+  decode: (json) => (json as JsonNumber).value.toDouble(),
+);
+final prediction = await endpoint.predict([1, 2, 3]).runFuture();
+```
+
+Creating the binding or `Effect` does not run either callback or issue I/O. Every execution
+encodes once, sends one POST, accepts any JSON response root, and decodes once. A decoder
+`FormatException` becomes a `ProtocolError` with the received JSON retained as partial output;
+other callback exceptions remain Conflux defects with their stacks. Successful responses retain
+the complete native JSON and HTTP metadata. Custom predictions do not infer a model identity or
+use the common model interface; use `deployment` only for an explicitly compatible API.

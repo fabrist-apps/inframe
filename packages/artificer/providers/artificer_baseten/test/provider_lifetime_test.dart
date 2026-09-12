@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:artificer_baseten/artificer_baseten.dart';
 import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
 import 'package:conflux/conflux.dart';
 import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
@@ -16,7 +17,7 @@ void main() {
     addTearDown(() => server.close(force: true));
     server.listen((request) async {
       requests++;
-      if (requests == 2 && !started.isCompleted) started.complete();
+      if (requests == 3 && !started.isCompleted) started.complete();
       await request.drain<void>();
       await Future<void>.delayed(const Duration(seconds: 30));
       await request.response.close();
@@ -35,13 +36,20 @@ void main() {
         .languageModel('served-model')
         .generate(GenerationRequest(messages: [UserMessage.text('wait')]))
         .runFutureExit();
+    final prediction = provider.predictionEndpoint<int, int>(
+      endpoint: Uri.parse('$origin/predict?environment=test'),
+      encode: JsonNumber.new,
+      decode: (value) => (value as JsonNumber).value.toInt(),
+    );
+    final predictionRun = prediction.predict(1).runFutureExit();
     await started.future;
 
     await Future.wait([provider.close(), provider.close()]);
 
     expect(await catalogRun, isA<Failed<GenerationResult, AiError>>());
     expect(await deploymentRun, isA<Failed<GenerationResult, AiError>>());
-    expect(requests, 2);
+    expect(await predictionRun, isA<Failed<NativeResponse<int>, AiError>>());
+    expect(requests, 3);
     expect(
       await provider
           .languageModel('catalog/model')
@@ -49,6 +57,7 @@ void main() {
           .runFutureExit(),
       _failedWith<ClientClosedError>(),
     );
+    expect(await prediction.predict(2).runFutureExit(), _failedWith<ClientClosedError>());
   });
 
   test('closing provider leaves a borrowed client usable', () async {
