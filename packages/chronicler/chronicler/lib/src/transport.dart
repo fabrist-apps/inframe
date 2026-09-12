@@ -10,7 +10,7 @@ sealed class ExportResult {
   const factory ExportResult.accepted() = WholeBatchExportResult.accepted;
   const factory ExportResult.retryable() = WholeBatchExportResult.retryable;
   const factory ExportResult.rejected() = WholeBatchExportResult.rejected;
-  factory ExportResult.records(Map<String, ExportDisposition> outcomes) = RecordExportResult;
+  factory ExportResult.records(Iterable<RecordExportOutcome> outcomes) = RecordExportResult;
 }
 
 /// Applies one disposition to the complete submitted batch.
@@ -24,15 +24,26 @@ final class WholeBatchExportResult extends ExportResult {
 
 /// Matches dispositions to submitted event IDs.
 final class RecordExportResult extends ExportResult {
-  RecordExportResult(Map<String, ExportDisposition> outcomes)
-    : outcomes = Map.unmodifiable(outcomes);
+  RecordExportResult(Iterable<RecordExportOutcome> outcomes)
+    : outcomes = List.unmodifiable(outcomes);
 
-  final Map<String, ExportDisposition> outcomes;
+  final List<RecordExportOutcome> outcomes;
+}
+
+/// One event-ID keyed disposition in a partial export result.
+final class RecordExportOutcome {
+  const RecordExportOutcome({required this.eventId, required this.disposition});
+
+  final String eventId;
+  final ExportDisposition disposition;
 }
 
 /// A cancelable export operation.
 abstract interface class ExportAttempt {
+  /// Completes only after this attempt's transport work has stopped.
   Future<ExportResult> get result;
+
+  /// Promptly and idempotently requests cancellation.
   void cancel();
 }
 

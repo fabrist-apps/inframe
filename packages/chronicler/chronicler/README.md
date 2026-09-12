@@ -39,3 +39,16 @@ term. Matching is case-insensitive and deliberately broad: the default `auth` te
 pass an empty term list, or use the synchronous `beforeRecord` hook to change message text and other
 payload content. The built-in rules run again after the hook. Invalid, null, or throwing hook results
 drop the record without exposing payload content in diagnostics.
+
+## Delivery outcomes and retries
+
+An exporter completes each attempt with one disposition for the whole batch or one disposition per
+submitted event ID. `accepted` means the destination acknowledged the record. `rejected` drops it
+permanently, while `retryable` keeps its original event ID and occurrence timestamp and retries it
+within the configured attempt limit.
+
+Retries use full-jitter exponential delays. Because a transport can deliver a request before its
+result fails or times out, a retry can duplicate delivery outside the process. Destinations should
+deduplicate on `eventId`. A timed-out attempt keeps its concurrency slot until `result` completes;
+`ExportAttempt.result` must therefore complete only after all transport work for that attempt has
+stopped. Cancellation is a prompt, idempotent request and does not itself release the slot.

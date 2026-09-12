@@ -112,12 +112,15 @@ final class ChroniclerRuntime {
   final DiagnosticChannel diagnostics;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
+  final _elapsed = Stopwatch()..start();
   late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
   late final Random _random = Random();
   var _insideHook = false;
   var _pendingBytes = 0;
+  var _nextSequence = 0;
   var _pumpScheduled = false;
-  Timer? _batchTimer;
+  Timer? _wakeTimer;
+  Duration Function(int attempt, Duration ceiling)? _retryDelayOverride;
 
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
 
@@ -246,12 +249,22 @@ final class ChroniclerRuntime {
         diagnostics.record(DiagnosticReason.queueFull);
         return;
       }
-      _pending.add(_PendingRecord(record, bytes.length));
+      final pending = _PendingRecord(
+        record,
+        bytes.length,
+        _nextSequence++,
+        _elapsed.elapsed + options.delivery.batchInterval,
+      );
+      _pending.add(pending);
       _pendingBytes += bytes.length;
-      if (_pending.length >= options.delivery.maxBatchRecords) {
+      if (_pending.where((record) => !record.isRetry).length >= options.delivery.maxBatchRecords) {
+        final now = _elapsed.elapsed;
+        for (final record in _pending.where((record) => !record.isRetry)) {
+          record.readyAt = now;
+        }
         _schedulePump();
       } else {
-        _batchTimer ??= Timer(options.delivery.batchInterval, _pump);
+        _scheduleWakeup();
       }
     } on RecordValidationException {
       diagnostics.record(DiagnosticReason.invalidRecord);
@@ -382,19 +395,27 @@ final class ChroniclerRuntime {
   }
 
   void _pump() {
-    _batchTimer?.cancel();
-    _batchTimer = null;
-    while (_active.length < options.delivery.maxConcurrentExports && _pending.isNotEmpty) {
+    _wakeTimer?.cancel();
+    _wakeTimer = null;
+    while (_active.length < options.delivery.maxConcurrentExports) {
+      final now = _elapsed.elapsed;
+      final eligible = _pending.where((record) => record.readyAt <= now).toList()
+        ..sort((left, right) => left.sequence.compareTo(right.sequence));
+      if (eligible.isEmpty) break;
       final records = <_PendingRecord>[];
       var batchBytes = 32;
-      while (_pending.isNotEmpty && records.length < options.delivery.maxBatchRecords) {
-        final next = _pending.first;
+      for (final next in eligible) {
+        if (records.length >= options.delivery.maxBatchRecords) break;
         final candidateBytes = batchBytes + next.encodedBytes + (records.isEmpty ? 0 : 1);
         if (candidateBytes > options.delivery.maxBatchBytes) break;
-        records.add(_pending.removeFirst());
+        _pending.remove(next);
+        records.add(next);
         batchBytes = candidateBytes;
       }
-      if (records.isEmpty) return;
+      if (records.isEmpty) break;
+      for (final record in records) {
+        record.attempts++;
+      }
       final active = _ActiveExport(records);
       _active.add(active);
       try {
@@ -402,31 +423,132 @@ final class ChroniclerRuntime {
           ChroniclerBatch(records.map((pending) => pending.record)),
         );
         active.attempt = attempt;
+        active.timeout = Timer(options.delivery.attemptTimeout, () => _timeOut(active));
         unawaited(
           attempt.result.then(
-            (_) => _complete(active),
-            onError: (Object _, StackTrace _) {
-              diagnostics.record(DiagnosticReason.exportFailed);
-              _complete(active);
-            },
+            (result) => _handleResult(active, result),
+            onError: (Object _, StackTrace _) => _handleFailure(active),
           ),
         );
       } on Object {
-        diagnostics.record(DiagnosticReason.exportFailed);
-        _complete(active);
+        _handleFailure(active);
       }
     }
-    if (_pending.isNotEmpty) {
-      _batchTimer ??= Timer(options.delivery.batchInterval, _pump);
+    _scheduleWakeup();
+  }
+
+  void _timeOut(_ActiveExport active) {
+    if (!_active.contains(active) || active.timedOut) return;
+    active.timedOut = true;
+    diagnostics.record(DiagnosticReason.exportTimedOut);
+    try {
+      active.attempt?.cancel();
+    } on Object {
+      diagnostics.record(DiagnosticReason.exportCancellationFailed);
     }
   }
 
-  void _complete(_ActiveExport active) {
+  void _handleResult(_ActiveExport active, ExportResult result) {
     if (!_active.remove(active)) return;
+    active.timeout?.cancel();
+    final outcomes = _validatedOutcomes(active.records, result);
+    if (outcomes == null) {
+      diagnostics.record(DiagnosticReason.invalidExportResult);
+      for (final record in active.records) {
+        record.uncertain = true;
+        _retry(record);
+      }
+      _schedulePump();
+      return;
+    }
     for (final record in active.records) {
-      _pendingBytes -= record.encodedBytes;
+      switch (outcomes[record.record.envelope.eventId]!) {
+        case ExportDisposition.accepted:
+          _finalize(record);
+        case ExportDisposition.rejected:
+          diagnostics.record(DiagnosticReason.exportRejected);
+          _finalize(record);
+        case ExportDisposition.retryable:
+          record.uncertain = true;
+          _retry(record);
+      }
     }
     _schedulePump();
+  }
+
+  void _handleFailure(_ActiveExport active) {
+    if (!_active.remove(active)) return;
+    active.timeout?.cancel();
+    diagnostics.record(DiagnosticReason.exportFailed);
+    for (final record in active.records) {
+      record.uncertain = true;
+      _retry(record);
+    }
+    _schedulePump();
+  }
+
+  Map<String, ExportDisposition>? _validatedOutcomes(
+    List<_PendingRecord> records,
+    ExportResult result,
+  ) {
+    if (result case WholeBatchExportResult(:final disposition)) {
+      return {for (final record in records) record.record.envelope.eventId: disposition};
+    }
+    final submittedIds = records.map((record) => record.record.envelope.eventId).toSet();
+    final outcomes = <String, ExportDisposition>{};
+    for (final outcome in (result as RecordExportResult).outcomes) {
+      if (!submittedIds.contains(outcome.eventId) || outcomes.containsKey(outcome.eventId)) {
+        return null;
+      }
+      outcomes[outcome.eventId] = outcome.disposition;
+    }
+    return outcomes.length == submittedIds.length ? outcomes : null;
+  }
+
+  void _retry(_PendingRecord record) {
+    if (record.attempts >= options.delivery.maxAttempts) {
+      diagnostics.record(DiagnosticReason.attemptsExhausted);
+      _finalize(record);
+      return;
+    }
+    final ceiling = _retryCeiling(record.attempts);
+    final delay =
+        _retryDelayOverride?.call(record.attempts, ceiling) ??
+        Duration(microseconds: _random.nextInt(ceiling.inMicroseconds + 1));
+    if (delay < Duration.zero || delay > ceiling) {
+      throw StateError('Retry delay must be between zero and its ceiling.');
+    }
+    record
+      ..isRetry = true
+      ..readyAt = _elapsed.elapsed + delay;
+    _pending.add(record);
+  }
+
+  Duration _retryCeiling(int attempts) {
+    final maximumMicros = options.delivery.maxRetryDelay.inMicroseconds;
+    var ceilingMicros = options.delivery.initialRetryDelay.inMicroseconds;
+    for (var retry = 1; retry < attempts; retry++) {
+      ceilingMicros = ceilingMicros >= maximumMicros ~/ 2 ? maximumMicros : ceilingMicros * 2;
+    }
+    return Duration(microseconds: ceilingMicros);
+  }
+
+  void _finalize(_PendingRecord record) {
+    _pendingBytes -= record.encodedBytes;
+  }
+
+  void _scheduleWakeup() {
+    if (_pending.isEmpty || _active.length >= options.delivery.maxConcurrentExports) return;
+    final next = _pending
+        .map((record) => record.readyAt)
+        .reduce((left, right) => left <= right ? left : right);
+    final delay = next - _elapsed.elapsed;
+    if (delay <= Duration.zero) {
+      _schedulePump();
+      return;
+    }
+    _wakeTimer?.cancel();
+    _wakeTimer = Timer(delay, _pump);
   }
 }
 
@@ -438,16 +560,35 @@ final class ChroniclerCaptureFixture {
       chronicler._runtime._captureFixture(record);
 }
 
+/// Internal fixture bridge for deterministic delivery tests.
+final class ChroniclerDeliveryFixture {
+  const ChroniclerDeliveryFixture._();
+
+  static void selectRetryDelay(
+    Chronicler chronicler,
+    Duration Function(int attempt, Duration ceiling) selector,
+  ) {
+    chronicler._runtime._retryDelayOverride = selector;
+  }
+}
+
 final class _PendingRecord {
-  const _PendingRecord(this.record, this.encodedBytes);
+  _PendingRecord(this.record, this.encodedBytes, this.sequence, this.readyAt);
   final ChroniclerRecord record;
   final int encodedBytes;
+  final int sequence;
+  Duration readyAt;
+  int attempts = 0;
+  bool isRetry = false;
+  bool uncertain = false;
 }
 
 final class _ActiveExport {
   _ActiveExport(this.records);
   final List<_PendingRecord> records;
   ExportAttempt? attempt;
+  Timer? timeout;
+  bool timedOut = false;
 }
 
 void _validateConfiguredLabel(
