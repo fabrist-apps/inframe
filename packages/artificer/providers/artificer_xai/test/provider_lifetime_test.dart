@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -110,6 +111,131 @@ void main() {
 
     expect(native, _failedWith<ProtocolError>());
     expect(common, _failedWith<ProtocolError>());
+  });
+
+  test('cancellation before headers and during body preserves interruption', () async {
+    final beforeHeaders = Completer<void>();
+    final bodyStarted = Completer<void>();
+    var requests = 0;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      requests++;
+      await request.drain<void>();
+      if (requests == 1) {
+        beforeHeaders.complete();
+        return;
+      }
+      request.response.write('{"id":"resp_1","output":[');
+      await request.response.flush();
+      bodyStarted.complete();
+    });
+    final provider = XaiProvider(
+      apiKey: 'secret',
+      baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1/'),
+    );
+    final runtime = Runtime();
+    addTearDown(runtime.close);
+    addTearDown(provider.close);
+    final operation = provider
+        .languageModel('model')
+        .generate(GenerationRequest(messages: [UserMessage.text('hello')]));
+
+    final acquiring = runtime.fork(operation);
+    await beforeHeaders.future;
+    final beforeExit = await acquiring
+        .interrupt('before headers')
+        .timeout(const Duration(seconds: 2));
+    final consuming = runtime.fork(operation);
+    await bodyStarted.future;
+    final bodyExit = await consuming.interrupt('during body').timeout(const Duration(seconds: 2));
+
+    expect((beforeExit as Failed<Object?, AiError>).cause.containsInterruption, isTrue);
+    expect((bodyExit as Failed<Object?, AiError>).cause.containsInterruption, isTrue);
+    expect(requests, 2);
+  });
+
+  test('early stream termination releases the response and keeps the provider usable', () async {
+    var requests = 0;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      requests++;
+      final body = jsonDecode(await utf8.decoder.bind(request).join())! as Map<String, Object?>;
+      if (body['stream'] == true) {
+        final created = jsonEncode({
+          'type': 'response.created',
+          'response': {
+            ..._response,
+            'status': 'in_progress',
+            'output': <Object?>[],
+          },
+        });
+        request.response
+          ..bufferOutput = false
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..write('data: $created\n\n');
+        await request.response.flush();
+        return;
+      }
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode(_response));
+      await request.response.close();
+    });
+    final provider = XaiProvider(
+      apiKey: 'secret',
+      baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1/'),
+    );
+    addTearDown(provider.close);
+    final model = provider.languageModel('model');
+
+    final first = await model
+        .stream(GenerationRequest(messages: [UserMessage.text('hello')]))
+        .runFirst()
+        .runFuture()
+        .timeout(const Duration(seconds: 2));
+    final generated = await model
+        .generate(GenerationRequest(messages: [UserMessage.text('next')]))
+        .runFuture()
+        .timeout(const Duration(seconds: 2));
+
+    expect(first, isA<Some<GenerationEvent>>());
+    expect(generated.text, 'Hello.');
+    expect(requests, 2);
+  });
+
+  test('redirects are returned as one provider failure without retrying', () async {
+    var requests = 0;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      requests++;
+      await request.drain<void>();
+      request.response
+        ..statusCode = HttpStatus.temporaryRedirect
+        ..headers.set(HttpHeaders.locationHeader, '/redirected')
+        ..headers.contentType = ContentType.json
+        ..write(
+          jsonEncode({
+            'error': {'code': 'redirect', 'message': 'redirect'},
+          }),
+        );
+      await request.response.close();
+    });
+    final provider = XaiProvider(
+      apiKey: 'secret',
+      baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1/'),
+    );
+    addTearDown(provider.close);
+
+    final exit = await provider
+        .languageModel('model')
+        .generate(GenerationRequest(messages: [UserMessage.text('hello')]))
+        .runFutureExit();
+
+    expect(exit, _failedWith<ProviderError>());
+    expect(requests, 1);
   });
 }
 
