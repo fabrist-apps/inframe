@@ -187,9 +187,9 @@ void main() {
 
       expect(report.accepted, 2);
       expect(
-        exporter.batches.single.records
-            .cast<MetricRecord>()
-            .map((record) => record.payload.instrument),
+        exporter.batches.single.records.cast<MetricRecord>().map(
+          (record) => record.payload.instrument,
+        ),
         containsAll([MetricInstrument.upDownCounter, MetricInstrument.gauge]),
       );
     });

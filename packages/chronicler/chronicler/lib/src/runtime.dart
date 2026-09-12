@@ -1947,6 +1947,28 @@ final class ChroniclerMetricFixture {
       count: count,
     );
   }
+
+  /// Places an existing histogram at an aggregate arithmetic boundary.
+  static void setHistogramAggregate(
+    Chronicler chronicler, {
+    required List<int> bucketCounts,
+    required int count,
+    required double max,
+    required double min,
+    required String name,
+    required double sum,
+    Map<String, Object?> attributes = const {},
+  }) {
+    chronicler._runtime.metrics.setHistogramAggregateForTesting(
+      name: name,
+      attributes: attributes,
+      count: count,
+      bucketCounts: bucketCounts,
+      sum: sum,
+      min: min,
+      max: max,
+    );
+  }
 }
 
 final class _PendingRecord {

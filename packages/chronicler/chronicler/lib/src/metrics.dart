@@ -105,17 +105,62 @@ final class ChroniclerMetrics {
     return handle;
   }
 
+  /// Returns a histogram with explicit upper-inclusive bucket boundaries.
+  ChroniclerHistogram histogram(
+    String name, {
+    required List<num> boundaries,
+    String unit = '1',
+  }) {
+    _validateDefinition(name, unit);
+    final normalizedBoundaries = _validateBoundaries(boundaries);
+    final existing = _instruments[name];
+    if (existing != null) {
+      _requireCompatible(
+        existing,
+        MetricInstrument.histogram,
+        unit,
+        boundaries: normalizedBoundaries,
+      );
+      return (existing as _HistogramInstrument).handle;
+    }
+    _requireInstrumentCapacity();
+    late final _HistogramInstrument instrument;
+    final handle = ChroniclerHistogram.internal(
+      (value, attributes) => _recordHistogram(instrument, value, attributes),
+    );
+    instrument = _HistogramInstrument(
+      name: name,
+      unit: unit,
+      boundaries: normalizedBoundaries,
+      handle: handle,
+    );
+    _instruments[name] = instrument;
+    return handle;
+  }
+
   void _requireCompatible(
     _MetricInstrument existing,
     MetricInstrument instrument,
-    String unit,
-  ) {
-    if (existing.instrument != instrument || existing.unit != unit) {
+    String unit, {
+    List<double>? boundaries,
+  }) {
+    if (existing.instrument != instrument ||
+        existing.unit != unit ||
+        !_sameBoundaries(existing, boundaries)) {
       throw const ChroniclerConfigurationException(
         'metric instrument',
         'name is already registered with a different definition',
       );
     }
+  }
+
+  bool _sameBoundaries(_MetricInstrument existing, List<double>? boundaries) {
+    if (existing is! _HistogramInstrument) return boundaries == null;
+    if (boundaries == null || existing.boundaries.length != boundaries.length) return false;
+    for (var index = 0; index < boundaries.length; index++) {
+      if (existing.boundaries[index] != boundaries[index]) return false;
+    }
+    return true;
   }
 
   void _requireInstrumentCapacity() {
@@ -143,6 +188,27 @@ final class ChroniclerMetrics {
         'must be 1 to 63 printable ASCII bytes',
       );
     }
+  }
+
+  List<double> _validateBoundaries(List<num> boundaries) {
+    if (boundaries.isEmpty || boundaries.length > _options.maxHistogramBoundaries) {
+      throw const ChroniclerConfigurationException(
+        'histogram boundaries',
+        'must be nonempty and within maxHistogramBoundaries',
+      );
+    }
+    final normalized = <double>[];
+    for (final boundary in boundaries) {
+      final value = boundary.toDouble();
+      if (!value.isFinite || normalized.isNotEmpty && value <= normalized.last) {
+        throw const ChroniclerConfigurationException(
+          'histogram boundaries',
+          'must be finite and strictly increasing after double conversion',
+        );
+      }
+      normalized.add(value == 0 ? 0 : value);
+    }
+    return List.unmodifiable(normalized);
   }
 
   void _addSum(
@@ -206,6 +272,49 @@ final class ChroniclerMetrics {
       ..count = nextCount
       ..value = value == 0 ? 0 : value
       ..observedAt = _now();
+  }
+
+  void _recordHistogram(
+    _HistogramInstrument instrument,
+    num input,
+    Map<String, Object?> attributes,
+  ) {
+    if (!_canRecord()) return;
+    final value = input.toDouble();
+    if (!value.isFinite) {
+      _diagnose(DiagnosticReason.invalidMeasurement);
+      return;
+    }
+    late final Map<String, Object?> dimensions;
+    try {
+      dimensions = _redact(_snapshotDimensions(attributes));
+    } on Object {
+      _diagnose(DiagnosticReason.invalidMeasurement);
+      return;
+    }
+    final series = _series(
+      instrument,
+      dimensions,
+      (attributes) => _HistogramSeries(attributes, instrument.boundaries.length + 1),
+    );
+    if (series == null) return;
+    var bucket = instrument.boundaries.indexWhere((boundary) => value <= boundary);
+    if (bucket < 0) bucket = instrument.boundaries.length;
+    final nextCount = series.count + 1;
+    final nextBucketCount = series.bucketCounts[bucket] + 1;
+    final nextSum = series.sum + value;
+    if (nextCount > _maximumPortableInteger ||
+        nextBucketCount > _maximumPortableInteger ||
+        !nextSum.isFinite) {
+      _diagnose(DiagnosticReason.invalidMeasurement);
+      return;
+    }
+    series
+      ..count = nextCount
+      ..sum = nextSum == 0 ? 0 : nextSum
+      ..min = series.min == null || value < series.min! ? value : series.min
+      ..max = series.max == null || value > series.max! ? value : series.max;
+    series.bucketCounts[bucket] = nextBucketCount;
   }
 
   T? _series<T extends _MetricSeries>(
@@ -354,6 +463,28 @@ final class ChroniclerMetrics {
     if (series == null) throw StateError('metric series does not exist');
     series.count = count;
   }
+
+  /// Replaces an existing histogram aggregate for atomic-overflow tests.
+  void setHistogramAggregateForTesting({
+    required String name,
+    required Map<String, Object?> attributes,
+    required int count,
+    required List<int> bucketCounts,
+    required double sum,
+    required double min,
+    required double max,
+  }) {
+    final instrument = _instruments[name];
+    final dimensions = _redact(_snapshotDimensions(attributes));
+    final series = instrument?.series[_seriesKey(dimensions)];
+    if (series is! _HistogramSeries) throw StateError('histogram series does not exist');
+    series
+      ..count = count
+      ..sum = sum
+      ..min = min
+      ..max = max;
+    series.bucketCounts.setAll(0, bucketCounts);
+  }
 }
 
 /// Records nonnegative changes into bounded interval aggregates.
@@ -405,6 +536,20 @@ final class ChroniclerGauge {
     num value, {
     Map<String, Object?> attributes = const {},
   }) => _set(value, attributes);
+}
+
+/// Records distributions using explicit upper-inclusive bucket boundaries.
+final class ChroniclerHistogram {
+  /// Creates a runtime-owned histogram handle.
+  ChroniclerHistogram.internal(this._record);
+
+  final void Function(num value, Map<String, Object?> attributes) _record;
+
+  /// Records [value] in the current interval for [attributes].
+  void record(
+    num value, {
+    Map<String, Object?> attributes = const {},
+  }) => _record(value, attributes);
 }
 
 sealed class _MetricInstrument {
@@ -499,6 +644,48 @@ final class _GaugeInstrument extends _MetricInstrument {
   }
 }
 
+final class _HistogramInstrument extends _MetricInstrument {
+  _HistogramInstrument({
+    required super.name,
+    required super.unit,
+    required this.boundaries,
+    required this.handle,
+  });
+
+  final List<double> boundaries;
+  final ChroniclerHistogram handle;
+
+  @override
+  MetricInstrument get instrument => MetricInstrument.histogram;
+
+  @override
+  MetricPayload payload(
+    _MetricSeries series, {
+    required DateTime intervalStart,
+    required DateTime intervalEnd,
+    required int durationMicros,
+  }) {
+    final histogram = series as _HistogramSeries;
+    return MetricPayload(
+      name: name,
+      instrument: instrument,
+      unit: unit,
+      attributes: histogram.attributes,
+      intervalStart: intervalStart,
+      intervalEnd: intervalEnd,
+      durationMicros: durationMicros,
+      observationCount: histogram.count,
+      temporality: MetricTemporality.delta,
+      boundaries: boundaries,
+      bucketCounts: histogram.bucketCounts,
+      count: histogram.count,
+      sum: histogram.sum,
+      min: histogram.min,
+      max: histogram.max,
+    );
+  }
+}
+
 sealed class _MetricSeries {
   _MetricSeries(this.attributes);
 
@@ -531,6 +718,24 @@ final class _GaugeSeries extends _MetricSeries {
     count = 0;
     value = 0;
     observedAt = null;
+  }
+}
+
+final class _HistogramSeries extends _MetricSeries {
+  _HistogramSeries(super.attributes, int bucketCount) : bucketCounts = List.filled(bucketCount, 0);
+
+  final List<int> bucketCounts;
+  double sum = 0;
+  double? min;
+  double? max;
+
+  @override
+  void reset() {
+    count = 0;
+    sum = 0;
+    min = null;
+    max = null;
+    bucketCounts.fillRange(0, bucketCounts.length, 0);
   }
 }
 

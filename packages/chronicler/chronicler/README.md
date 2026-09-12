@@ -100,6 +100,12 @@ active.add(1);
 active.add(-1);
 final depth = context.metrics.gauge('queue.depth');
 depth.set(42);
+final latency = context.metrics.histogram(
+  'request.duration',
+  unit: 'ms',
+  boundaries: [10, 50, 100, 250, 500, 1000],
+);
+latency.record(125);
 ```
 
 Counters export nonnegative changes measured during each interval rather than lifetime totals. The
@@ -119,6 +125,11 @@ zero when changes cancel. They do not represent an absolute current count. Sette
 series exports its latest accepted value and observation time for the interval. A gauge value is not
 repeated in later intervals, so applications call `set` periodically when regular observations are
 needed. Callback and automatically polled gauges are not part of the base SDK.
+
+Histograms require at least one finite, strictly increasing boundary chosen for the measured value.
+Each boundary is an inclusive upper bound; values above the final boundary enter an overflow bucket.
+Every measured interval exports immutable bucket counts, total count, sum, minimum, and maximum.
+Chronicler supplies no implicit bucket ranges, and repeated lookup cannot change registered boundaries.
 
 `flush()` closes the current partial metric interval before taking its delivery snapshot. New
 measurements immediately enter a fresh full interval and cannot extend that flush. `close()` seals
