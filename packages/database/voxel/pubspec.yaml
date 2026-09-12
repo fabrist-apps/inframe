@@ -1,0 +1,22 @@
+name: voxel_workspace
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+
+workspace:
+  - voxel
+  - voxel_generator
+  - test/fixtures/schema_package
+  - test/fixtures/app_package
+
+dev_dependencies:
+  build_runner: ^2.16.1
+  test: ^1.26.3
+  turso: any
+  voxel: any
+  voxel_fixture_app: any
+  voxel_fixture_schema: any
+  voxel_generator: any
+  web: ^1.1.1
