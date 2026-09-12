@@ -63,7 +63,7 @@ final class OpenAIFile {
       expiresAt: _optionalInteger(value, 'expires_at'),
       filename: _string(value, 'filename'),
       purpose: _purpose(_string(value, 'purpose')),
-      status: _status(_string(value, 'status')),
+      status: _status(_optionalString(value, 'status')),
       statusDetails: _optionalString(value, 'status_details'),
       raw: raw,
       extensions: JsonObject(
@@ -140,7 +140,12 @@ final class OpenAIFilePage {
   factory OpenAIFilePage.fromJson(JsonObject raw) {
     final value = raw.toDart();
     return OpenAIFilePage._(
-      data: _list(value, 'data').map((item) => OpenAIFile.fromJson(JsonObject.fromDart(item))),
+      data: _list(value, 'data').map((item) {
+        if (item is! Map<String, Object?>) {
+          throw const FormatException('file page data must contain objects.');
+        }
+        return OpenAIFile.fromJson(JsonObject(item));
+      }),
       firstId: _optionalString(value, 'first_id'),
       lastId: _optionalString(value, 'last_id'),
       hasMore: _boolean(value, 'has_more'),
@@ -217,7 +222,7 @@ OpenAIFilePurpose _purpose(String value) => OpenAIFilePurpose.values.firstWhere(
   orElse: () => OpenAIFilePurpose.unknown,
 );
 
-OpenAIFileStatus _status(String value) => switch (value) {
+OpenAIFileStatus _status(String? value) => switch (value) {
   'uploaded' => OpenAIFileStatus.uploaded,
   'processed' => OpenAIFileStatus.processed,
   'error' => OpenAIFileStatus.error,

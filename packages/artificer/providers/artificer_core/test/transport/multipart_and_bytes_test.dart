@@ -48,6 +48,9 @@ void main() {
 
     expect(opens, 2);
     expect(contentTypes, everyElement(startsWith('multipart/form-data; boundary=')));
+    final boundaries = contentTypes.map((value) => value.split('boundary=').last).toList();
+    expect(boundaries, everyElement(matches(RegExp(r'^artificer-[A-Za-z0-9_-]{32}$'))));
+    expect(boundaries.toSet(), hasLength(2));
     for (var index = 0; index < bodies.length; index++) {
       final body = bodies[index];
       final text = latin1.decode(body);

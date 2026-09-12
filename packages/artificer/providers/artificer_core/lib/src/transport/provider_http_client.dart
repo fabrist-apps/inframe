@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:artificer_core/src/errors.dart';
@@ -879,10 +880,10 @@ String _safeForeignMessage(Object error) => switch (error) {
   _ => 'The HTTP operation failed.',
 };
 
-var _multipartSequence = 0;
+final _multipartRandom = Random.secure();
 
 String _multipartBoundary() =>
-    'artificer-${DateTime.now().microsecondsSinceEpoch}-${_multipartSequence++}';
+    'artificer-${base64Url.encode(List.generate(24, (_) => _multipartRandom.nextInt(256)))}';
 
 List<int> _multipartPrefix(
   ProviderMultipartRequest request,

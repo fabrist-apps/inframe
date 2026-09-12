@@ -153,11 +153,51 @@ void main() {
       isA<Failed<List<GenerationEvent>, AiError>>().having(
         (failure) => (failure.cause as Expected<AiError>).error,
         'error',
-        isA<ProviderError>().having(
-          (error) => (error.partialOutput! as AssistantMessage).text,
-          'partial text',
-          'partial',
-        ),
+        isA<ProviderError>()
+            .having((error) => error.message, 'message', 'failed')
+            .having((error) => error.code, 'code', 'server_error')
+            .having(
+              (error) => (error.partialOutput! as AssistantMessage).text,
+              'partial text',
+              'partial',
+            ),
+      ),
+    );
+  });
+
+  test('response.failed reads the nested native stream error', () async {
+    final server = await _streamServer([
+      {
+        'type': 'response.failed',
+        'sequence_number': 0,
+        'response': {
+          ..._createdResponse,
+          'status': 'failed',
+          'error': {'code': 'model_error', 'message': 'nested failure'},
+        },
+      },
+    ]);
+    final provider = _provider(server);
+    addTearDown(provider.close);
+
+    final exit = await provider.responses
+        .stream(
+          OpenAIResponseRequest(
+            model: 'gpt-future',
+            input: [OpenAIResponseInputMessage.userText('hello')],
+          ),
+        )
+        .runCollect()
+        .runFutureExit();
+
+    expect(
+      exit,
+      isA<Failed<List<OpenAIResponseEvent>, AiError>>().having(
+        (failure) => (failure.cause as Expected<AiError>).error,
+        'error',
+        isA<ProviderError>()
+            .having((error) => error.message, 'message', 'nested failure')
+            .having((error) => error.code, 'code', 'model_error'),
       ),
     );
   });

@@ -518,15 +518,15 @@ sealed class OpenAIResponseOutputItem {
     final type = _string(value, 'type');
     return switch (type) {
       'message' => OpenAIResponseMessageItem._(
-        id: value['id'] as String?,
-        status: value['status'] as String?,
+        id: _optionalString(value, 'id'),
+        status: _optionalString(value, 'status'),
         content: _list(value, 'content').map(OpenAIResponseOutputContent.fromDart),
         raw: raw,
         extensions: JsonObject(_without(value, {'type', 'id', 'status', 'role', 'content'})),
       ),
       'reasoning' => OpenAIReasoningOutputItem._(
-        id: value['id'] as String?,
-        status: value['status'] as String?,
+        id: _optionalString(value, 'id'),
+        status: _optionalString(value, 'status'),
         summaries: _optionalList(
           value,
           'summary',
@@ -536,11 +536,11 @@ sealed class OpenAIResponseOutputItem {
       ),
       'function_call' || 'custom_tool_call' => OpenAICallerToolOutputItem._(
         type: type,
-        id: value['id'] as String?,
+        id: _optionalString(value, 'id'),
         callId: _string(value, 'call_id'),
         name: _string(value, 'name'),
         input: type == 'function_call' ? _string(value, 'arguments') : _string(value, 'input'),
-        status: value['status'] as String?,
+        status: _optionalString(value, 'status'),
         raw: raw,
         extensions: JsonObject(
           _without(value, {'type', 'id', 'call_id', 'name', 'arguments', 'input', 'status'}),
@@ -548,11 +548,11 @@ sealed class OpenAIResponseOutputItem {
       ),
       'computer_call' || 'shell_call' || 'apply_patch_call' => OpenAICallerToolOutputItem._(
         type: type,
-        id: value['id'] as String?,
+        id: _optionalString(value, 'id'),
         callId: _string(value, 'call_id'),
         name: type.replaceFirst('_call', ''),
         input: JsonObject(_without(value, {'type', 'id', 'call_id', 'status'})).encode(),
-        status: value['status'] as String?,
+        status: _optionalString(value, 'status'),
         raw: raw,
         extensions: JsonObject(_without(value, {'type', 'id', 'call_id', 'status'})),
       ),
@@ -562,14 +562,14 @@ sealed class OpenAIResponseOutputItem {
       'mcp_call' ||
       'mcp_list_tools' => OpenAIProviderToolOutputItem._(
         type: type,
-        id: value['id'] as String?,
-        status: value['status'] as String?,
+        id: _optionalString(value, 'id'),
+        status: _optionalString(value, 'status'),
         raw: raw,
         extensions: JsonObject(_without(value, {'type', 'id', 'status'})),
       ),
       _ => OpenAIUnknownOutputItem._(
         type: type,
-        id: value['id'] as String?,
+        id: _optionalString(value, 'id'),
         raw: raw,
         extensions: JsonObject(_without(value, {'type', 'id'})),
       ),
@@ -814,6 +814,13 @@ List<Object?> _optionalList(Map<String, Object?> value, String key) {
 
 String _string(Map<String, Object?> value, String key) {
   final field = value[key];
+  if (field is! String) throw FormatException('$key must be a string.');
+  return field;
+}
+
+String? _optionalString(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field == null) return null;
   if (field is! String) throw FormatException('$key must be a string.');
   return field;
 }

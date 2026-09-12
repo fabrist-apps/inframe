@@ -165,7 +165,7 @@ final class OpenAIResponsesResource {
             for (final item in value.output)
               ReplayItem(
                 id: item.id,
-                phase: item.extensions.toDart()['phase'] as String?,
+                phase: _optionalExtensionString(item.extensions, 'phase'),
                 data: item.raw,
               ),
           ],
@@ -201,7 +201,9 @@ final class OpenAIResponsesResource {
             error is Map<String, Object?> && error['message'] is String
                 ? error['message']! as String
                 : 'OpenAI response failed.',
-            code: error is Map<String, Object?> ? error['code'] as String? : null,
+            code: error is Map<String, Object?> && error['code'] is String
+                ? error['code']! as String
+                : null,
             details: details,
             requestId: response.metadata.requestId,
           ),
@@ -449,7 +451,7 @@ final class _OpenAINativeResponsesProtocol implements SseProtocol<OpenAIResponse
   Iterable<OpenAIResponseEvent> decode(SseEvent event) {
     final decoded = _decodeEvent(event);
     if (decoded.type == 'response.failed' || decoded.type == 'error') {
-      throw ProviderError('OpenAI reported a streaming error.', details: decoded.raw);
+      throw _streamError(decoded);
     }
     if (decoded is OpenAIResponseCompletedEvent) _terminal = true;
     return [decoded];
@@ -536,15 +538,7 @@ final class _OpenAICommonResponsesProtocol implements SseProtocol<GenerationEven
         _lastTerminal = response;
       case OpenAIUnknownResponseEvent():
         if (decoded.type == 'response.failed' || decoded.type == 'error') {
-          final value = decoded.raw.toDart();
-          throw ProviderError(
-            value['message'] is String
-                ? value['message']! as String
-                : 'OpenAI reported a streaming error.',
-            code: value['code'] as String?,
-            details: decoded.raw,
-            partialOutput: assembler.partialMessage,
-          );
+          throw _streamError(decoded, partialOutput: assembler.partialMessage);
         }
         _unknownEvents.add(ReplayItem(phase: 'unknown-event', data: decoded.raw));
         yield assembler.providerEvent(decoded.type, decoded.raw);
@@ -601,7 +595,7 @@ final class _OpenAICommonResponsesProtocol implements SseProtocol<GenerationEven
         for (final item in terminal.output)
           ReplayItem(
             id: item.id,
-            phase: item.extensions.toDart()['phase'] as String?,
+            phase: _optionalExtensionString(item.extensions, 'phase'),
             data: item.raw,
           ),
         ..._unknownEvents,
@@ -768,14 +762,48 @@ Iterable<Citation> _citations(OpenAIOutputTextContent part) sync* {
     if (annotation is! Map<String, Object?>) continue;
     final url = annotation['url'];
     if (url is! String) continue;
+    final uri = Uri.tryParse(url);
+    if (uri == null) continue;
     yield Citation(
-      uri: Uri.parse(url),
-      title: annotation['title'] as String?,
-      documentReference: annotation['file_id'] as String?,
+      uri: uri,
+      title: switch (annotation['title']) {
+        final String title => title,
+        _ => null,
+      },
+      documentReference: switch (annotation['file_id']) {
+        final String fileId => fileId,
+        _ => null,
+      },
       nativeMetadata: JsonObject(annotation),
     );
   }
 }
+
+ProviderError _streamError(OpenAIResponseEvent event, {Object? partialOutput}) {
+  final raw = event.raw.toDart();
+  final error = switch (event.type) {
+    'response.failed' => switch (raw['response']) {
+      final Map<String, Object?> response => response['error'],
+      _ => null,
+    },
+    _ => raw,
+  };
+  final fields = error is Map<String, Object?> ? error : const <String, Object?>{};
+  return ProviderError(
+    fields['message'] is String
+        ? fields['message']! as String
+        : 'OpenAI reported a streaming error.',
+    code: fields['code'] is String ? fields['code']! as String : null,
+    details: event.raw,
+    partialOutput: partialOutput,
+  );
+}
+
+String? _optionalExtensionString(JsonObject extensions, String key) =>
+    switch (extensions.toDart()[key]) {
+      final String value => value,
+      _ => null,
+    };
 
 ToolArguments _toolArguments(OpenAICallerToolOutputItem item) {
   if (item.type == 'custom_tool_call') return TextToolArguments(item.input);

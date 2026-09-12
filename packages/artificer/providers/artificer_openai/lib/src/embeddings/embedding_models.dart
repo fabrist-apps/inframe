@@ -159,7 +159,7 @@ final class OpenAIEmbeddingData {
     final value = _object(input, 'embedding item');
     final embedding = value['embedding'];
     final decoded = switch (embedding) {
-      final String base64 => OpenAIBase64Embedding(base64),
+      final String base64 when base64.isNotEmpty => OpenAIBase64Embedding(base64),
       final List<Object?> vector when vector.every((item) => item is num) => OpenAIFloatEmbedding(
         vector.cast<num>(),
       ),

@@ -395,6 +395,55 @@ void main() {
     expect(result.message.replay!.items, hasLength(4));
   });
 
+  test('malformed optional fields fail predictably and invalid citations are skipped', () {
+    expect(
+      () => OpenAIResponseOutputItem.fromDart({
+        'id': 1,
+        'type': 'message',
+        'content': <Object?>[],
+      }),
+      throwsFormatException,
+    );
+    final raw = JsonObject({
+      'id': 'resp_citation',
+      'status': 'completed',
+      'model': 'gpt-future',
+      'output': [
+        {
+          'id': 'msg_1',
+          'type': 'message',
+          'status': 'completed',
+          'content': [
+            {
+              'type': 'output_text',
+              'text': 'answer',
+              'annotations': [
+                {'type': 'url_citation', 'url': 'http://['},
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    final provider = OpenAIProvider(apiKey: 'secret');
+    addTearDown(provider.close);
+
+    final result = provider.responses.normalize(
+      NativeResponse(
+        value: OpenAIResponse.fromJson(raw),
+        payload: NativePayload(
+          providerId: 'openai',
+          api: 'responses',
+          modelId: 'gpt-future',
+          json: raw,
+        ),
+        metadata: ResponseMetadata(statusCode: 200),
+      ),
+    );
+
+    expect(result.message.parts.whereType<TextOutputPart>().single.citations, isEmpty);
+  });
+
   test('rejects stateful common options and incompatible replay before I/O', () async {
     var requests = 0;
     final server = await _server((request, _) async {

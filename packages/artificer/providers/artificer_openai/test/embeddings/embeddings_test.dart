@@ -114,7 +114,11 @@ void main() {
             'object': 'list',
             'model': 'actual-model',
             'data': [
-              {'object': 'embedding', 'index': 0, 'embedding': <Object?>[]},
+              {
+                'object': 'embedding',
+                'index': 0,
+                'embedding': requests == 1 ? <Object?>[] : '',
+              },
             ],
           }),
         );
@@ -140,7 +144,17 @@ void main() {
         .embed(EmbeddingRequest(items: [EmbeddingInput.text('one')]))
         .runFutureExit();
     expect(invalid, _failedWith<ProtocolError>());
-    expect(requests, 1);
+    final invalidBase64 = await provider.embeddings
+        .create(
+          OpenAIEmbeddingRequest(
+            model: 'future-model',
+            input: [OpenAITextEmbeddingInput('one')],
+            encodingFormat: OpenAIEmbeddingEncoding.base64,
+          ),
+        )
+        .runFutureExit();
+    expect(invalidBase64, _failedWith<ProtocolError>());
+    expect(requests, 2);
   });
 }
 

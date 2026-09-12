@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:artificer_openai/artificer_openai.dart';
 import 'package:conflux/conflux.dart';
@@ -89,7 +91,38 @@ void main() {
     expect(uploadText, contains('Content-Type: application/octet-stream'));
     expect(uploadBody, containsAllInOrder([0, 1, 2, 255]));
   });
+
+  test('deprecated status may be absent and malformed pages fail as protocol errors', () async {
+    final withoutStatus = Map<String, Object?>.from(_file)..remove('status');
+    expect(
+      OpenAIFile.fromJson(JsonObject(withoutStatus)).status,
+      OpenAIFileStatus.unknown,
+    );
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      await request.drain<void>();
+      _json(request, {
+        'object': 'list',
+        'data': [1],
+        'has_more': false,
+      });
+      await request.response.close();
+    });
+    final provider = _provider(server);
+    addTearDown(provider.close);
+
+    final exit = await provider.files.list().runFutureExit();
+
+    expect(exit, _failedWith<ProtocolError>());
+  });
 }
+
+Matcher _failedWith<E extends AiError>() => isA<Failed<Object?, AiError>>().having(
+  (failure) => (failure.cause as Expected<AiError>).error,
+  'error',
+  isA<E>(),
+);
 
 void _json(HttpRequest request, Map<String, Object?> value) {
   request.response
