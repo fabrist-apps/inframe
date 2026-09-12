@@ -32,11 +32,18 @@ final class DiagnosticChannel {
   }
 
   void close() {
-    closed = true;
+    if (closed) return;
+    final now = _elapsed.elapsed;
+    final eligible = _timers.keys.where((reason) {
+      final last = _lastNotification[reason];
+      return last == null || now - last >= options.notificationInterval;
+    }).toList();
     for (final timer in _timers.values) {
       timer.cancel();
     }
     _timers.clear();
+    eligible.forEach(_notify);
+    closed = true;
   }
 
   void _notify(DiagnosticReason reason) {

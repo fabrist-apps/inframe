@@ -9,6 +9,8 @@ final class TestExporter implements ChroniclerExporter {
   final _nextBatch = StreamController<ChroniclerBatch>.broadcast(sync: true);
   final _exportFailures = Queue<Exception>();
   int closeCount = 0;
+  Completer<void>? closeCompleter;
+  Exception? closeError;
 
   Stream<ChroniclerBatch> get exportedBatches => _nextBatch.stream;
 
@@ -25,9 +27,13 @@ final class TestExporter implements ChroniclerExporter {
   }
 
   @override
-  Future<void> close() async {
+  Future<void> close() {
     closeCount++;
-    await _nextBatch.close();
+    final error = closeError;
+    if (error != null) throw error;
+    return (closeCompleter?.future ?? Future.value()).whenComplete(
+      _nextBatch.close,
+    );
   }
 }
 

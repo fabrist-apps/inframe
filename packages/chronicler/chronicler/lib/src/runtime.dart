@@ -42,6 +42,9 @@ final class Chronicler {
   Future<DeliveryReport> flush({Duration? timeout}) =>
       _runtime.flush(timeout ?? _runtime.options.delivery.flushTimeout);
 
+  /// Stops recording, drains bounded work, and releases the owned exporter.
+  Future<DeliveryReport> close() => _runtime.close();
+
   bool isCollectionEnabled(ChroniclerSignal signal) => _runtime.isCollectionEnabled(signal);
 
   // API contract uses a positional boolean for symmetric runtime toggles.
@@ -140,7 +143,12 @@ final class ChroniclerRuntime {
   var _pumpScheduled = false;
   Timer? _wakeTimer;
   Duration Function(int attempt, Duration ceiling)? _retryDelayOverride;
-  final ChroniclerRuntimeState _state = ChroniclerRuntimeState.running;
+  ChroniclerRuntimeState _state = ChroniclerRuntimeState.running;
+  bool _deliveryOpen = true;
+  Future<DeliveryReport>? _closeFuture;
+  Set<_RecordDisposition>? _closeSnapshot;
+  Completer<void>? _closeDeliveryResolved;
+  Completer<void>? _activeDrained;
 
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
 
@@ -174,11 +182,141 @@ final class ChroniclerRuntime {
     return waiter.completer.future;
   }
 
+  Future<DeliveryReport> close() {
+    final existing = _closeFuture;
+    if (existing != null) return existing;
+    final completer = Completer<DeliveryReport>();
+    _closeFuture = completer.future;
+    _beginClose(completer);
+    return completer.future;
+  }
+
+  void _beginClose(Completer<DeliveryReport> completer) {
+    _state = ChroniclerRuntimeState.closing;
+    diagnostics.close();
+    final startedAt = _elapsed.elapsed;
+    final finalizations = <_RecordDisposition>[];
+    while (_flushFinalizations.isNotEmpty) {
+      for (final record in _flushFinalizations.removeFirst()) {
+        finalizations.add(_finalizeForClose(record));
+      }
+    }
+    final snapshot = <_RecordDisposition>{
+      for (final record in _pending) record.disposition,
+      for (final export in _active)
+        for (final record in export.records) record.disposition,
+      ...finalizations,
+    };
+    _closeSnapshot = snapshot;
+    final resolved = Completer<void>();
+    _closeDeliveryResolved = resolved;
+    if (snapshot.every((state) => state.isTerminal)) resolved.complete();
+    final now = _elapsed.elapsed;
+    for (final record in _pending) {
+      record.readyAt = now;
+    }
+    _schedulePump();
+    unawaited(
+      _runClose(snapshot, resolved.future, startedAt).then(
+        completer.complete,
+        onError: (Object _, StackTrace _) {
+          _finishOutstandingAtShutdown();
+          _state = ChroniclerRuntimeState.closed;
+          completer.complete(_report(snapshot, timedOut: true, cleanupIncomplete: true));
+        },
+      ),
+    );
+  }
+
+  Future<DeliveryReport> _runClose(
+    Set<_RecordDisposition> snapshot,
+    Future<void> deliveryResolved,
+    Duration startedAt,
+  ) async {
+    final totalDeadline = startedAt + options.delivery.closeTimeout;
+    final deliveryDeadline = totalDeadline - options.delivery.cleanupReserve;
+    final deliveryCompleted = await _completesBy(deliveryResolved, deliveryDeadline);
+    _deliveryOpen = false;
+    _wakeTimer?.cancel();
+    _wakeTimer = null;
+    if (!deliveryCompleted) {
+      for (final record in _pending.toList()) {
+        _pending.remove(record);
+        _drop(record, DropReason.shutdown);
+      }
+      for (final active in _active) {
+        for (final record in active.records) {
+          record.disposition.uncertain = true;
+        }
+        _requestCancellation(active);
+      }
+    }
+
+    var cleanupFailed = false;
+    Future<void> exporterCleanup;
+    try {
+      exporterCleanup = exporter.close();
+    } on Object {
+      cleanupFailed = true;
+      diagnostics.record(DiagnosticReason.exportCleanupFailed);
+      exporterCleanup = Future.value();
+    }
+    final observedCleanup = exporterCleanup.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {
+        cleanupFailed = true;
+        diagnostics.record(DiagnosticReason.exportCleanupFailed);
+      },
+    );
+    final activeDrained = Completer<void>();
+    _activeDrained = activeDrained;
+    if (_active.isEmpty) activeDrained.complete();
+    final cleanupCompleted = await _completesBy(
+      Future.wait([observedCleanup, activeDrained.future]),
+      totalDeadline,
+    );
+    if (!cleanupCompleted) _finishOutstandingAtShutdown();
+    _activeDrained = null;
+    _state = ChroniclerRuntimeState.closed;
+    _closeDeliveryResolved = null;
+    _closeSnapshot = null;
+    _notifyFlushWaiters();
+    return _report(
+      snapshot,
+      timedOut: !deliveryCompleted || !cleanupCompleted,
+      cleanupIncomplete: cleanupFailed || !cleanupCompleted,
+    );
+  }
+
+  Future<bool> _completesBy(Future<void> operation, Duration deadline) {
+    final remaining = deadline - _elapsed.elapsed;
+    if (remaining <= Duration.zero) return Future.value(false);
+    final result = Completer<bool>();
+    late final Timer timer;
+    timer = Timer(remaining, () => result.complete(false));
+    unawaited(
+      operation.then<void>(
+        (_) {
+          if (result.isCompleted) return;
+          timer.cancel();
+          result.complete(true);
+        },
+        onError: (Object _, StackTrace _) {
+          if (result.isCompleted) return;
+          timer.cancel();
+          result.complete(true);
+        },
+      ),
+    );
+    return result.future;
+  }
+
   bool isCollectionEnabled(ChroniclerSignal signal) => _enabledSignals.contains(signal);
 
   // API contract uses a positional boolean for symmetric runtime toggles.
   // ignore: avoid_positional_boolean_parameters
   void setCollectionEnabled(ChroniclerSignal signal, bool enabled) {
+    _requireRunningConfiguration();
     if (enabled == _enabledSignals.contains(signal)) return;
     if (enabled) {
       _enabledSignals.add(signal);
@@ -197,9 +335,21 @@ final class ChroniclerRuntime {
     _scheduleWakeup();
   }
 
-  // API contract uses a method rather than property assignment.
-  // ignore: use_setters_to_change_properties, avoid_positional_boolean_parameters
-  void setPropagationEnabled(bool enabled) => _propagationEnabled = enabled;
+  // API contract uses a positional boolean for symmetric runtime toggles.
+  // ignore: avoid_positional_boolean_parameters
+  void setPropagationEnabled(bool enabled) {
+    _requireRunningConfiguration();
+    _propagationEnabled = enabled;
+  }
+
+  void _requireRunningConfiguration() {
+    if (_state != ChroniclerRuntimeState.running) {
+      throw const ChroniclerConfigurationException(
+        'lifecycle',
+        'does not allow configuration changes',
+      );
+    }
+  }
 
   void recordLog(
     LogSeverity severity,
@@ -208,6 +358,10 @@ final class ChroniclerRuntime {
     StackTrace? stackTrace,
     Map<String, Object?> attributes = const {},
   }) {
+    if (_state != ChroniclerRuntimeState.running) {
+      diagnostics.record(DiagnosticReason.runtimeClosed);
+      return;
+    }
     if (diagnostics.insideCallback || _insideHook) {
       diagnostics.record(DiagnosticReason.reentrantRecording);
       return;
@@ -266,6 +420,10 @@ final class ChroniclerRuntime {
   }
 
   void _captureFixture(ChroniclerRecord record) {
+    if (_state != ChroniclerRuntimeState.running) {
+      diagnostics.record(DiagnosticReason.runtimeClosed);
+      return;
+    }
     final signal = _signalFor(record);
     final sampleRate = switch (record) {
       LogRecord() => options.sampling.logs,
@@ -293,8 +451,24 @@ final class ChroniclerRuntime {
     return _finalizeAndEnqueue(record);
   }
 
-  _RecordDisposition _finalizeAndEnqueue(ChroniclerRecord original) {
+  _RecordDisposition _finalizeForClose(ChroniclerRecord record) {
+    if (!_enabledSignals.contains(_signalFor(record))) {
+      final disposition = _RecordDisposition();
+      _dropDisposition(disposition, DropReason.collectionDisabled);
+      return disposition;
+    }
+    return _finalizeAndEnqueue(record, allowDuringClosing: true);
+  }
+
+  _RecordDisposition _finalizeAndEnqueue(
+    ChroniclerRecord original, {
+    bool allowDuringClosing = false,
+  }) {
     final disposition = _RecordDisposition();
+    if (_state != ChroniclerRuntimeState.running && !allowDuringClosing) {
+      _dropDisposition(disposition, DropReason.runtimeClosed);
+      return disposition;
+    }
     try {
       // Validate caller data before field-name rules can hide it.
       codec.encodeRecord(original);
@@ -336,6 +510,10 @@ final class ChroniclerRuntime {
       if (_pending.length + _activeRecordCount >= options.delivery.maxPendingRecords ||
           _pendingBytes + bytes.length > options.delivery.maxPendingBytes) {
         _dropDisposition(disposition, DropReason.queueFull);
+        return disposition;
+      }
+      if (_state != ChroniclerRuntimeState.running && !allowDuringClosing) {
+        _dropDisposition(disposition, DropReason.runtimeClosed);
         return disposition;
       }
       final pending = _PendingRecord(
@@ -478,7 +656,7 @@ final class ChroniclerRuntime {
   }
 
   void _schedulePump() {
-    if (_pumpScheduled) return;
+    if (_pumpScheduled || !_deliveryOpen) return;
     _pumpScheduled = true;
     Timer.run(() {
       _pumpScheduled = false;
@@ -487,6 +665,7 @@ final class ChroniclerRuntime {
   }
 
   void _pump() {
+    if (!_deliveryOpen) return;
     _wakeTimer?.cancel();
     _wakeTimer = null;
     while (_active.length < options.delivery.maxConcurrentExports) {
@@ -536,6 +715,13 @@ final class ChroniclerRuntime {
       record.disposition.uncertain = true;
     }
     diagnostics.record(DiagnosticReason.exportTimedOut);
+    _requestCancellation(active);
+  }
+
+  void _requestCancellation(_ActiveExport active) {
+    if (active.cancellationRequested) return;
+    active.cancellationRequested = true;
+    active.timeout?.cancel();
     try {
       active.attempt?.cancel();
     } on Object {
@@ -553,6 +739,7 @@ final class ChroniclerRuntime {
         record.disposition.uncertain = true;
         _retry(record);
       }
+      _notifyActiveDrained();
       _schedulePump();
       return;
     }
@@ -567,6 +754,7 @@ final class ChroniclerRuntime {
           _retry(record);
       }
     }
+    _notifyActiveDrained();
     _schedulePump();
   }
 
@@ -578,6 +766,7 @@ final class ChroniclerRuntime {
       record.disposition.uncertain = true;
       _retry(record);
     }
+    _notifyActiveDrained();
     _schedulePump();
   }
 
@@ -602,6 +791,10 @@ final class ChroniclerRuntime {
   void _retry(_PendingRecord record) {
     if (!record.retryEligible) {
       _drop(record, DropReason.collectionDisabled);
+      return;
+    }
+    if (!_deliveryOpen) {
+      _drop(record, DropReason.shutdown);
       return;
     }
     if (record.attempts >= options.delivery.maxAttempts) {
@@ -667,6 +860,39 @@ final class ChroniclerRuntime {
         _completeFlush(waiter, timedOut: false);
       }
     }
+    final closeSnapshot = _closeSnapshot;
+    final closeResolved = _closeDeliveryResolved;
+    if (closeSnapshot != null &&
+        closeResolved != null &&
+        !closeResolved.isCompleted &&
+        closeSnapshot.every((state) => state.isTerminal)) {
+      closeResolved.complete();
+    }
+  }
+
+  void _notifyActiveDrained() {
+    final activeDrained = _activeDrained;
+    if (_active.isEmpty && activeDrained != null && !activeDrained.isCompleted) {
+      activeDrained.complete();
+    }
+  }
+
+  void _finishOutstandingAtShutdown() {
+    _wakeTimer?.cancel();
+    _wakeTimer = null;
+    for (final record in _pending.toList()) {
+      _pending.remove(record);
+      _drop(record, DropReason.shutdown);
+    }
+    for (final active in _active.toList()) {
+      _active.remove(active);
+      active.timeout?.cancel();
+      for (final record in active.records) {
+        record.disposition.uncertain = true;
+        _drop(record, DropReason.shutdown);
+      }
+    }
+    _notifyActiveDrained();
   }
 
   void _completeFlush(_FlushWaiter waiter, {required bool timedOut}) {
@@ -675,7 +901,11 @@ final class ChroniclerRuntime {
     waiter.completer.complete(_report(waiter.snapshot, timedOut: timedOut));
   }
 
-  DeliveryReport _report(Iterable<_RecordDisposition> snapshot, {required bool timedOut}) {
+  DeliveryReport _report(
+    Iterable<_RecordDisposition> snapshot, {
+    required bool timedOut,
+    bool cleanupIncomplete = false,
+  }) {
     var accepted = 0;
     var pending = 0;
     var uncertainDropped = 0;
@@ -697,12 +927,14 @@ final class ChroniclerRuntime {
       uncertainDropped: uncertainDropped,
       timedOut: timedOut,
       runtimeState: _state,
-      cleanupIncomplete: false,
+      cleanupIncomplete: cleanupIncomplete,
     );
   }
 
   void _scheduleWakeup() {
-    if (_pending.isEmpty || _active.length >= options.delivery.maxConcurrentExports) {
+    if (!_deliveryOpen ||
+        _pending.isEmpty ||
+        _active.length >= options.delivery.maxConcurrentExports) {
       _wakeTimer?.cancel();
       _wakeTimer = null;
       return;
@@ -791,6 +1023,7 @@ final class _ActiveExport {
   ExportAttempt? attempt;
   Timer? timeout;
   bool timedOut = false;
+  bool cancellationRequested = false;
 }
 
 void _validateConfiguredLabel(
