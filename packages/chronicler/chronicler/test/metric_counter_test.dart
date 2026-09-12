@@ -3,7 +3,9 @@ import 'package:chronicler/src/runtime.dart' show ChroniclerMetricFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/async.dart';
 import 'support/exporter.dart';
+import 'support/metric_clock.dart';
 
 void main() {
   group('ChroniclerCounter', () {
@@ -24,7 +26,7 @@ void main() {
       context.metrics.counter('orders.completed', unit: 'orders')
         ..add(2, attributes: {'channel': 'mobile'})
         ..add(3, attributes: {'channel': 'mobile'});
-      await _waitFor(() => exporter.batches.isNotEmpty);
+      await waitForCondition(() => exporter.batches.isNotEmpty);
 
       final record = exporter.batches.single.records.single as MetricRecord;
       expect(record.envelope.userId, isNull);
@@ -107,7 +109,7 @@ void main() {
 
     test('should canonicalize and redact dimensions before selecting a series', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(exporter);
       ChroniclerMetricFixture.overrideClocks(
         chronicler,
@@ -125,7 +127,7 @@ void main() {
         ..advance(const Duration(seconds: 10))
         ..rewindWall(const Duration(seconds: 20));
       ChroniclerMetricFixture.rotate(chronicler);
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await waitForCondition(() => exporter.batches.expand((batch) => batch.records).length == 2);
 
       final records = exporter.batches
           .expand((batch) => batch.records)
@@ -147,7 +149,7 @@ void main() {
 
     test('should reject invalid measurements without changing prior state', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(exporter);
       ChroniclerMetricFixture.overrideClocks(
         chronicler,
@@ -180,7 +182,7 @@ void main() {
         ..add(1, attributes: {'boundary': 'count'});
       clock.advance(const Duration(seconds: 10));
       ChroniclerMetricFixture.rotate(chronicler);
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await waitForCondition(() => exporter.batches.expand((batch) => batch.records).length == 2);
 
       final payloads = exporter.batches
           .expand((batch) => batch.records)
@@ -207,7 +209,7 @@ void main() {
 
     test('should keep string, boolean, and numeric dimensions distinct', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(exporter);
       ChroniclerMetricFixture.overrideClocks(
         chronicler,
@@ -221,7 +223,7 @@ void main() {
 
       clock.advance(const Duration(seconds: 10));
       ChroniclerMetricFixture.rotate(chronicler);
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await waitForCondition(() => exporter.batches.expand((batch) => batch.records).length == 3);
 
       expect(
         exporter.batches.expand((batch) => batch.records),
@@ -235,7 +237,7 @@ void main() {
       'should enforce instrument and series capacities without disabling existing series',
       () async {
         final exporter = TestExporter(acceptImmediately: true);
-        final clock = _MetricClock();
+        final clock = MetricClock();
         final chronicler = _chronicler(
           exporter,
           metrics: const MetricOptions(
@@ -288,24 +290,3 @@ Chronicler _chronicler(
     metrics: metrics,
   ),
 );
-
-final class _MetricClock {
-  DateTime now = DateTime.utc(2026, 9, 12);
-  Duration elapsed = Duration.zero;
-
-  void advance(Duration duration) {
-    now = now.add(duration);
-    elapsed += duration;
-  }
-
-  void rewindWall(Duration duration) {
-    now = now.subtract(duration);
-  }
-}
-
-Future<void> _waitFor(bool Function() condition) async {
-  for (var attempt = 0; attempt < 200 && !condition(); attempt++) {
-    await Future<void>.delayed(const Duration(milliseconds: 2));
-  }
-  expect(condition(), isTrue);
-}

@@ -6,6 +6,7 @@ import 'package:chronicler/src/runtime.dart'
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/async.dart';
 import 'support/exporter.dart';
 
 void main() {
@@ -50,7 +51,7 @@ void main() {
           expect(_sums(exporter), [1]);
 
           currentTimer.fire();
-          await _waitFor(() => _sums(exporter).length == 2);
+          await waitForCondition(() => _sums(exporter).length == 2);
           expect(_sums(exporter), [1, 2]);
           await chronicler.close();
         },
@@ -143,11 +144,11 @@ void main() {
         ..add(1);
 
       final firstFlush = chronicler.flush();
-      await _waitFor(() => exporter.attempts.isNotEmpty);
+      await waitForCondition(() => exporter.attempts.isNotEmpty);
       final original = exporter.batches.single.records.single as MetricRecord;
       counter.add(9);
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
 
       final retry = exporter.batches.last.records.single as MetricRecord;
       expect(retry.envelope.eventId, original.envelope.eventId);
@@ -156,7 +157,7 @@ void main() {
       expect((await firstFlush).accepted, 1);
 
       final secondFlush = chronicler.flush();
-      await _waitFor(() => exporter.attempts.length == 3);
+      await waitForCondition(() => exporter.attempts.length == 3);
       expect(
         (exporter.batches.last.records.single as MetricRecord).payload.sum,
         9,
@@ -234,34 +235,34 @@ void main() {
       await chronicler.close();
     });
 
-    test('should reject hook-created invalid metric values and dimensions', () async {
-      final exporter = TestExporter(acceptImmediately: true);
-      final chronicler = _chronicler(
-        exporter,
-        redaction: RedactionOptions(
-          beforeRecord: (record) {
-            final metric = record as MetricRecord;
-            return metric.copyWith(
-              payload: metric.payload.copyWith(
-                sum: -1,
-                attributes: {
-                  'nested': {'value': 1},
-                  'missing': null,
-                },
-              ),
-            );
-          },
-        ),
-      );
-      chronicler.recorder.metrics.counter('requests').add(1);
-
-      final report = await chronicler.flush();
-
-      expect(report.accepted, 0);
-      expect(report.dropped, {DropReason.invalidRecord: 1});
-      expect(exporter.batches, isEmpty);
-      await chronicler.close();
-    });
+    for (final invalid in <String, MetricPayload Function(MetricPayload)>{
+      'negative counter sum': (payload) => payload.copyWith(sum: -1),
+      'nested dimension': (payload) => payload.copyWith(
+        attributes: {
+          'nested': {'value': 1},
+        },
+      ),
+      'null dimension': (payload) => payload.copyWith(attributes: {'missing': null}),
+    }.entries) {
+      test('should reject a hook-created ${invalid.key}', () async {
+        final exporter = TestExporter(acceptImmediately: true);
+        final chronicler = _chronicler(
+          exporter,
+          redaction: RedactionOptions(
+            beforeRecord: (record) {
+              final metric = record as MetricRecord;
+              return metric.copyWith(payload: invalid.value(metric.payload));
+            },
+          ),
+        );
+        chronicler.recorder.metrics.counter('requests').add(1);
+        final report = await chronicler.flush();
+        expect(report.accepted, 0);
+        expect(report.dropped, {DropReason.invalidRecord: 1});
+        expect(exporter.batches, isEmpty);
+        await chronicler.close();
+      });
+    }
 
     test('should keep interval scheduling paused while metrics are disabled', () async {
       var metricTimers = 0;
@@ -369,13 +370,6 @@ List<double?> _sums(TestExporter exporter) => exporter.batches
     .cast<MetricRecord>()
     .map((record) => record.payload.sum)
     .toList();
-
-Future<void> _waitFor(bool Function() condition) async {
-  for (var attempt = 0; attempt < 100 && !condition(); attempt++) {
-    await Future<void>.delayed(const Duration(milliseconds: 2));
-  }
-  expect(condition(), isTrue);
-}
 
 final class _ManualTimer implements Timer {
   _ManualTimer(this._callback);

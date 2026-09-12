@@ -170,9 +170,9 @@ final class DiagnosticOptions {
   final Duration notificationInterval;
 }
 
-/// Reserved base configuration for metric aggregation added by INF-11.
+/// Bounds metric instruments, series, and aggregation intervals.
 final class MetricOptions {
-  /// Creates reserved metric aggregation limits for the metrics package.
+  /// Creates metric aggregation intervals and capacity limits.
   const MetricOptions({
     this.interval = const Duration(seconds: 10),
     this.maxInstruments = 100,
@@ -205,9 +205,9 @@ final class MetricOptions {
   final int maxHistogramBoundaries;
 }
 
-/// Reserved base configuration for tracing added by INF-9.
+/// Controls trace sampling, propagation, and cancellation classification.
 final class TracingOptions {
-  /// Creates reserved tracing behavior for the tracing package.
+  /// Creates tracing behavior for callback-managed spans.
   const TracingOptions({
     this.honorRemoteSampling = true,
     this.propagationEnabled = true,
@@ -275,10 +275,10 @@ final class ChroniclerOptions {
   /// Runtime diagnostic notification behavior.
   final DiagnosticOptions diagnostics;
 
-  /// Reserved metric aggregation options.
+  /// Metric aggregation intervals and capacity limits.
   final MetricOptions metrics;
 
-  /// Reserved tracing options.
+  /// Trace sampling, propagation, and cancellation behavior.
   final TracingOptions tracing;
 
   /// Signal types whose capture starts enabled.

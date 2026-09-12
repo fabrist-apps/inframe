@@ -4,7 +4,9 @@ import 'package:chronicler/src/runtime.dart'
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/async.dart';
 import 'support/exporter.dart';
+import 'support/metric_clock.dart';
 
 void main() {
   group('Chronicler up/down counters and gauges', () {
@@ -75,7 +77,7 @@ void main() {
 
     test('should keep the latest gauge timestamp and omit unobserved intervals', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(exporter);
       ChroniclerMetricFixture.overrideClocks(
         chronicler,
@@ -207,7 +209,7 @@ void main() {
       metrics.gauge('depth').set(6);
 
       final flush = chronicler.flush();
-      await _waitFor(() => exporter.attempts.isNotEmpty);
+      await waitForCondition(() => exporter.attempts.isNotEmpty);
       final originals = exporter.batches.single.records;
       const codec = ChroniclerCodec();
       for (final record in originals) {
@@ -216,7 +218,7 @@ void main() {
         expect((decoded as Decoded<ChroniclerRecord>).value, record);
       }
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
 
       expect(exporter.batches.last.records, originals);
       exporter.attempts.last.completer.complete(const ExportResult.accepted());
@@ -244,20 +246,3 @@ Chronicler _chronicler(
     ),
   ),
 );
-
-Future<void> _waitFor(bool Function() condition) async {
-  for (var attempt = 0; attempt < 100 && !condition(); attempt++) {
-    await Future<void>.delayed(const Duration(milliseconds: 2));
-  }
-  expect(condition(), isTrue);
-}
-
-final class _MetricClock {
-  DateTime now = DateTime.utc(2026, 9, 12);
-  Duration elapsed = Duration.zero;
-
-  void advance(Duration duration) {
-    now = now.add(duration);
-    elapsed += duration;
-  }
-}

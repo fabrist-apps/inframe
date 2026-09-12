@@ -2,10 +2,12 @@ import 'package:chronicler/chronicler.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/async.dart';
+import 'support/error_capture_support.dart';
 import 'support/exporter.dart';
 
 void main() {
-  group('ChroniclerErrors', () {
+  group('ChroniclerErrors capture', () {
     test('should export a handled error with attribution and raw stack', () async {
       final exporter = TestExporter();
       final chronicler = Chronicler(
@@ -52,7 +54,7 @@ void main() {
 
     test('should capture arbitrary values and keep occurrences distinct', () async {
       final exporter = TestExporter();
-      final chronicler = _chronicler(exporter, maxBatchRecords: 2);
+      final chronicler = createErrorChronicler(exporter, maxBatchRecords: 2);
       final context = Context().withChronicler(chronicler.recorder);
       final thrownValue = Object();
 
@@ -71,13 +73,13 @@ void main() {
 
     test('should contain text conversion failures and preserve supplied stack', () async {
       final exporter = TestExporter();
-      final chronicler = _chronicler(exporter);
+      final chronicler = createErrorChronicler(exporter);
 
       Context()
           .withChronicler(chronicler.recorder)
           .errors
           .capture(
-            _ThrowingText(),
+            ThrowingText(),
             stackTrace: StackTrace.fromString('application-stack'),
           );
       await Future<void>.delayed(Duration.zero);
@@ -90,14 +92,14 @@ void main() {
 
     test('should use a fixed fallback when stack conversion fails', () async {
       final exporter = TestExporter();
-      final chronicler = _chronicler(exporter);
+      final chronicler = createErrorChronicler(exporter);
 
       Context()
           .withChronicler(chronicler.recorder)
           .errors
           .capture(
             'failed',
-            stackTrace: _ThrowingStack(),
+            stackTrace: ThrowingStack(),
           );
       await Future<void>.delayed(Duration.zero);
 
@@ -152,41 +154,9 @@ void main() {
       expect(error.payload.attributes, {'accessToken': '[REDACTED]'});
     });
 
-    test('should reject hook-modified causes that exceed the chain limit', () async {
-      final exporter = TestExporter();
-      final chronicler = Chronicler(
-        appId: 'app',
-        release: 'release',
-        source: ChroniclerSource.server,
-        exporter: exporter,
-        options: ChroniclerOptions(
-          delivery: const DeliveryOptions(maxBatchRecords: 1),
-          redaction: RedactionOptions(
-            beforeRecord: (record) {
-              final error = record as ErrorRecord;
-              return error.copyWith(
-                payload: error.payload.copyWith(
-                  causes: List.filled(
-                    5,
-                    const ErrorDetails(type: 'Cause', message: 'invalid'),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      );
-
-      Context().withChronicler(chronicler.recorder).errors.capture('root');
-      await Future<void>.delayed(Duration.zero);
-
-      expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
-    });
-
     test('should keep error occurrences separate from error logs and failed spans', () async {
       final exporter = TestExporter();
-      final chronicler = _chronicler(exporter, maxBatchRecords: 3);
+      final chronicler = createErrorChronicler(exporter, maxBatchRecords: 3);
       final context = Context().withChronicler(chronicler.recorder);
 
       context.logs.error('log', error: StateError('logged'));
@@ -228,7 +198,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       final first = exporter.batches.single.records.single as ErrorRecord;
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await waitForCondition(() => exporter.attempts.length == 2);
 
       final retried = exporter.batches.last.records.single as ErrorRecord;
       expect(exporter.batches, hasLength(2));
@@ -264,7 +234,7 @@ void main() {
 
     test('should obey error collection and closed-runtime transitions', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final chronicler = _chronicler(exporter);
+      final chronicler = createErrorChronicler(exporter);
       final errors = Context().withChronicler(chronicler.recorder).errors;
 
       chronicler.setCollectionEnabled(ChroniclerSignal.errors, false);
@@ -289,285 +259,5 @@ void main() {
     test('should throw MissingContextValue when setup is absent', () {
       expect(() => Context().errors, throwsA(isA<MissingContextValue>()));
     });
-
-    test('should preserve explicitly supplied causes in order with repetitions', () async {
-      final exporter = TestExporter();
-      final chronicler = _chronicler(exporter);
-      final repeated = StateError('repeated');
-
-      Context()
-          .withChronicler(chronicler.recorder)
-          .errors
-          .capture(
-            StateError('root'),
-            causes: [
-              ChroniclerCause(repeated, stackTrace: StackTrace.fromString('nearest')),
-              const ChroniclerCause('deepest'),
-              ChroniclerCause(repeated),
-            ],
-          );
-      await Future<void>.delayed(Duration.zero);
-
-      final error = exporter.batches.single.records.single as ErrorRecord;
-      expect(error.payload.causes.map((cause) => cause.message), [
-        'Bad state: repeated',
-        'deepest',
-        'Bad state: repeated',
-      ]);
-      expect(error.payload.causes.first.stackTrace, 'nearest');
-    });
-
-    test('should preserve root and cause line endings through the codec', () async {
-      final exporter = TestExporter();
-      final chronicler = _chronicler(exporter);
-
-      Context()
-          .withChronicler(chronicler.recorder)
-          .errors
-          .capture(
-            'root',
-            stackTrace: StackTrace.fromString('root-a\r\nroot-b\n'),
-            causes: [
-              ChroniclerCause(
-                'cause',
-                stackTrace: StackTrace.fromString('cause-a\ncause-b\r\n'),
-              ),
-            ],
-          );
-      await Future<void>.delayed(Duration.zero);
-      final captured = exporter.batches.single.records.single as ErrorRecord;
-      const codec = ChroniclerCodec();
-
-      final decoded = codec.decodeRecord(codec.encodeRecord(captured));
-      expect(decoded, isA<Decoded<ChroniclerRecord>>());
-      final error = (decoded as Decoded<ChroniclerRecord>).value as ErrorRecord;
-      expect(error.payload.error.stackTrace, 'root-a\r\nroot-b\n');
-      expect(error.payload.causes.single.stackTrace, 'cause-a\ncause-b\r\n');
-    });
-
-    test('should contain conversion failures for each explicit cause', () async {
-      final exporter = TestExporter();
-      final chronicler = _chronicler(exporter);
-
-      Context()
-          .withChronicler(chronicler.recorder)
-          .errors
-          .capture(
-            'root',
-            causes: [
-              ChroniclerCause(
-                _ThrowingText(),
-                stackTrace: _ThrowingStack(),
-              ),
-            ],
-          );
-      await Future<void>.delayed(Duration.zero);
-
-      final cause = (exporter.batches.single.records.single as ErrorRecord).payload.causes.single;
-      expect(cause.message, '[Error message unavailable]');
-      expect(cause.stackTrace, '[Stack trace unavailable]');
-      expect(chronicler.diagnosticCounts[DiagnosticReason.textConversionFailed], BigInt.two);
-    });
-
-    test('should snapshot cause inputs and retain ended-span correlation', () async {
-      final exporter = TestExporter();
-      final chronicler = _chronicler(exporter, maxBatchRecords: 2);
-      final base = Context().withChronicler(chronicler.recorder);
-      final causeText = _MutableText('before');
-      final causeStack = _MutableStack('stack-before');
-      final causes = <ChroniclerCause>[
-        ChroniclerCause(causeText, stackTrace: causeStack),
-      ];
-      late Context retained;
-
-      base.spanSync('operation', run: (span) => retained = span);
-      retained.errors.capture('root', causes: causes);
-      causes.clear();
-      causeText.value = 'after';
-      causeStack.value = 'stack-after';
-      await Future<void>.delayed(Duration.zero);
-
-      final records = exporter.batches.single.records;
-      final span = records.whereType<SpanRecord>().single;
-      final error = records.whereType<ErrorRecord>().single;
-      expect(error.envelope.traceId, span.envelope.traceId);
-      expect(error.envelope.spanId, span.envelope.spanId);
-      expect(error.payload.causes.single.message, 'before');
-      expect(error.payload.causes.single.stackTrace, 'stack-before');
-    });
-
-    test('should reject an excessive chain before converting its values', () async {
-      final exporter = TestExporter();
-      final chronicler = _chronicler(exporter);
-      final root = _CountingText();
-      final cause = _CountingText();
-
-      Context()
-          .withChronicler(chronicler.recorder)
-          .errors
-          .capture(
-            root,
-            causes: List.filled(5, ChroniclerCause(cause)),
-          );
-      await Future<void>.delayed(Duration.zero);
-
-      expect(exporter.batches, isEmpty);
-      expect(root.conversions, 0);
-      expect(cause.conversions, 0);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
-    });
-
-    test('should accept four causes and honor a configured zero limit', () async {
-      final exporter = TestExporter();
-      final chronicler = _chronicler(exporter);
-
-      Context()
-          .withChronicler(chronicler.recorder)
-          .errors
-          .capture(
-            'root',
-            causes: List.generate(4, (index) => ChroniclerCause('cause-$index')),
-          );
-      await Future<void>.delayed(Duration.zero);
-      expect(
-        (exporter.batches.single.records.single as ErrorRecord).payload.causes,
-        hasLength(4),
-      );
-
-      final zeroExporter = TestExporter();
-      final zero = Chronicler(
-        appId: 'app',
-        release: 'release',
-        source: ChroniclerSource.server,
-        exporter: zeroExporter,
-        options: const ChroniclerOptions(
-          limits: ChroniclerLimits(maxCauses: 0),
-          delivery: DeliveryOptions(maxBatchRecords: 1),
-        ),
-      );
-      Context()
-          .withChronicler(zero.recorder)
-          .errors
-          .capture(
-            'root',
-            causes: const [ChroniclerCause('cause')],
-          );
-      await Future<void>.delayed(Duration.zero);
-      expect(zeroExporter.batches, isEmpty);
-      expect(zero.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
-    });
-
-    test('should enforce UTF-8 field limits on every cause', () async {
-      Future<Chronicler> capture(ChroniclerCause cause) async {
-        final exporter = TestExporter();
-        final chronicler = Chronicler(
-          appId: 'app',
-          release: 'release',
-          source: ChroniclerSource.server,
-          exporter: exporter,
-          options: const ChroniclerOptions(
-            limits: ChroniclerLimits(
-              maxErrorMessageBytes: 3,
-              maxStackTraceBytes: 3,
-            ),
-            delivery: DeliveryOptions(maxBatchRecords: 1),
-          ),
-        );
-        Context()
-            .withChronicler(chronicler.recorder)
-            .errors
-            .capture(
-              '',
-              causes: [cause],
-            );
-        await Future<void>.delayed(Duration.zero);
-        expect(exporter.batches, isEmpty);
-        return chronicler;
-      }
-
-      final message = await capture(const ChroniclerCause('éé'));
-      final stack = await capture(
-        ChroniclerCause('', stackTrace: StackTrace.fromString('éé')),
-      );
-      expect(message.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
-      expect(stack.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
-    });
-
-    test('should enforce the complete encoded bound across a cause chain', () async {
-      final exporter = TestExporter();
-      final chronicler = Chronicler(
-        appId: 'app',
-        release: 'release',
-        source: ChroniclerSource.server,
-        exporter: exporter,
-        options: const ChroniclerOptions(
-          delivery: DeliveryOptions(
-            maxRecordBytes: 400,
-            maxBatchRecords: 1,
-          ),
-        ),
-      );
-
-      Context()
-          .withChronicler(chronicler.recorder)
-          .errors
-          .capture(
-            'r' * 100,
-            causes: const [ChroniclerCause('placeholder')],
-            attributes: {'extra': 'a' * 180},
-          );
-      await Future<void>.delayed(Duration.zero);
-
-      expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.recordTooLarge], BigInt.one);
-    });
   });
 }
-
-final class _ThrowingText {
-  @override
-  String toString() => throw StateError('sensitive');
-}
-
-final class _ThrowingStack implements StackTrace {
-  @override
-  String toString() => throw StateError('sensitive');
-}
-
-final class _MutableText {
-  _MutableText(this.value);
-
-  String value;
-
-  @override
-  String toString() => value;
-}
-
-final class _MutableStack implements StackTrace {
-  _MutableStack(this.value);
-
-  String value;
-
-  @override
-  String toString() => value;
-}
-
-final class _CountingText {
-  int conversions = 0;
-
-  @override
-  String toString() {
-    conversions++;
-    return 'converted';
-  }
-}
-
-Chronicler _chronicler(TestExporter exporter, {int maxBatchRecords = 1}) => Chronicler(
-  appId: 'app',
-  release: 'release',
-  source: ChroniclerSource.server,
-  exporter: exporter,
-  options: ChroniclerOptions(
-    delivery: DeliveryOptions(maxBatchRecords: maxBatchRecords),
-  ),
-);

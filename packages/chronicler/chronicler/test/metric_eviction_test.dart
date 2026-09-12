@@ -4,12 +4,13 @@ import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/exporter.dart';
+import 'support/metric_clock.dart';
 
 void main() {
   group('Chronicler metric idle eviction', () {
     test('should finalize an expired series before admitting its replacement', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(exporter);
       ChroniclerMetricFixture.overrideClocks(
         chronicler,
@@ -36,7 +37,7 @@ void main() {
 
     test('should not refresh idle time for rejected measurements or lookup', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(exporter);
       ChroniclerMetricFixture.overrideClocks(
         chronicler,
@@ -69,7 +70,7 @@ void main() {
 
     test('should retain active series and reclaim empty state at an interval boundary', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(exporter);
       ChroniclerMetricFixture.overrideClocks(
         chronicler,
@@ -103,7 +104,7 @@ void main() {
 
     test('should reclaim capacity even when final delivery rejects the expired record', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(
         exporter,
         batchInterval: const Duration(minutes: 1),
@@ -133,7 +134,7 @@ void main() {
 
     test('should use the common idle store for every instrument kind', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       final chronicler = _chronicler(exporter);
       ChroniclerMetricFixture.overrideClocks(
         chronicler,
@@ -159,7 +160,7 @@ void main() {
 
     test('should contain instrument lookup from a finalization hook', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = _MetricClock();
+      final clock = MetricClock();
       late Chronicler chronicler;
       chronicler = _chronicler(
         exporter,
@@ -222,17 +223,3 @@ Chronicler _chronicler(
     redaction: redaction,
   ),
 );
-
-final class _MetricClock {
-  DateTime now = DateTime.utc(2026, 9, 12);
-  Duration elapsed = Duration.zero;
-
-  void advance(Duration duration) {
-    now = now.add(duration);
-    elapsed += duration;
-  }
-
-  void rewindWall(Duration duration) {
-    now = now.subtract(duration);
-  }
-}

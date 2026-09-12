@@ -317,3 +317,29 @@ for cleanup; if delivery finishes early, cleanup receives the remaining time. A 
 unresolved records as dropped and sets `cleanupIncomplete` when exporter work or resources remain at
 the total deadline. Recording after shutdown is a non-throwing diagnostic drop, while configuration
 changes after shutdown starts throw `ChroniclerConfigurationException`.
+
+## Implementation reading path
+
+Start with [`lib/chronicler.dart`](lib/chronicler.dart) for the supported API and
+[`src/context_integration.dart`](lib/src/context_integration.dart) for Context bindings.
+[`src/runtime.dart`](lib/src/runtime.dart) defines the owner and borrowed recorder API.
+Its internal implementation is organized by responsibility:
+
+| Responsibility | Implementation |
+| --- | --- |
+| Capture policy and runtime coordination | [`runtime/capture.dart`](lib/src/runtime/capture.dart) |
+| Configuration validation and snapshots | [`runtime/configuration.dart`](lib/src/runtime/configuration.dart) |
+| Trace lifetimes, sampling, and active span state | [`runtime/tracing.dart`](lib/src/runtime/tracing.dart) |
+| Record validation, redaction, and application hooks | [`runtime/record_processing.dart`](lib/src/runtime/record_processing.dart) |
+| Queue capacity, retries, flush snapshots, and exporter shutdown | [`runtime/delivery_queue.dart`](lib/src/runtime/delivery_queue.dart) |
+| Instrument registry and interval aggregation | [`metrics/aggregation.dart`](lib/src/metrics/aggregation.dart) |
+
+[`src/codec.dart`](lib/src/codec.dart) owns canonical record encoding. Its
+[`codec/record_decoder.dart`](lib/src/codec/record_decoder.dart) parses untrusted bytes, and
+[`codec/record_schema.dart`](lib/src/codec/record_schema.dart) enforces the model contract in both
+directions. [`src/record_validation.dart`](lib/src/record_validation.dart) handles bounded attribute
+snapshots and Unicode validation shared by capture, metrics, and the codec.
+
+[`src/models.dart`](lib/src/models.dart) keeps the sealed record family and mapped payloads with their
+generated mapper library. The handwritten codec defines the version-one wire format; generated
+mapping supports model operations such as copying and equality.
