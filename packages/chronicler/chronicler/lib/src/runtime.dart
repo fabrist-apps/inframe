@@ -6,6 +6,7 @@ import 'package:chronicler/src/codec.dart';
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/diagnostics.dart';
 import 'package:chronicler/src/lifecycle.dart';
+import 'package:chronicler/src/metric_aggregation.dart';
 import 'package:chronicler/src/metrics.dart';
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/record_validation.dart';
@@ -290,6 +291,7 @@ final class ChroniclerRuntime {
        ),
        codec = ChroniclerCodec(
          limits: options.limits,
+         metricOptions: options.metrics,
          maxRecordBytes: options.delivery.maxRecordBytes,
          maxBatchBytes: options.delivery.maxBatchBytes,
          maxBatchRecords: options.delivery.maxBatchRecords,
@@ -353,7 +355,7 @@ final class ChroniclerRuntime {
   final DiagnosticChannel diagnostics;
 
   /// Runtime-owned metric registry.
-  late final ChroniclerMetrics metrics = ChroniclerMetrics.internal(
+  late final MetricAggregation _metrics = MetricAggregation(
     options: options.metrics,
     limits: options.limits,
     canRecord: () => _canRecord(ChroniclerSignal.metrics, null),
@@ -361,9 +363,13 @@ final class ChroniclerRuntime {
     redact: _redactMap,
     createRecord: _metricRecord,
     finalize: _finalizeAndEnqueue,
+    startEnabled: _enabledSignals.contains(ChroniclerSignal.metrics),
     now: () => _now,
     elapsed: () => _elapsedNow,
   );
+
+  /// Metric instrument contracts borrowed by recorders and Context.
+  ChroniclerMetrics get metrics => _metrics;
   Random _secureRandom;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
@@ -725,7 +731,7 @@ final class ChroniclerRuntime {
     }
     final finalizedByCall = <_RecordDisposition>[];
     if (_state == ChroniclerRuntimeState.running) {
-      for (final record in metrics.seal()) {
+      for (final record in _metrics.seal()) {
         finalizedByCall.add(_finalizeForFlush(record));
       }
       if (_flushFinalizations.isNotEmpty) {
@@ -770,7 +776,7 @@ final class ChroniclerRuntime {
     diagnostics.close();
     final startedAt = _elapsed.elapsed;
     final finalizations = <_RecordDisposition>[];
-    for (final record in metrics.seal(scheduleNext: false)) {
+    for (final record in _metrics.seal(scheduleNext: false)) {
       finalizations.add(_finalizeForClose(record));
     }
     while (_flushFinalizations.isNotEmpty) {
@@ -903,11 +909,11 @@ final class ChroniclerRuntime {
     if (enabled == _enabledSignals.contains(signal)) return;
     if (enabled) {
       _enabledSignals.add(signal);
-      if (signal == ChroniclerSignal.metrics) metrics.enable();
+      if (signal == ChroniclerSignal.metrics) _metrics.enable();
       return;
     }
     _enabledSignals.remove(signal);
-    if (signal == ChroniclerSignal.metrics) metrics.disable();
+    if (signal == ChroniclerSignal.metrics) _metrics.disable();
     if (signal == ChroniclerSignal.traces) {
       for (final span in _liveSpans) {
         span
@@ -1918,7 +1924,7 @@ final class ChroniclerMetricFixture {
 
   /// Rotates the current interval synchronously and stops its next timer.
   static void rotate(Chronicler chronicler) {
-    chronicler._runtime.metrics.rotateForTesting();
+    chronicler._runtime._metrics.rotateForTesting();
   }
 
   /// Makes the next metric record construction fail.
@@ -1937,7 +1943,7 @@ final class ChroniclerMetricFixture {
     required double sum,
     Map<String, Object?> attributes = const {},
   }) {
-    chronicler._runtime.metrics.setCounterAggregateForTesting(
+    chronicler._runtime._metrics.setCounterAggregateForTesting(
       name: name,
       attributes: attributes,
       count: count,
@@ -1952,7 +1958,7 @@ final class ChroniclerMetricFixture {
     required String name,
     Map<String, Object?> attributes = const {},
   }) {
-    chronicler._runtime.metrics.setSeriesCountForTesting(
+    chronicler._runtime._metrics.setSeriesCountForTesting(
       name: name,
       attributes: attributes,
       count: count,
@@ -1970,7 +1976,7 @@ final class ChroniclerMetricFixture {
     required double sum,
     Map<String, Object?> attributes = const {},
   }) {
-    chronicler._runtime.metrics.setHistogramAggregateForTesting(
+    chronicler._runtime._metrics.setHistogramAggregateForTesting(
       name: name,
       attributes: attributes,
       count: count,

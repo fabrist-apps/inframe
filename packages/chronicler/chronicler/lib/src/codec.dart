@@ -65,6 +65,7 @@ final class ChroniclerCodec {
   /// Creates a version-one codec with explicit decode and encode limits.
   const ChroniclerCodec({
     this.limits = const ChroniclerLimits(),
+    this.metricOptions = const MetricOptions(),
     this.maxRecordBytes = 64 * 1024,
     this.maxBatchBytes = 512 * 1024,
     this.maxBatchRecords = 100,
@@ -72,6 +73,9 @@ final class ChroniclerCodec {
 
   /// Record schema and caller-data limits.
   final ChroniclerLimits limits;
+
+  /// Metric-specific schema and dimension limits.
+  final MetricOptions metricOptions;
 
   /// Maximum bytes accepted or produced for one record.
   final int maxRecordBytes;
@@ -375,7 +379,7 @@ final class ChroniclerCodec {
       name: _label(map, 'name'),
       instrument: instrument,
       unit: _label(map, 'unit'),
-      attributes: _attributes(map, 'attributes'),
+      attributes: _metricAttributes(map, 'attributes'),
       intervalStart: _timestamp(map, 'intervalStart'),
       intervalEnd: _timestamp(map, 'intervalEnd'),
       durationMicros: _portableInt(map, 'durationMicros'),
@@ -490,7 +494,10 @@ final class ChroniclerCodec {
   void _validateMetric(MetricPayload payload) {
     _validateModelString(payload.name, limits.maxLabelBytes, allowEmpty: false);
     _validateModelString(payload.unit, limits.maxLabelBytes, allowEmpty: false);
-    _recordValidator.snapshotAttributes(payload.attributes);
+    _recordValidator.snapshotMetricAttributes(
+      payload.attributes,
+      maxAttributes: metricOptions.maxAttributes,
+    );
     _validatePortableInt(payload.durationMicros);
     _validatePortableInt(payload.observationCount);
     _validateTimestampForEncoding(payload.intervalStart);
@@ -506,6 +513,7 @@ final class ChroniclerCodec {
         if (payload.temporality != MetricTemporality.delta ||
             payload.sum == null ||
             !payload.sum!.isFinite ||
+            payload.instrument == MetricInstrument.counter && payload.sum! < 0 ||
             payload.boundaries != null ||
             payload.bucketCounts != null ||
             payload.count != null ||
@@ -521,6 +529,7 @@ final class ChroniclerCodec {
         if (payload.temporality != MetricTemporality.delta ||
             boundaries == null ||
             boundaries.isEmpty ||
+            boundaries.length > metricOptions.maxHistogramBoundaries ||
             buckets == null ||
             buckets.length != boundaries.length + 1 ||
             payload.count == null ||
@@ -534,7 +543,7 @@ final class ChroniclerCodec {
             !payload.max!.isFinite ||
             payload.min! > payload.max! ||
             !_strictlyIncreasing(boundaries) ||
-            buckets.any((value) => value < 0) ||
+            buckets.any((value) => value < 0 || value > 9007199254740991) ||
             payload.value != null ||
             payload.observedAt != null) {
           throw const ChroniclerEncodingException('histogram payload is invalid');
@@ -678,6 +687,12 @@ final class ChroniclerCodec {
 
   Map<String, Object?> _attributes(Map<String, Object?> map, String key) =>
       _recordValidator.snapshotAttributes(_map(map[key]));
+
+  Map<String, Object?> _metricAttributes(Map<String, Object?> map, String key) =>
+      _recordValidator.snapshotMetricAttributes(
+        _map(map[key]),
+        maxAttributes: metricOptions.maxAttributes,
+      );
 
   Map<String, Object?> _nonemptyAttributes(Map<String, Object?> map, String key) {
     final value = _attributes(map, key);

@@ -156,6 +156,45 @@ void main() {
       expect(const MetricOptions().idleTimeout, const Duration(minutes: 5));
       await chronicler.close();
     });
+
+    test('should contain instrument lookup from a finalization hook', () async {
+      final exporter = TestExporter(acceptImmediately: true);
+      final clock = _MetricClock();
+      late Chronicler chronicler;
+      chronicler = _chronicler(
+        exporter,
+        redaction: RedactionOptions(
+          beforeRecord: (record) {
+            chronicler.recorder.metrics.counter('inside.hook').add(1);
+            return record;
+          },
+        ),
+      );
+      ChroniclerMetricFixture.overrideClocks(
+        chronicler,
+        now: () => clock.now,
+        elapsed: () => clock.elapsed,
+      );
+      final counter = chronicler.recorder.metrics.counter('requests')
+        ..add(1, attributes: {'route': 'old'});
+      clock.advance(const Duration(seconds: 10));
+
+      expect(
+        () => counter.add(2, attributes: {'route': 'replacement'}),
+        returnsNormally,
+      );
+      await chronicler.flush();
+
+      expect(
+        exporter.batches
+            .expand((batch) => batch.records)
+            .cast<MetricRecord>()
+            .map((record) => record.payload.sum),
+        [1, 2],
+      );
+      expect(chronicler.diagnosticCounts[DiagnosticReason.reentrantRecording], BigInt.two);
+      await chronicler.close();
+    });
   });
 }
 
@@ -163,6 +202,7 @@ Chronicler _chronicler(
   TestExporter exporter, {
   Duration batchInterval = const Duration(seconds: 5),
   int maxPendingRecords = 5000,
+  RedactionOptions redaction = const RedactionOptions(),
 }) => Chronicler(
   appId: 'app',
   release: 'release',
@@ -179,6 +219,7 @@ Chronicler _chronicler(
       maxSeriesPerInstrument: 1,
       idleTimeout: Duration(seconds: 10),
     ),
+    redaction: redaction,
   ),
 );
 

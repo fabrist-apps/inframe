@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:chronicler/chronicler.dart';
 import 'package:chronicler/src/runtime.dart'
     show ChroniclerDeliveryFixture, ChroniclerMetricFixture;
@@ -187,6 +189,96 @@ void main() {
       expect(_sums(exporter), [2]);
       expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
       await chronicler.close();
+    });
+
+    test('should validate finalized dimensions with the metric attribute limit', () async {
+      final exporter = TestExporter(acceptImmediately: true);
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          limits: ChroniclerLimits(maxMapEntries: 1),
+          metrics: MetricOptions(maxAttributes: 2),
+        ),
+      );
+      chronicler.recorder.metrics
+          .counter('requests')
+          .add(
+            1,
+            attributes: {'route': '/orders', 'method': 'GET'},
+          );
+
+      final report = await chronicler.flush();
+
+      expect(report.accepted, 1);
+      expect(report.dropped, isEmpty);
+      await chronicler.close();
+    });
+
+    test('should reject hook-created invalid metric values and dimensions', () async {
+      final exporter = TestExporter(acceptImmediately: true);
+      final chronicler = _chronicler(
+        exporter,
+        redaction: RedactionOptions(
+          beforeRecord: (record) {
+            final metric = record as MetricRecord;
+            return metric.copyWith(
+              payload: metric.payload.copyWith(
+                sum: -1,
+                attributes: {
+                  'nested': {'value': 1},
+                  'missing': null,
+                },
+              ),
+            );
+          },
+        ),
+      );
+      chronicler.recorder.metrics.counter('requests').add(1);
+
+      final report = await chronicler.flush();
+
+      expect(report.accepted, 0);
+      expect(report.dropped, {DropReason.invalidRecord: 1});
+      expect(exporter.batches, isEmpty);
+      await chronicler.close();
+    });
+
+    test('should keep interval scheduling paused while metrics are disabled', () async {
+      var metricTimers = 0;
+      await runZoned(
+        () async {
+          final chronicler = Chronicler(
+            appId: 'app',
+            release: 'release',
+            source: ChroniclerSource.server,
+            exporter: TestExporter(acceptImmediately: true),
+            options: const ChroniclerOptions(
+              enabledSignals: {
+                ChroniclerSignal.logs,
+                ChroniclerSignal.events,
+                ChroniclerSignal.traces,
+                ChroniclerSignal.errors,
+              },
+              metrics: MetricOptions(interval: Duration(milliseconds: 10)),
+            ),
+          );
+          chronicler.recorder.metrics.counter('requests');
+          await chronicler.flush();
+          await Future<void>.delayed(const Duration(milliseconds: 25));
+          await chronicler.close();
+        },
+        zoneSpecification: ZoneSpecification(
+          createTimer: (self, parent, zone, duration, callback) {
+            if (duration == const Duration(milliseconds: 10)) metricTimers++;
+            return parent.createTimer(zone, duration, callback);
+          },
+        ),
+      );
+
+      expect(metricTimers, 0);
     });
   });
 }
