@@ -217,6 +217,8 @@ void main() {
         '2026-09-13T12:00:00Z',
         '2026-09-13T12:00:00+05:30',
         '2026-09-13T12:00:00.123456789-04:00',
+        '0001-01-01T00:00:00Z',
+        '9999-12-31T23:59:59Z',
       ]) {
         expect(
           () => GoogleCachedContentExpirationUpdate(expireTime: expireTime),
@@ -230,6 +232,8 @@ void main() {
         '2026-09-13T24:00:00Z',
         '2026-09-13T12:00:00+24:00',
         '2026-09-13T12:00:00.1234567890Z',
+        '0001-01-01T00:00:00+00:01',
+        '9999-12-31T23:59:59-00:01',
       ]) {
         expect(
           () => GoogleCachedContentExpirationUpdate(expireTime: expireTime),

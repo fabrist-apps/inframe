@@ -297,7 +297,10 @@ bool _isRfc3339Timestamp(String value) {
   const daysPerMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   final leapDay = month == 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
   final maxDay = daysPerMonth[month - 1] + (leapDay ? 1 : 0);
-  return day >= 1 && day <= maxDay;
+  if (day < 1 || day > maxDay) return false;
+
+  final utc = DateTime.tryParse(value)?.toUtc();
+  return utc != null && utc.year >= 1 && utc.year <= 9999;
 }
 
 String _decodedCacheName(String value) {
