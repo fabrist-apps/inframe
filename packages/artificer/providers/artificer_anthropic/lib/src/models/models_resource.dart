@@ -1,6 +1,6 @@
+import 'package:artificer_anthropic/src/decode.dart';
 import 'package:artificer_anthropic/src/models/model_models.dart';
 import 'package:artificer_core/artificer_core.dart';
-import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:conflux/conflux.dart';
 
@@ -39,7 +39,7 @@ final class AnthropicModelsResource {
           api: _api,
           modelId: 'models',
         )
-        .flatMap((response) => _decode(response, AnthropicModelPage.fromJson));
+        .flatMap((response) => decodeNativeResponse(response, AnthropicModelPage.fromJson));
   }
 
   /// Retrieves one model by its exact provider-local identifier.
@@ -55,24 +55,7 @@ final class AnthropicModelsResource {
           api: _api,
           modelId: id,
         )
-        .flatMap((response) => _decode(response, AnthropicModel.fromJson));
-  }
-}
-
-Effect<NativeResponse<T>, AiError> _decode<T>(
-  NativeResponse<JsonObject> response,
-  T Function(JsonObject) decode,
-) {
-  try {
-    return Effect.succeed(
-      NativeResponse(
-        value: decode(response.value),
-        payload: response.payload,
-        metadata: response.metadata,
-      ),
-    );
-  } on FormatException catch (error) {
-    return Effect.fail(ProtocolError(error.message));
+        .flatMap((response) => decodeNativeResponse(response, AnthropicModel.fromJson));
   }
 }
 

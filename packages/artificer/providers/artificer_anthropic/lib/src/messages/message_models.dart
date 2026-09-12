@@ -112,8 +112,9 @@ sealed class AnthropicContentBlock {
         input: JsonValue.fromDart(value['input']),
         raw: raw,
       ),
-      final type when _providerResultTypes.contains(type) => AnthropicProviderToolResultBlock._(
+      final type when _providerResultTypes.containsKey(type) => AnthropicProviderToolResultBlock._(
         type: type,
+        name: _providerResultTypes[type]!,
         toolUseId: _string(value, 'tool_use_id'),
         content: JsonValue.fromDart(value['content']),
         raw: raw,
@@ -374,6 +375,7 @@ final class AnthropicServerToolUseBlock extends AnthropicContentBlock {
 final class AnthropicProviderToolResultBlock extends AnthropicContentBlock {
   AnthropicProviderToolResultBlock._({
     required this.type,
+    required this.name,
     required this.toolUseId,
     required this.content,
     required this.raw,
@@ -381,6 +383,9 @@ final class AnthropicProviderToolResultBlock extends AnthropicContentBlock {
 
   @override
   final String type;
+
+  /// Name of the provider tool that produced this result.
+  final String name;
 
   /// Identifier of the corresponding provider-owned invocation.
   final String toolUseId;
@@ -663,12 +668,12 @@ final class AnthropicRemoteMcpServer {
 }
 
 const _providerResultTypes = {
-  'web_search_tool_result',
-  'web_fetch_tool_result',
-  'code_execution_tool_result',
-  'bash_code_execution_tool_result',
-  'text_editor_code_execution_tool_result',
-  'tool_search_tool_result',
+  'web_search_tool_result': 'web_search',
+  'web_fetch_tool_result': 'web_fetch',
+  'code_execution_tool_result': 'code_execution',
+  'bash_code_execution_tool_result': 'bash_code_execution',
+  'text_editor_code_execution_tool_result': 'text_editor_code_execution',
+  'tool_search_tool_result': 'tool_search',
 };
 
 /// A content type outside this pinned snapshot, retained without loss.

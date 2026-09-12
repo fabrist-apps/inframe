@@ -206,6 +206,43 @@ void main() {
         throwsArgumentError,
       );
     });
+
+    test('should not infer native ownership from an application tool name', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write(jsonEncode(_pausedMessage));
+        await request.response.close();
+      });
+      final provider = AnthropicProvider(
+        apiKey: 'secret',
+        baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1'),
+      );
+      addTearDown(provider.close);
+
+      final result = await provider
+          .languageModel('future-model')
+          .generate(
+            GenerationRequest(
+              messages: [UserMessage.text('Use my computer function.')],
+              tools: [
+                FunctionTool(
+                  name: 'computer',
+                  inputSchema: JsonObject({'type': 'object'}),
+                ),
+              ],
+            ),
+          )
+          .runFuture();
+
+      final call = result.message.parts.whereType<ApplicationToolCallPart>().singleWhere(
+        (part) => part.name == 'computer',
+      );
+      expect(call.arguments, isA<JsonToolArguments>());
+    });
   });
 }
 

@@ -1,6 +1,6 @@
+import 'package:artificer_anthropic/src/decode.dart';
 import 'package:artificer_anthropic/src/files/file_models.dart';
 import 'package:artificer_core/artificer_core.dart';
-import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
 import 'package:conflux/conflux.dart';
 
@@ -44,7 +44,7 @@ final class AnthropicFilesResource {
           providerId: _providerId,
           api: _api,
         )
-        .flatMap((response) => _decode(response, AnthropicFileMetadata.fromJson));
+        .flatMap((response) => decodeNativeResponse(response, AnthropicFileMetadata.fromJson));
   }
 
   /// Lists one explicit page without automatically following [AnthropicFilePage.nextPage].
@@ -88,7 +88,7 @@ final class AnthropicFilesResource {
           api: _api,
           modelId: 'files',
         )
-        .flatMap((response) => _decode(response, AnthropicFilePage.fromJson));
+        .flatMap((response) => decodeNativeResponse(response, AnthropicFilePage.fromJson));
   }
 
   /// Retrieves one file's native metadata.
@@ -99,7 +99,7 @@ final class AnthropicFilesResource {
         api: _api,
         modelId: 'files',
       )
-      .flatMap((response) => _decode(response, AnthropicFileMetadata.fromJson));
+      .flatMap((response) => decodeNativeResponse(response, AnthropicFileMetadata.fromJson));
 
   /// Downloads file bytes subject to Anthropic's native download restrictions.
   ///
@@ -128,24 +128,7 @@ final class AnthropicFilesResource {
         api: _api,
         modelId: 'files',
       )
-      .flatMap((response) => _decode(response, AnthropicDeletedFile.fromJson));
-}
-
-Effect<NativeResponse<T>, AiError> _decode<T>(
-  NativeResponse<JsonObject> response,
-  T Function(JsonObject) decode,
-) {
-  try {
-    return Effect.succeed(
-      NativeResponse(
-        value: decode(response.value),
-        payload: response.payload,
-        metadata: response.metadata,
-      ),
-    );
-  } on FormatException catch (error) {
-    return Effect.fail(ProtocolError(error.message));
-  }
+      .flatMap((response) => decodeNativeResponse(response, AnthropicDeletedFile.fromJson));
 }
 
 String _filePath(String fileId) => 'files/${Uri.encodeComponent(_nonEmpty(fileId, 'fileId'))}';

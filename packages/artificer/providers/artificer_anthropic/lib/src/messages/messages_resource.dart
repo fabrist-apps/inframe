@@ -1,7 +1,9 @@
 import 'dart:convert';
 
+import 'package:artificer_anthropic/src/decode.dart';
 import 'package:artificer_anthropic/src/messages/message_models.dart';
 import 'package:artificer_anthropic/src/messages/token_models.dart';
+import 'package:artificer_anthropic/src/messages/tool_models.dart';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/protocols.dart';
@@ -33,7 +35,9 @@ final class AnthropicMessagesResource {
         api: 'messages.count_tokens',
         modelId: request.model,
       )
-      .flatMap(_decodeTokenCount);
+      .flatMap(
+        (response) => decodeNativeResponse(response, AnthropicMessageTokensCount.fromJson),
+      );
 
   /// Creates one native Message.
   Effect<NativeResponse<AnthropicMessage>, AiError> create(AnthropicMessageRequest request) =>
@@ -49,7 +53,7 @@ final class AnthropicMessagesResource {
             api: _api,
             modelId: request.model,
           )
-          .flatMap(_decodeMessage);
+          .flatMap((response) => decodeNativeResponse(response, AnthropicMessage.fromJson));
 
   /// Streams typed native Messages events.
   Flow<AnthropicMessageEvent, AiError> stream(
@@ -86,6 +90,7 @@ final class AnthropicMessagesResource {
     ),
     createProtocol: () => _AnthropicCommonProtocol(
       request.model,
+      callerNativeToolNames: _callerNativeToolNames(request.tools),
       maxAssembledBytes: maxAssembledBytes,
     ),
     decodedEventCapacity: decodedEventCapacity,
@@ -94,10 +99,16 @@ final class AnthropicMessagesResource {
   );
 
   /// Normalizes an already-decoded Message without issuing I/O.
-  GenerationResult normalize(NativeResponse<AnthropicMessage> response) {
+  GenerationResult normalize(
+    NativeResponse<AnthropicMessage> response, {
+    AnthropicMessageRequest? request,
+  }) {
     final value = response.value;
     final usage = _commonUsage(value.usage);
-    final parts = value.content.map(_commonPart).toList();
+    final nativeNames = _callerNativeToolNames(request?.tools ?? const []);
+    final parts = value.content
+        .map((block) => _commonPart(block, callerNativeToolNames: nativeNames))
+        .toList();
     if (value.stopReason == 'refusal' && value.stopDetails != null) {
       parts.add(_refusalPart(value.stopDetails!));
     }
@@ -127,38 +138,6 @@ final class AnthropicMessagesResource {
 Map<String, String> _betaHeaders(List<String> betaFeatures) => {
   if (betaFeatures.isNotEmpty) 'anthropic-beta': betaFeatures.join(','),
 };
-
-Effect<NativeResponse<AnthropicMessageTokensCount>, AiError> _decodeTokenCount(
-  NativeResponse<JsonObject> response,
-) {
-  try {
-    return Effect.succeed(
-      NativeResponse(
-        value: AnthropicMessageTokensCount.fromJson(response.value),
-        payload: response.payload,
-        metadata: response.metadata,
-      ),
-    );
-  } on FormatException catch (error) {
-    return Effect.fail(ProtocolError(error.message));
-  }
-}
-
-Effect<NativeResponse<AnthropicMessage>, AiError> _decodeMessage(
-  NativeResponse<JsonObject> response,
-) {
-  try {
-    return Effect.succeed(
-      NativeResponse(
-        value: AnthropicMessage.fromJson(response.value),
-        payload: response.payload,
-        metadata: response.metadata,
-      ),
-    );
-  } on FormatException catch (error) {
-    return Effect.fail(ProtocolError(error.message));
-  }
-}
 
 final class _AnthropicNativeProtocol implements SseProtocol<AnthropicMessageEvent> {
   var _terminal = false;
@@ -196,16 +175,20 @@ final class _AnthropicNativeProtocol implements SseProtocol<AnthropicMessageEven
 }
 
 final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
-  _AnthropicCommonProtocol(this.modelId, {required int maxAssembledBytes})
-    : _maxAssembledBytes = maxAssembledBytes,
-      assembler = GenerationStreamAssembler(
-        providerId: _providerId,
-        api: _api,
-        modelId: modelId,
-        maxAssembledBytes: maxAssembledBytes,
-      );
+  _AnthropicCommonProtocol(
+    this.modelId, {
+    required this.callerNativeToolNames,
+    required int maxAssembledBytes,
+  }) : _maxAssembledBytes = maxAssembledBytes,
+       assembler = GenerationStreamAssembler(
+         providerId: _providerId,
+         api: _api,
+         modelId: modelId,
+         maxAssembledBytes: maxAssembledBytes,
+       );
 
   final String modelId;
+  final Set<String> callerNativeToolNames;
   final int _maxAssembledBytes;
   final GenerationStreamAssembler assembler;
   final Map<int, _AnthropicBlockAssembly> _blocks = {};
@@ -254,7 +237,10 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
             partialOutput: partialOutput,
           );
         }
-        final block = _AnthropicBlockAssembly(contentBlock);
+        final block = _AnthropicBlockAssembly(
+          contentBlock,
+          callerNativeToolNames: callerNativeToolNames,
+        );
         _blocks[index] = block;
         yield assembler.startPart(
           index: index,
@@ -323,6 +309,7 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
           _commonPart(
             block.finish(),
             malformedInputIssue: block.inputIssue,
+            callerNativeToolNames: callerNativeToolNames,
           ),
         );
       case AnthropicMessageDeltaEvent():
@@ -427,23 +414,26 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
 }
 
 final class _AnthropicBlockAssembly {
-  _AnthropicBlockAssembly(this.start)
-    : _text = StringBuffer(
-        switch (start) {
-          AnthropicTextBlock(:final text) => text,
-          AnthropicThinkingBlock(:final thinking) => thinking,
-          _ => '',
-        },
-      ),
-      _signature = StringBuffer(
-        start is AnthropicThinkingBlock ? start.signature : '',
-      ),
-      _citations = switch (start) {
-        AnthropicTextBlock(:final citations?) => citations.toList(),
-        _ => <JsonObject>[],
-      };
+  _AnthropicBlockAssembly(
+    this.start, {
+    required this.callerNativeToolNames,
+  }) : _text = StringBuffer(
+         switch (start) {
+           AnthropicTextBlock(:final text) => text,
+           AnthropicThinkingBlock(:final thinking) => thinking,
+           _ => '',
+         },
+       ),
+       _signature = StringBuffer(
+         start is AnthropicThinkingBlock ? start.signature : '',
+       ),
+       _citations = switch (start) {
+         AnthropicTextBlock(:final citations?) => citations.toList(),
+         _ => <JsonObject>[],
+       };
 
   final AnthropicContentBlock start;
+  final Set<String> callerNativeToolNames;
   final StringBuffer _text;
   final StringBuffer _signature;
   final List<JsonObject> _citations;
@@ -452,14 +442,15 @@ final class _AnthropicBlockAssembly {
   bool finished = false;
   String? inputIssue;
 
-  GenerationPartKind get kind => switch (_commonPart(start)) {
-    TextOutputPart() => GenerationPartKind.text,
-    ReasoningSummaryPart() => GenerationPartKind.reasoning,
-    RefusalPart() => GenerationPartKind.refusal,
-    ApplicationToolCallPart() => GenerationPartKind.applicationToolCall,
-    ProviderToolRecordPart() => GenerationPartKind.providerTool,
-    OpaqueOutputPart() => GenerationPartKind.opaque,
-  };
+  GenerationPartKind get kind =>
+      switch (_commonPart(start, callerNativeToolNames: callerNativeToolNames)) {
+        TextOutputPart() => GenerationPartKind.text,
+        ReasoningSummaryPart() => GenerationPartKind.reasoning,
+        RefusalPart() => GenerationPartKind.refusal,
+        ApplicationToolCallPart() => GenerationPartKind.applicationToolCall,
+        ProviderToolRecordPart() => GenerationPartKind.providerTool,
+        OpaqueOutputPart() => GenerationPartKind.opaque,
+      };
 
   GenerationPartOwner get owner => switch (kind) {
     GenerationPartKind.providerTool ||
@@ -591,6 +582,7 @@ int? _sum(int? left, int? right) => left == null || right == null ? null : left 
 OutputPart _commonPart(
   AnthropicContentBlock block, {
   String? malformedInputIssue,
+  Set<String> callerNativeToolNames = const {},
 }) => switch (block) {
   AnthropicTextBlock(:final text, :final citations) => TextOutputPart(
     text,
@@ -611,7 +603,7 @@ OutputPart _commonPart(
     id: id,
     name: name,
     arguments: input is JsonObject
-        ? _callerNativeToolNames.contains(name)
+        ? callerNativeToolNames.contains(name)
               ? NativeToolArguments(providerId: _providerId, api: _api, action: input)
               : JsonToolArguments(input, originalText: input.encode())
         : MalformedToolArguments(
@@ -633,9 +625,9 @@ OutputPart _commonPart(
     status: _providerToolStatus(block.raw, fallback: ProviderToolStatus.pending),
     details: block.raw,
   ),
-  AnthropicProviderToolResultBlock(:final toolUseId) => ProviderToolRecordPart(
+  AnthropicProviderToolResultBlock(:final toolUseId, :final name) => ProviderToolRecordPart(
     id: toolUseId,
-    name: _providerResultName(block.type),
+    name: name,
     owner: ToolExecutionOwner.provider,
     status: _providerToolStatus(block.raw, fallback: _providerResultStatus(block)),
     details: block.raw,
@@ -680,22 +672,11 @@ ProviderToolStatus _providerResultStatus(AnthropicProviderToolResultBlock block)
   return ProviderToolStatus.completed;
 }
 
-String _providerResultName(String type) => switch (type) {
-  'web_search_tool_result' => 'web_search',
-  'web_fetch_tool_result' => 'web_fetch',
-  'code_execution_tool_result' => 'code_execution',
-  'bash_code_execution_tool_result' => 'bash_code_execution',
-  'text_editor_code_execution_tool_result' => 'text_editor_code_execution',
-  'tool_search_tool_result' => 'tool_search',
-  _ => type,
-};
-
-const _callerNativeToolNames = {
-  'computer',
-  'bash',
-  'str_replace_based_edit_tool',
-  'memory',
-};
+Set<String> _callerNativeToolNames(Iterable<AnthropicToolDefinition> tools) => tools
+    .whereType<AnthropicNativeTool>()
+    .where((tool) => tool.executionOwner == ToolExecutionOwner.caller)
+    .map((tool) => tool.name)
+    .toSet();
 
 FinishReason _finishReason(String? reason) => switch (reason) {
   'end_turn' || 'stop_sequence' => FinishReason.stop,

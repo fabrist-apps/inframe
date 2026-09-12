@@ -105,7 +105,8 @@ final class AnthropicLanguageModel implements LanguageModel {
     final native = _encodeCommon(request, options);
     return switch (native) {
       AiError() => Effect.fail(native),
-      AnthropicMessageRequest() => _messages.create(native).map(_messages.normalize),
+      AnthropicMessageRequest() =>
+        _messages.create(native).map((response) => _messages.normalize(response, request: native)),
       _ => throw StateError('Unexpected common request encoding result.'),
     };
   }
@@ -130,6 +131,11 @@ final class AnthropicLanguageModel implements LanguageModel {
       modelId: modelId,
     );
     if (replayError != null) return replayError;
+    final nativeTools = options.resolveNativeTools(callOptions);
+    final callerNativeToolNames = nativeTools
+        .where((tool) => tool.executionOwner == ToolExecutionOwner.caller)
+        .map((tool) => tool.name)
+        .toSet();
     final messages = <AnthropicInputMessage>[];
     final nativeCallerCalls = <String, String>{};
     for (final message in request.messages) {
@@ -144,7 +150,7 @@ final class AnthropicLanguageModel implements LanguageModel {
       if (nativeMessage.role == AnthropicMessageRole.assistant) {
         for (final block in nativeMessage.content) {
           if (block case AnthropicToolUseBlock(:final id, :final name)
-              when _callerNativeToolNames.contains(name)) {
+              when callerNativeToolNames.contains(name)) {
             nativeCallerCalls[id] = name;
           }
         }
@@ -159,7 +165,6 @@ final class AnthropicLanguageModel implements LanguageModel {
           ),
         )
         .toList();
-    final nativeTools = options.resolveNativeTools(callOptions);
     final duplicateNames = <String>{};
     final seenNames = <String>{};
     for (final tool in <AnthropicToolDefinition>[...commonTools, ...nativeTools]) {
@@ -406,10 +411,3 @@ String _nonEmpty(String value, String name) {
 
 Uri _directoryBaseUrl(Uri value) =>
     value.path.endsWith('/') ? value : value.replace(path: '${value.path}/');
-
-const _callerNativeToolNames = {
-  'computer',
-  'bash',
-  'str_replace_based_edit_tool',
-  'memory',
-};
