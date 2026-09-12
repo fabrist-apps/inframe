@@ -5,9 +5,16 @@ final class GoogleFunctionDeclaration {
   /// Creates a native function declaration.
   GoogleFunctionDeclaration({
     required String name,
-    required this.parameters,
     this.description,
-  }) : name = _nonEmpty(name, 'name');
+    this.parameters,
+    this.parametersJsonSchema,
+  }) : name = _nonEmpty(name, 'name') {
+    if (parameters != null && parametersJsonSchema != null) {
+      throw ArgumentError(
+        'parameters and parametersJsonSchema are mutually exclusive.',
+      );
+    }
+  }
 
   /// Function name.
   final String name;
@@ -15,14 +22,18 @@ final class GoogleFunctionDeclaration {
   /// Optional function description.
   final String? description;
 
-  /// JSON Schema accepted by the function.
-  final JsonObject parameters;
+  /// Google Schema accepted by the function.
+  final JsonObject? parameters;
+
+  /// Unmodified JSON Schema accepted by the function.
+  final JsonObject? parametersJsonSchema;
 
   /// Encodes the declaration.
   JsonObject toJson() => JsonObject({
     'name': name,
     'description': ?description,
-    'parameters': parameters.toDart(),
+    if (parameters case final value?) 'parameters': value.toDart(),
+    if (parametersJsonSchema case final value?) 'parametersJsonSchema': value.toDart(),
   });
 }
 

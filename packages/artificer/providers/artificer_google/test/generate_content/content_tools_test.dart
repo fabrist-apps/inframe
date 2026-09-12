@@ -18,6 +18,12 @@ void main() {
               description: 'Lookup',
               parameters: JsonObject({'type': 'object'}),
             ),
+            GoogleFunctionDeclaration(
+              name: 'lookup_json',
+              parametersJsonSchema: JsonObject({
+                'type': ['object', 'null'],
+              }),
+            ),
           ]),
           GoogleSearchTool(config: JsonObject({'searchTypes': {}})),
           GoogleCodeExecutionTool(),
@@ -40,6 +46,12 @@ void main() {
                 'name': 'lookup',
                 'description': 'Lookup',
                 'parameters': {'type': 'object'},
+              },
+              {
+                'name': 'lookup_json',
+                'parametersJsonSchema': {
+                  'type': ['object', 'null'],
+                },
               },
             ],
           },
@@ -73,6 +85,21 @@ void main() {
             },
           },
         ],
+      );
+    });
+
+    test('keeps native function schema alternatives mutually exclusive', () {
+      expect(
+        GoogleFunctionDeclaration(name: 'ping').toJson().toDart(),
+        {'name': 'ping'},
+      );
+      expect(
+        () => GoogleFunctionDeclaration(
+          name: 'lookup',
+          parameters: JsonObject({'type': 'object'}),
+          parametersJsonSchema: JsonObject({'type': 'object'}),
+        ),
+        throwsArgumentError,
       );
     });
 
@@ -132,9 +159,12 @@ void main() {
             name: 'lookup',
             description: 'Look up a value.',
             inputSchema: JsonObject({
-              'type': 'object',
-              'properties': {
+              'type': ['object', 'null'],
+              r'$defs': {
                 'query': {'type': 'string'},
+              },
+              'properties': {
+                'query': {r'$ref': r'#/$defs/query'},
               },
               'required': ['query'],
             }),
@@ -175,7 +205,26 @@ void main() {
           },
         },
       ]);
-      expect(body['tools']! as List, hasLength(3));
+      final tools = body['tools']! as List;
+      expect(tools, hasLength(3));
+      expect(tools.first, {
+        'functionDeclarations': [
+          {
+            'name': 'lookup',
+            'description': 'Look up a value.',
+            'parametersJsonSchema': {
+              'type': ['object', 'null'],
+              r'$defs': {
+                'query': {'type': 'string'},
+              },
+              'properties': {
+                'query': {r'$ref': r'#/$defs/query'},
+              },
+              'required': ['query'],
+            },
+          },
+        ],
+      });
       expect((body['toolConfig']! as Map)['functionCallingConfig']! as Map, {
         'mode': 'ANY',
         'allowedFunctionNames': ['lookup'],
@@ -291,7 +340,7 @@ void main() {
                   },
                 ],
               },
-              'finishReason': 'FUNCTION_CALL',
+              'finishReason': 'STOP',
             },
           ],
         });
@@ -426,6 +475,7 @@ void main() {
       expect(request.uri.path, '/v1beta/models/gemini-test:countTokens');
       expect(jsonDecode(await utf8.decoder.bind(request).join()), {
         'generateContentRequest': {
+          'model': 'models/gemini-test',
           'contents': [
             {
               'role': 'user',
@@ -501,7 +551,7 @@ void main() {
                   },
                 ],
               },
-              'finishReason': 'FUNCTION_CALL',
+              'finishReason': 'STOP',
             },
           ],
         }),
@@ -563,7 +613,7 @@ void main() {
                   },
                 ],
               },
-              'finishReason': 'FUNCTION_CALL',
+              'finishReason': 'STOP',
             },
           ],
         }),
@@ -640,7 +690,7 @@ const _toolResponse = <String, Object?>{
           },
         ],
       },
-      'finishReason': 'FUNCTION_CALL',
+      'finishReason': 'STOP',
       'groundingMetadata': {
         'groundingChunks': [
           {

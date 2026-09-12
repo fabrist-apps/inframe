@@ -358,6 +358,9 @@ final class GoogleContent {
   factory GoogleContent.fromJson(JsonObject json) {
     final value = json.toDart();
     final parts = _list(value, 'parts');
+    if (parts.isEmpty) {
+      throw const FormatException('parts must not be empty.');
+    }
     return GoogleContent(
       role: _optionalString(value, 'role'),
       parts: parts.map((part) => GooglePart.fromJson(JsonObject.fromDart(part))),
@@ -820,7 +823,11 @@ final class GoogleCountTokensRequest {
   JsonObject toJson() => JsonObject({
     if (contents case final values?)
       'contents': values.map((value) => value.toJson().toDart()).toList(),
-    if (generateContentRequest case final value?) 'generateContentRequest': value.toJson().toDart(),
+    if (generateContentRequest case final value?)
+      'generateContentRequest': {
+        'model': value.model,
+        ...value.toJson().toDart(),
+      },
   });
 }
 
@@ -858,6 +865,7 @@ final class GoogleCountTokensResponse {
 }
 
 const _requestFields = {
+  'model',
   'contents',
   'systemInstruction',
   'generationConfig',

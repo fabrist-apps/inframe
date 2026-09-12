@@ -216,6 +216,99 @@ void main() {
       ]);
     });
 
+    test('should keep synthesized call IDs unique across streaming tool rounds', () async {
+      final bodies = <Map<String, Object?>>[];
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        bodies.add(jsonDecode(await utf8.decoder.bind(request).join())! as Map<String, Object?>);
+        request.response
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..write('data: ${jsonEncode(_streamToolCall('response-${bodies.length}'))}\n\n');
+        await request.response.close();
+      });
+      final provider = _provider(server);
+      addTearDown(provider.close);
+      final model = provider.languageModel('future-model');
+      final tool = FunctionTool(
+        name: 'lookup',
+        inputSchema: JsonObject({'type': 'object'}),
+      );
+      final firstEvents = await model
+          .stream(
+            GenerationRequest(
+              messages: [UserMessage.text('Call the tool.')],
+              tools: [tool],
+            ),
+          )
+          .runCollect()
+          .runFuture();
+      final first = firstEvents.whereType<GenerationFinished>().single.result;
+      final firstCall = first.message.parts.whereType<ApplicationToolCallPart>().single;
+
+      final secondEvents = await model
+          .stream(
+            GenerationRequest(
+              messages: [
+                UserMessage.text('Call the tool.'),
+                first.message,
+                ToolMessage([
+                  JsonToolResult(
+                    callId: firstCall.id,
+                    value: JsonValue.fromDart({'value': 42}),
+                  ),
+                ]),
+              ],
+              tools: [tool],
+            ),
+          )
+          .runCollect()
+          .runFuture();
+      final second = secondEvents.whereType<GenerationFinished>().single.result;
+      final secondCall = second.message.parts.whereType<ApplicationToolCallPart>().single;
+
+      expect(first.finishReason, FinishReason.toolCalls);
+      expect(second.finishReason, FinishReason.toolCalls);
+      expect(firstCall.id, 'google-call-response-1-0');
+      expect(secondCall.id, 'google-call-response-2-0');
+      final replayedResult =
+          ((((bodies.last['contents']! as List).last as Map)['parts']! as List).single
+                  as Map)['functionResponse']!
+              as Map;
+      expect(replayedResult.containsKey('id'), isFalse);
+    });
+
+    test('should fail a streamed candidate that has no parts', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        request.response
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..write(
+            'data: ${jsonEncode({
+              'candidates': [
+                {
+                  'content': {'role': 'model', 'parts': <Object?>[]},
+                  'finishReason': 'STOP',
+                },
+              ],
+            })}\n\n',
+          );
+        await request.response.close();
+      });
+      final provider = _provider(server);
+      addTearDown(provider.close);
+
+      final exit = await provider
+          .languageModel('future-model')
+          .stream(GenerationRequest(messages: [UserMessage.text('Hello')]))
+          .runCollect()
+          .runFutureExit();
+
+      expect(exit, _failedWith<ProtocolError>());
+    });
+
     test('should finish an inspectable blocked stream with trailing usage', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
@@ -543,6 +636,27 @@ Map<String, Object?> _streamChunk(String text, {String? finishReason}) => {
   ],
   'modelVersion': 'future-model-001',
   'responseId': 'response-stream',
+};
+
+Map<String, Object?> _streamToolCall(String responseId) => {
+  'candidates': [
+    {
+      'content': {
+        'role': 'model',
+        'parts': [
+          {
+            'functionCall': {
+              'name': 'lookup',
+              'args': {'query': 'answer'},
+            },
+          },
+        ],
+      },
+      'finishReason': 'STOP',
+      'index': 0,
+    },
+  ],
+  'responseId': responseId,
 };
 
 const _completeContentResponse = <String, Object?>{

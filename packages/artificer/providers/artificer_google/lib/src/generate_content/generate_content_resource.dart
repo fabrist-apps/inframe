@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/protocols.dart';
@@ -141,6 +143,7 @@ final class GoogleGenerateContentResource {
     final requestTools = request?.tools ?? const <GoogleToolDefinition>[];
     final callerFunctionNames = requestTools.expand((tool) => tool.functionNames).toSet();
     final allowsComputerUse = requestTools.any((tool) => tool is GoogleComputerUseTool);
+    final syntheticCallIds = _SyntheticCallIds(value.responseId);
     var callIndex = 0;
     final parts = <OutputPart>[];
     if (content != null) {
@@ -149,6 +152,7 @@ final class GoogleGenerateContentResource {
           part,
           index: parts.length,
           callIndex: callIndex,
+          syntheticCallIds: syntheticCallIds,
           citations: parts.whereType<TextOutputPart>().isEmpty ? citations : const [],
           callerFunctionNames: callerFunctionNames,
           allowsComputerUse: allowsComputerUse,
@@ -160,7 +164,10 @@ final class GoogleGenerateContentResource {
     return _result(
       response,
       parts: parts,
-      finishReason: _finishReason(candidate.finishReason),
+      finishReason: _commonFinishReason(
+        candidate.finishReason,
+        hasApplicationToolCalls: parts.any((part) => part is ApplicationToolCallPart),
+      ),
       nativeFinishReason: candidate.finishReason,
       replay: [
         if (content != null) ReplayItem(phase: 'content', data: content.toJson()),
@@ -199,6 +206,7 @@ OutputPart? _normalizePart(
   GooglePart part, {
   required int index,
   required int callIndex,
+  required _SyntheticCallIds syntheticCallIds,
   required List<Citation> citations,
   required Set<String> callerFunctionNames,
   required bool allowsComputerUse,
@@ -220,7 +228,7 @@ OutputPart? _normalizePart(
       );
     }
     return ApplicationToolCallPart(
-      id: call.id ?? 'google-call-$callIndex',
+      id: call.id ?? syntheticCallIds.forIndex(callIndex),
       name: call.name,
       arguments: isApplicationFunction
           ? call.rawArgs.toDart() is Map<String, Object?>
@@ -541,12 +549,15 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
     }
     var callIndex = 0;
     var citationsAttached = false;
+    var hasApplicationToolCalls = false;
+    final syntheticCallIds = _SyntheticCallIds(_responseId);
     for (final streamPart in _parts) {
       final part = streamPart.value;
       final normalized = _normalizePart(
         part,
         index: streamPart.index,
         callIndex: callIndex,
+        syntheticCallIds: syntheticCallIds,
         citations: citationsAttached ? const [] : _latestCitations,
         callerFunctionNames: callerFunctionNames,
         allowsComputerUse: allowsComputerUse,
@@ -561,6 +572,7 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
             data: part.toJson(),
           );
       if (output is TextOutputPart) citationsAttached = true;
+      if (output is ApplicationToolCallPart) hasApplicationToolCalls = true;
       yield assembler.finishPart(streamPart.index, output);
     }
     if (_blocked case final reason?) {
@@ -581,7 +593,12 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
             'content': assembledContent.toJson().toDart(),
           });
     yield assembler.finish(
-      finishReason: _blocked == null ? _finishReason(_finish) : FinishReason.contentFilter,
+      finishReason: _blocked == null
+          ? _commonFinishReason(
+              _finish,
+              hasApplicationToolCalls: hasApplicationToolCalls,
+            )
+          : FinishReason.contentFilter,
       nativeFinishReason: _blocked ?? _finish,
       nativeResponse: JsonObject({
         'chunks': _rawChunks.map((chunk) => chunk.toDart()).toList(),
@@ -712,7 +729,6 @@ bool _isFinished(String? reason) => reason != null && reason != 'FINISH_REASON_U
 
 FinishReason _finishReason(String? reason) => switch (reason) {
   'STOP' => FinishReason.stop,
-  'FUNCTION_CALL' => FinishReason.toolCalls,
   'MAX_TOKENS' => FinishReason.outputLimit,
   'SAFETY' ||
   'BLOCKLIST' ||
@@ -723,6 +739,31 @@ FinishReason _finishReason(String? reason) => switch (reason) {
   'IMAGE_PROHIBITED_CONTENT' => FinishReason.contentFilter,
   _ => FinishReason.other,
 };
+
+FinishReason _commonFinishReason(
+  String? nativeReason, {
+  required bool hasApplicationToolCalls,
+}) {
+  final finishReason = _finishReason(nativeReason);
+  return finishReason == FinishReason.stop && hasApplicationToolCalls
+      ? FinishReason.toolCalls
+      : finishReason;
+}
+
+final class _SyntheticCallIds {
+  _SyntheticCallIds(String? responseId) : _scope = responseId;
+
+  String? _scope;
+
+  String forIndex(int index) => 'google-call-${_scope ??= _randomScope()}-$index';
+}
+
+final Random _secureRandom = Random.secure();
+
+String _randomScope() => List.generate(
+  16,
+  (_) => _secureRandom.nextInt(256).toRadixString(16).padLeft(2, '0'),
+).join();
 
 String _modelId(String name) => name.substring('models/'.length);
 

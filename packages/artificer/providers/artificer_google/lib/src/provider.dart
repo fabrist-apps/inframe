@@ -245,7 +245,7 @@ final class GoogleLanguageModel implements LanguageModel {
         GoogleFunctionDeclaration(
           name: tool.name,
           description: tool.description,
-          parameters: tool.inputSchema,
+          parametersJsonSchema: tool.inputSchema,
         ),
     ];
     final nativeTools = options.resolveTools(callOptions) ?? const <GoogleToolDefinition>[];

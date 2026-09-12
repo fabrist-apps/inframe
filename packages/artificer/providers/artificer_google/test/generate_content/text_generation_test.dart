@@ -104,6 +104,88 @@ void main() {
       expect(requests, 1);
     });
 
+    test('should keep synthesized call IDs unique across ordinary tool rounds', () async {
+      final bodies = <Map<String, Object?>>[];
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        bodies.add(jsonDecode(await utf8.decoder.bind(request).join())! as Map<String, Object?>);
+        _json(request, _toolCallResponse('response-${bodies.length}'));
+        await request.response.close();
+      });
+      final provider = _provider(server);
+      addTearDown(provider.close);
+      final model = provider.languageModel('future-model');
+      final tool = FunctionTool(
+        name: 'lookup',
+        inputSchema: JsonObject({'type': 'object'}),
+      );
+      final first = await model
+          .generate(
+            GenerationRequest(
+              messages: [UserMessage.text('Call the tool.')],
+              tools: [tool],
+            ),
+          )
+          .runFuture();
+      final firstCall = first.message.parts.whereType<ApplicationToolCallPart>().single;
+
+      final second = await model
+          .generate(
+            GenerationRequest(
+              messages: [
+                UserMessage.text('Call the tool.'),
+                first.message,
+                ToolMessage([
+                  JsonToolResult(
+                    callId: firstCall.id,
+                    value: JsonValue.fromDart({'value': 42}),
+                  ),
+                ]),
+              ],
+              tools: [tool],
+            ),
+          )
+          .runFuture();
+      final secondCall = second.message.parts.whereType<ApplicationToolCallPart>().single;
+
+      expect(first.finishReason, FinishReason.toolCalls);
+      expect(second.finishReason, FinishReason.toolCalls);
+      expect(firstCall.id, 'google-call-response-1-0');
+      expect(secondCall.id, 'google-call-response-2-0');
+      final replayedResult =
+          ((((bodies.last['contents']! as List).last as Map)['parts']! as List).single
+                  as Map)['functionResponse']!
+              as Map;
+      expect(replayedResult.containsKey('id'), isFalse);
+    });
+
+    test('should fail an ordinary response whose candidate has no parts', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        _json(request, {
+          'candidates': [
+            {
+              'content': {'role': 'model', 'parts': <Object?>[]},
+              'finishReason': 'STOP',
+            },
+          ],
+        });
+        await request.response.close();
+      });
+      final provider = _provider(server);
+      addTearDown(provider.close);
+
+      final exit = await provider
+          .languageModel('future-model')
+          .generate(GenerationRequest(messages: [UserMessage.text('Hello')]))
+          .runFutureExit();
+
+      expect(exit, _failedWith<ProtocolError>());
+    });
+
     test('should require an explicit index for multiple native candidates', () {
       final response = NativeResponse(
         value: GoogleGenerateContentResponse.fromJson(
@@ -255,6 +337,26 @@ Map<String, Object?> _candidate(String text) => {
     ],
   },
   'finishReason': 'STOP',
+};
+
+Map<String, Object?> _toolCallResponse(String responseId) => {
+  'candidates': [
+    {
+      'content': {
+        'role': 'model',
+        'parts': [
+          {
+            'functionCall': {
+              'name': 'lookup',
+              'args': {'query': 'answer'},
+            },
+          },
+        ],
+      },
+      'finishReason': 'STOP',
+    },
+  ],
+  'responseId': responseId,
 };
 
 const _response = <String, Object?>{
