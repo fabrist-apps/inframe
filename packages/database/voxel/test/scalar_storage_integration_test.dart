@@ -1,6 +1,7 @@
 import 'package:test/test.dart';
 import 'package:turso/turso.dart';
 import 'package:voxel/voxel.dart';
+import 'package:voxel_fixture_schema/authors.dart';
 
 import 'generated_consumer.dart';
 
@@ -49,5 +50,26 @@ void main() {
     expect(row.code.value, 'ada');
     expect(row.optionalCode, isNull);
     expect(row.preferences.darkMode, isTrue);
+
+    final predicate = (table.count + 1).lessThanExpression(table.count.value(2147483647));
+    final filtered = await database.query(
+      'SELECT count FROM scalarValues WHERE ${predicate.renderParameters()}',
+      parameters: predicate.parameters,
+    );
+    expect(filtered.rows, isEmpty);
+  });
+
+  test('executes parameterized checks as literal Turso DDL', () async {
+    final schema = Authors.db.buildSchema();
+    final expression = schema.constraints.single.expression;
+    final database = await TursoDatabase.open(TursoLocation.memory());
+    addTearDown(database.close);
+
+    await database.execute('CREATE TABLE authors (name TEXT CHECK ($expression))');
+    await database.execute('INSERT INTO authors VALUES (?)', parameters: ['Ada']);
+    await expectLater(
+      database.execute('INSERT INTO authors VALUES (?)', parameters: ['']),
+      throwsA(anything),
+    );
   });
 }

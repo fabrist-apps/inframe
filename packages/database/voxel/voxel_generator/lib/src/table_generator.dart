@@ -15,6 +15,8 @@ import 'package:voxel_generator/src/generator_utils.dart';
 final class VoxelTableGenerator extends GeneratorForAnnotation<VoxelTable> {
   const VoxelTableGenerator() : super(inPackage: 'voxel');
 
+  static final _columnSyntaxCache = Expando<_ColumnSyntax>('Voxel column syntax');
+
   @override
   String generateForAnnotatedElement(
     Element element,
@@ -224,15 +226,11 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   }
 
   String? _enumType(FieldElement field) {
-    final library = field.library;
-    final parsed = library.session.getParsedLibraryByElement(library);
-    if (parsed is ParsedLibraryResult) {
-      final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
-      if (declaration != null) {
-        final visitor = _EnumTextVisitor();
-        declaration.accept(visitor);
-        if (visitor.enumType case final enumType?) return enumType;
-      }
+    final declaration = _columnSyntax(field).declaration;
+    if (declaration != null) {
+      final visitor = _EnumTextVisitor();
+      declaration.accept(visitor);
+      if (visitor.enumType case final enumType?) return enumType;
     }
     return _enumTypeFromColumn(field.type, field.library);
   }
@@ -270,9 +268,7 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   String _columnValueType(FieldElement field) {
     final rendered = columnValueType(field.type, field.library);
     if (rendered != 'InvalidType') return rendered;
-    final parsed = field.library.session.getParsedLibraryByElement(field.library);
-    if (parsed is! ParsedLibraryResult) return rendered;
-    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
+    final declaration = _columnSyntax(field).declaration;
     if (declaration is! VariableDeclaration || declaration.parent is! VariableDeclarationList) {
       return rendered;
     }
@@ -284,14 +280,7 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   }
 
   _ColumnDefaults _columnDefaults(FieldElement field) {
-    final parsed = field.library.session.getParsedLibraryByElement(field.library);
-    if (parsed is! ParsedLibraryResult) return const _ColumnDefaults();
-    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
-    if (declaration is! VariableDeclaration || declaration.initializer == null) {
-      return const _ColumnDefaults();
-    }
-    final methods = <String>[];
-    _collectColumnMethods(declaration.initializer!, methods);
+    final methods = _columnSyntax(field).methods;
     return _ColumnDefaults(
       hasDefaultFn:
           methods.contains('defaultValue') ||
@@ -302,12 +291,7 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   }
 
   void _validateMappedHookOrder(FieldElement field) {
-    final parsed = field.library.session.getParsedLibraryByElement(field.library);
-    if (parsed is! ParsedLibraryResult) return;
-    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
-    if (declaration is! VariableDeclaration || declaration.initializer == null) return;
-    final methods = <String>[];
-    _collectColumnMethods(declaration.initializer!, methods);
+    final methods = _columnSyntax(field).methods;
     final mapIndex = methods.indexOf('map');
     if (mapIndex < 0) return;
     final storageHook = methods
@@ -324,12 +308,7 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   }
 
   void _validateArrayHookOrder(FieldElement field) {
-    final parsed = field.library.session.getParsedLibraryByElement(field.library);
-    if (parsed is! ParsedLibraryResult) return;
-    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
-    if (declaration is! VariableDeclaration || declaration.initializer == null) return;
-    final methods = <String>[];
-    _collectColumnMethods(declaration.initializer!, methods);
+    final methods = _columnSyntax(field).methods;
     final arrayIndex = methods.indexOf('array');
     if (arrayIndex < 0) return;
     final scalarHook = methods
@@ -359,6 +338,21 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
       default:
         return;
     }
+  }
+
+  _ColumnSyntax _columnSyntax(FieldElement field) {
+    final cached = _columnSyntaxCache[field];
+    if (cached != null) return cached;
+    final parsed = field.library.session.getParsedLibraryByElement(field.library);
+    final declaration = parsed is ParsedLibraryResult
+        ? parsed.getFragmentDeclaration(field.firstFragment)?.node
+        : null;
+    final methods = <String>[];
+    if (declaration is VariableDeclaration) {
+      final initializer = declaration.initializer;
+      if (initializer != null) _collectColumnMethods(initializer, methods);
+    }
+    return _columnSyntaxCache[field] = _ColumnSyntax(declaration, List.unmodifiable(methods));
   }
 
   String? _enumTypeFromColumn(DartType type, LibraryElement library) {
@@ -440,6 +434,13 @@ final class _MutationField {
   final String domainType;
   final String storageType;
   final bool isRequiredInsert;
+}
+
+final class _ColumnSyntax {
+  const _ColumnSyntax(this.declaration, this.methods);
+
+  final AstNode? declaration;
+  final List<String> methods;
 }
 
 final class _ColumnDefaults {

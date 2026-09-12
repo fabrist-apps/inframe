@@ -145,6 +145,14 @@ void main() {
     );
     expect(() => table.texts.codec.decode('[[]]', isSqlNull: false), throwsFormatException);
     expect(
+      () => table.texts.codec.decode('[', isSqlNull: false),
+      throwsA(
+        isA<FormatException>()
+            .having((error) => error.message, 'message', contains('Unexpected end of input'))
+            .having((error) => error.source, 'source', '['),
+      ),
+    );
+    expect(
       () => table.codes.decodeValue('["secret"]', isSqlNull: false),
       throwsA(
         isA<VoxelConversionException>()

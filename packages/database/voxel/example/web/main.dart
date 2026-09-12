@@ -266,8 +266,11 @@ void _expect(bool condition, String message) {
 void _expectFailure(void Function() operation) {
   try {
     operation();
-  } on Object {
-    return;
+  } on Object catch (error) {
+    if (error is FormatException || error is RangeError || error is VoxelConversionException) {
+      return;
+    }
+    rethrow;
   }
   throw StateError('Expected malformed stored text to fail.');
 }

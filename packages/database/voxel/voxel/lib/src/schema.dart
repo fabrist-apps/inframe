@@ -138,6 +138,7 @@ final class VoxelTableSchema<Definition, Row> {
   late final List<VoxelIndex> indexes;
   late final List<VoxelConstraint> constraints;
   final Map<String, VoxelRelationDescriptor<Object?>> relations;
+  bool _isComposed = false;
 
   String get qualifiedName => '${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}';
 
@@ -197,6 +198,13 @@ void _validateIdentifier(String identifier, String label) {
 }
 
 void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
+  for (final table in tables) {
+    if (table._isComposed) {
+      throw ArgumentError(
+        'Voxel table ${table.schemaName}.${table.tableName} already belongs to a Voxel database schema.',
+      );
+    }
+  }
   final schemaObjectNames = <String>{};
   final registered = <Type, VoxelTableSchema<Object?, Object?>>{};
   for (final table in tables) {
@@ -363,6 +371,9 @@ void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
       }
     }
   }
+  for (final table in tables) {
+    table._isComposed = true;
+  }
 }
 
 String _schemaObjectKey(String schema, String name) =>
@@ -434,7 +445,7 @@ abstract class VoxelTableDefinition<Self> {
   VoxelConstraint check(String name, VoxelPredicate predicate) => VoxelConstraint(
     name: name,
     kind: VoxelConstraintKind.check,
-    expression: predicate.sql,
+    expression: predicate.renderLiterals(),
     predicate: predicate,
   );
 
@@ -834,7 +845,7 @@ final class VoxelJsonCodec extends VoxelCodec<JsonValue> {
     try {
       return JsonValue.from(jsonDecode(value));
     } on Object catch (error) {
-      throw FormatException('invalid JSON text', error);
+      throw FormatException('invalid JSON text: $error', value);
     }
   }
 }
@@ -1573,7 +1584,7 @@ final class _VoxelBoundExpression<T> implements VoxelExpression<T> {
 
   @override
   String renderPlaceholders(String Function(int index) placeholder) =>
-      '${placeholder(0)}::${codec.cast}';
+      'CAST(${placeholder(0)} AS ${codec.cast})';
 
   @override
   String renderParameters({int startAt = 1}) =>
@@ -1606,7 +1617,7 @@ final class _VoxelBinaryExpression<T> implements VoxelExpression<T> {
   @override
   String renderPlaceholders(String Function(int index) placeholder) =>
       '(${left.renderPlaceholders(placeholder)} $operator '
-      '${placeholder(left.parameters.length)}::${codec.cast})';
+      'CAST(${placeholder(left.parameters.length)} AS ${codec.cast}))';
 
   @override
   String renderParameters({int startAt = 1}) =>
@@ -1967,7 +1978,7 @@ final class VoxelArrayCodec<Element> extends VoxelCodec<List<Element>> {
     try {
       parsed = jsonDecode(value);
     } on Object catch (error) {
-      throw FormatException('invalid array JSON text', error);
+      throw FormatException('invalid array JSON text: $error', value);
     }
     if (parsed is! List<Object?>) throw const FormatException('expected a JSON array');
     return [

@@ -33,4 +33,20 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test('rejects reusing a table schema across database compositions', () {
+    final table = Users.db.buildSchema() as VoxelTableSchema<Object?, Object?>;
+    VoxelDatabaseSchema(name: 'first', tables: [table]);
+
+    expect(
+      () => VoxelDatabaseSchema(name: 'second', tables: [table]),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          contains('already belongs to a Voxel database schema'),
+        ),
+      ),
+    );
+  });
 }
