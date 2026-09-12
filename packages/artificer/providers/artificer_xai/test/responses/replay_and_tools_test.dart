@@ -218,6 +218,19 @@ void main() {
                   mimeType: 'image/png',
                   source: BytesMediaSource([1, 2, 3]),
                 ),
+              ]),
+            ],
+          ),
+        )
+        .runFuture();
+    final parts = ((body['input']! as List).single as Map)['content']! as List;
+    expect(parts[1], {'type': 'input_image', 'image_url': 'data:image/png;base64,AQID'});
+
+    final fileImageFailed = await model
+        .generate(
+          GenerationRequest(
+            messages: [
+              UserMessage([
                 MediaInputPart(
                   kind: MediaKind.image,
                   mimeType: 'image/png',
@@ -232,10 +245,7 @@ void main() {
             ],
           ),
         )
-        .runFuture();
-    final parts = ((body['input']! as List).single as Map)['content']! as List;
-    expect(parts[1], {'type': 'input_image', 'image_url': 'data:image/png;base64,AQID'});
-    expect(parts[2], {'type': 'input_image', 'file_id': 'file_1'});
+        .runFutureExit();
 
     final audioFailed = await model
         .generate(
@@ -267,9 +277,37 @@ void main() {
           ),
         )
         .runFutureExit();
+    expect(fileImageFailed, _failedWith<UnsupportedFeatureError>());
     expect(audioFailed, _failedWith<UnsupportedFeatureError>());
     expect(videoFailed, _failedWith<UnsupportedFeatureError>());
     expect(requests, 1);
+  });
+
+  test('empty portable assistant history fails through the typed channel', () async {
+    var requests = 0;
+    final server = await _server((request, _) async {
+      requests++;
+      return _textResponse;
+    });
+    final provider = _provider(server);
+    addTearDown(provider.close);
+    final model = provider.languageModel('grok-future');
+    final histories = [
+      AssistantMessage([]),
+      AssistantMessage([TextOutputPart('')]),
+    ];
+
+    for (final assistant in histories) {
+      final request = GenerationRequest(
+        messages: [UserMessage.text('before'), assistant, UserMessage.text('after')],
+      );
+      expect(await model.generate(request).runFutureExit(), _failedWith<UnsupportedFeatureError>());
+      expect(
+        await model.stream(request).runCollect().runFutureExit(),
+        _failedWith<UnsupportedFeatureError>(),
+      );
+    }
+    expect(requests, 0);
   });
 
   test('encodes custom and native caller tool results with their matching types', () async {

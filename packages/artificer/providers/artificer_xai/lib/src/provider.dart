@@ -174,11 +174,17 @@ final class XaiLanguageModel implements LanguageModel {
             'Edited assistant history supports portable text only.',
           );
         }
+        final textParts = parts.cast<TextOutputPart>();
+        if (textParts.isEmpty || textParts.any((part) => part.text.isEmpty)) {
+          return const UnsupportedFeatureError(
+            'Edited assistant history requires nonempty portable text.',
+          );
+        }
         input.add(
           XaiResponseInputMessage(
             role: XaiResponseInputRole.assistant,
             content: [
-              for (final part in parts.cast<TextOutputPart>()) XaiTextInputPart(part.text),
+              for (final part in textParts) XaiTextInputPart(part.text),
             ],
           ),
         );
@@ -261,11 +267,8 @@ final class XaiLanguageModel implements LanguageModel {
           imageUrl: 'data:$mimeType;base64,${base64Encode(bytes)}',
         ),
         UrlMediaSource(:final url) => XaiImageInputPart(imageUrl: url.toString()),
-        ProviderFileSource(:final providerId, :final api, :final reference)
-            when providerId == _providerId && api == _responsesApi =>
-          XaiImageInputPart(fileId: reference),
-        ProviderFileSource() => const InvalidRequestError(
-          'Xai file input must match the xai/responses context.',
+        ProviderFileSource() => const UnsupportedFeatureError(
+          'Xai image input supports URL and inline byte sources.',
         ),
       },
       MediaKind.document => switch (source) {

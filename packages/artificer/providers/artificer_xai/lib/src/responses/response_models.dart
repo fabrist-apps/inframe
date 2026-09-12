@@ -104,27 +104,16 @@ final class XaiTextInputPart extends XaiResponseInputPart {
   Map<String, Object?> toDart() => {'type': 'input_text', 'text': text};
 }
 
-/// An image supplied by URL, data URL, or provider file ID.
+/// An image supplied by URL or data URL.
 final class XaiImageInputPart extends XaiResponseInputPart {
-  /// Creates an image input with exactly one native source.
-  XaiImageInputPart({this.imageUrl, this.fileId}) {
-    if ((imageUrl == null) == (fileId == null)) {
-      throw ArgumentError('Exactly one image source is required.');
-    }
-  }
+  /// Creates an image input from the native `image_url` field.
+  XaiImageInputPart({required String imageUrl}) : imageUrl = _nonEmpty(imageUrl, 'imageUrl');
 
   /// HTTP(S) or data URL.
-  final String? imageUrl;
-
-  /// Xai file ID.
-  final String? fileId;
+  final String imageUrl;
 
   @override
-  Map<String, Object?> toDart() => {
-    'type': 'input_image',
-    'image_url': ?imageUrl,
-    'file_id': ?fileId,
-  };
+  Map<String, Object?> toDart() => {'type': 'input_image', 'image_url': imageUrl};
 }
 
 /// A document supplied through an Xai file ID.

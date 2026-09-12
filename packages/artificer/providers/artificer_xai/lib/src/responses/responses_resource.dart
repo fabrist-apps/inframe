@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/protocols.dart';
@@ -458,6 +460,7 @@ final class _XaiCommonResponsesProtocol implements SseProtocol<GenerationEvent> 
   final GenerationStreamAssembler assembler;
   final Map<int, GenerationPartKind> _started = {};
   final List<ReplayItem> _unknownEvents = [];
+  var _unknownEventBytes = 0;
   var _terminal = false;
   XaiResponse? _lastTerminal;
 
@@ -518,6 +521,15 @@ final class _XaiCommonResponsesProtocol implements SseProtocol<GenerationEvent> 
       case XaiUnknownResponseEvent():
         if (decoded.type == 'response.failed' || decoded.type == 'error') {
           throw _streamError(decoded, partialOutput: assembler.partialMessage);
+        }
+        _unknownEventBytes += utf8.encode(decoded.raw.encode()).length;
+        if (_unknownEventBytes > assembler.maxAssembledBytes) {
+          throw ResponseLimitError(
+            'Retained unknown events exceeded the configured byte limit.',
+            limit: assembler.maxAssembledBytes,
+            actual: _unknownEventBytes,
+            partialOutput: assembler.partialMessage,
+          );
         }
         _unknownEvents.add(ReplayItem(phase: 'unknown-event', data: decoded.raw));
         yield assembler.providerEvent(decoded.type, decoded.raw);

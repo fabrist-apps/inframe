@@ -275,6 +275,41 @@ void main() {
     );
     expect(requests, 0);
   });
+
+  test('retained unknown events obey the assembled response limit', () async {
+    final server = await _streamServer([
+      {
+        'type': 'response.future.delta',
+        'sequence_number': 0,
+        'payload': 'x' * 4096,
+      },
+      {'type': 'response.completed', 'sequence_number': 1, 'response': _finalResponse},
+    ]);
+    final provider = _provider(server);
+    addTearDown(provider.close);
+
+    final exit = await provider.responses
+        .streamCommon(
+          XaiResponseRequest(
+            model: 'grok-future',
+            input: [XaiResponseInputMessage.userText('hello')],
+          ),
+          maxAssembledBytes: 1024,
+        )
+        .runCollect()
+        .runFutureExit();
+
+    expect(
+      exit,
+      isA<Failed<List<GenerationEvent>, AiError>>().having(
+        (failure) => (failure.cause as Expected<AiError>).error,
+        'error',
+        isA<ResponseLimitError>()
+            .having((error) => error.limit, 'limit', 1024)
+            .having((error) => error.actual, 'actual', greaterThan(4096)),
+      ),
+    );
+  });
 }
 
 Future<HttpServer> _streamServer(List<Map<String, Object?>> events) async {
