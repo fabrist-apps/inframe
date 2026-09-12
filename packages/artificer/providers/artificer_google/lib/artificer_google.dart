@@ -1,6 +1,8 @@
 /// Google Gemini model adapters and typed native GenerateContent resources.
 library;
 
+export 'src/cached_contents/cached_content_models.dart';
+export 'src/cached_contents/cached_contents_resource.dart';
 export 'src/embeddings/embedding_models.dart';
 export 'src/embeddings/embeddings_resource.dart';
 export 'src/files/files_resource.dart';

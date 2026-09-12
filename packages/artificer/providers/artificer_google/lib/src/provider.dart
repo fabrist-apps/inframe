@@ -1,6 +1,7 @@
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
+import 'package:artificer_google/src/cached_contents/cached_contents_resource.dart';
 import 'package:artificer_google/src/embeddings/embedding_models.dart';
 import 'package:artificer_google/src/embeddings/embeddings_resource.dart';
 import 'package:artificer_google/src/files/files_resource.dart';
@@ -30,6 +31,7 @@ final class GoogleProvider {
     embeddings = GoogleEmbeddingsResource(_client);
     files = GoogleFilesResource(_client);
     interactions = GoogleInteractionsResource(_client);
+    cachedContents = GoogleCachedContentsResource(_client);
   }
 
   final ProviderHttpClient _client;
@@ -48,6 +50,9 @@ final class GoogleProvider {
 
   /// Explicit stable-v1 Interactions lifecycle and streaming operations.
   late final GoogleInteractionsResource interactions;
+
+  /// Explicit cached-content lifecycle operations.
+  late final GoogleCachedContentsResource cachedContents;
 
   /// Creates a common explicit-history language model without discovery.
   GoogleLanguageModel languageModel(String modelId, {GoogleModelOptions? options}) {
