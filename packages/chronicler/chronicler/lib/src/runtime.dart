@@ -136,6 +136,17 @@ final class ChroniclerRecorder {
     run: run,
   );
 
+  /// Marks the active callback-managed span as failed.
+  void setSpanError() => _runtime._setSpanError(_attribution.span);
+
+  /// Replaces one attribute on the active callback-managed span.
+  void setSpanAttribute(String key, Object? value) =>
+      _runtime._setSpanAttributes(_attribution.span, {key: value});
+
+  /// Atomically merges [attributes] into the active callback-managed span.
+  void setSpanAttributes(Map<String, Object?> attributes) =>
+      _runtime._setSpanAttributes(_attribution.span, attributes);
+
   /// Returns a recorder whose analytics identity is exactly the supplied IDs.
   ///
   /// Omitted IDs are cleared. Runtime configuration and operation correlation
@@ -378,8 +389,8 @@ final class ChroniclerRuntime {
       final value = await result;
       _finishSpan(started.state, SpanStatus.success);
       return value;
-    } on Object {
-      _finishSpan(started.state, SpanStatus.error);
+    } on Object catch (error) {
+      _finishSpan(started.state, _failureStatus(error));
       rethrow;
     }
   }
@@ -406,9 +417,20 @@ final class ChroniclerRuntime {
       }
       _finishSpan(started.state, SpanStatus.success);
       return result;
-    } on Object {
-      _finishSpan(started.state, SpanStatus.error);
+    } on Object catch (error) {
+      _finishSpan(started.state, _failureStatus(error));
       rethrow;
+    }
+  }
+
+  SpanStatus _failureStatus(Object error) {
+    final classifier = options.tracing.isCancellation;
+    if (classifier == null) return SpanStatus.error;
+    try {
+      return classifier(error) ? SpanStatus.cancelled : SpanStatus.error;
+    } on Object {
+      diagnostics.record(DiagnosticReason.cancellationClassifierFailed);
+      return SpanStatus.error;
     }
   }
 
@@ -444,12 +466,13 @@ final class ChroniclerRuntime {
     }
     final collectionEnabled = _enabledSignals.contains(ChroniclerSignal.traces);
     final state = _SpanState(
+      eventId: ChronoID.generate(prefix: 'evt'),
       traceId: traceId,
       spanId: spanId,
       parentSpanId: activeParent?.spanId,
       name: name,
       kind: kind,
-      attributes: snapshot,
+      attributes: _redactMap(snapshot),
       startedAt: _elapsedNow,
       timestamp: _now,
       recordPayload: payloadValid && collectionEnabled,
@@ -477,12 +500,15 @@ final class ChroniclerRuntime {
     if (span.ended) return;
     span.ended = true;
     if (!span.recordPayload) return;
+    final finalStatus = status == SpanStatus.success && span.explicitError
+        ? SpanStatus.error
+        : status;
     final durationMicros = (_elapsedNow - span.startedAt).inMicroseconds;
     final attribution = span.attribution;
     _finalizeAndEnqueue(
       SpanRecord(
         envelope: RecordEnvelope(
-          eventId: ChronoID.generate(prefix: 'evt'),
+          eventId: span.eventId,
           appId: appId,
           release: release,
           source: source,
@@ -498,10 +524,80 @@ final class ChroniclerRuntime {
         payload: SpanPayload(
           name: span.name,
           spanKind: span.kind,
-          status: status,
+          status: finalStatus,
           durationMicros: durationMicros,
           attributes: span.attributes,
         ),
+      ),
+    );
+  }
+
+  void _setSpanError(_SpanState? span) {
+    if (!_canUpdateSpan(span)) return;
+    span!.explicitError = true;
+  }
+
+  void _setSpanAttributes(_SpanState? span, Map<String, Object?> update) {
+    if (!_canUpdateSpan(span)) return;
+    if (!span!.recordPayload) return;
+    try {
+      final proposed = <String, Object?>{...span.attributes, ...update};
+      final snapshot = _redactMap(validator.snapshotAttributes(proposed));
+      final reserved = _spanRecord(
+        span,
+        status: SpanStatus.cancelled,
+        durationMicros: 9007199254740991,
+        attributes: snapshot,
+      );
+      codec
+        ..validateRecord(reserved)
+        ..encodeRecord(reserved);
+      span.attributes = snapshot;
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidSpanUpdate);
+    }
+  }
+
+  bool _canUpdateSpan(_SpanState? span) {
+    if (span == null) {
+      diagnostics.record(DiagnosticReason.noActiveSpan);
+      return false;
+    }
+    if (span.ended) {
+      diagnostics.record(DiagnosticReason.invalidSpanUpdate);
+      return false;
+    }
+    return true;
+  }
+
+  SpanRecord _spanRecord(
+    _SpanState span, {
+    required SpanStatus status,
+    required int durationMicros,
+    required Map<String, Object?> attributes,
+  }) {
+    final attribution = span.attribution;
+    return SpanRecord(
+      envelope: RecordEnvelope(
+        eventId: span.eventId,
+        appId: appId,
+        release: release,
+        source: source,
+        timestamp: span.timestamp,
+        buildId: buildId,
+        userId: attribution.userId,
+        anonymousId: attribution.anonymousId,
+        sessionId: attribution.sessionId,
+        traceId: span.traceId,
+        spanId: span.spanId,
+        parentSpanId: span.parentSpanId,
+      ),
+      payload: SpanPayload(
+        name: span.name,
+        spanKind: span.kind,
+        status: status,
+        durationMicros: durationMicros,
+        attributes: attributes,
       ),
     );
   }
@@ -1564,6 +1660,7 @@ final class _StartedSpan {
 
 final class _SpanState {
   _SpanState({
+    required this.eventId,
     required this.traceId,
     required this.spanId,
     required this.parentSpanId,
@@ -1577,18 +1674,20 @@ final class _SpanState {
     required this.attribution,
   });
 
+  final String eventId;
   final String traceId;
   final String spanId;
   final String? parentSpanId;
   final String name;
   final SpanKind kind;
-  final Map<String, Object?> attributes;
+  Map<String, Object?> attributes;
   final Duration startedAt;
   final DateTime timestamp;
   final bool recordPayload;
   final bool lineageRecording;
   final _RecorderAttribution attribution;
   bool ended = false;
+  bool explicitError = false;
 }
 
 /// Internal fixture bridge for deterministic delivery tests.

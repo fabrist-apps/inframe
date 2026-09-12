@@ -45,6 +45,9 @@ extension ChroniclerContextEvents on Context {
 
 /// Runs callback-managed tracing operations from a configured [Context].
 extension ChroniclerContextTracing on Context {
+  /// Active-span updates and propagation backed by this Context's recorder.
+  ChroniclerTracing get tracing => ChroniclerTracing(require(_chroniclerKey));
+
   /// Runs [run] in a new root trace and returns its result asynchronously.
   Future<T> trace<T>(
     String name, {
@@ -96,6 +99,23 @@ extension ChroniclerContextTracing on Context {
     attributes: attributes,
     run: (recorder) => run(withChronicler(recorder)),
   );
+}
+
+/// Updates the active callback-managed span reached through a [Context].
+final class ChroniclerTracing {
+  /// Creates a tracing view over a borrowed recorder.
+  const ChroniclerTracing(this._recorder);
+
+  final ChroniclerRecorder _recorder;
+
+  /// Marks the active span as failed without changing the callback result.
+  void setError() => _recorder.setSpanError();
+
+  /// Replaces one active-span attribute after atomic validation.
+  void setAttribute(String key, Object? value) => _recorder.setSpanAttribute(key, value);
+
+  /// Atomically merges [attributes] into the active span.
+  void setAttributes(Map<String, Object?> attributes) => _recorder.setSpanAttributes(attributes);
 }
 
 /// Records product events without waiting for transport work.
