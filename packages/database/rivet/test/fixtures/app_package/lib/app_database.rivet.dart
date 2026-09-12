@@ -7,6 +7,32 @@ part of 'app_database.dart';
 // RivetTableGenerator
 // **************************************************************************
 
+/// Typed relation include scope for [PackageUsers].
+final class PackageUsersInclude {
+  /// Creates the generated include scope.
+  const PackageUsersInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<PackageUsers, PackageUsersRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [package] relation.
+  RivetInclude<schema.PackageUsers, schema.PackageUsersRow> package({
+    RivetWhere<schema.PackageUsers>? where,
+  }) {
+    final target = schema.PackageUsers.db.buildSchema();
+    final relationPath = path.isEmpty ? 'package' : '$path.package';
+    return RivetInclude<schema.PackageUsers, schema.PackageUsersRow>(
+      name: 'package',
+      path: relationPath,
+      relation: _schema.relations['package']!,
+      targetSchema: target,
+      where: where,
+    );
+  }
+}
+
 /// Generated row returned by reads from 'fixture.appUsers'.
 final class PackageUsersRow {
   /// Creates a row from decoded column and relation values.
@@ -164,6 +190,57 @@ final class _$PackageUsersDB
     }
 
     final definition = createDefinition();
+    PackageUsersRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => PackageUsersRow(
+      packageName: transport
+          ? definition.packageName.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.packageName.decodeValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            ),
+      access: transport
+          ? definition.access.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.access.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      accessRecord: transport
+          ? definition.accessRecord.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.accessRecord.decodeValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            ),
+      accessCallback: transport
+          ? definition.accessCallback.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.accessCallback.decodeValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            ),
+      packageAccess: transport
+          ? definition.packageAccess.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.packageAccess.decodeValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            ),
+      package: relations.read('package'),
+    );
+
     return RivetTableSchema<PackageUsers, PackageUsersRow>(
       schemaName: 'fixture',
       tableName: 'appUsers',
@@ -190,31 +267,36 @@ final class _$PackageUsersDB
         definition.accessCallback as RivetColumn<Object?>,
         definition.packageAccess as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => PackageUsersRow(
-        packageName: definition.packageName.decodeValue(
-          values[0],
-          isSqlNull: sqlNulls[0],
-        ),
-        access: definition.access.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
-        accessRecord: definition.accessRecord.decodeValue(
-          values[2],
-          isSqlNull: sqlNulls[2],
-        ),
-        accessCallback: definition.accessCallback.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        packageAccess: definition.packageAccess.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'package': definition.package as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<PackageUsers, PackageUsersRow> find({
+    RivetWhere<PackageUsers>? where,
+    RivetOrderBy<PackageUsers>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<PackageUsersInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(PackageUsersInclude(schema)) ?? const [],
     );
   }
 

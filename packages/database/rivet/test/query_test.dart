@@ -101,6 +101,91 @@ void main() {
       );
       expect(executor.queries.single.parameters, ['Ada', 'Grace']);
     });
+
+    test('should load one relation and preserve missing and duplicate cardinality', () async {
+      executor.rows = [
+        (
+          [
+            'Ada',
+            {
+              'count': 1,
+              'rows': [
+                [
+                  [false, 'Ada'],
+                ],
+              ],
+            },
+          ],
+          [false, false],
+        ),
+      ];
+
+      final row = await Posts.db.find(include: (include) => [include.author()]).getSingle(executor);
+
+      expect((row.author as LoadedRelation<UserProfilesRow?>).value?.displayName, 'Ada');
+      expect(executor.queries.single.sql, contains('jsonb_build_object'));
+      expect(executor.queries.single.sql, contains('LIMIT 2'));
+
+      executor.rows = [
+        (
+          [
+            'Missing',
+            {'count': 0, 'rows': <Object?>[]},
+          ],
+          [false, false],
+        ),
+      ];
+      final missing = await Posts.db
+          .find(include: (include) => [include.author()])
+          .getSingle(executor);
+      expect((missing.author as LoadedRelation<UserProfilesRow?>).value, isNull);
+
+      executor.rows = [
+        (
+          [
+            'Ada',
+            {
+              'count': 2,
+              'rows': [
+                [
+                  [false, 'Ada'],
+                ],
+                [
+                  [false, 'Ada'],
+                ],
+              ],
+            },
+          ],
+          [false, false],
+        ),
+      ];
+      await expectLater(
+        Posts.db.find(include: (include) => [include.author()]).get(executor),
+        throwsA(
+          isA<RivetCardinalityException>().having(
+            (error) => error.relationPath,
+            'relationPath',
+            'author',
+          ),
+        ),
+      );
+    });
+
+    test('should reject duplicate one includes before execution', () {
+      expect(
+        () => Posts.db.find(
+          include: (include) => [include.author(), include.author()],
+        ),
+        throwsA(
+          isA<RivetUnsupportedQueryException>().having(
+            (error) => error.message,
+            'message',
+            contains('author'),
+          ),
+        ),
+      );
+      expect(executor.queries, isEmpty);
+    });
   });
 }
 

@@ -63,6 +63,7 @@ final class _$PackageUsersDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<PackageUsers, PackageUsersRow>(
       schemaName: 'fixture',
       tableName: 'packageUsers',

@@ -15,6 +15,15 @@ typedef RivetRowDecoder<Row> = Row Function(
   List<Object?> values,
   List<bool> sqlNulls,
 );
+typedef RivetWhere<Definition> = RivetPredicate Function(Definition table);
+typedef RivetOrderBy<Definition> = List<RivetOrder> Function(Definition table);
+
+typedef RivetRelatedRowDecoder<Row> = Row Function(
+  List<Object?> values,
+  List<bool> sqlNulls,
+  RivetRelationValues relations, {
+  required bool transport,
+});
 
 /// Runtime metadata emitted by a table generator.
 final class RivetTableSchema<Definition, Row> {
@@ -25,6 +34,7 @@ final class RivetTableSchema<Definition, Row> {
     required List<RivetColumn<Object?>> columns,
     required List<String> columnNames,
     required this.decode,
+    this.decodeRelated,
     this.createDefinition,
     this.columnsFor,
     this.renamedFrom,
@@ -80,12 +90,31 @@ final class RivetTableSchema<Definition, Row> {
   final Definition Function()? createDefinition;
   final List<RivetColumn<Object?>> Function(Definition definition)? columnsFor;
   final RivetRowDecoder<Row> decode;
+  final RivetRelatedRowDecoder<Row>? decodeRelated;
   final int formatVersion;
   late final List<RivetIndex> indexes;
   late final List<RivetConstraint> constraints;
   final Map<String, RivetRelationDescriptor<Object?>> relations;
 
   String get qualifiedName => '${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}';
+
+  Row decodeRow(
+    List<Object?> values,
+    List<bool> sqlNulls, {
+    RivetRelationValues relations = const RivetRelationValues(),
+    bool transport = false,
+  }) => (decodeRelated ?? (values, sqlNulls, _, {required transport}) => decode(values, sqlNulls))(
+    values,
+    sqlNulls,
+    relations,
+    transport: transport,
+  );
+
+  void qualify(String qualifier) {
+    for (final column in columns) {
+      column.qualifier = qualifier;
+    }
+  }
 
   Definition scopedDefinition(String qualifier) {
     final buildDefinition = createDefinition;
@@ -276,6 +305,8 @@ abstract class RivetCodec<T> {
   String select(String columnSql) => columnSql;
   Object? encode(T value);
   T decode(Object? value, {required bool isSqlNull});
+  T decodeTransport(Object? value, {required bool isSqlNull}) =>
+      decode(value, isSqlNull: isSqlNull);
 
   RivetCodec<T> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) => this;
 }
@@ -316,6 +347,10 @@ final class RivetNullableCodec<T> extends RivetCodec<T?> {
   @override
   T? decode(Object? value, {required bool isSqlNull}) =>
       isSqlNull ? null : inner.decode(value, isSqlNull: false);
+
+  @override
+  T? decodeTransport(Object? value, {required bool isSqlNull}) =>
+      isSqlNull ? null : inner.decodeTransport(value, isSqlNull: false);
 
   @override
   RivetCodec<T?> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) =>
@@ -419,6 +454,14 @@ final class RivetDateTimeCodec extends RivetCodec<DateTime> {
       throw const FormatException('expected a PostgreSQL TIMESTAMPTZ');
     }
     return _milliseconds(value);
+  }
+
+  @override
+  DateTime decodeTransport(Object? value, {required bool isSqlNull}) {
+    if (!isSqlNull && value is String) {
+      return decode(DateTime.parse(value), isSqlNull: false);
+    }
+    return decode(value, isSqlNull: isSqlNull);
   }
 
   DateTime _milliseconds(DateTime value) =>
@@ -660,6 +703,10 @@ final class RivetMappedCodec<Domain, Storage> extends RivetCodec<Domain> {
   @override
   Domain decode(Object? value, {required bool isSqlNull}) =>
       converter.fromSql(storage.decode(value, isSqlNull: isSqlNull));
+
+  @override
+  Domain decodeTransport(Object? value, {required bool isSqlNull}) =>
+      converter.fromSql(storage.decodeTransport(value, isSqlNull: isSqlNull));
 
   @override
   RivetCodec<Domain> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) =>
@@ -1239,6 +1286,8 @@ class RivetColumn<T> implements RivetExpression<T> {
     _qualifier = qualifier;
   }
 
+  set qualifier(String value) => _qualifier = value;
+
   String get physicalName => declaredName ?? dartName;
   @override
   String get sql => [
@@ -1275,6 +1324,9 @@ class RivetColumn<T> implements RivetExpression<T> {
 
   T decodeValue(Object? value, {required bool isSqlNull}) =>
       _convert('decode', () => codec.decode(value, isSqlNull: isSqlNull));
+
+  T decodeTransportValue(Object? value, {required bool isSqlNull}) =>
+      _convert('decode', () => codec.decodeTransport(value, isSqlNull: isSqlNull));
 
   Object? encodeValue(Object? value) => _convert(
     'encode',

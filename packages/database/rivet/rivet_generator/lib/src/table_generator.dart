@@ -90,6 +90,20 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
           return '${field.displayName}: definition.${field.displayName}.decodeValue(values[$index], isSqlNull: sqlNulls[$index])';
         })
         .join(', ');
+    final relatedDecodes = [
+      ...columns.indexed.map((entry) {
+        final index = entry.$1;
+        final field = entry.$2;
+        return '${field.displayName}: transport '
+            '? definition.${field.displayName}.decodeTransportValue(values[$index], '
+            'isSqlNull: sqlNulls[$index]) '
+            ': definition.${field.displayName}.decodeValue(values[$index], '
+            'isSqlNull: sqlNulls[$index])';
+      }),
+      ...relations.map(
+        (field) => '${field.displayName}: relations.read(${literal(field.displayName)})',
+      ),
+    ].join(', ');
     final indexes = element.fields.any((field) => field.displayName == '_indexes')
         ? '      indexes: () => definition._indexes,\n'
         : '';
@@ -102,6 +116,113 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
               '${literal(field.displayName)}: definition.${field.displayName} as RivetRelationDescriptor<Object?>',
         )
         .join(', ');
+    final includeMethods = relations
+        .map((field) {
+          final types = _relationTypes(field);
+          final fieldName = field.displayName;
+          final isOne = const TypeChecker.typeNamed(
+            RivetOneRelation,
+            inPackage: 'rivet',
+          ).isAssignableFromType(field.type);
+          final collectionParameters = isOne
+              ? ''
+              : '''
+    RivetOrderBy<${types.target}>? orderBy,
+    int? limit,
+''';
+          final collectionArguments = isOne
+              ? ''
+              : '''
+      orderBy: orderBy,
+      limit: limit,
+''';
+          final nestedParameter = types.hasRelations
+              ? '    RivetIncludes<${types.include}>? include,\n'
+              : '';
+          final nestedArgument = types.hasRelations
+              ? '      includes: include?.call(${types.include}(target, path: relationPath)) ?? const [],\n'
+              : '';
+          return '''
+  /// Includes the [$fieldName] relation.
+  RivetInclude<${types.target}, ${types.row}> $fieldName({
+    RivetWhere<${types.target}>? where,
+$collectionParameters
+$nestedParameter
+  }) {
+    final target = ${types.target}.db.buildSchema();
+    final relationPath = path.isEmpty ? ${literal(fieldName)} : '\$path.$fieldName';
+    return RivetInclude<${types.target}, ${types.row}>(
+      name: ${literal(fieldName)},
+      path: relationPath,
+      relation: _schema.relations[${literal(fieldName)}]!,
+      targetSchema: target,
+      where: where,
+$collectionArguments
+$nestedArgument
+    );
+  }
+''';
+        })
+        .join('\n');
+    final includeScope = relations.isEmpty
+        ? ''
+        : '''
+/// Typed relation include scope for [$className].
+final class ${className}Include {
+  /// Creates the generated include scope.
+  const ${className}Include(this._schema, {this.path = ''});
+
+  final RivetTableSchema<$className, $rowName> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+$includeMethods
+}
+''';
+    final rowDecoder = relations.isEmpty
+        ? ''
+        : '''
+    $rowName decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => $rowName($relatedDecodes);
+''';
+    final schemaDecoders = relations.isEmpty
+        ? '      decode: (values, sqlNulls) => $rowName($decodes),\n'
+        : '''
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+''';
+    final findMethod = relations.isEmpty
+        ? ''
+        : '''
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<$className, $rowName> find({
+    RivetWhere<$className>? where,
+    RivetOrderBy<$className>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<${className}Include>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(${className}Include(schema)) ?? const [],
+    );
+  }
+''';
     final enumCodecs = columns
         .map((field) => (field, _enumType(field)))
         .where((entry) => entry.$2 != null)
@@ -155,6 +276,7 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
         .join('\n');
 
     return '''
+$includeScope
 /// Generated row returned by reads from ${literal('$schemaName.$tableName')}.
 final class $rowName {
   /// Creates a row from decoded column and relation values.
@@ -205,6 +327,7 @@ final class _\$${className}DB extends RivetTableAccessor<$className, $rowName> {
       return definition;
     }
     final definition = createDefinition();
+$rowDecoder
     return RivetTableSchema<$className, $rowName>(
       schemaName: ${literal(schemaName)},
       tableName: ${literal(tableName)},
@@ -213,10 +336,12 @@ $renameMetadata      definition: definition,
       columnNames: [$names],
       createDefinition: createDefinition,
       columnsFor: (definition) => [$descriptorList],
-      decode: (values, sqlNulls) => $rowName($decodes),
+$schemaDecoders
 $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},\n'}
     );
   }
+
+$findMethod
 
   /// Creates a reusable insert plan.
   RivetInsert<$className, $rowName> insert(
@@ -354,6 +479,17 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   }
 
   String _relationValueType(FieldElement field) {
+    final types = _relationTypes(field);
+    final type = field.type;
+    return const TypeChecker.typeNamed(
+          RivetOneRelation,
+          inPackage: 'rivet',
+        ).isAssignableFromType(type)
+        ? 'Relation<${types.row}?>'
+        : 'Relation<List<${types.row}>>';
+  }
+
+  _RelationTypes _relationTypes(FieldElement field) {
     final type = field.type;
     if (type is! InterfaceType || type.typeArguments.isEmpty) {
       throw InvalidGenerationSourceError(
@@ -369,7 +505,8 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     }
     final separator = targetReference.lastIndexOf('.');
     final prefix = separator < 0 ? '' : targetReference.substring(0, separator + 1);
-    final defaultRowName = '${targetElement?.displayName ?? targetReference}Row';
+    final targetName = targetElement?.displayName ?? targetReference;
+    final defaultRowName = '${targetName}Row';
     var targetRow = '$prefix$defaultRowName';
     if (targetElement != null) {
       final value = const TypeChecker.typeNamed(
@@ -380,13 +517,32 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
         targetRow = '$prefix${readString(ConstantReader(value), 'rowName', defaultRowName)}';
       }
     }
-    return const TypeChecker.typeNamed(
-          RivetOneRelation,
-          inPackage: 'rivet',
-        ).isAssignableFromType(type)
-        ? 'Relation<$targetRow?>'
-        : 'Relation<List<$targetRow>>';
+    final targetHasRelations =
+        targetElement is ClassElement &&
+        targetElement.fields.any(
+          (field) =>
+              !field.isStatic &&
+              const TypeChecker.typeNamed(
+                RivetRelationDescriptor,
+                inPackage: 'rivet',
+              ).isAssignableFromType(field.type),
+        );
+    return _RelationTypes(
+      targetReference,
+      targetRow,
+      '$prefix${targetName}Include',
+      targetHasRelations,
+    );
   }
+}
+
+final class _RelationTypes {
+  const _RelationTypes(this.target, this.row, this.include, this.hasRelations);
+
+  final String target;
+  final String row;
+  final String include;
+  final bool hasRelations;
 }
 
 final class _MutationField {

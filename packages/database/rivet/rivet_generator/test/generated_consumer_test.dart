@@ -51,6 +51,52 @@ final class RivetApp extends _$RivetApp {}
       );
     });
 
+    test('should generate typed one-relation include scopes', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'one_include.rivet.dart';
+
+@RivetTable(rowName: 'User')
+final class Users extends RivetTableDefinition<Users> {
+  static const db = _$UsersDB();
+  late final id = integer()();
+  late final profile = one<Profiles>(
+    fields: [id],
+    references: (profile) => [profile.userId],
+  )();
+}
+
+@RivetTable(rowName: 'Profile')
+final class Profiles extends RivetTableDefinition<Profiles> {
+  static const db = _$ProfilesDB();
+  late final userId = integer()();
+  late final country = text()();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/one_include.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/one_include.rivet.dart': decodedMatches(
+            allOf(
+              contains('final class UsersInclude'),
+              contains('RivetInclude<Profiles, Profile> profile({'),
+              contains('RivetWhere<Profiles>? where,'),
+              contains('RivetFind<Users, User> find({'),
+              contains('RivetIncludes<UsersInclude>? include,'),
+              contains('decodeRelated:'),
+              contains("profile: relations.read('profile')"),
+            ),
+          ),
+        },
+      );
+    });
+
     test('should generate typed insert companions from column defaults', () async {
       final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
       await readerWriter.testing.loadIsolateSources();

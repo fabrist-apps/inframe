@@ -7,6 +7,41 @@ part of 'generated_consumer.dart';
 // RivetTableGenerator
 // **************************************************************************
 
+/// Typed relation include scope for [UserProfiles].
+final class UserProfilesInclude {
+  /// Creates the generated include scope.
+  const UserProfilesInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<UserProfiles, UserProfilesRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [posts] relation.
+  RivetInclude<Posts, PostsRow> posts({
+    RivetWhere<Posts>? where,
+    RivetOrderBy<Posts>? orderBy,
+    int? limit,
+
+    RivetIncludes<PostsInclude>? include,
+  }) {
+    final target = Posts.db.buildSchema();
+    final relationPath = path.isEmpty ? 'posts' : '$path.posts';
+    return RivetInclude<Posts, PostsRow>(
+      name: 'posts',
+      path: relationPath,
+      relation: _schema.relations['posts']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(PostsInclude(target, path: relationPath)) ?? const [],
+    );
+  }
+}
+
 /// Generated row returned by reads from 'fbr116.userProfiles'.
 final class UserProfilesRow {
   /// Creates a row from decoded column and relation values.
@@ -60,6 +95,24 @@ final class _$UserProfilesDB
     }
 
     final definition = createDefinition();
+    UserProfilesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => UserProfilesRow(
+      displayName: transport
+          ? definition.displayName.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.displayName.decodeValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            ),
+      posts: relations.read('posts'),
+    );
+
     return RivetTableSchema<UserProfiles, UserProfilesRow>(
       schemaName: 'fbr116',
       tableName: 'userProfiles',
@@ -71,17 +124,38 @@ final class _$UserProfilesDB
       columnsFor: (definition) => [
         definition.displayName as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => UserProfilesRow(
-        displayName: definition.displayName.decodeValue(
-          values[0],
-          isSqlNull: sqlNulls[0],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       indexes: () => definition._indexes,
       constraints: () => definition._constraints,
       relations: {
         'posts': definition.posts as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<UserProfiles, UserProfilesRow> find({
+    RivetWhere<UserProfiles>? where,
+    RivetOrderBy<UserProfiles>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<UserProfilesInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(UserProfilesInclude(schema)) ?? const [],
     );
   }
 
@@ -107,6 +181,38 @@ final class _$UserProfilesDB
   RivetDelete<UserProfiles, UserProfilesRow> delete({
     RivetWhere<UserProfiles>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [Posts].
+final class PostsInclude {
+  /// Creates the generated include scope.
+  const PostsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<Posts, PostsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [author] relation.
+  RivetInclude<UserProfiles, UserProfilesRow> author({
+    RivetWhere<UserProfiles>? where,
+
+    RivetIncludes<UserProfilesInclude>? include,
+  }) {
+    final target = UserProfiles.db.buildSchema();
+    final relationPath = path.isEmpty ? 'author' : '$path.author';
+    return RivetInclude<UserProfiles, UserProfilesRow>(
+      name: 'author',
+      path: relationPath,
+      relation: _schema.relations['author']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(UserProfilesInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr116.posts'.
@@ -160,6 +266,24 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
     }
 
     final definition = createDefinition();
+    PostsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => PostsRow(
+      authorName: transport
+          ? definition.authorName.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.authorName.decodeValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            ),
+      author: relations.read('author'),
+    );
+
     return RivetTableSchema<Posts, PostsRow>(
       schemaName: 'fbr116',
       tableName: 'posts',
@@ -170,15 +294,36 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
       columnsFor: (definition) => [
         definition.authorName as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => PostsRow(
-        authorName: definition.authorName.decodeValue(
-          values[0],
-          isSqlNull: sqlNulls[0],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'author': definition.author as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<Posts, PostsRow> find({
+    RivetWhere<Posts>? where,
+    RivetOrderBy<Posts>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<PostsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(PostsInclude(schema)) ?? const [],
     );
   }
 
@@ -368,6 +513,7 @@ final class _$ScalarValuesDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<ScalarValues, ScalarValuesRow>(
       schemaName: 'fbr119',
       tableName: 'scalarValues',
@@ -603,6 +749,7 @@ final class _$EnumValuesDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<EnumValues, EnumValuesRow>(
       schemaName: 'fbr120',
       tableName: 'enumValues',
@@ -753,6 +900,7 @@ final class _$VectorValuesDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<VectorValues, VectorValuesRow>(
       schemaName: 'fbr121',
       tableName: 'vectorValues',
@@ -962,6 +1110,7 @@ final class _$ArrayValuesDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<ArrayValues, ArrayValuesRow>(
       schemaName: 'fbr122',
       tableName: 'arrayValues',
@@ -1100,6 +1249,7 @@ final class _$MalformedArraysDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<MalformedArrays, MalformedArraysRow>(
       schemaName: 'fbr122',
       tableName: 'malformedArrays',
@@ -1253,6 +1403,7 @@ final class _$MetadataColumnsDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<MetadataColumns, MetadataColumnsRow>(
       schemaName: 'metadata',
       tableName: 'metadataColumns',
@@ -1289,6 +1440,7 @@ final class _$MetadataColumnsDB
         ),
         code: definition.code.decodeValue(values[4], isSqlNull: sqlNulls[4]),
       ),
+
       indexes: () => definition._indexes,
       constraints: () => definition._constraints,
     );
@@ -1364,6 +1516,7 @@ final class _$TextTargetsDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<TextTargets, TextTargetsRow>(
       schemaName: 'metadata',
       tableName: 'textTargets',
@@ -1448,6 +1601,7 @@ final class _$InvalidReferencesDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<InvalidReferences, InvalidReferencesRow>(
       schemaName: 'metadata',
       tableName: 'invalidReferences',
@@ -1533,6 +1687,7 @@ final class _$ParameterNamesDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<ParameterNames, ParameterNamesRow>(
       schemaName: 'metadata',
       tableName: 'parameterNames',
@@ -1911,6 +2066,7 @@ final class _$MutationCatalogDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<MutationCatalog, MutationCatalogRow>(
       schemaName: 'fbr139',
       tableName: 'mutationCatalog',
@@ -2219,6 +2375,7 @@ final class _$MutationUsersDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<MutationUsers, MutationUsersRow>(
       schemaName: 'fbr138',
       tableName: 'mutationUsers',
@@ -2302,6 +2459,42 @@ final class _$MutationUsersDB
   }) => RivetDelete(buildSchema(), where: where);
 }
 
+/// Typed relation include scope for [MutationParents].
+final class MutationParentsInclude {
+  /// Creates the generated include scope.
+  const MutationParentsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationParents, MutationParentsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [children] relation.
+  RivetInclude<MutationChildren, MutationChildrenRow> children({
+    RivetWhere<MutationChildren>? where,
+    RivetOrderBy<MutationChildren>? orderBy,
+    int? limit,
+
+    RivetIncludes<MutationChildrenInclude>? include,
+  }) {
+    final target = MutationChildren.db.buildSchema();
+    final relationPath = path.isEmpty ? 'children' : '$path.children';
+    return RivetInclude<MutationChildren, MutationChildrenRow>(
+      name: 'children',
+      path: relationPath,
+      relation: _schema.relations['children']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(MutationChildrenInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
 /// Generated row returned by reads from 'fbr138.mutationParents'.
 final class MutationParentsRow {
   /// Creates a row from decoded column and relation values.
@@ -2366,6 +2559,27 @@ final class _$MutationParentsDB
     }
 
     final definition = createDefinition();
+    MutationParentsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationParentsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      children: relations.read('children'),
+    );
+
     return RivetTableSchema<MutationParents, MutationParentsRow>(
       schemaName: 'fbr138',
       tableName: 'mutationParents',
@@ -2380,13 +2594,36 @@ final class _$MutationParentsDB
         definition.id as RivetColumn<Object?>,
         definition.name as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationParentsRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        name: definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'children': definition.children as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationParents, MutationParentsRow> find({
+    RivetWhere<MutationParents>? where,
+    RivetOrderBy<MutationParents>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationParentsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(MutationParentsInclude(schema)) ?? const [],
     );
   }
 
@@ -2412,6 +2649,38 @@ final class _$MutationParentsDB
   RivetDelete<MutationParents, MutationParentsRow> delete({
     RivetWhere<MutationParents>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationChildren].
+final class MutationChildrenInclude {
+  /// Creates the generated include scope.
+  const MutationChildrenInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationChildren, MutationChildrenRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [parent] relation.
+  RivetInclude<MutationParents, MutationParentsRow> parent({
+    RivetWhere<MutationParents>? where,
+
+    RivetIncludes<MutationParentsInclude>? include,
+  }) {
+    final target = MutationParents.db.buildSchema();
+    final relationPath = path.isEmpty ? 'parent' : '$path.parent';
+    return RivetInclude<MutationParents, MutationParentsRow>(
+      name: 'parent',
+      path: relationPath,
+      relation: _schema.relations['parent']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(MutationParentsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr138.mutationChildren'.
@@ -2475,6 +2744,27 @@ final class _$MutationChildrenDB
     }
 
     final definition = createDefinition();
+    MutationChildrenRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationChildrenRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      parentId: transport
+          ? definition.parentId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.parentId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      parent: relations.read('parent'),
+    );
+
     return RivetTableSchema<MutationChildren, MutationChildrenRow>(
       schemaName: 'fbr138',
       tableName: 'mutationChildren',
@@ -2489,16 +2779,36 @@ final class _$MutationChildrenDB
         definition.id as RivetColumn<Object?>,
         definition.parentId as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationChildrenRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        parentId: definition.parentId.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'parent': definition.parent as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationChildren, MutationChildrenRow> find({
+    RivetWhere<MutationChildren>? where,
+    RivetOrderBy<MutationChildren>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationChildrenInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(MutationChildrenInclude(schema)) ?? const [],
     );
   }
 
@@ -2524,6 +2834,44 @@ final class _$MutationChildrenDB
   RivetDelete<MutationChildren, MutationChildrenRow> delete({
     RivetWhere<MutationChildren>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationUpdateUsers].
+final class MutationUpdateUsersInclude {
+  /// Creates the generated include scope.
+  const MutationUpdateUsersInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationUpdateUsers, MutationUpdateUsersRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [children] relation.
+  RivetInclude<MutationUpdateChildren, MutationUpdateChildrenRow> children({
+    RivetWhere<MutationUpdateChildren>? where,
+    RivetOrderBy<MutationUpdateChildren>? orderBy,
+    int? limit,
+
+    RivetIncludes<MutationUpdateChildrenInclude>? include,
+  }) {
+    final target = MutationUpdateChildren.db.buildSchema();
+    final relationPath = path.isEmpty ? 'children' : '$path.children';
+    return RivetInclude<MutationUpdateChildren, MutationUpdateChildrenRow>(
+      name: 'children',
+      path: relationPath,
+      relation: _schema.relations['children']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(
+            MutationUpdateChildrenInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr140.mutationUpdateUsers'.
@@ -2689,6 +3037,72 @@ final class _$MutationUpdateUsersDB
     }
 
     final definition = createDefinition();
+    MutationUpdateUsersRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationUpdateUsersRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      age: transport
+          ? definition.age.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.age.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      updatedAt: transport
+          ? definition.updatedAt.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.updatedAt.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      nullableNote: transport
+          ? definition.nullableNote.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.nullableNote.decodeValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            ),
+      code: transport
+          ? definition.code.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.code.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+      defaultOnly: transport
+          ? definition.defaultOnly.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.defaultOnly.decodeValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            ),
+      serverOnly: transport
+          ? definition.serverOnly.decodeTransportValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            )
+          : definition.serverOnly.decodeValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            ),
+      children: relations.read('children'),
+    );
+
     return RivetTableSchema<MutationUpdateUsers, MutationUpdateUsersRow>(
       schemaName: 'fbr140',
       tableName: 'mutationUpdateUsers',
@@ -2724,31 +3138,36 @@ final class _$MutationUpdateUsersDB
         definition.defaultOnly as RivetColumn<Object?>,
         definition.serverOnly as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationUpdateUsersRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        name: definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
-        age: definition.age.decodeValue(values[2], isSqlNull: sqlNulls[2]),
-        updatedAt: definition.updatedAt.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        nullableNote: definition.nullableNote.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
-        code: definition.code.decodeValue(values[5], isSqlNull: sqlNulls[5]),
-        defaultOnly: definition.defaultOnly.decodeValue(
-          values[6],
-          isSqlNull: sqlNulls[6],
-        ),
-        serverOnly: definition.serverOnly.decodeValue(
-          values[7],
-          isSqlNull: sqlNulls[7],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'children': definition.children as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationUpdateUsers, MutationUpdateUsersRow> find({
+    RivetWhere<MutationUpdateUsers>? where,
+    RivetOrderBy<MutationUpdateUsers>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationUpdateUsersInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(MutationUpdateUsersInclude(schema)) ?? const [],
     );
   }
 
@@ -2774,6 +3193,41 @@ final class _$MutationUpdateUsersDB
   RivetDelete<MutationUpdateUsers, MutationUpdateUsersRow> delete({
     RivetWhere<MutationUpdateUsers>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationUpdateChildren].
+final class MutationUpdateChildrenInclude {
+  /// Creates the generated include scope.
+  const MutationUpdateChildrenInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationUpdateChildren, MutationUpdateChildrenRow>
+  _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [user] relation.
+  RivetInclude<MutationUpdateUsers, MutationUpdateUsersRow> user({
+    RivetWhere<MutationUpdateUsers>? where,
+
+    RivetIncludes<MutationUpdateUsersInclude>? include,
+  }) {
+    final target = MutationUpdateUsers.db.buildSchema();
+    final relationPath = path.isEmpty ? 'user' : '$path.user';
+    return RivetInclude<MutationUpdateUsers, MutationUpdateUsersRow>(
+      name: 'user',
+      path: relationPath,
+      relation: _schema.relations['user']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(
+            MutationUpdateUsersInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr140.mutationUpdateChildren'.
@@ -2844,6 +3298,27 @@ final class _$MutationUpdateChildrenDB
     }
 
     final definition = createDefinition();
+    MutationUpdateChildrenRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationUpdateChildrenRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      userId: transport
+          ? definition.userId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.userId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      user: relations.read('user'),
+    );
+
     return RivetTableSchema<MutationUpdateChildren, MutationUpdateChildrenRow>(
       schemaName: 'fbr140',
       tableName: 'mutationUpdateChildren',
@@ -2858,14 +3333,35 @@ final class _$MutationUpdateChildrenDB
         definition.id as RivetColumn<Object?>,
         definition.userId as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationUpdateChildrenRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        userId: definition.userId.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {'user': definition.user as RivetRelationDescriptor<Object?>},
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationUpdateChildren, MutationUpdateChildrenRow> find({
+    RivetWhere<MutationUpdateChildren>? where,
+    RivetOrderBy<MutationUpdateChildren>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationUpdateChildrenInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes:
+          include?.call(MutationUpdateChildrenInclude(schema)) ?? const [],
     );
   }
 
@@ -2891,6 +3387,78 @@ final class _$MutationUpdateChildrenDB
   RivetDelete<MutationUpdateChildren, MutationUpdateChildrenRow> delete({
     RivetWhere<MutationUpdateChildren>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationDeleteParents].
+final class MutationDeleteParentsInclude {
+  /// Creates the generated include scope.
+  const MutationDeleteParentsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationDeleteParents, MutationDeleteParentsRow>
+  _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [cascadeChildren] relation.
+  RivetInclude<MutationCascadeChildren, MutationCascadeChildrenRow>
+  cascadeChildren({
+    RivetWhere<MutationCascadeChildren>? where,
+    RivetOrderBy<MutationCascadeChildren>? orderBy,
+    int? limit,
+
+    RivetIncludes<MutationCascadeChildrenInclude>? include,
+  }) {
+    final target = MutationCascadeChildren.db.buildSchema();
+    final relationPath = path.isEmpty
+        ? 'cascadeChildren'
+        : '$path.cascadeChildren';
+    return RivetInclude<MutationCascadeChildren, MutationCascadeChildrenRow>(
+      name: 'cascadeChildren',
+      path: relationPath,
+      relation: _schema.relations['cascadeChildren']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(
+            MutationCascadeChildrenInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
+
+  /// Includes the [restrictChildren] relation.
+  RivetInclude<MutationRestrictChildren, MutationRestrictChildrenRow>
+  restrictChildren({
+    RivetWhere<MutationRestrictChildren>? where,
+    RivetOrderBy<MutationRestrictChildren>? orderBy,
+    int? limit,
+
+    RivetIncludes<MutationRestrictChildrenInclude>? include,
+  }) {
+    final target = MutationRestrictChildren.db.buildSchema();
+    final relationPath = path.isEmpty
+        ? 'restrictChildren'
+        : '$path.restrictChildren';
+    return RivetInclude<MutationRestrictChildren, MutationRestrictChildrenRow>(
+      name: 'restrictChildren',
+      path: relationPath,
+      relation: _schema.relations['restrictChildren']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(
+            MutationRestrictChildrenInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr141.delete Parents'.
@@ -2965,6 +3533,28 @@ final class _$MutationDeleteParentsDB
     }
 
     final definition = createDefinition();
+    MutationDeleteParentsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationDeleteParentsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      label: transport
+          ? definition.label.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.label.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      cascadeChildren: relations.read('cascadeChildren'),
+      restrictChildren: relations.read('restrictChildren'),
+    );
+
     return RivetTableSchema<MutationDeleteParents, MutationDeleteParentsRow>(
       schemaName: 'fbr141',
       tableName: 'delete Parents',
@@ -2979,16 +3569,39 @@ final class _$MutationDeleteParentsDB
         definition.id as RivetColumn<Object?>,
         definition.label as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationDeleteParentsRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        label: definition.label.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'cascadeChildren':
             definition.cascadeChildren as RivetRelationDescriptor<Object?>,
         'restrictChildren':
             definition.restrictChildren as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationDeleteParents, MutationDeleteParentsRow> find({
+    RivetWhere<MutationDeleteParents>? where,
+    RivetOrderBy<MutationDeleteParents>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationDeleteParentsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(MutationDeleteParentsInclude(schema)) ?? const [],
     );
   }
 
@@ -3014,6 +3627,41 @@ final class _$MutationDeleteParentsDB
   RivetDelete<MutationDeleteParents, MutationDeleteParentsRow> delete({
     RivetWhere<MutationDeleteParents>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationCascadeChildren].
+final class MutationCascadeChildrenInclude {
+  /// Creates the generated include scope.
+  const MutationCascadeChildrenInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationCascadeChildren, MutationCascadeChildrenRow>
+  _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [parent] relation.
+  RivetInclude<MutationDeleteParents, MutationDeleteParentsRow> parent({
+    RivetWhere<MutationDeleteParents>? where,
+
+    RivetIncludes<MutationDeleteParentsInclude>? include,
+  }) {
+    final target = MutationDeleteParents.db.buildSchema();
+    final relationPath = path.isEmpty ? 'parent' : '$path.parent';
+    return RivetInclude<MutationDeleteParents, MutationDeleteParentsRow>(
+      name: 'parent',
+      path: relationPath,
+      relation: _schema.relations['parent']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(
+            MutationDeleteParentsInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr141.cascade Children'.
@@ -3088,6 +3736,27 @@ final class _$MutationCascadeChildrenDB
     }
 
     final definition = createDefinition();
+    MutationCascadeChildrenRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationCascadeChildrenRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      parentId: transport
+          ? definition.parentId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.parentId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      parent: relations.read('parent'),
+    );
+
     return RivetTableSchema<
       MutationCascadeChildren,
       MutationCascadeChildrenRow
@@ -3105,16 +3774,37 @@ final class _$MutationCascadeChildrenDB
         definition.id as RivetColumn<Object?>,
         definition.parentId as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationCascadeChildrenRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        parentId: definition.parentId.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'parent': definition.parent as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationCascadeChildren, MutationCascadeChildrenRow> find({
+    RivetWhere<MutationCascadeChildren>? where,
+    RivetOrderBy<MutationCascadeChildren>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationCascadeChildrenInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes:
+          include?.call(MutationCascadeChildrenInclude(schema)) ?? const [],
     );
   }
 
@@ -3141,6 +3831,41 @@ final class _$MutationCascadeChildrenDB
   RivetDelete<MutationCascadeChildren, MutationCascadeChildrenRow> delete({
     RivetWhere<MutationCascadeChildren>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationRestrictChildren].
+final class MutationRestrictChildrenInclude {
+  /// Creates the generated include scope.
+  const MutationRestrictChildrenInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationRestrictChildren, MutationRestrictChildrenRow>
+  _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [parent] relation.
+  RivetInclude<MutationDeleteParents, MutationDeleteParentsRow> parent({
+    RivetWhere<MutationDeleteParents>? where,
+
+    RivetIncludes<MutationDeleteParentsInclude>? include,
+  }) {
+    final target = MutationDeleteParents.db.buildSchema();
+    final relationPath = path.isEmpty ? 'parent' : '$path.parent';
+    return RivetInclude<MutationDeleteParents, MutationDeleteParentsRow>(
+      name: 'parent',
+      path: relationPath,
+      relation: _schema.relations['parent']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(
+            MutationDeleteParentsInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr141.restrict Children'.
@@ -3215,6 +3940,27 @@ final class _$MutationRestrictChildrenDB
     }
 
     final definition = createDefinition();
+    MutationRestrictChildrenRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationRestrictChildrenRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      parentId: transport
+          ? definition.parentId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.parentId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      parent: relations.read('parent'),
+    );
+
     return RivetTableSchema<
       MutationRestrictChildren,
       MutationRestrictChildrenRow
@@ -3232,16 +3978,37 @@ final class _$MutationRestrictChildrenDB
         definition.id as RivetColumn<Object?>,
         definition.parentId as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationRestrictChildrenRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        parentId: definition.parentId.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'parent': definition.parent as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationRestrictChildren, MutationRestrictChildrenRow> find({
+    RivetWhere<MutationRestrictChildren>? where,
+    RivetOrderBy<MutationRestrictChildren>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationRestrictChildrenInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes:
+          include?.call(MutationRestrictChildrenInclude(schema)) ?? const [],
     );
   }
 
@@ -3268,6 +4035,44 @@ final class _$MutationRestrictChildrenDB
   RivetDelete<MutationRestrictChildren, MutationRestrictChildrenRow> delete({
     RivetWhere<MutationRestrictChildren>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationBatchParents].
+final class MutationBatchParentsInclude {
+  /// Creates the generated include scope.
+  const MutationBatchParentsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationBatchParents, MutationBatchParentsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [children] relation.
+  RivetInclude<MutationBatchChildren, MutationBatchChildrenRow> children({
+    RivetWhere<MutationBatchChildren>? where,
+    RivetOrderBy<MutationBatchChildren>? orderBy,
+    int? limit,
+
+    RivetIncludes<MutationBatchChildrenInclude>? include,
+  }) {
+    final target = MutationBatchChildren.db.buildSchema();
+    final relationPath = path.isEmpty ? 'children' : '$path.children';
+    return RivetInclude<MutationBatchChildren, MutationBatchChildrenRow>(
+      name: 'children',
+      path: relationPath,
+      relation: _schema.relations['children']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(
+            MutationBatchChildrenInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr142.mutationBatchParents'.
@@ -3391,6 +4196,48 @@ final class _$MutationBatchParentsDB
     }
 
     final definition = createDefinition();
+    MutationBatchParentsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationBatchParentsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      createdAt: transport
+          ? definition.createdAt.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.createdAt.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      nickname: transport
+          ? definition.nickname.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.nickname.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      serverValue: transport
+          ? definition.serverValue.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.serverValue.decodeValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            ),
+      children: relations.read('children'),
+    );
+
     return RivetTableSchema<MutationBatchParents, MutationBatchParentsRow>(
       schemaName: 'fbr142',
       tableName: 'mutationBatchParents',
@@ -3411,25 +4258,36 @@ final class _$MutationBatchParentsDB
         definition.nickname as RivetColumn<Object?>,
         definition.serverValue as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationBatchParentsRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        name: definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
-        createdAt: definition.createdAt.decodeValue(
-          values[2],
-          isSqlNull: sqlNulls[2],
-        ),
-        nickname: definition.nickname.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        serverValue: definition.serverValue.decodeValue(
-          values[4],
-          isSqlNull: sqlNulls[4],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'children': definition.children as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationBatchParents, MutationBatchParentsRow> find({
+    RivetWhere<MutationBatchParents>? where,
+    RivetOrderBy<MutationBatchParents>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationBatchParentsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(MutationBatchParentsInclude(schema)) ?? const [],
     );
   }
 
@@ -3455,6 +4313,41 @@ final class _$MutationBatchParentsDB
   RivetDelete<MutationBatchParents, MutationBatchParentsRow> delete({
     RivetWhere<MutationBatchParents>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationBatchChildren].
+final class MutationBatchChildrenInclude {
+  /// Creates the generated include scope.
+  const MutationBatchChildrenInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationBatchChildren, MutationBatchChildrenRow>
+  _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [parent] relation.
+  RivetInclude<MutationBatchParents, MutationBatchParentsRow> parent({
+    RivetWhere<MutationBatchParents>? where,
+
+    RivetIncludes<MutationBatchParentsInclude>? include,
+  }) {
+    final target = MutationBatchParents.db.buildSchema();
+    final relationPath = path.isEmpty ? 'parent' : '$path.parent';
+    return RivetInclude<MutationBatchParents, MutationBatchParentsRow>(
+      name: 'parent',
+      path: relationPath,
+      relation: _schema.relations['parent']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(
+            MutationBatchParentsInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr142.mutationBatchChildren'.
@@ -3525,6 +4418,27 @@ final class _$MutationBatchChildrenDB
     }
 
     final definition = createDefinition();
+    MutationBatchChildrenRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationBatchChildrenRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      parentId: transport
+          ? definition.parentId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.parentId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      parent: relations.read('parent'),
+    );
+
     return RivetTableSchema<MutationBatchChildren, MutationBatchChildrenRow>(
       schemaName: 'fbr142',
       tableName: 'mutationBatchChildren',
@@ -3539,16 +4453,36 @@ final class _$MutationBatchChildrenDB
         definition.id as RivetColumn<Object?>,
         definition.parentId as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationBatchChildrenRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        parentId: definition.parentId.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'parent': definition.parent as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationBatchChildren, MutationBatchChildrenRow> find({
+    RivetWhere<MutationBatchChildren>? where,
+    RivetOrderBy<MutationBatchChildren>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationBatchChildrenInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(MutationBatchChildrenInclude(schema)) ?? const [],
     );
   }
 
@@ -3625,6 +4559,7 @@ final class _$MutationConflictGroupsDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<MutationConflictGroups, MutationConflictGroupsRow>(
       schemaName: 'fbr143',
       tableName: 'mutationConflictGroups',
@@ -3661,6 +4596,45 @@ final class _$MutationConflictGroupsDB
   RivetDelete<MutationConflictGroups, MutationConflictGroupsRow> delete({
     RivetWhere<MutationConflictGroups>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationConflictParents].
+final class MutationConflictParentsInclude {
+  /// Creates the generated include scope.
+  const MutationConflictParentsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationConflictParents, MutationConflictParentsRow>
+  _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [children] relation.
+  RivetInclude<MutationConflictChildren, MutationConflictChildrenRow> children({
+    RivetWhere<MutationConflictChildren>? where,
+    RivetOrderBy<MutationConflictChildren>? orderBy,
+    int? limit,
+
+    RivetIncludes<MutationConflictChildrenInclude>? include,
+  }) {
+    final target = MutationConflictChildren.db.buildSchema();
+    final relationPath = path.isEmpty ? 'children' : '$path.children';
+    return RivetInclude<MutationConflictChildren, MutationConflictChildrenRow>(
+      name: 'children',
+      path: relationPath,
+      relation: _schema.relations['children']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(
+            MutationConflictChildrenInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr143.mutationConflictParents'.
@@ -3846,6 +4820,72 @@ final class _$MutationConflictParentsDB
     }
 
     final definition = createDefinition();
+    MutationConflictParentsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationConflictParentsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      email: transport
+          ? definition.email.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.email.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      username: transport
+          ? definition.username.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.username.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      active: transport
+          ? definition.active.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.active.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.name.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      age: transport
+          ? definition.age.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.age.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+      createdAt: transport
+          ? definition.createdAt.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.createdAt.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+      requiredByDatabase: transport
+          ? definition.requiredByDatabase.decodeTransportValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            )
+          : definition.requiredByDatabase.decodeValue(
+              values[7],
+              isSqlNull: sqlNulls[7],
+            ),
+      groupId: transport
+          ? definition.groupId.decodeTransportValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            )
+          : definition.groupId.decodeValue(values[8], isSqlNull: sqlNulls[8]),
+      children: relations.read('children'),
+    );
+
     return RivetTableSchema<
       MutationConflictParents,
       MutationConflictParentsRow
@@ -3887,35 +4927,37 @@ final class _$MutationConflictParentsDB
         definition.requiredByDatabase as RivetColumn<Object?>,
         definition.groupId as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationConflictParentsRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        email: definition.email.decodeValue(values[1], isSqlNull: sqlNulls[1]),
-        username: definition.username.decodeValue(
-          values[2],
-          isSqlNull: sqlNulls[2],
-        ),
-        active: definition.active.decodeValue(
-          values[3],
-          isSqlNull: sqlNulls[3],
-        ),
-        name: definition.name.decodeValue(values[4], isSqlNull: sqlNulls[4]),
-        age: definition.age.decodeValue(values[5], isSqlNull: sqlNulls[5]),
-        createdAt: definition.createdAt.decodeValue(
-          values[6],
-          isSqlNull: sqlNulls[6],
-        ),
-        requiredByDatabase: definition.requiredByDatabase.decodeValue(
-          values[7],
-          isSqlNull: sqlNulls[7],
-        ),
-        groupId: definition.groupId.decodeValue(
-          values[8],
-          isSqlNull: sqlNulls[8],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'children': definition.children as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationConflictParents, MutationConflictParentsRow> find({
+    RivetWhere<MutationConflictParents>? where,
+    RivetOrderBy<MutationConflictParents>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationConflictParentsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes:
+          include?.call(MutationConflictParentsInclude(schema)) ?? const [],
     );
   }
 
@@ -3942,6 +4984,41 @@ final class _$MutationConflictParentsDB
   RivetDelete<MutationConflictParents, MutationConflictParentsRow> delete({
     RivetWhere<MutationConflictParents>? where,
   }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [MutationConflictChildren].
+final class MutationConflictChildrenInclude {
+  /// Creates the generated include scope.
+  const MutationConflictChildrenInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<MutationConflictChildren, MutationConflictChildrenRow>
+  _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [parent] relation.
+  RivetInclude<MutationConflictParents, MutationConflictParentsRow> parent({
+    RivetWhere<MutationConflictParents>? where,
+
+    RivetIncludes<MutationConflictParentsInclude>? include,
+  }) {
+    final target = MutationConflictParents.db.buildSchema();
+    final relationPath = path.isEmpty ? 'parent' : '$path.parent';
+    return RivetInclude<MutationConflictParents, MutationConflictParentsRow>(
+      name: 'parent',
+      path: relationPath,
+      relation: _schema.relations['parent']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(
+            MutationConflictParentsInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fbr143.mutationConflictChildren'.
@@ -4016,6 +5093,27 @@ final class _$MutationConflictChildrenDB
     }
 
     final definition = createDefinition();
+    MutationConflictChildrenRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MutationConflictChildrenRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      parentId: transport
+          ? definition.parentId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.parentId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      parent: relations.read('parent'),
+    );
+
     return RivetTableSchema<
       MutationConflictChildren,
       MutationConflictChildrenRow
@@ -4033,16 +5131,37 @@ final class _$MutationConflictChildrenDB
         definition.id as RivetColumn<Object?>,
         definition.parentId as RivetColumn<Object?>,
       ],
-      decode: (values, sqlNulls) => MutationConflictChildrenRow(
-        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
-        parentId: definition.parentId.decodeValue(
-          values[1],
-          isSqlNull: sqlNulls[1],
-        ),
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
       ),
+      decodeRelated: decodeRow,
+
       relations: {
         'parent': definition.parent as RivetRelationDescriptor<Object?>,
       },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<MutationConflictChildren, MutationConflictChildrenRow> find({
+    RivetWhere<MutationConflictChildren>? where,
+    RivetOrderBy<MutationConflictChildren>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<MutationConflictChildrenInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes:
+          include?.call(MutationConflictChildrenInclude(schema)) ?? const [],
     );
   }
 
@@ -4243,6 +5362,7 @@ final class _$MutationUpsertUsersDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<MutationUpsertUsers, MutationUpsertUsersRow>(
       schemaName: 'fbr144',
       tableName: 'mutationUpsertUsers',
@@ -4399,6 +5519,7 @@ final class _$MutationAssignmentNamesDB
     }
 
     final definition = createDefinition();
+
     return RivetTableSchema<
       MutationAssignmentNames,
       MutationAssignmentNamesRow
