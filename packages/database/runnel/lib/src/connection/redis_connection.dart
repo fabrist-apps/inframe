@@ -108,6 +108,50 @@ final class RedisConnection {
     return pending.completer.future;
   }
 
+  List<Future<Object?>> executeBatch(
+    List<RedisCommand<Object?>> commands, {
+    required Duration timeout,
+  }) {
+    final acceptedAt = Stopwatch()..start();
+    if (_closed) {
+      throw const RedisClosedException(message: 'The Redis connection is closed.');
+    }
+    final encoded = commands.map(encodeCommand).toList(growable: false);
+    final encodedBytes = encoded.fold<int>(0, (total, bytes) => total + bytes.length);
+    if (_pending.length + commands.length > _limits.maxPendingCommands) {
+      throw RedisLimitException(
+        message: 'The batch would exceed ${_limits.maxPendingCommands} pending commands.',
+        deliveryStatus: RedisDeliveryStatus.notSent,
+        limit: _limits.maxPendingCommands,
+      );
+    }
+    if (_pendingBytes + encodedBytes > _limits.maxPendingBytes) {
+      throw RedisLimitException(
+        message: 'The batch would exceed ${_limits.maxPendingBytes} pending encoded bytes.',
+        deliveryStatus: RedisDeliveryStatus.notSent,
+        limit: _limits.maxPendingBytes,
+      );
+    }
+    final remaining = timeout - acceptedAt.elapsed;
+    if (remaining <= Duration.zero) {
+      throw const RedisTimeoutException(
+        message: 'The Redis batch deadline expired during local encoding.',
+        deliveryStatus: RedisDeliveryStatus.notSent,
+      );
+    }
+
+    final accepted = <_Pending<Object?>>[];
+    for (var index = 0; index < commands.length; index++) {
+      final pending = _Pending<Object?>(commands[index], encoded[index]);
+      _pending.add(pending);
+      accepted.add(pending);
+      _pendingBytes += encoded[index].length;
+      pending.timer = Timer(remaining, () => _timeout(pending));
+    }
+    _scheduleFlush();
+    return List.unmodifiable(accepted.map((pending) => pending.completer.future));
+  }
+
   void _scheduleFlush() {
     if (_flushScheduled) return;
     _flushScheduled = true;

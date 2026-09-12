@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:runnel/runnel.dart';
-import 'package:runnel/src/commands/scalars.dart';
 import 'package:test/test.dart';
 
 void main() {

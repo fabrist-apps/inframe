@@ -220,6 +220,51 @@ void main() {
               await client.xtrim(stream, StreamTrim.minId(secondStreamId)),
               0,
             );
+
+            final pipelineKey = 'runnel:integration:pipeline:$suffix';
+            final pipelineCounter = 'runnel:integration:pipeline-counter:$suffix';
+            await client.set(pipelineKey, 'value');
+            final pipeline = client.pipeline();
+            final pipelinedValue = pipeline.add(getCommand(pipelineKey));
+            final pipelinedCount = pipeline.add(incrCommand(pipelineCounter));
+            final pipelinedFailure = pipeline.add(incrCommand(hash));
+            final pipelineResults = await pipeline.exec();
+            expect(pipelineResults.value(pipelinedValue), 'value');
+            expect(pipelineResults.value(pipelinedCount), 1);
+            expect(
+              pipelineResults.outcome(pipelinedFailure),
+              isA<BatchFailure<int>>().having(
+                (failure) => failure.error,
+                'error',
+                isA<RedisServerException>(),
+              ),
+            );
+
+            final transactionCounter = 'runnel:integration:transaction:$suffix';
+            final transaction = client.transaction();
+            final firstIncrement = transaction.add(incrCommand(transactionCounter));
+            final transactionFailure = transaction.add(incrCommand(hash));
+            final secondIncrement = transaction.add(incrCommand(transactionCounter));
+            final transactionResults = await transaction.exec();
+            expect(transactionResults.value(firstIncrement), 1);
+            expect(
+              transactionResults.outcome(transactionFailure),
+              isA<BatchFailure<int>>(),
+            );
+            expect(transactionResults.value(secondIncrement), 2);
+            expect(await client.get(transactionCounter), '2');
+
+            final rejectedTransaction = client.transaction()
+              ..add(
+                RedisCommand<void>(
+                  [RedisArgument.text('SET')],
+                  (_) {},
+                ),
+              );
+            await expectLater(
+              rejectedTransaction.exec(),
+              throwsA(isA<RedisTransactionException>()),
+            );
           },
         );
       }

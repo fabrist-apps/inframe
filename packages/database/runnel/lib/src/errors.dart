@@ -121,3 +121,18 @@ final class RedisServerException implements Exception {
   @override
   String toString() => '$code $message';
 }
+
+/// A MULTI/EXEC transaction was rejected before it produced command results.
+final class RedisTransactionException implements Exception {
+  /// Creates a transaction-level rejection.
+  const RedisTransactionException(this.message, {this.cause});
+
+  /// Human-readable rejection detail.
+  final String message;
+
+  /// The underlying Redis or protocol failure when one exists.
+  final Object? cause;
+
+  @override
+  String toString() => message;
+}

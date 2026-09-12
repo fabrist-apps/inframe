@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:runnel/src/batch.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/command_validation.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
@@ -30,6 +31,7 @@ final class Runnel {
   final Duration _shutdownTimeout;
   final RunnelLimits _limits;
   final ReconnectBackoff _backoff = ReconnectBackoff();
+  final Set<RedisConnection> _transactionConnections = {};
 
   RedisConnection? _connection;
   Timer? _reconnectTimer;
@@ -70,8 +72,8 @@ final class Runnel {
     }
   }
 
-  Future<RedisConnection> _openPhysicalConnection() async {
-    final deadline = _Deadline(_connectTimeout);
+  Future<RedisConnection> _openPhysicalConnection({Duration? timeout}) async {
+    final deadline = _Deadline(timeout ?? _connectTimeout);
     RedisConnection? connection;
     try {
       connection = await RedisConnection.open(
@@ -178,6 +180,105 @@ final class Runnel {
     return connection.execute(command, timeout: deadline);
   }
 
+  /// Creates a typed, ordered pipeline builder without performing I/O.
+  RedisBatch pipeline() => RedisBatch.internal(
+    maxCommands: _limits.maxPendingCommands,
+    maxBytes: _limits.maxPendingBytes,
+    reservedCommands: 0,
+    reservedBytes: 0,
+    defaultTimeout: _commandTimeout,
+    executor: _executePipeline,
+  );
+
+  /// Creates a typed MULTI/EXEC builder backed by a dedicated connection.
+  RedisBatch transaction() {
+    final framing =
+        encodeCommand(_transactionFrame('MULTI')).length +
+        encodeCommand(_transactionFrame('EXEC')).length;
+    return RedisBatch.internal(
+      maxCommands: _limits.maxPendingCommands,
+      maxBytes: _limits.maxPendingBytes,
+      reservedCommands: 2,
+      reservedBytes: framing,
+      defaultTimeout: _commandTimeout,
+      executor: _executeTransaction,
+    );
+  }
+
+  Future<List<BatchOutcome<Object?>>> _executePipeline(
+    List<RedisCommand<Object?>> commands,
+    Duration timeout,
+  ) async {
+    final connection = _readyConnection();
+    return settleBatch(connection.executeBatch(commands, timeout: timeout));
+  }
+
+  Future<List<BatchOutcome<Object?>>> _executeTransaction(
+    List<RedisCommand<Object?>> commands,
+    Duration timeout,
+  ) async {
+    _readyConnection();
+    final deadline = _Deadline(timeout);
+    final connection = await _openPhysicalConnection(timeout: deadline.remaining);
+    if (_state != _ClientState.ready) {
+      await connection.close(commandsAreUncertain: true);
+      throw const RedisClosedException(message: 'The Runnel client is closing.');
+    }
+    _transactionConnections.add(connection);
+    try {
+      final wireCommands = <RedisCommand<Object?>>[
+        _transactionFrame('MULTI'),
+        for (final command in commands) _queuedCommand(command),
+        _transactionFrame('EXEC'),
+      ];
+      final replies = await settleBatch(
+        connection.executeBatch(wireCommands, timeout: deadline.remaining),
+      );
+      _requireTransactionSuccess(replies.first, 'MULTI was rejected.');
+      for (var index = 0; index < commands.length; index++) {
+        _requireTransactionSuccess(replies[index + 1], 'A transaction command was rejected.');
+      }
+      final execReply = _requireTransactionSuccess(replies.last, 'EXEC was rejected.');
+      if (execReply is RespNull) {
+        throw const RedisTransactionException('EXEC did not commit the transaction.');
+      }
+      if (execReply is! RespArray || execReply.values.length != commands.length) {
+        throw const RedisProtocolException(message: 'EXEC returned an invalid result array.');
+      }
+      return List.generate(commands.length, (index) {
+        final reply = execReply.values[index];
+        if (reply case RespError(:final code, :final message)) {
+          return BatchFailure<Object?>(
+            RedisServerException(code: code, message: message),
+            StackTrace.current,
+          );
+        }
+        try {
+          return BatchSuccess<Object?>(commands[index].decode(reply));
+        } on Object catch (error, stackTrace) {
+          return BatchFailure<Object?>(error, stackTrace);
+        }
+      }, growable: false);
+    } finally {
+      _transactionConnections.remove(connection);
+      await connection.close(commandsAreUncertain: !connection.isIdle);
+    }
+  }
+
+  RedisConnection _readyConnection() {
+    final connection = _connection;
+    if (_state == _ClientState.reconnecting || _state == _ClientState.connecting) {
+      throw const RedisTransportException(
+        message: 'The Redis connection is reconnecting; offline queuing is disabled.',
+        deliveryStatus: RedisDeliveryStatus.notSent,
+      );
+    }
+    if (_state != _ClientState.ready || connection == null || connection.isClosed) {
+      throw const RedisClosedException(message: 'The Runnel client is closed.');
+    }
+    return connection;
+  }
+
   /// Checks that Redis can process an ordinary command.
   Future<bool> ping({Duration? timeout}) => execute(
     RedisCommand<bool>([RedisArgument.text('PING')], (reply) => respText(reply) == 'PONG'),
@@ -194,6 +295,11 @@ final class Runnel {
     _reconnectTimer = null;
     final connection = _connection;
     _connection = null;
+    final transactions = List<RedisConnection>.of(_transactionConnections);
+    _transactionConnections.clear();
+    await Future.wait(
+      transactions.map((transaction) => transaction.close(commandsAreUncertain: true)),
+    );
     if (connection != null && !connection.isClosed) {
       try {
         await connection.waitUntilIdle().timeout(_shutdownTimeout);
@@ -204,6 +310,26 @@ final class Runnel {
     }
     _state = _ClientState.closed;
   }
+}
+
+RedisCommand<Object?> _transactionFrame(String name) => RedisCommand<Object?>(
+  [RedisArgument.text(name)],
+  (reply) => reply,
+);
+
+RedisCommand<Object?> _queuedCommand(RedisCommand<Object?> command) => RedisCommand<Object?>(
+  command.arguments,
+  (reply) => reply,
+);
+
+Object? _requireTransactionSuccess(BatchOutcome<Object?> outcome, String message) {
+  return switch (outcome) {
+    BatchSuccess<Object?>(:final value) => value,
+    BatchFailure<Object?>(:final error, :final stackTrace) => Error.throwWithStackTrace(
+      error is RunnelException ? error : RedisTransactionException(message, cause: error),
+      stackTrace,
+    ),
+  };
 }
 
 enum _ClientState { connecting, ready, reconnecting, closing, closed }
