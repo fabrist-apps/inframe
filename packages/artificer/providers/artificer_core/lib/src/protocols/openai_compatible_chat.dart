@@ -316,6 +316,12 @@ final class OpenAiCompatibleChatCodec<O> {
         InvalidRequestError('Compatible dialect providerId and api must not be empty.'),
       );
     }
+    final replayError = request.validateReplayTarget(
+      providerId: dialect.providerId,
+      api: dialect.api,
+      modelId: modelId,
+    );
+    if (replayError != null) return Failure(replayError);
     final validation = dialect.validate(request, options);
     if (validation != null) return Failure(validation);
     try {
@@ -522,8 +528,9 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
   final StringBuffer _text = StringBuffer();
   final StringBuffer _refusal = StringBuffer();
   final Map<int, _ToolStreamState> _tools = {};
+  final Map<String, Object?> _choiceExtensions = {};
   final List<ReplayItem> _replay = [];
-  Usage? _usage;
+  JsonObject? _nativeUsage;
   String? _responseId;
   String? _actualModel;
   String? _nativeFinishReason;
@@ -590,6 +597,7 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
           partialOutput: assembler.partialMessage,
         );
       }
+      _choiceExtensions.addAll(choice.extensions.toDart());
       yield* _delta(choice.delta);
       if (choice.finishReason case final reason?) {
         _nativeFinishReason = reason;
@@ -597,7 +605,7 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
       }
     }
     if (chunk.usage case final usage?) {
-      _usage = usage;
+      _nativeUsage = JsonObject.fromDart(chunk.raw.toDart()['usage']);
       yield assembler.updateUsage(usage);
     }
   }
@@ -633,8 +641,10 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
         );
       }
       if (call['id'] case final String id) state.id = id;
+      state.extensions.addAll(_without(call, {'index', 'id', 'type', 'function'}));
       if (call['function'] case final Map<String, Object?> function) {
         if (function['name'] case final String name) state.name = name;
+        state.functionExtensions.addAll(_without(function, {'name', 'arguments'}));
         if (function['arguments'] case final String arguments) {
           state.arguments.write(arguments);
           yield assembler.appendText(partIndex, arguments);
@@ -684,11 +694,18 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
     }
     yield* _finishParts();
     final nativeResponse = _toAssembledResponse();
+    final nativeChoice = (nativeResponse.toDart()['choices']! as List<Object?>).single;
     yield assembler.finish(
       finishReason: _finishReason(_nativeFinishReason),
       nativeFinishReason: _nativeFinishReason,
       nativeResponse: nativeResponse,
-      replay: _replay,
+      replay: [
+        ReplayItem(
+          phase: 'choice',
+          data: JsonObject.fromDart(nativeChoice),
+        ),
+        ..._replay,
+      ],
     );
   }
 
@@ -699,6 +716,7 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
       'model': _actualModel ?? modelId,
       'choices': [
         {
+          ..._choiceExtensions,
           'index': 0,
           'message': {
             'role': 'assistant',
@@ -708,10 +726,12 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
               'tool_calls': [
                 for (final entry in toolCalls)
                   {
-                    'id': entry.value.id!,
+                    ...entry.value.extensions,
+                    'id': entry.value.id,
                     'type': 'function',
                     'function': {
-                      'name': entry.value.name!,
+                      ...entry.value.functionExtensions,
+                      'name': entry.value.name,
                       'arguments': entry.value.arguments.toString(),
                     },
                   },
@@ -720,12 +740,7 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
           'finish_reason': _nativeFinishReason,
         },
       ],
-      if (_usage case final usage?)
-        'usage': {
-          'prompt_tokens': ?usage.inputTokens,
-          'completion_tokens': ?usage.outputTokens,
-          'total_tokens': ?usage.totalTokens,
-        },
+      if (_nativeUsage case final usage?) 'usage': usage.toDart(),
     });
   }
 
@@ -755,6 +770,8 @@ final class _ToolStreamState {
   String? id;
   String? name;
   final StringBuffer arguments = StringBuffer();
+  final Map<String, Object?> extensions = {};
+  final Map<String, Object?> functionExtensions = {};
 }
 
 Map<String, Object?> _encodeRequest(GenerationRequest request, String modelId) {
@@ -803,7 +820,11 @@ Iterable<Map<String, Object?>> _encodeMessage(Message message) sync* {
         text.add(part.text);
       }
       yield {'role': 'user', 'content': text.join()};
-    case AssistantMessage(:final parts):
+    case AssistantMessage(:final parts, :final replay):
+      if (replay != null) {
+        yield _compatibleReplayMessage(replay);
+        return;
+      }
       final text = parts.whereType<TextOutputPart>().map((part) => part.text).join();
       final calls = parts.whereType<ApplicationToolCallPart>().toList();
       final unsupported = parts.where(
@@ -890,6 +911,23 @@ String _toolResultText(ToolResult result) => switch (result) {
   NativeToolResult(:final value) => value.encode(),
   ApplicationErrorToolResult(:final message) => message,
 };
+
+Map<String, Object?> _compatibleReplayMessage(ProviderReplay replay) {
+  final choice = replay.items.where((item) => item.phase == 'choice').firstOrNull;
+  if (choice == null) {
+    throw const InvalidRequestError(
+      'Compatible assistant replay is missing its native choice.',
+    );
+  }
+  final choiceData = choice.data.toDart();
+  final message = _object(choiceData['message'], 'compatible replay message');
+  if (message['role'] != 'assistant') {
+    throw const InvalidRequestError(
+      'Compatible assistant replay must contain an assistant message.',
+    );
+  }
+  return message;
+}
 
 ApplicationToolCallPart _normalizeToolCall(OpenAiCompatibleToolCall call) =>
     ApplicationToolCallPart(

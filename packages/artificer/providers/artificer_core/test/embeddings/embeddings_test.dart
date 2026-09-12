@@ -39,6 +39,19 @@ void main() {
         throwsArgumentError,
       );
     });
+
+    test('should reject text when text embeddings are known unsupported', () {
+      final capabilities = EmbeddingCapabilities({
+        EmbeddingCapability.text: CapabilitySupport.unsupported,
+      });
+
+      expect(
+        capabilities.validate(
+          EmbeddingRequest(items: [EmbeddingInput.text('hello')]),
+        ),
+        isA<UnsupportedFeatureError>(),
+      );
+    });
   });
 
   group('EmbeddingResult', () {

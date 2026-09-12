@@ -8,16 +8,15 @@ sealed class AiError implements Exception {
   final String message;
 
   @override
-  String toString() =>
-      '${switch (this) {
-        InvalidRequestError() => 'InvalidRequestError',
-        UnsupportedFeatureError() => 'UnsupportedFeatureError',
-        ProviderError() => 'ProviderError',
-        TransportError() => 'TransportError',
-        ProtocolError() => 'ProtocolError',
-        ResponseLimitError() => 'ResponseLimitError',
-        ClientClosedError() => 'ClientClosedError',
-      }}: $message';
+  String toString() => switch (this) {
+    InvalidRequestError() => 'InvalidRequestError',
+    UnsupportedFeatureError() => 'UnsupportedFeatureError',
+    ProviderError() => 'ProviderError',
+    TransportError() => 'TransportError',
+    ProtocolError() => 'ProtocolError',
+    ResponseLimitError() => 'ResponseLimitError',
+    ClientClosedError() => 'ClientClosedError',
+  };
 }
 
 /// The caller supplied an invalid request.

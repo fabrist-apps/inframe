@@ -136,7 +136,7 @@ void main() {
               ),
             ),
           )
-          .runFuture();
+          .runFutureExit();
       await _waitForListener(source);
       source.add(utf8.encode(List.generate(100, (index) => 'data: $index\n\n').join()));
       await firstDelivered.future;
@@ -153,7 +153,11 @@ void main() {
           'resumes=$upstreamResumes',
         ),
       );
-      await consumed.timeout(const Duration(seconds: 2));
+      final exit = await consumed.timeout(const Duration(seconds: 2));
+      if (exit case Failed<void, AiError>(cause: Defect(:final error, :final stackTrace))) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+      expect(exit, isA<Succeeded<void, AiError>>());
       expect(protocol.decoded, 100);
     });
 
@@ -271,10 +275,14 @@ void main() {
       expect(next.metadata.statusCode, 200);
     });
 
-    test('provider close waits for active stream cleanup and rejects its consumer', () async {
+    test('provider close releases a backpressured stream and preserves interruption', () async {
+      final firstDelivered = Completer<void>();
+      final releaseConsumer = Completer<void>();
       final listening = Completer<void>();
       var bodyCancelled = false;
+      final protocol = _BurstProtocol(100);
       final body = StreamController<List<int>>(
+        sync: true,
         onListen: listening.complete,
         onCancel: () => bodyCancelled = true,
       );
@@ -286,19 +294,62 @@ void main() {
       addTearDown(runtime.close);
       final fiber = runtime.fork(
         client
-            .sendSse<String>(
+            .sendSse<int>(
               ProviderHttpRequest(method: 'GET', path: 'stream'),
-              createProtocol: _RequiresTerminalProtocol.new,
+              createProtocol: () => protocol,
+              decodedEventCapacity: 1,
             )
-            .runCollect(),
+            .runForEach(
+              (_) => Effect.build(($) async {
+                if (!firstDelivered.isCompleted) {
+                  firstDelivered.complete();
+                  await releaseConsumer.future;
+                }
+              }),
+            ),
       );
       await listening.future;
+      body.add(utf8.encode('data: burst\n\n'));
+      await firstDelivered.future;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(protocol.produced, lessThanOrEqualTo(3));
 
       await client.close().timeout(const Duration(seconds: 2));
+      releaseConsumer.complete();
       final exit = await fiber.join();
 
-      expect(exit, _failedWith<ClientClosedError>());
+      expect((exit as Failed<void, AiError>).cause.containsInterruption, isTrue);
       expect(bodyCancelled, isTrue);
+    });
+
+    test('keeps unexpected protocol exceptions as defects', () async {
+      Future<Exit<List<String>, AiError>> run(_DefectPhase phase) {
+        final client = ProviderHttpClient(
+          baseUrl: Uri.parse('https://example.test/'),
+          client: _ResponseClient(
+            () => http.StreamedResponse(
+              Stream.value(utf8.encode('data: value\n\n')),
+              200,
+            ),
+          ),
+        );
+        addTearDown(client.close);
+        return client
+            .sendSse<String>(
+              ProviderHttpRequest(method: 'GET', path: 'stream'),
+              createProtocol: () => _DefectProtocol(phase),
+            )
+            .runCollect()
+            .runFutureExit();
+      }
+
+      for (final phase in _DefectPhase.values) {
+        final exit = await run(phase);
+        final cause = (exit as Failed<List<String>, AiError>).cause;
+        expect(cause.containsFatal, isTrue, reason: phase.name);
+        expect(cause.expectedErrors, isEmpty, reason: phase.name);
+      }
     });
 
     test('retains a cleanup defect after early successful observation', () async {
@@ -383,6 +434,65 @@ final class _CountingProtocol implements SseProtocol<int> {
 
   @override
   Iterable<int> finish() => const [];
+}
+
+final class _BurstProtocol implements SseProtocol<int> {
+  _BurstProtocol(this.count);
+
+  final int count;
+  int produced = 0;
+
+  @override
+  bool get isTerminal => false;
+
+  @override
+  Object? get partialOutput => null;
+
+  @override
+  Iterable<int> start(ResponseMetadata metadata) => const [];
+
+  @override
+  Iterable<int> decode(SseEvent event) sync* {
+    for (var index = 0; index < count; index++) {
+      produced++;
+      yield index;
+    }
+  }
+
+  @override
+  Iterable<int> finish() => const [];
+}
+
+enum _DefectPhase { start, decode, finish }
+
+final class _DefectProtocol implements SseProtocol<String> {
+  _DefectProtocol(this.phase);
+
+  final _DefectPhase phase;
+
+  @override
+  bool get isTerminal => phase == _DefectPhase.finish;
+
+  @override
+  Object? get partialOutput => null;
+
+  @override
+  Iterable<String> start(ResponseMetadata metadata) {
+    if (phase == _DefectPhase.start) throw StateError('start defect');
+    return const [];
+  }
+
+  @override
+  Iterable<String> decode(SseEvent event) {
+    if (phase == _DefectPhase.decode) throw StateError('decode defect');
+    return const [];
+  }
+
+  @override
+  Iterable<String> finish() {
+    if (phase == _DefectPhase.finish) throw StateError('finish defect');
+    return const [];
+  }
 }
 
 final class _TerminalProtocol implements SseProtocol<String> {

@@ -61,6 +61,22 @@ final class ProviderUploadRequest {
 
 enum _ClientState { open, closing, closed }
 
+sealed class _SseSignal {
+  const _SseSignal();
+}
+
+final class _SseExpected extends _SseSignal {
+  const _SseExpected(this.error);
+
+  final AiError error;
+}
+
+final class _SseTerminal extends _SseSignal {
+  const _SseTerminal(this.cause);
+
+  final Cause<_SseSignal> cause;
+}
+
 /// A one-attempt HTTP client shared by one provider's models and endpoints.
 final class ProviderHttpClient {
   /// Creates a [ProviderHttpClient].
@@ -158,21 +174,32 @@ final class ProviderHttpClient {
     if (responseLimit <= 0) {
       throw ArgumentError.value(responseLimit, 'maxStreamBytes', 'must be positive');
     }
-    return Flow.fromStream<A, AiError>(
-      () => _openSseStream(
-        request,
-        protocol: createProtocol(),
-        maxEventBytes: maxEventBytes,
-        maxStreamBytes: responseLimit,
-      ),
-      onError: (error, _) => error is AiError
-          ? error
-          : TransportError(
-              _safeForeignMessage(error),
-              deliveryState: RequestDeliveryState.responseStarted,
-            ),
-      capacity: decodedEventCapacity,
-    );
+    return Flow.fromStream<A, _SseSignal>(
+          () => _openSseStream(
+            request,
+            protocol: createProtocol(),
+            maxEventBytes: maxEventBytes,
+            maxStreamBytes: responseLimit,
+          ),
+          onError: (error, stackTrace) => switch (error) {
+            _SseSignal() => error,
+            AiError() => _SseExpected(error),
+            _ => _SseTerminal(Defect(error, stackTrace)),
+          },
+          capacity: decodedEventCapacity,
+        )
+        .catchError(
+          (signal) => switch (signal) {
+            _SseExpected() => Flow.fail<A, _SseSignal>(signal),
+            _SseTerminal(:final cause) => Effect.failCause<A, _SseSignal>(cause).asFlow(),
+          },
+        )
+        .mapError(
+          (signal) => switch (signal) {
+            _SseExpected(:final error) => error,
+            _SseTerminal() => throw StateError('An SSE terminal cause was not expanded.'),
+          },
+        );
   }
 
   Stream<A> _openSseStream<A>(
@@ -498,6 +525,7 @@ final class _RequestLifetime {
   Future<void>? _cleanupFuture;
 
   Future<void> get abortTrigger => _abort.future;
+  Future<Object?> get cancellation => _cancelled.future;
   Future<void> get done => _done.future;
 
   Future<_WaitResult<T>> waitFor<T extends Object>(Future<T> future) {

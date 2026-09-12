@@ -18,6 +18,10 @@ Versioned JSON persistence includes copied media bytes and provider replay data.
 provider-owned state requires the same provider, API, and model. Constructing edited content creates
 a new message and retains replay only when the caller passes it explicitly.
 
+`AiError.toString()` reports only the error type so logs do not expose provider-returned content.
+Applications can inspect the typed error fields when they intentionally need the message, request ID,
+native details, partial output, or remote resource ID.
+
 `Setting<T>` distinguishes inherited values, replacements, and explicit clearing for immutable
 provider options. Provider adapters must reject known unsupported features and conflicting native
 fields before I/O; they must not silently drop options or validate generated JSON against application
@@ -57,8 +61,10 @@ response body without closing a shared client.
 Completions endpoints. Provider packages implement `OpenAiCompatibleChatDialect<O>` to validate typed
 options and add vendor fields. The codec always requests one candidate, requires an explicit index when
 normalizing a native multi-choice response, retains unknown native extensions, and rejects `extraBody`
-collisions before I/O. It does not claim that every OpenAI-shaped service or vendor feature is
-compatible; Anthropic and Google keep their own protocol adapters.
+collisions before I/O. Nonstreaming and assembled streaming results retain a native choice for exact
+same-target assistant replay, including refusal, usage, choice, tool-call, and function extensions. It
+does not claim that every OpenAI-shaped service or vendor feature is compatible; Anthropic and Google
+keep their own protocol adapters.
 
 The compatible fixtures are pinned on 2026-09-12 to the published
 [xAI Chat Completions reference](https://docs.x.ai/developers/rest-api-reference/inference/chat-completions)

@@ -206,6 +206,8 @@ final class EmbeddingCapabilities {
       if (request.items.length > 1) EmbeddingCapability.batching,
       if (request.dimensions != null) EmbeddingCapability.dimensions,
       for (final input in request.items)
+        if (input.parts.any((part) => part is TextInputPart)) EmbeddingCapability.text,
+      for (final input in request.items)
         for (final media in input.parts.whereType<MediaInputPart>())
           switch (media.kind) {
             MediaKind.image => EmbeddingCapability.image,

@@ -121,6 +121,61 @@ void main() {
       );
     });
 
+    test('preserves same-target assistant replay and rejects incompatible targets', () {
+      final xai = OpenAiCompatibleChatCodec(
+        _Dialect(providerId: 'xai', field: 'search_parameters'),
+      );
+      final baseten = OpenAiCompatibleChatCodec(
+        _Dialect(providerId: 'baseten', field: 'model_adapter'),
+      );
+      final response = JsonObject.fromDart({
+        ..._response(''),
+        'choices': [
+          {
+            'index': 0,
+            'message': {
+              'role': 'assistant',
+              'content': null,
+              'refusal': 'blocked',
+              'reasoning_content': {'signature': 'keep'},
+            },
+            'finish_reason': 'refusal',
+          },
+        ],
+      });
+      final normalized = _success(
+        xai.normalize(
+          _success(xai.decodeNative(_rawResponse(response, providerId: 'xai'))),
+        ),
+      );
+      final next = GenerationRequest(
+        messages: [UserMessage.text('again'), normalized.message],
+      );
+
+      final encoded = _success(
+        xai.encode(
+          next,
+          modelId: 'model-1',
+          options: const _Options({'mode': 'auto'}),
+        ),
+      );
+      final messages = encoded.body.toDart()['messages']! as List<Object?>;
+      expect(messages.last, {
+        'role': 'assistant',
+        'content': null,
+        'refusal': 'blocked',
+        'reasoning_content': {'signature': 'keep'},
+      });
+      expect(
+        baseten.encode(
+          next,
+          modelId: 'model-1',
+          options: const _Options('adapter-v2'),
+        ),
+        isA<Failure<OpenAiCompatibleChatRequest, AiError>>(),
+      );
+    });
+
     test('common and typed streams share framing while preserving malformed arguments', () async {
       final codec = OpenAiCompatibleChatCodec(
         _Dialect(providerId: 'xai', field: 'search_parameters'),
@@ -174,6 +229,38 @@ void main() {
         isA<MalformedToolArguments>(),
       );
       expect(finished.usage?.totalTokens, 5);
+      final assembled = finished.nativePayload.json.toDart();
+      final choices = assembled['choices'];
+      if (choices is! List<Object?>) {
+        fail('Expected one assembled native choice.');
+      }
+      final assembledChoice = choices.single;
+      if (assembledChoice is! Map<String, Object?>) {
+        fail('Expected one assembled native choice.');
+      }
+      final message = assembledChoice['message'];
+      if (message is! Map<String, Object?>) {
+        fail('Expected one assembled native tool call.');
+      }
+      final calls = message['tool_calls'];
+      if (calls is! List<Object?>) {
+        fail('Expected one assembled native tool call.');
+      }
+      final assembledCall = calls.single;
+      if (assembledCall is! Map<String, Object?>) {
+        fail('Expected one assembled native tool call.');
+      }
+      expect(
+        (assembled['usage']! as Map<String, Object?>)['completion_tokens_details'],
+        {'reasoning_tokens': 2},
+      );
+      expect(assembledChoice['choice_future'], {'keep': true});
+      expect(assembledCall['tool_future'], isTrue);
+      expect(
+        (assembledCall['function']! as Map<String, Object?>)['function_future'],
+        9,
+      );
+      expect(finished.message.replay?.items.first.phase, 'choice');
       expect(common.whereType<ProviderEvent>(), hasLength(1));
       expect(common.last, isA<GenerationFinished>());
       expect(native.whereType<OpenAiCompatibleChunk>(), hasLength(5));
@@ -292,12 +379,18 @@ List<int> _streamBody() {
       'choices': [
         {
           'index': 0,
+          'choice_future': {'keep': true},
           'delta': {
             'tool_calls': [
               {
                 'index': 0,
                 'id': 'call-2',
-                'function': {'name': 'lookup', 'arguments': '{'},
+                'tool_future': true,
+                'function': {
+                  'name': 'lookup',
+                  'arguments': '{',
+                  'function_future': 9,
+                },
               },
             ],
           },
@@ -330,7 +423,12 @@ List<int> _streamBody() {
       'id': 'response-1',
       'model': 'model-1',
       'choices': <Object?>[],
-      'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5},
+      'usage': {
+        'prompt_tokens': 2,
+        'completion_tokens': 3,
+        'total_tokens': 5,
+        'completion_tokens_details': {'reasoning_tokens': 2},
+      },
     },
   ];
   return utf8.encode(

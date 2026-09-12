@@ -13,6 +13,7 @@ final class _SsePump<A> {
     required this.release,
   }) : parser = _SseParser(maxEventBytes) {
     controller = StreamController<A>(
+      sync: true,
       onListen: _start,
       onPause: _pause,
       onResume: _resume,
@@ -32,6 +33,10 @@ final class _SsePump<A> {
   final _SseParser parser;
   late final StreamController<A> controller;
   StreamSubscription<List<int>>? _body;
+  Iterator<A>? _pendingOutput;
+  void Function()? _onOutputDone;
+  void Function(Object error, StackTrace stackTrace)? _onOutputFailure;
+  var _outputDrainScheduled = false;
   List<int>? _chunk;
   var _chunkIndex = 0;
   var _streamBytes = 0;
@@ -45,9 +50,9 @@ final class _SsePump<A> {
 
   Future<void> _start() async {
     unawaited(
-      lifetime.abortTrigger.then((_) {
+      lifetime.cancellation.then((reason) {
         if (!_cancelled && !_finishing) {
-          return _fail(const ClientClosedError(), StackTrace.current);
+          return _terminate(Interrupted(reason));
         }
       }),
     );
@@ -77,23 +82,28 @@ final class _SsePump<A> {
         requestId: response.headers['x-request-id'] ?? response.headers['request-id'],
         headers: response.headers,
       );
-      final emitted = _emitAll(protocol.start(metadata));
-      if (emitted) {
-        scheduleMicrotask(() => _listen(response, paused: _paused));
-      } else {
-        _listen(response, paused: _paused);
+      try {
+        _queueProtocolOutput(
+          protocol.start(metadata),
+          onDone: () => _listen(response, paused: _paused),
+        );
+      } on Object catch (error, stackTrace) {
+        await _terminate(_protocolCause(error, stackTrace));
       }
     } on Object catch (error, stackTrace) {
       if (_cancelled) return;
-      await _fail(
-        error is AiError
-            ? error
-            : TransportError(
-                _safeForeignMessage(error),
-                deliveryState: RequestDeliveryState.mayHaveReachedProvider,
-              ),
-        stackTrace,
-      );
+      final cause = switch (error) {
+        AiError() || FormatException() => _protocolCause(error, stackTrace),
+        _ => Expected<_SseSignal>(
+          _SseExpected(
+            TransportError(
+              _safeForeignMessage(error),
+              deliveryState: RequestDeliveryState.mayHaveReachedProvider,
+            ),
+          ),
+        ),
+      };
+      await _terminate(cause);
     }
   }
 
@@ -102,15 +112,18 @@ final class _SsePump<A> {
       _receive,
       onError: (Object error, StackTrace stackTrace) {
         unawaited(
-          _fail(
-            error is AiError
-                ? error
-                : TransportError(
-                    _safeForeignMessage(error),
-                    deliveryState: RequestDeliveryState.responseStarted,
-                    partialOutput: protocol.partialOutput,
-                  ),
-            stackTrace,
+          _terminate(
+            Expected(
+              _SseExpected(
+                error is AiError
+                    ? error
+                    : TransportError(
+                        _safeForeignMessage(error),
+                        deliveryState: RequestDeliveryState.responseStarted,
+                        partialOutput: protocol.partialOutput,
+                      ),
+              ),
+            ),
           ),
         );
       },
@@ -126,14 +139,17 @@ final class _SsePump<A> {
     _streamBytes += bytes.length;
     if (_streamBytes > maxStreamBytes) {
       unawaited(
-        _fail(
-          ResponseLimitError(
-            'The streamed response exceeded the configured byte limit.',
-            limit: maxStreamBytes,
-            actual: _streamBytes,
-            partialOutput: protocol.partialOutput,
+        _terminate(
+          Expected(
+            _SseExpected(
+              ResponseLimitError(
+                'The streamed response exceeded the configured byte limit.',
+                limit: maxStreamBytes,
+                actual: _streamBytes,
+                partialOutput: protocol.partialOutput,
+              ),
+            ),
           ),
-          StackTrace.current,
         ),
       );
       return;
@@ -146,40 +162,56 @@ final class _SsePump<A> {
   void _drainChunk() {
     final chunk = _chunk;
     if (chunk == null || _paused || _cancelled || _finishing) return;
-    try {
-      while (_chunkIndex < chunk.length && !_paused && !_finishing) {
-        final event = parser.addByte(chunk[_chunkIndex++]);
-        if (event != null) {
-          final emitted = _emitAll(protocol.decode(event));
-          if (protocol.isTerminal) {
-            unawaited(_finishTransport());
-          } else if (emitted && _chunkIndex < chunk.length) {
-            _pauseParser();
-            scheduleMicrotask(() {
-              _drainChunk();
-              if (_chunk == null || _paused || _finishing) _resumeParser();
-            });
-            return;
-          }
+    while (_chunkIndex < chunk.length && !_paused && !_finishing) {
+      final SseEvent? event;
+      try {
+        event = parser.addByte(chunk[_chunkIndex++]);
+      } on Object catch (error, stackTrace) {
+        unawaited(_terminate(_protocolCause(error, stackTrace)));
+        return;
+      }
+      if (event != null) {
+        _pauseParser();
+        try {
+          _queueProtocolOutput(
+            protocol.decode(event),
+            onDone: _continueAfterEvent,
+          );
+        } on Object catch (error, stackTrace) {
+          unawaited(_terminate(_protocolCause(error, stackTrace)));
         }
+        return;
       }
-      if (_chunkIndex == chunk.length) {
-        _chunk = null;
-        _chunkIndex = 0;
-      }
-    } on Object catch (error, stackTrace) {
-      unawaited(_fail(_protocolError(error), stackTrace));
     }
+    if (_chunkIndex == chunk.length) {
+      _chunk = null;
+      _chunkIndex = 0;
+      _resumeParser();
+    }
+  }
+
+  void _continueAfterEvent() {
+    if (protocol.isTerminal) {
+      unawaited(_finishTransport());
+      return;
+    }
+    scheduleMicrotask(_drainChunk);
   }
 
   Future<void> _completeBody() async {
     if (_cancelled || _finishing) return;
     try {
       final event = parser.close();
-      if (event != null) _emitAll(protocol.decode(event));
-      await _finishTransport();
+      if (event == null) {
+        await _finishTransport();
+      } else {
+        _queueProtocolOutput(
+          protocol.decode(event),
+          onDone: () => unawaited(_finishTransport()),
+        );
+      }
     } on Object catch (error, stackTrace) {
-      await _fail(_protocolError(error), stackTrace);
+      await _terminate(_protocolCause(error, stackTrace));
     }
   }
 
@@ -188,13 +220,22 @@ final class _SsePump<A> {
     _finishing = true;
     try {
       await lifetime.cleanup();
-      _emitAll(protocol.finish());
-      await controller.close();
     } on Object catch (error, stackTrace) {
-      if (!controller.isClosed) controller.addError(_protocolError(error), stackTrace);
-      if (!controller.isClosed) await controller.close();
-    } finally {
       _release();
+      _emitTerminal(Defect(error, stackTrace));
+      return;
+    }
+    _release();
+    try {
+      _queueOutput(
+        protocol.finish(),
+        onDone: _closeOutput,
+        onFailure: (error, stackTrace) {
+          _emitTerminal(_protocolCause(error, stackTrace));
+        },
+      );
+    } on Object catch (error, stackTrace) {
+      _emitTerminal(_protocolCause(error, stackTrace));
     }
   }
 
@@ -202,44 +243,119 @@ final class _SsePump<A> {
     try {
       final bytes = await _readBody(response, lifetime, maxStreamBytes);
       final payload = JsonObject.parse(utf8.decode(bytes));
-      await _fail(
-        _providerError(
-          response,
-          payload,
-          response.headers['x-request-id'] ?? response.headers['request-id'],
+      await _terminate(
+        Expected(
+          _SseExpected(
+            _providerError(
+              response,
+              payload,
+              response.headers['x-request-id'] ?? response.headers['request-id'],
+            ),
+          ),
         ),
-        StackTrace.current,
       );
-    } on _ResponseTooLarge catch (error, stackTrace) {
-      await _fail(
-        ResponseLimitError(
-          'The response exceeded the configured byte limit.',
-          limit: maxStreamBytes,
-          actual: error.actual,
-          partialOutput: protocol.partialOutput,
+    } on _ResponseTooLarge catch (error) {
+      await _terminate(
+        Expected(
+          _SseExpected(
+            ResponseLimitError(
+              'The response exceeded the configured byte limit.',
+              limit: maxStreamBytes,
+              actual: error.actual,
+              partialOutput: protocol.partialOutput,
+            ),
+          ),
         ),
-        stackTrace,
       );
-    } on Object catch (error, stackTrace) {
-      await _fail(_protocolError(error), stackTrace);
+    } on FormatException catch (error, stackTrace) {
+      await _terminate(_protocolCause(error, stackTrace));
+    } on Object catch (error) {
+      await _terminate(
+        Expected(
+          _SseExpected(
+            error is AiError
+                ? error
+                : TransportError(
+                    _safeForeignMessage(error),
+                    deliveryState: RequestDeliveryState.responseStarted,
+                    partialOutput: protocol.partialOutput,
+                  ),
+          ),
+        ),
+      );
     }
   }
 
-  Future<void> _fail(AiError error, StackTrace stackTrace) async {
+  Future<void> _terminate(Cause<_SseSignal> original) async {
     if (_cancelled || _finishing) return;
     _finishing = true;
-    if (!controller.isClosed) controller.addError(error, stackTrace);
-    if (!controller.isClosed) await controller.close();
+    Cause<_SseSignal>? cleanupFailure;
+    try {
+      await lifetime.cleanup();
+    } on Object catch (error, stackTrace) {
+      cleanupFailure = Defect(error, stackTrace);
+    }
+    _release();
+    _emitTerminal(
+      cleanupFailure == null ? original : Sequential([original, cleanupFailure]),
+    );
   }
 
-  bool _emitAll(Iterable<A> values) {
-    var emitted = false;
-    for (final value in values) {
-      if (_cancelled || controller.isClosed) return emitted;
-      emitted = true;
-      controller.add(value);
+  void _queueProtocolOutput(Iterable<A> values, {required void Function() onDone}) {
+    _queueOutput(
+      values,
+      onDone: onDone,
+      onFailure: (error, stackTrace) {
+        unawaited(_terminate(_protocolCause(error, stackTrace)));
+      },
+    );
+  }
+
+  void _queueOutput(
+    Iterable<A> values, {
+    required void Function() onDone,
+    required void Function(Object error, StackTrace stackTrace) onFailure,
+  }) {
+    if (_pendingOutput != null) throw StateError('SSE protocol outputs overlapped.');
+    _pendingOutput = values.iterator;
+    _onOutputDone = onDone;
+    _onOutputFailure = onFailure;
+    _drainOutput();
+  }
+
+  void _drainOutput() {
+    _outputDrainScheduled = false;
+    final output = _pendingOutput;
+    if (output == null || _paused || _cancelled || controller.isClosed) return;
+    try {
+      if (!output.moveNext()) {
+        _pendingOutput = null;
+        final done = _onOutputDone;
+        final fail = _onOutputFailure;
+        _onOutputDone = null;
+        _onOutputFailure = null;
+        try {
+          done?.call();
+        } on Object catch (error, stackTrace) {
+          fail?.call(error, stackTrace);
+        }
+        return;
+      }
+      controller.add(output.current);
+      _scheduleOutputDrain();
+    } on Object catch (error, stackTrace) {
+      _pendingOutput = null;
+      final fail = _onOutputFailure;
+      _onOutputDone = null;
+      _onOutputFailure = null;
+      fail?.call(error, stackTrace);
     }
-    return emitted;
+  }
+
+  void _scheduleOutputDrain() {
+    if (_outputDrainScheduled) return;
+    _outputDrainScheduled = true;
+    scheduleMicrotask(_drainOutput);
   }
 
   void _pause() {
@@ -261,14 +377,18 @@ final class _SsePump<A> {
 
   void _resume() {
     if (!_paused) return;
+    final body = _body;
     _paused = false;
-    _drainChunk();
-    if (!_paused && !_finishing) _body?.resume();
+    body?.resume();
+    _drainOutput();
   }
 
   Future<void> _cancel() async {
     if (_cancelled) return;
     _cancelled = true;
+    _pendingOutput = null;
+    _onOutputDone = null;
+    _onOutputFailure = null;
     try {
       await lifetime.cancelAndCleanup('SSE consumer stopped');
     } finally {
@@ -276,29 +396,47 @@ final class _SsePump<A> {
     }
   }
 
-  AiError _protocolError(Object error) => switch (error) {
-    ResponseLimitError() => ResponseLimitError(
-      error.message,
-      limit: error.limit,
-      actual: error.actual,
-      partialOutput: error.partialOutput ?? protocol.partialOutput,
-      remoteResourceId: error.remoteResourceId,
+  Cause<_SseSignal> _protocolCause(Object error, StackTrace stackTrace) => switch (error) {
+    ResponseLimitError() => Expected(
+      _SseExpected(
+        ResponseLimitError(
+          error.message,
+          limit: error.limit,
+          actual: error.actual,
+          partialOutput: error.partialOutput ?? protocol.partialOutput,
+          remoteResourceId: error.remoteResourceId,
+        ),
+      ),
     ),
-    ProtocolError() => ProtocolError(
-      error.message,
-      partialOutput: error.partialOutput ?? protocol.partialOutput,
-      remoteResourceId: error.remoteResourceId,
+    ProtocolError() => Expected(
+      _SseExpected(
+        ProtocolError(
+          error.message,
+          partialOutput: error.partialOutput ?? protocol.partialOutput,
+          remoteResourceId: error.remoteResourceId,
+        ),
+      ),
     ),
-    AiError() => error,
-    FormatException() => ProtocolError(
-      'The streamed response was malformed: ${error.message}',
-      partialOutput: protocol.partialOutput,
+    AiError() => Expected(_SseExpected(error)),
+    FormatException() => Expected(
+      _SseExpected(
+        ProtocolError(
+          'The streamed response was malformed.',
+          partialOutput: protocol.partialOutput,
+        ),
+      ),
     ),
-    _ => ProtocolError(
-      'The streamed response could not be decoded.',
-      partialOutput: protocol.partialOutput,
-    ),
+    _ => Defect(error, stackTrace),
   };
+
+  void _emitTerminal(Cause<_SseSignal> cause) {
+    if (!controller.isClosed) controller.addError(_SseTerminal(cause));
+    _closeOutput();
+  }
+
+  void _closeOutput() {
+    if (!controller.isClosed) unawaited(controller.close());
+  }
 
   void _release() {
     if (_released) return;

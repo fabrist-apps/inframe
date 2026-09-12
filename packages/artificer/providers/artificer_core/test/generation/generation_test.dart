@@ -45,4 +45,15 @@ void main() {
       expect(capabilities.validateRequested([ModelCapability.imageInput]), isNull);
     });
   });
+
+  test('default error strings do not expose provider content', () {
+    const error = ProviderError(
+      'echoed prompt and credential',
+      statusCode: 400,
+      requestId: 'request-1',
+    );
+
+    expect(error.toString(), contains('ProviderError'));
+    expect(error.toString(), isNot(contains(error.message)));
+  });
 }
