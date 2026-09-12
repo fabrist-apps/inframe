@@ -158,6 +158,7 @@ final class GoogleLanguageModel implements LanguageModel {
     if (replayError != null) return replayError;
     final contents = <GoogleContent>[];
     final calls = <String, ApplicationToolCallPart>{};
+    final replayCallIds = <String, String?>{};
     for (final message in request.messages) {
       switch (message) {
         case UserMessage(:final parts):
@@ -165,10 +166,12 @@ final class GoogleLanguageModel implements LanguageModel {
           if (encoded is AiError) return encoded;
           contents.add(GoogleContent(role: 'user', parts: encoded as List<GooglePart>));
         case AssistantMessage(:final parts, :final replay):
-          for (final call in parts.whereType<ApplicationToolCallPart>()) {
+          final applicationCalls = parts.whereType<ApplicationToolCallPart>().toList();
+          for (final call in applicationCalls) {
             calls[call.id] = call;
           }
           final replayContents = _replayContents(replay);
+          _recordReplayCallIds(applicationCalls, replayContents, replayCallIds);
           if (replayContents.isNotEmpty) {
             contents.addAll(replayContents);
             continue;
@@ -198,7 +201,11 @@ final class GoogleLanguageModel implements LanguageModel {
                 'Tool result ${result.callId} references a missing call.',
               );
             }
-            final encoded = _encodeToolResult(result, call);
+            final encoded = _encodeToolResult(
+              result,
+              call,
+              responseId: replayCallIds.containsKey(call.id) ? replayCallIds[call.id] : call.id,
+            );
             if (encoded is AiError) return encoded;
             parts.add(encoded as GooglePart);
           }
@@ -344,7 +351,33 @@ final class GoogleLanguageModel implements LanguageModel {
   }
 }
 
-Object _encodeToolResult(ToolResult result, ApplicationToolCallPart call) {
+void _recordReplayCallIds(
+  List<ApplicationToolCallPart> applicationCalls,
+  List<GoogleContent> replayContents,
+  Map<String, String?> replayCallIds,
+) {
+  final nativeCalls = replayContents
+      .expand((content) => content.parts)
+      .map((part) => part.functionCall)
+      .whereType<GoogleFunctionCall>()
+      .toList();
+  var nativeIndex = 0;
+  for (final applicationCall in applicationCalls) {
+    while (nativeIndex < nativeCalls.length) {
+      final nativeCall = nativeCalls[nativeIndex++];
+      if (nativeCall.name != applicationCall.name) continue;
+      if (nativeCall.id != null && nativeCall.id != applicationCall.id) continue;
+      replayCallIds[applicationCall.id] = nativeCall.id;
+      break;
+    }
+  }
+}
+
+Object _encodeToolResult(
+  ToolResult result,
+  ApplicationToolCallPart call, {
+  required String? responseId,
+}) {
   final nativeCall = call.arguments is NativeToolArguments;
   final response = switch (result) {
     JsonToolResult(:final value) when !nativeCall => JsonObject({'output': value.toDart()}),
@@ -367,7 +400,7 @@ Object _encodeToolResult(ToolResult result, ApplicationToolCallPart call) {
   }
   return GooglePart.functionResponse(
     GoogleFunctionResponse(
-      id: call.id.startsWith('google-call-') ? null : call.id,
+      id: responseId,
       name: call.name,
       response: response,
     ),

@@ -759,6 +759,9 @@ final class GoogleGenerateContentChunk {
     required this.value,
     required this.payload,
     required this.metadata,
+    this.event,
+    this.eventId,
+    this.retry,
   });
 
   /// Decoded native response fragment.
@@ -769,6 +772,15 @@ final class GoogleGenerateContentChunk {
 
   /// HTTP metadata for the stream.
   final ResponseMetadata metadata;
+
+  /// Native SSE event name, including names added after this schema snapshot.
+  final String? event;
+
+  /// Native SSE event identity, when supplied.
+  final String? eventId;
+
+  /// Native SSE retry hint, when supplied.
+  final Duration? retry;
 }
 
 /// One explicit native token-count request.

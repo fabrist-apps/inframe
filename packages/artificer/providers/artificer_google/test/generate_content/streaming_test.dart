@@ -2,12 +2,161 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
+import 'package:artificer_core/transport.dart';
 import 'package:artificer_google/artificer_google.dart';
 import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('GoogleGenerateContentResource', () {
+    test('should stream every ordered content kind with stable identities and replay', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        if (request.uri.path.endsWith(':generateContent')) {
+          request.response
+            ..headers.contentType = ContentType.json
+            ..write(jsonEncode(_completeContentResponse));
+          await request.response.close();
+          return;
+        }
+        request.response
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..write('data: ${jsonEncode(_streamChunk('Answer '))}\n\n')
+          ..write('data: ${jsonEncode(_streamChunk('done'))}\n\n')
+          ..write(
+            'data: ${jsonEncode({
+              'candidates': [
+                {
+                  'content': {
+                    'role': 'model',
+                    'parts': [
+                      {'text': 'Thought', 'thought': true, 'thoughtSignature': 'signature'},
+                      {
+                        'functionCall': {
+                          'id': 'call-1',
+                          'name': 'lookup',
+                          'args': {'query': 'dart'},
+                        },
+                      },
+                      {
+                        'executableCode': {'language': 'PYTHON', 'code': 'print(1)'},
+                      },
+                      {
+                        'inlineData': {'mimeType': 'image/png', 'data': 'AA=='},
+                      },
+                    ],
+                  },
+                  'finishReason': 'STOP',
+                  'index': 0,
+                  'groundingMetadata': {
+                    'groundingChunks': [
+                      {
+                        'web': {'uri': 'https://example.test/source', 'title': 'Source'},
+                      },
+                    ],
+                  },
+                },
+              ],
+              'responseId': 'response-stream',
+            })}\n\n',
+          );
+        await request.response.close();
+      });
+      final provider = _provider(server);
+      addTearDown(provider.close);
+
+      final nativeRequest = GoogleGenerateContentRequest(
+        model: 'models/future-model',
+        contents: [
+          GoogleContent(role: 'user', parts: [GooglePart.text('hello')]),
+        ],
+        tools: [
+          GoogleFunctionDeclarationsTool([
+            GoogleFunctionDeclaration(
+              name: 'lookup',
+              parameters: JsonObject({
+                'type': 'object',
+                'properties': <String, Object?>{},
+              }),
+            ),
+          ]),
+        ],
+      );
+      final ordinaryNative = await provider.models.generateContent(nativeRequest).runFuture();
+      final ordinary = provider.models.normalizeGenerateContent(
+        ordinaryNative,
+        request: nativeRequest,
+      );
+
+      final events = await provider
+          .languageModel('future-model')
+          .stream(
+            GenerationRequest(
+              messages: [UserMessage.text('hello')],
+              tools: [
+                FunctionTool(
+                  name: 'lookup',
+                  inputSchema: JsonObject({
+                    'type': 'object',
+                    'properties': <String, Object?>{},
+                  }),
+                ),
+              ],
+            ),
+          )
+          .runCollect()
+          .runFuture();
+
+      final starts = events.whereType<PartStarted>().toList();
+      expect(starts.map((event) => event.partId), [
+        'part-0',
+        'part-1',
+        'part-2',
+        'part-3',
+        'part-4',
+      ]);
+      expect(starts.map((event) => event.kind), [
+        GenerationPartKind.text,
+        GenerationPartKind.reasoning,
+        GenerationPartKind.applicationToolCall,
+        GenerationPartKind.providerTool,
+        GenerationPartKind.opaque,
+      ]);
+      expect(events.whereType<TextPartDelta>().map((event) => event.text), ['Answer ', 'done']);
+      expect(events.whereType<ReasoningPartDelta>().single.text, 'Thought');
+
+      final result = events.whereType<GenerationFinished>().single.result;
+      expect(result.message.parts, [
+        isA<TextOutputPart>().having((part) => part.text, 'text', 'Answer done'),
+        isA<ReasoningSummaryPart>().having((part) => part.text, 'text', 'Thought'),
+        isA<ApplicationToolCallPart>().having((part) => part.id, 'id', 'call-1'),
+        isA<ProviderToolRecordPart>(),
+        isA<OpaqueOutputPart>(),
+      ]);
+      expect((result.message.parts.first as TextOutputPart).citations.single.title, 'Source');
+      expect(result.message.replay!.items.map((item) => item.phase), [
+        'content',
+        'candidate-metadata',
+      ]);
+      expect(
+        result.message.replay!.items.first.data.encode(),
+        contains('thoughtSignature'),
+      );
+      expect(
+        result.message.parts.map((part) => part.toDart()),
+        ordinary.message.parts.map((part) => part.toDart()),
+      );
+      final streamedReplay = result.message.replay!.items;
+      final ordinaryReplay = ordinary.message.replay!.items;
+      expect(streamedReplay.map((item) => item.phase), ordinaryReplay.map((item) => item.phase));
+      for (final (index, item) in streamedReplay.indexed) {
+        expect(item.data.toDart(), ordinaryReplay[index].data.toDart());
+      }
+    });
+
     test('should stream native chunks and common text through normal EOF', () async {
       final requests = <String>[];
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -168,6 +317,146 @@ void main() {
       expect(exit, _failedWith<ProtocolError>());
     });
 
+    test('should decode split UTF-8 and retain unknown SSE event metadata', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        request.response.headers.contentType = ContentType('text', 'event-stream');
+        final record = utf8.encode(
+          'event: future-content\n'
+          'id: native-event-1\n'
+          'data: ${jsonEncode(_streamChunk('Hello 🙂', finishReason: 'STOP'))}\n\n',
+        );
+        final emoji = record.indexOf(0xf0);
+        var offset = 0;
+        for (final boundary in [1, emoji + 1, emoji + 3, record.length - 1]) {
+          request.response.add(record.sublist(offset, boundary));
+          offset = boundary;
+        }
+        request.response.add(record.sublist(offset));
+        await request.response.close();
+      });
+      final provider = _provider(server);
+      addTearDown(provider.close);
+
+      final native = await provider.models
+          .streamGenerateContent(_request())
+          .runCollect()
+          .runFuture();
+      final events = await provider
+          .languageModel('future-model')
+          .stream(GenerationRequest(messages: [UserMessage.text('hello')]))
+          .runCollect()
+          .runFuture();
+
+      expect(native.single.event, 'future-content');
+      expect(native.single.eventId, 'native-event-1');
+      expect(events.whereType<TextPartDelta>().single.text, 'Hello 🙂');
+      final nativeEvent = events.whereType<ProviderEvent>().single;
+      expect(nativeEvent.name, 'future-content');
+      expect(nativeEvent.data.toDart()['id'], 'native-event-1');
+      final replay = events.whereType<GenerationFinished>().single.result.message.replay!;
+      expect(replay.items.last.phase, 'sse-event');
+      expect(replay.items.last.data.toDart()['event'], 'future-content');
+    });
+
+    test('should fail malformed and service-error records with immutable partial output', () async {
+      for (final serviceError in [false, true]) {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        server.listen((request) async {
+          await request.drain<void>();
+          request.response
+            ..headers.contentType = ContentType('text', 'event-stream')
+            ..write('data: ${jsonEncode(_streamChunk('partial'))}\n\n')
+            ..write(
+              serviceError
+                  ? 'data: ${jsonEncode({
+                      'error': {'code': 429, 'message': 'quota', 'status': 'RESOURCE_EXHAUSTED'},
+                    })}\n\n'
+                  : 'data: {malformed\n\n',
+            );
+          await request.response.close();
+        });
+        final provider = _provider(server);
+        final observed = <GenerationEvent>[];
+
+        final exit = await provider
+            .languageModel('future-model')
+            .stream(GenerationRequest(messages: [UserMessage.text('hello')]))
+            .runForEach((event) {
+              observed.add(event);
+              return Effect.succeed(null);
+            })
+            .runFutureExit();
+
+        final error = _errorFrom(exit);
+        expect(error, serviceError ? isA<ProviderError>() : isA<ProtocolError>());
+        final partial = switch (error) {
+          ProviderError(:final partialOutput) => partialOutput,
+          ProtocolError(:final partialOutput) => partialOutput,
+          _ => null,
+        };
+        expect((partial! as AssistantMessage).text, 'partial');
+        expect(observed.whereType<GenerationFinished>(), isEmpty);
+        await provider.close();
+        await server.close(force: true);
+      }
+    });
+
+    test('should enforce event, stream, and assembled-response limits', () async {
+      Future<AiError> runNative({required int maxEventBytes, int? maxStreamBytes}) async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        server.listen((request) async {
+          await request.drain<void>();
+          request.response
+            ..headers.contentType = ContentType('text', 'event-stream')
+            ..write(
+              'data: ${jsonEncode(_streamChunk('a long response', finishReason: 'STOP'))}\n\n',
+            );
+          await request.response.close();
+        });
+        final provider = _provider(server);
+        final exit = await provider.models
+            .streamGenerateContent(
+              _request(),
+              decodedEventCapacity: 1,
+              maxEventBytes: maxEventBytes,
+              maxStreamBytes: maxStreamBytes,
+            )
+            .runCollect()
+            .runFutureExit();
+        await provider.close();
+        await server.close(force: true);
+        return _errorFrom(exit);
+      }
+
+      expect(await runNative(maxEventBytes: 12), isA<ResponseLimitError>());
+      expect(
+        await runNative(maxEventBytes: 1024, maxStreamBytes: 20),
+        isA<ResponseLimitError>(),
+      );
+
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        request.response
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..write('data: ${jsonEncode(_streamChunk('too long', finishReason: 'STOP'))}\n\n');
+        await request.response.close();
+      });
+      final client = ProviderHttpClient(
+        baseUrl: Uri.parse('http://${server.address.address}:${server.port}'),
+      );
+      addTearDown(client.close);
+      final exit = await GoogleGenerateContentResource(client)
+          .streamCommon(_request(), maxAssembledBytes: 4)
+          .runCollect()
+          .runFutureExit();
+      expect(exit, _failedWith<ResponseLimitError>());
+    });
+
     test('should fail HTTP-200 service error records with native details', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
@@ -232,6 +521,13 @@ GoogleProvider _provider(HttpServer server) => GoogleProvider(
   baseUrl: Uri.parse('http://${server.address.address}:${server.port}'),
 );
 
+GoogleGenerateContentRequest _request() => GoogleGenerateContentRequest(
+  model: 'models/future-model',
+  contents: [
+    GoogleContent(role: 'user', parts: [GooglePart.text('hello')]),
+  ],
+);
+
 Map<String, Object?> _streamChunk(String text, {String? finishReason}) => {
   'candidates': [
     {
@@ -246,5 +542,42 @@ Map<String, Object?> _streamChunk(String text, {String? finishReason}) => {
     },
   ],
   'modelVersion': 'future-model-001',
+  'responseId': 'response-stream',
+};
+
+const _completeContentResponse = <String, Object?>{
+  'candidates': [
+    {
+      'content': {
+        'role': 'model',
+        'parts': [
+          {'text': 'Answer done'},
+          {'text': 'Thought', 'thought': true, 'thoughtSignature': 'signature'},
+          {
+            'functionCall': {
+              'id': 'call-1',
+              'name': 'lookup',
+              'args': {'query': 'dart'},
+            },
+          },
+          {
+            'executableCode': {'language': 'PYTHON', 'code': 'print(1)'},
+          },
+          {
+            'inlineData': {'mimeType': 'image/png', 'data': 'AA=='},
+          },
+        ],
+      },
+      'finishReason': 'STOP',
+      'index': 0,
+      'groundingMetadata': {
+        'groundingChunks': [
+          {
+            'web': {'uri': 'https://example.test/source', 'title': 'Source'},
+          },
+        ],
+      },
+    },
+  ],
   'responseId': 'response-stream',
 };

@@ -92,6 +92,7 @@ final class GoogleGenerateContentResource {
       ),
       createProtocol: () => _GoogleCommonGenerateContentProtocol(
         modelId,
+        request: request,
         maxAssembledBytes: maxAssembledBytes,
       ),
       decodedEventCapacity: decodedEventCapacity,
@@ -346,7 +347,11 @@ final class _GoogleNativeGenerateContentProtocol
   Iterable<GoogleGenerateContentChunk> decode(SseEvent event) {
     final raw = _decodeEvent(event);
     final metadata = _metadata;
-    _throwServiceError(raw, metadata);
+    _throwServiceError(
+      raw,
+      metadata,
+      partialOutput: List<GoogleGenerateContentChunk>.unmodifiable(_chunks),
+    );
     final value = GoogleGenerateContentResponse.fromJson(raw);
     _terminal = _terminal || _isTerminal(value);
     final chunk = GoogleGenerateContentChunk(
@@ -358,6 +363,9 @@ final class _GoogleNativeGenerateContentProtocol
         json: raw,
       ),
       metadata: metadata,
+      event: event.event,
+      eventId: event.id,
+      retry: event.retry,
     );
     _chunks.add(chunk);
     return [chunk];
@@ -377,8 +385,12 @@ final class _GoogleNativeGenerateContentProtocol
 final class _GoogleCommonGenerateContentProtocol implements SseProtocol<GenerationEvent> {
   _GoogleCommonGenerateContentProtocol(
     this.modelId, {
+    required GoogleGenerateContentRequest request,
     required int maxAssembledBytes,
-  }) : assembler = GenerationStreamAssembler(
+  }) : callerFunctionNames =
+           request.tools?.expand((tool) => tool.functionNames).toSet() ?? const {},
+       allowsComputerUse = request.tools?.any((tool) => tool is GoogleComputerUseTool) ?? false,
+       assembler = GenerationStreamAssembler(
          providerId: _providerId,
          api: _api,
          modelId: modelId,
@@ -386,13 +398,20 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
        );
 
   final String modelId;
+  final Set<String> callerFunctionNames;
+  final bool allowsComputerUse;
   final GenerationStreamAssembler assembler;
   final List<JsonObject> _rawChunks = [];
-  final Map<int, StringBuffer> _text = {};
-  final Map<int, JsonObject> _opaque = {};
+  final List<ReplayItem> _nativeEventReplay = [];
+  final List<_GoogleStreamPart> _parts = [];
+  final Map<String, Object?> _candidateMetadata = {};
+  JsonObject? _promptFeedback;
+  List<Citation> _latestCitations = const [];
   String? _finish;
   String? _blocked;
   String? _responseId;
+  String? _modelVersion;
+  String? _contentRole;
   late ResponseMetadata _streamMetadata;
 
   // Finish metadata is necessary but normal EOF is also part of success.
@@ -411,9 +430,14 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
   @override
   Iterable<GenerationEvent> decode(SseEvent event) sync* {
     final raw = _decodeEvent(event);
-    _throwServiceError(raw, _streamMetadata);
+    _throwServiceError(raw, _streamMetadata, partialOutput: assembler.partialMessage);
     final value = GoogleGenerateContentResponse.fromJson(raw);
     _rawChunks.add(raw);
+    if (event.event case final name? when name != 'message') {
+      final envelope = _sseEnvelope(event, raw);
+      _nativeEventReplay.add(ReplayItem(phase: 'sse-event', data: envelope));
+      yield assembler.providerEvent(name, envelope);
+    }
     if (value.responseId case final responseId?) {
       if (_responseId != null && _responseId != responseId) {
         throw ProtocolError(
@@ -424,8 +448,24 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
       _responseId = responseId;
       assembler.setResponseId(responseId);
     }
+    if (value.modelVersion case final modelVersion?) {
+      if (_modelVersion != null && _modelVersion != modelVersion) {
+        throw ProtocolError(
+          'Google model version changed during streaming.',
+          partialOutput: assembler.partialMessage,
+        );
+      }
+      _modelVersion = modelVersion;
+    }
     if (value.promptFeedback?.blockReason case final reason? when _isBlocked(reason)) {
+      if (value.candidates.isNotEmpty || _parts.isNotEmpty) {
+        throw ProtocolError(
+          'Google returned prompt blocking after candidate content.',
+          partialOutput: assembler.partialMessage,
+        );
+      }
       _blocked = reason;
+      _promptFeedback = value.promptFeedback!.raw;
     }
     if (value.candidates.length > 1) {
       throw ProtocolError(
@@ -434,22 +474,69 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
       );
     }
     if (value.candidates.isNotEmpty) {
+      if (_blocked != null) {
+        throw ProtocolError(
+          'Google returned candidate content after prompt blocking.',
+          partialOutput: assembler.partialMessage,
+        );
+      }
       final candidate = value.candidates.first;
+      if (candidate.index case final index? when index != 0) {
+        throw ProtocolError(
+          'Google returned candidate $index to a one-candidate common stream.',
+          partialOutput: assembler.partialMessage,
+        );
+      }
       if (_isFinished(candidate.finishReason)) {
+        if (_finish != null && _finish != candidate.finishReason) {
+          throw ProtocolError(
+            'Google candidate finish reason changed during streaming.',
+            partialOutput: assembler.partialMessage,
+          );
+        }
         _finish = candidate.finishReason;
       }
+      final metadata = Map<String, Object?>.of(candidate.raw.toDart())..remove('content');
+      _candidateMetadata.addAll(metadata);
+      if (candidate.content?.role case final role?) {
+        if (_contentRole != null && _contentRole != role) {
+          throw ProtocolError(
+            'Google candidate content role changed during streaming.',
+            partialOutput: assembler.partialMessage,
+          );
+        }
+        _contentRole = role;
+      }
+      final currentCitations = _citations(candidate.extensions);
+      if (currentCitations.isNotEmpty) _latestCitations = currentCitations;
       final nativeParts = candidate.content?.parts ?? const <GooglePart>[];
-      for (final (index, part) in nativeParts.indexed) {
-        if (part.text case final delta?) {
-          final buffer = _text[index];
-          if (buffer == null) {
-            _text[index] = StringBuffer();
-            yield assembler.startPart(index: index, kind: GenerationPartKind.text);
-          }
-          _text[index]!.write(delta);
-          if (delta.isNotEmpty) yield assembler.appendText(index, delta);
+      for (final (chunkIndex, part) in nativeParts.indexed) {
+        final canContinue = chunkIndex == 0 && _parts.isNotEmpty && _parts.last.canContinue(part);
+        late final _GoogleStreamPart streamPart;
+        if (canContinue) {
+          streamPart = _parts.last;
         } else {
-          _opaque[index] = part.toJson();
+          final index = _parts.length;
+          streamPart = _GoogleStreamPart(index, part);
+          _parts.add(streamPart);
+          final kind = _partKind(
+            part,
+            callerFunctionNames: callerFunctionNames,
+            allowsComputerUse: allowsComputerUse,
+          );
+          yield assembler.startPart(
+            index: index,
+            kind: kind,
+            owner: kind == GenerationPartKind.providerTool || kind == GenerationPartKind.opaque
+                ? GenerationPartOwner.provider
+                : GenerationPartOwner.application,
+          );
+        }
+        streamPart.add(part);
+        if (part.text case final delta? when delta.isNotEmpty) {
+          yield assembler.appendText(streamPart.index, delta);
+        } else if (streamPart.acceptsOpaqueDelta) {
+          yield assembler.appendOpaque(streamPart.index, part.toJson());
         }
       }
     }
@@ -466,26 +553,47 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
         partialOutput: assembler.partialMessage,
       );
     }
-    for (final entry in _text.entries) {
-      yield assembler.finishPart(entry.key, TextOutputPart(entry.value.toString()));
-    }
-    for (final entry in _opaque.entries) {
-      yield assembler.startPart(index: entry.key, kind: GenerationPartKind.opaque);
-      yield assembler.finishPart(
-        entry.key,
-        OpaqueOutputPart(
-          providerId: _providerId,
-          api: _api,
-          kind: 'part',
-          data: entry.value,
-        ),
+    var callIndex = 0;
+    var citationsAttached = false;
+    for (final streamPart in _parts) {
+      final part = streamPart.value;
+      final normalized = _normalizePart(
+        part,
+        index: streamPart.index,
+        callIndex: callIndex,
+        citations: citationsAttached ? const [] : _latestCitations,
+        callerFunctionNames: callerFunctionNames,
+        allowsComputerUse: allowsComputerUse,
       );
+      if (part.functionCall != null) callIndex++;
+      final output =
+          normalized ??
+          OpaqueOutputPart(
+            providerId: _providerId,
+            api: _api,
+            kind: 'part-metadata',
+            data: part.toJson(),
+          );
+      if (output is TextOutputPart) citationsAttached = true;
+      yield assembler.finishPart(streamPart.index, output);
     }
     if (_blocked case final reason?) {
-      const index = 0;
+      final index = _parts.length;
       yield assembler.startPart(index: index, kind: GenerationPartKind.refusal);
       yield assembler.finishPart(index, RefusalPart('Google blocked the prompt ($reason).'));
     }
+    final assembledContent = _parts.isEmpty
+        ? null
+        : GoogleContent(
+            role: _contentRole ?? 'model',
+            parts: _parts.map((part) => part.value),
+          );
+    final assembledCandidate = assembledContent == null
+        ? null
+        : JsonObject({
+            ..._candidateMetadata,
+            'content': assembledContent.toJson().toDart(),
+          });
     yield assembler.finish(
       finishReason: _blocked == null ? _finishReason(_finish) : FinishReason.contentFilter,
       nativeFinishReason: _blocked ?? _finish,
@@ -493,11 +601,88 @@ final class _GoogleCommonGenerateContentProtocol implements SseProtocol<Generati
         'chunks': _rawChunks.map((chunk) => chunk.toDart()).toList(),
       }),
       replay: [
-        for (final chunk in _rawChunks) ReplayItem(phase: 'stream-chunk', data: chunk),
+        if (assembledContent != null) ReplayItem(phase: 'content', data: assembledContent.toJson()),
+        if (assembledCandidate != null)
+          ReplayItem(phase: 'candidate-metadata', data: assembledCandidate),
+        if (_promptFeedback case final feedback?)
+          ReplayItem(phase: 'prompt-feedback', data: feedback),
+        ..._nativeEventReplay,
       ],
     );
   }
 }
+
+final class _GoogleStreamPart {
+  _GoogleStreamPart(this.index, GooglePart first)
+    : _kind = _wirePartKind(first),
+      _value = <String, Object?>{};
+
+  final int index;
+  final String _kind;
+  final Map<String, Object?> _value;
+  final StringBuffer _text = StringBuffer();
+
+  bool get acceptsOpaqueDelta => _kind != 'text' && _kind != 'functionCall';
+
+  bool canContinue(GooglePart next) {
+    if (_kind != _wirePartKind(next)) return false;
+    if (_kind == 'text') return value.thought == next.thought;
+    return false;
+  }
+
+  void add(GooglePart part) {
+    final raw = part.toJson().toDart();
+    _value.addAll(raw);
+    if (part.text case final text?) {
+      _text.write(text);
+      _value['text'] = _text.toString();
+    }
+  }
+
+  GooglePart get value => GooglePart.fromJson(JsonObject(_value));
+}
+
+String _wirePartKind(GooglePart part) {
+  if (part.text != null) return 'text';
+  if (part.functionCall != null) return 'functionCall';
+  if (part.functionResponse != null) return 'functionResponse';
+  if (part.executableCode != null) return 'executableCode';
+  if (part.codeExecutionResult != null) return 'codeExecutionResult';
+  if (part.toolCall != null) return 'toolCall';
+  if (part.toolResponse != null) return 'toolResponse';
+  if (part.inlineData != null) return 'inlineData';
+  if (part.fileData != null) return 'fileData';
+  return 'unknown';
+}
+
+GenerationPartKind _partKind(
+  GooglePart part, {
+  required Set<String> callerFunctionNames,
+  required bool allowsComputerUse,
+}) {
+  if (part.text != null) {
+    return part.thought == true ? GenerationPartKind.reasoning : GenerationPartKind.text;
+  }
+  if (part.functionCall case final call?) {
+    return callerFunctionNames.contains(call.name) || allowsComputerUse
+        ? GenerationPartKind.applicationToolCall
+        : GenerationPartKind.opaque;
+  }
+  if (part.executableCode != null ||
+      part.codeExecutionResult != null ||
+      part.toolCall != null ||
+      part.toolResponse != null) {
+    return GenerationPartKind.providerTool;
+  }
+  return GenerationPartKind.opaque;
+}
+
+JsonObject _sseEnvelope(SseEvent event, JsonObject raw) => JsonObject({
+  'event': ?event.event,
+  'id': ?event.id,
+  if (event.retry case final retry?) 'retryMilliseconds': retry.inMilliseconds,
+  'data': raw.toDart(),
+});
 
 JsonObject _decodeEvent(SseEvent event) {
   try {
@@ -507,7 +692,11 @@ JsonObject _decodeEvent(SseEvent event) {
   }
 }
 
-void _throwServiceError(JsonObject raw, ResponseMetadata metadata) {
+void _throwServiceError(
+  JsonObject raw,
+  ResponseMetadata metadata, {
+  Object? partialOutput,
+}) {
   final value = raw.toDart();
   final error = value['error'];
   if (error is! Map<String, Object?>) return;
@@ -523,6 +712,7 @@ void _throwServiceError(JsonObject raw, ResponseMetadata metadata) {
     requestId: metadata.requestId,
     retryAfter: _retryDelay(retry),
     rawRetryAfter: retry,
+    partialOutput: partialOutput,
   );
 }
 

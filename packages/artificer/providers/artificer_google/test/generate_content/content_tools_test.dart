@@ -270,6 +270,73 @@ void main() {
       });
     });
 
+    test('does not confuse a real Google ID with a synthesized local ID', () async {
+      final bodies = <Map<String, Object?>>[];
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        bodies.add(jsonDecode(await utf8.decoder.bind(request).join())! as Map<String, Object?>);
+        _json(request, {
+          'candidates': [
+            {
+              'content': {
+                'role': 'model',
+                'parts': [
+                  {
+                    'functionCall': {
+                      'id': 'google-call-0',
+                      'name': 'lookup',
+                      'args': {'query': 'answer'},
+                    },
+                  },
+                ],
+              },
+              'finishReason': 'FUNCTION_CALL',
+            },
+          ],
+        });
+        await request.response.close();
+      });
+      final provider = _provider(server);
+      addTearDown(provider.close);
+      final model = provider.languageModel('gemini-test');
+      final tool = FunctionTool(
+        name: 'lookup',
+        inputSchema: JsonObject({'type': 'object'}),
+      );
+      final first = await model
+          .generate(
+            GenerationRequest(
+              messages: [UserMessage.text('Call the tool.')],
+              tools: [tool],
+            ),
+          )
+          .runFuture();
+
+      await model
+          .generate(
+            GenerationRequest(
+              messages: [
+                UserMessage.text('Call the tool.'),
+                first.message,
+                ToolMessage([
+                  JsonToolResult(
+                    callId: 'google-call-0',
+                    value: JsonValue.fromDart({'value': 42}),
+                  ),
+                ]),
+              ],
+              tools: [tool],
+            ),
+          )
+          .runFuture();
+
+      final contents = bodies.last['contents']! as List;
+      final response = ((contents.last as Map)['parts']! as List).single as Map;
+      final functionResponse = response['functionResponse']! as Map;
+      expect(functionResponse['id'], 'google-call-0');
+    });
+
     test('rejects unsupported media and schema keywords before I/O', () async {
       var requests = 0;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
