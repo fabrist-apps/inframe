@@ -6,6 +6,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show ScopeAccess;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:context/context.dart';
 
 /// Opens cursors for count-based and clock-based Flow batching.
 abstract final class BatchingFlowSource {
@@ -22,13 +23,9 @@ abstract final class BatchingFlowSource {
     required int maxSize,
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
-    final mailbox = FlowMailbox<_TimedValue<A>, E>(
-      capacity,
-      overflow,
-      onOverflow == null ? null : (event, _) => onOverflow(event),
-    );
+    final mailbox = FlowMailbox<_TimedValue<A>, E>(capacity, overflow, onOverflow);
     if (!mailbox.registerClose(execution)) {
       mailbox.close();
       return const Failed(Interrupted(ScopeClosed()));

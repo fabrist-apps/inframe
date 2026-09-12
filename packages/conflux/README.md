@@ -309,6 +309,10 @@ and `toStream` still select the root execution context.
 Concurrent flattening mappers and `withLatestFrom` combiners receive the
 operator's execution `Context`. Delayed overflow callbacks for merge and
 combination buffers retain that same owning region.
+Shared Flow work and overflow remain in the first subscriber's connection
+`Context`; live and replayed values are observed in each subscriber's own
+region. Timed buffer, debounce, and throttle overflow callbacks retain their
+operator's execution `Context` across timer activity.
 
 `Flow.fromQueue(queue)` creates competing consumers: one consumer receives each
 accepted item. `Flow.fromPubSub(pubsub)` acquires an independent subscription

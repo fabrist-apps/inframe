@@ -402,7 +402,7 @@ final class Flow<A, E> {
     int capacity = 16,
     int replay = 0,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     validateFlowBuffer(capacity, overflow, onOverflow);
     if (replay < 0) {
@@ -440,7 +440,7 @@ final class Flow<A, E> {
     required int maxSize,
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     _validateFlowDuration(duration);
     if (maxSize <= 0) {
@@ -468,7 +468,7 @@ final class Flow<A, E> {
     Duration duration, {
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     _validateFlowDuration(duration);
     validateFlowBuffer(capacity, overflow, onOverflow);
@@ -492,7 +492,7 @@ final class Flow<A, E> {
     Duration duration, {
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     _validateFlowDuration(duration);
     validateFlowBuffer(capacity, overflow, onOverflow);

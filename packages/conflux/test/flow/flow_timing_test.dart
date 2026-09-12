@@ -2,12 +2,81 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import '../support/fake_clock.dart';
 
 void main() {
   group('Flow timing', () {
+    test('should retain timed operator Context for delayed overflow callbacks', () async {
+      final request = ContextKey<String>('request');
+      final owner = Context().withBinding(request.bind('owner'));
+      final subscriber = Context().withBinding(request.bind('subscriber'));
+
+      for (final operation in ['bufferTime', 'debounce', 'throttle']) {
+        final listening = Completer<void>();
+        final blocked = Completer<void>();
+        final release = Completer<void>();
+        final overflowed = Completer<String>();
+        final controller = StreamController<int>(
+          sync: true,
+          onListen: listening.complete,
+        );
+        final source = Flow.fromStream<int, String>(
+          (_) => controller.stream,
+          onError: (error, stackTrace, _) => '$error',
+        );
+        String onOverflow(FlowBufferOverflow _, Context context) {
+          final value = context.require(request);
+          if (!overflowed.isCompleted) overflowed.complete(value);
+          return 'overflow';
+        }
+
+        final timed = switch (operation) {
+          'bufferTime' => source.bufferTime(
+            Duration.zero,
+            maxSize: 1,
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: onOverflow,
+          ),
+          'debounce' => source.debounce(
+            Duration.zero,
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: onOverflow,
+          ),
+          _ => source.throttle(
+            Duration.zero,
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: onOverflow,
+          ),
+        };
+        final running = timed.withContext(owner).subscribe((_, _) {
+          return Effect.tryFuture<void, String>(
+            (_) {
+              if (!blocked.isCompleted) blocked.complete();
+              return release.future;
+            },
+            onError: (error, stackTrace, _) => '$error',
+          );
+        }, context: subscriber);
+
+        await listening.future;
+        controller.add(1);
+        await blocked.future;
+        controller.add(2);
+        await _flushMicrotasks();
+        controller.add(3);
+        expect(await overflowed.future, 'owner', reason: operation);
+        release.complete();
+        await controller.close();
+        expect(await running.completion, isA<Failed<void, String>>(), reason: operation);
+      }
+    });
+
     test('should debounce to the latest value after a monotonic quiet interval', () async {
       final clock = FakeClock();
       final runtime = Runtime(clock: clock);
@@ -194,7 +263,7 @@ void main() {
                 Duration.zero,
                 capacity: 1,
                 overflow: FlowOverflowPolicy.fail,
-                onOverflow: (_) => 'overflow',
+                onOverflow: (_, _) => 'overflow',
               )
               .subscribe((_, _) {
                 return Effect.tryFuture<void, String>(

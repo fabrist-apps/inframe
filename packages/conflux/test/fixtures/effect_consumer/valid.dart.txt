@@ -60,6 +60,28 @@ Future<void> main() async {
     (primary, latest, context) => '$primary:$latest:$context',
   );
   await Runtime().run(combined.runDrain());
+  final timed = flow
+      .share(
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (overflow, context) => _SpecificError(),
+      )
+      .bufferTime(
+        Duration.zero,
+        maxSize: 2,
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (overflow, context) => _SpecificError(),
+      )
+      .debounce(
+        Duration.zero,
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (overflow, context) => _SpecificError(),
+      )
+      .throttle(
+        Duration.zero,
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (overflow, context) => _SpecificError(),
+      );
+  await Runtime().run(timed.runDrain());
 
   final cron = (Cron.fromFields(
     location: tz.UTC,

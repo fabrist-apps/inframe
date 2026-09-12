@@ -2,10 +2,109 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('Flow sharing', () {
+    test('should keep connection work owned while subscribers observe locally', () async {
+      final request = ContextKey<String>('request');
+      final owner = Context().withBinding(request.bind('owner'));
+      final later = Context().withBinding(request.bind('later'));
+      final listening = Completer<void>();
+      final firstValue = Completer<void>();
+      final replayed = Completer<void>();
+      final controller = StreamController<int>(sync: true, onListen: listening.complete);
+      addTearDown(controller.close);
+      final upstream = <String>[];
+      final firstSeen = <String>[];
+      final laterSeen = <String>[];
+      final shared =
+          Flow.fromStream<int, String>(
+                (context) {
+                  upstream.add('source:${context.require(request)}');
+                  return controller.stream;
+                },
+                onError: (error, stackTrace, _) => '$error',
+              )
+              .map((value, context) {
+                upstream.add('$value:${context.require(request)}');
+                return value;
+              })
+              .share(replay: 1);
+      final first = shared.subscribe((value, context) {
+        firstSeen.add('$value:${context.require(request)}');
+        if (!firstValue.isCompleted) firstValue.complete();
+        return Effect.succeed(null);
+      }, context: owner);
+
+      await listening.future;
+      controller.add(1);
+      await firstValue.future;
+      final second = shared.subscribe((value, context) {
+        laterSeen.add('$value:${context.require(request)}');
+        if (!replayed.isCompleted) replayed.complete();
+        return Effect.succeed(null);
+      }, context: later);
+      await replayed.future;
+      controller.add(2);
+      await controller.close();
+
+      expect(await first.completion, isA<Succeeded<void, String>>());
+      expect(await second.completion, isA<Succeeded<void, String>>());
+      expect(upstream, ['source:owner', '1:owner', '2:owner']);
+      expect(firstSeen, ['1:owner', '2:owner']);
+      expect(laterSeen, ['1:later', '2:later']);
+    });
+
+    test('should use the connection Context for a later subscriber overflow', () async {
+      final request = ContextKey<String>('request');
+      final owner = Context().withBinding(request.bind('owner'));
+      final later = Context().withBinding(request.bind('later'));
+      final listening = Completer<void>();
+      final blocked = Completer<void>();
+      final release = Completer<void>();
+      final overflowed = Completer<String>();
+      final controller = StreamController<int>(sync: true, onListen: listening.complete);
+      addTearDown(controller.close);
+      final shared =
+          Flow.fromStream<int, String>(
+            (_) => controller.stream,
+            onError: (error, stackTrace, _) => '$error',
+          ).share(
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: (_, context) {
+              final value = context.require(request);
+              if (!overflowed.isCompleted) overflowed.complete(value);
+              return 'overflow';
+            },
+          );
+      final first = shared.subscribe((_, _) => Effect.succeed(null), context: owner);
+      await listening.future;
+      final second = shared.subscribe((_, _) {
+        return Effect.tryFuture<void, String>(
+          (_) {
+            if (!blocked.isCompleted) blocked.complete();
+            return release.future;
+          },
+          onError: (error, stackTrace, _) => '$error',
+        );
+      }, context: later);
+
+      controller.add(1);
+      await blocked.future;
+      controller
+        ..add(2)
+        ..add(3);
+      expect(await overflowed.future, 'owner');
+      release.complete();
+      await controller.close();
+
+      expect(await first.completion, isA<Succeeded<void, String>>());
+      expect(await second.completion, isA<Failed<void, String>>());
+    });
+
     test(
       'should share one connection and retain replay until the last subscriber leaves',
       () async {

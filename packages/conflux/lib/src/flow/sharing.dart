@@ -9,6 +9,7 @@ import 'package:conflux/src/effect/execution.dart' show ScopeAccess;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:context/context.dart';
 
 /// Opens cursors against one lazily connected shared Flow state.
 abstract final class SharedFlowSource {
@@ -18,7 +19,7 @@ abstract final class SharedFlowSource {
     required int capacity,
     required int replay,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => _SharedFlowState<A, E>(
     upstream,
     capacity: capacity,
@@ -48,7 +49,7 @@ final class _SharedFlowState<A, E> {
   /// Per-subscriber behavior when [capacity] live values are pending.
   final FlowOverflowPolicy overflow;
 
-  final E Function(FlowBufferOverflow overflow)? _onOverflow;
+  final E Function(FlowBufferOverflow overflow, Context context)? _onOverflow;
   _SharedConnection<A, E>? _connection;
   Future<Cause<Never>?>? _cleanup;
   var _nextConnectionId = 0;
@@ -71,11 +72,7 @@ final class _SharedFlowState<A, E> {
     }
 
     final subscriber = _SharedSubscriber<A, E>(
-      FlowMailbox(
-        capacity,
-        overflow,
-        _onOverflow == null ? null : (event, _) => _onOverflow(event),
-      ),
+      FlowMailbox(capacity, overflow, _onOverflow),
     );
     var connection = _connection;
     var shouldStart = false;

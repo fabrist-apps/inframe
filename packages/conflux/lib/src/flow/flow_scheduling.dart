@@ -17,7 +17,7 @@ abstract final class FlowSchedulingSource {
     required Duration duration,
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => _open(
     upstream,
     (input, output) => _debounce(input, output, duration),
@@ -32,7 +32,7 @@ abstract final class FlowSchedulingSource {
     required Duration duration,
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => _open(
     upstream,
     (input, output) => _throttle(input, output, duration),
@@ -50,12 +50,10 @@ abstract final class FlowSchedulingSource {
     process, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
-    E mapOverflow(FlowBufferOverflow event, Context _) => onOverflow!(event);
-    final callback = onOverflow == null ? null : mapOverflow;
-    final input = FlowMailbox<_Stamped<A>, E>(capacity, overflow, callback);
-    final output = FlowMailbox<A, E>(capacity, overflow, callback);
+    final input = FlowMailbox<_Stamped<A>, E>(capacity, overflow, onOverflow);
+    final output = FlowMailbox<A, E>(capacity, overflow, onOverflow);
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
       Effect.sync((_) {
