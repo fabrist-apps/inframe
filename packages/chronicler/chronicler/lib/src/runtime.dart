@@ -37,7 +37,10 @@ final class Chronicler {
   final ChroniclerRuntime _runtime;
 
   /// A borrowed recorder suitable for binding to a request context.
-  ChroniclerRecorder get recorder => ChroniclerRecorder._(_runtime);
+  ChroniclerRecorder get recorder => ChroniclerRecorder._(
+    _runtime,
+    const _RecorderAttribution(),
+  );
 
   /// An immutable snapshot of exact runtime diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => _runtime.diagnosticCounts;
@@ -66,9 +69,25 @@ final class Chronicler {
 
 /// Borrowed immutable attribution view over one Chronicler runtime.
 final class ChroniclerRecorder {
-  const ChroniclerRecorder._(this._runtime);
+  const ChroniclerRecorder._(this._runtime, this._attribution);
 
   final ChroniclerRuntime _runtime;
+  final _RecorderAttribution _attribution;
+
+  /// Returns a recorder whose analytics identity is exactly the supplied IDs.
+  ///
+  /// Omitted IDs are cleared. Runtime configuration and operation correlation
+  /// remain shared with this recorder.
+  ChroniclerRecorder withIdentity({
+    String? userId,
+    String? anonymousId,
+    String? sessionId,
+  }) => _runtime._withIdentity(
+    this,
+    userId: userId,
+    anonymousId: anonymousId,
+    sessionId: sessionId,
+  );
 
   /// Records a structured log without waiting for transport work.
   void recordLog(
@@ -77,13 +96,64 @@ final class ChroniclerRecorder {
     Object? error,
     StackTrace? stackTrace,
     Map<String, Object?> attributes = const {},
-  }) => _runtime.recordLog(
+  }) => _runtime._recordLog(
+    _attribution,
     severity,
     message,
     error: error,
     stackTrace: stackTrace,
     attributes: attributes,
   );
+
+  /// Records an ordinary named product event without waiting for transport.
+  void recordEvent(
+    String name, {
+    Map<String, Object?> properties = const {},
+  }) => _runtime._recordEvent(_attribution, name, properties: properties);
+
+  /// Records an explicit anonymous-to-user association.
+  void identify({required String anonymousId, required String userId}) =>
+      _runtime._recordIdentityLink(
+        _attribution,
+        anonymousId: anonymousId,
+        userId: userId,
+      );
+
+  /// Records explicit user properties to set for [userId].
+  void setUserProperties({
+    required String userId,
+    required Map<String, Object?> properties,
+  }) => _runtime._recordUserPropertiesSet(
+    _attribution,
+    userId: userId,
+    properties: properties,
+  );
+
+  /// Records explicit user-property removals for [userId].
+  void unsetUserProperties({
+    required String userId,
+    required List<String> keys,
+  }) => _runtime._recordUserPropertiesUnset(
+    _attribution,
+    userId: userId,
+    keys: keys,
+  );
+}
+
+final class _RecorderAttribution {
+  const _RecorderAttribution({
+    this.userId,
+    this.anonymousId,
+    this.sessionId,
+    this.traceId,
+    this.spanId,
+  });
+
+  final String? userId;
+  final String? anonymousId;
+  final String? sessionId;
+  final String? traceId;
+  final String? spanId;
 }
 
 /// Internal owner of queue, delivery, and lifecycle state.
@@ -182,6 +252,35 @@ final class ChroniclerRuntime {
 
   /// An immutable snapshot of exact diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
+
+  ChroniclerRecorder _withIdentity(
+    ChroniclerRecorder recorder, {
+    String? userId,
+    String? anonymousId,
+    String? sessionId,
+  }) {
+    try {
+      for (final MapEntry(:key, :value) in {
+        'userId': userId,
+        'anonymousId': anonymousId,
+        'sessionId': sessionId,
+      }.entries) {
+        if (value != null) _validateRequiredId(value, key);
+      }
+    } on RecordValidationException catch (error) {
+      throw ChroniclerConfigurationException('identity', error.reason);
+    }
+    return ChroniclerRecorder._(
+      this,
+      _RecorderAttribution(
+        userId: userId,
+        anonymousId: anonymousId,
+        sessionId: sessionId,
+        traceId: recorder._attribution.traceId,
+        spanId: recorder._attribution.spanId,
+      ),
+    );
+  }
 
   /// Flushes the current record snapshot within [timeout].
   Future<DeliveryReport> flush(Duration timeout) {
@@ -403,23 +502,15 @@ final class ChroniclerRuntime {
     }
   }
 
-  /// Records a structured log through the runtime capture policy.
-  void recordLog(
+  void _recordLog(
+    _RecorderAttribution attribution,
     LogSeverity severity,
     String message, {
     Object? error,
     StackTrace? stackTrace,
     Map<String, Object?> attributes = const {},
   }) {
-    if (_state != ChroniclerRuntimeState.running) {
-      diagnostics.record(DiagnosticReason.runtimeClosed);
-      return;
-    }
-    if (diagnostics.insideCallback || _insideHook) {
-      diagnostics.record(DiagnosticReason.reentrantRecording);
-      return;
-    }
-    if (!_allowsCapture(ChroniclerSignal.logs, options.sampling.logs)) return;
+    if (!_canRecord(ChroniclerSignal.logs, options.sampling.logs)) return;
     try {
       validator.validateString(message, options.limits.maxStringBytes, 'message');
       final snapshot = validator.snapshotAttributes(attributes);
@@ -435,14 +526,7 @@ final class ChroniclerRuntime {
         );
       }
       final record = LogRecord(
-        envelope: RecordEnvelope(
-          eventId: ChronoID.generate(prefix: 'evt'),
-          appId: appId,
-          release: release,
-          source: source,
-          timestamp: DateTime.now().toUtc(),
-          buildId: buildId,
-        ),
+        envelope: _envelope(attribution),
         payload: LogPayload(
           severity: severity,
           message: message,
@@ -458,6 +542,130 @@ final class ChroniclerRuntime {
       diagnostics.record(DiagnosticReason.invalidRecord);
     }
   }
+
+  void _recordEvent(
+    _RecorderAttribution attribution,
+    String name, {
+    Map<String, Object?> properties = const {},
+  }) {
+    if (!_canRecord(ChroniclerSignal.events, options.sampling.events)) return;
+    try {
+      validator.validateString(name, options.limits.maxLabelBytes, 'event name');
+      if (name.isEmpty) {
+        throw const RecordValidationException('event name must be nonempty');
+      }
+      final snapshot = validator.snapshotAttributes(properties);
+      _finalizeAndEnqueue(
+        ProductEventRecord(
+          envelope: _envelope(attribution),
+          payload: ProductEventPayload(name: name, properties: snapshot),
+        ),
+      );
+    } on RecordValidationException {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    }
+  }
+
+  void _recordIdentityLink(
+    _RecorderAttribution attribution, {
+    required String anonymousId,
+    required String userId,
+  }) {
+    _recordEventControl(() {
+      _validateRequiredId(anonymousId, 'anonymousId');
+      _validateRequiredId(userId, 'userId');
+      return IdentityLinkRecord(
+        envelope: _envelope(attribution),
+        payload: IdentityLinkPayload(anonymousId: anonymousId, userId: userId),
+      );
+    });
+  }
+
+  void _recordUserPropertiesSet(
+    _RecorderAttribution attribution, {
+    required String userId,
+    required Map<String, Object?> properties,
+  }) {
+    if (properties.isEmpty) return;
+    _recordEventControl(() {
+      _validateRequiredId(userId, 'userId');
+      final snapshot = validator.snapshotAttributes(properties);
+      return UserPropertiesSetRecord(
+        envelope: _envelope(attribution),
+        payload: UserPropertiesSetPayload(userId: userId, properties: snapshot),
+      );
+    });
+  }
+
+  void _recordUserPropertiesUnset(
+    _RecorderAttribution attribution, {
+    required String userId,
+    required List<String> keys,
+  }) {
+    if (keys.isEmpty) return;
+    _recordEventControl(() {
+      _validateRequiredId(userId, 'userId');
+      final distinctKeys = <String>{};
+      for (final key in keys) {
+        validator.validateString(key, options.limits.maxKeyBytes, 'property key');
+        if (key.isEmpty) {
+          throw const RecordValidationException('property key must be nonempty');
+        }
+        distinctKeys.add(key);
+      }
+      if (distinctKeys.length > options.limits.maxListItems) {
+        throw const RecordValidationException('property key list item limit exceeded');
+      }
+      return UserPropertiesUnsetRecord(
+        envelope: _envelope(attribution),
+        payload: UserPropertiesUnsetPayload(userId: userId, keys: distinctKeys),
+      );
+    });
+  }
+
+  void _recordEventControl(ChroniclerRecord Function() createRecord) {
+    if (!_canRecord(ChroniclerSignal.events, null)) return;
+    try {
+      _finalizeAndEnqueue(createRecord());
+    } on RecordValidationException {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    }
+  }
+
+  void _validateRequiredId(String value, String name) {
+    validator.validateString(value, options.limits.maxIdBytes, name);
+    if (value.isEmpty) throw RecordValidationException('$name must be nonempty');
+  }
+
+  bool _canRecord(ChroniclerSignal signal, double? sampleRate) {
+    if (_state != ChroniclerRuntimeState.running) {
+      diagnostics.record(DiagnosticReason.runtimeClosed);
+      return false;
+    }
+    if (diagnostics.insideCallback || _insideHook) {
+      diagnostics.record(DiagnosticReason.reentrantRecording);
+      return false;
+    }
+    return _allowsCapture(signal, sampleRate);
+  }
+
+  RecordEnvelope _envelope(_RecorderAttribution attribution) => RecordEnvelope(
+    eventId: ChronoID.generate(prefix: 'evt'),
+    appId: appId,
+    release: release,
+    source: source,
+    timestamp: DateTime.now().toUtc(),
+    buildId: buildId,
+    userId: attribution.userId,
+    anonymousId: attribution.anonymousId,
+    sessionId: attribution.sessionId,
+    traceId: attribution.traceId,
+    spanId: attribution.spanId,
+  );
 
   bool _allowsCapture(ChroniclerSignal signal, double? sampleRate) {
     if (!_enabledSignals.contains(signal)) {
@@ -1051,6 +1259,22 @@ final class ChroniclerCaptureFixture {
   /// Submits a finalized sibling-signal [record] through capture policy.
   static void capture(Chronicler chronicler, ChroniclerRecord record) =>
       chronicler._runtime._captureFixture(record);
+
+  /// Returns a recorder with valid operation correlation for identity tests.
+  static ChroniclerRecorder withCorrelation(
+    ChroniclerRecorder recorder, {
+    required String traceId,
+    required String spanId,
+  }) => ChroniclerRecorder._(
+    recorder._runtime,
+    _RecorderAttribution(
+      userId: recorder._attribution.userId,
+      anonymousId: recorder._attribution.anonymousId,
+      sessionId: recorder._attribution.sessionId,
+      traceId: traceId,
+      spanId: spanId,
+    ),
+  );
 }
 
 /// Internal fixture bridge for deterministic delivery tests.

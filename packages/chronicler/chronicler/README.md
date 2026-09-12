@@ -16,6 +16,14 @@ final chronicler = Chronicler(
 final context = Context().withChronicler(chronicler.recorder);
 
 context.logs.info('Order created', attributes: {'orderId': 'order_123'});
+final request = context.withIdentity(
+  userId: authenticatedUser.id,
+  sessionId: clientSessionId,
+);
+request.events.track(
+  'purchase_completed',
+  properties: {'orderId': 'order_123', 'amountMinor': 1200},
+);
 final report = await chronicler.flush();
 await chronicler.close();
 ```
@@ -24,6 +32,44 @@ The application creates the exporter and gives Chronicler exclusive ownership of
 synchronous: Chronicler validates and snapshots the payload, then schedules transport work. It never
 retains live request objects. The queue is bounded by record count and canonical encoded bytes, and
 in-flight records continue to consume that capacity.
+
+`withIdentity` derives a new Context for analytics attribution. It replaces the complete identity,
+so omitted user, anonymous, and session IDs are cleared. The original Context and sibling request
+contexts remain unchanged. Pass the returned Context downstream. Chronicler accepts caller-supplied
+IDs without generating, persisting, expiring, or authenticating them; authentication remains an
+application concern. Calling `withIdentity()` clears attribution on the derived Context and emits no
+record.
+
+Identity assignment and anonymous-to-user linking are separate operations. Client integration can
+emit a link explicitly, then pass a newly derived Context for subsequent records:
+
+```dart
+context.events.identify(anonymousId: anonymousId, userId: userId);
+final identified = context.withIdentity(userId: userId, sessionId: sessionId);
+```
+
+The link is scoped to the configured App and travels through normal bounded delivery. It expresses
+association intent for downstream processing; it does not mutate any Context, merge accounts,
+authenticate the supplied IDs, or confirm that stored history has been updated.
+
+User-property updates also name their target explicitly:
+
+```dart
+context.events.setUserProperties(
+  userId: userId,
+  properties: {'plan': 'pro', 'companySize': 12},
+);
+context.events.unsetUserProperties(
+  userId: userId,
+  keys: ['companySize'],
+);
+```
+
+A set operation replaces only the supplied keys when processed. Omitted keys remain untouched, and
+null is a stored value rather than deletion intent. An unset operation explicitly removes its keys,
+collapsing duplicates in first-appearance order. Sensitive names such as `password` remain intact in
+the removal list. Empty updates are no-ops. Updates use bounded event delivery but bypass random
+sampling; enqueueing does not confirm a stored profile change.
 
 The defaults retain up to 5,000 records or 8 MiB, export batches of up to 100 records or 512 KiB
 within five seconds, run one export at a time, and make five total attempts. An attempt times out
