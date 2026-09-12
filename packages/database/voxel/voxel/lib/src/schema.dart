@@ -197,8 +197,7 @@ void _validateIdentifier(String identifier, String label) {
 }
 
 void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
-  final physicalNames = <String>{};
-  final indexNames = <String>{};
+  final schemaObjectNames = <String>{};
   final registered = <Type, VoxelTableSchema<Object?, Object?>>{};
   for (final table in tables) {
     final definition = table.definition;
@@ -210,9 +209,7 @@ void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
     if (_reservedVoxelTables.contains(_identifierKey(table.tableName))) {
       throw ArgumentError('Voxel table name ${table.tableName} is reserved for migration state.');
     }
-    if (!physicalNames.add(
-      '${_identifierKey(table.schemaName)}.${_identifierKey(table.tableName)}',
-    )) {
+    if (!schemaObjectNames.add(_schemaObjectKey(table.schemaName, table.tableName))) {
       throw ArgumentError(
         'Duplicate Voxel table registration: ${table.schemaName}.${table.tableName}.',
       );
@@ -222,10 +219,12 @@ void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
     }
     registered[table.definitionType] = table;
     for (final index in table.indexes) {
-      final key = '${_identifierKey(table.schemaName)}.${_identifierKey(index.name)}';
-      if (!indexNames.add(key)) {
+      if (_reservedVoxelTables.contains(_identifierKey(index.name))) {
+        throw ArgumentError('Voxel index name ${index.name} is reserved for migration state.');
+      }
+      if (!schemaObjectNames.add(_schemaObjectKey(table.schemaName, index.name))) {
         throw ArgumentError(
-          'Duplicate Voxel index registration: ${table.schemaName}.${index.name}.',
+          'Duplicate Voxel schema object: ${table.schemaName}.${index.name}.',
         );
       }
     }
@@ -365,6 +364,9 @@ void _validateVoxelSchemas(List<VoxelTableSchema<Object?, Object?>> tables) {
     }
   }
 }
+
+String _schemaObjectKey(String schema, String name) =>
+    '${_identifierKey(schema)}.${_identifierKey(name)}';
 
 /// Base class used by annotated table declarations.
 abstract class VoxelTableDefinition<Self> {

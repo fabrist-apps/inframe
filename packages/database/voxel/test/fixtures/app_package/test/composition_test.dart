@@ -113,6 +113,16 @@ void main() {
       ),
       throwsArgumentError,
     );
+    expect(
+      () => VoxelDatabaseSchema(
+        name: 'table_index_collision',
+        tables: [
+          _schema(_FirstDefinition(), tableName: 'posts'),
+          _schema(_SecondDefinition(), tableName: 'users', indexName: 'POSTS'),
+        ],
+      ),
+      throwsArgumentError,
+    );
   });
 }
 
