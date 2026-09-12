@@ -12,6 +12,18 @@ import 'package:chronicler/src/trace_propagation.dart';
 import 'package:chronicler/src/transport.dart';
 import 'package:chrono_id/chrono_id.dart';
 
+/// One caller-supplied cause to snapshot during error capture.
+final class ChroniclerCause {
+  /// Creates an explicit cause from an arbitrary Dart [error] and optional stack.
+  const ChroniclerCause(this.error, {this.stackTrace});
+
+  /// Error value converted during capture.
+  final Object error;
+
+  /// Optional application stack converted during capture.
+  final StackTrace? stackTrace;
+}
+
 /// Configured owner of capture and export resources.
 final class Chronicler {
   /// Creates a runtime and transfers ownership of [exporter] to it.
@@ -200,12 +212,14 @@ final class ChroniclerRecorder {
     Object error, {
     StackTrace? stackTrace,
     bool handled = true,
+    List<ChroniclerCause> causes = const [],
     Map<String, Object?> attributes = const {},
   }) => _runtime._recordError(
     _attribution,
     error,
     stackTrace: stackTrace,
     handled: handled,
+    causes: causes,
     attributes: attributes,
   );
 
@@ -958,15 +972,22 @@ final class ChroniclerRuntime {
     Object error, {
     StackTrace? stackTrace,
     bool handled = true,
+    List<ChroniclerCause> causes = const [],
     Map<String, Object?> attributes = const {},
   }) {
     if (!_canRecord(ChroniclerSignal.errors, null)) return;
     try {
+      if (causes.length > options.limits.maxCauses) {
+        throw const RecordValidationException('too many causes');
+      }
       final record = ErrorRecord(
         envelope: _envelope(attribution),
         payload: ErrorPayload(
           error: _convertError(error, stackTrace),
           handled: handled,
+          causes: causes.map(
+            (cause) => _convertError(cause.error, cause.stackTrace),
+          ),
           attributes: validator.snapshotAttributes(attributes),
         ),
       );

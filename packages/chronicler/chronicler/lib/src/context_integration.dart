@@ -183,11 +183,13 @@ final class ChroniclerErrors {
     Object error, {
     StackTrace? stackTrace,
     bool handled = true,
+    List<ChroniclerCause> causes = const [],
     Map<String, Object?> attributes = const {},
   }) => _recorder.recordError(
     error,
     stackTrace: stackTrace,
     handled: handled,
+    causes: causes,
     attributes: attributes,
   );
 }

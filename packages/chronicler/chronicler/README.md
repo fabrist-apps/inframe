@@ -97,6 +97,9 @@ try {
   context.errors.capture(
     error,
     stackTrace: stackTrace,
+    causes: [
+      ChroniclerCause(databaseError, stackTrace: databaseStackTrace),
+    ],
     attributes: {'feature': 'checkout'},
   );
 }
@@ -113,6 +116,12 @@ returning. It does not inspect object fields, discover causes, generate a missin
 original error object. The raw stack text is preserved with configured release, optional build ID,
 identity, session, and trace correlation. Error occurrences are distinct from error-level logs and
 failed spans; neither creates an occurrence automatically.
+
+Supply causes explicitly from the immediate cause to the deepest cause. Chronicler preserves their
+order and repetitions, snapshots their converted text during capture, and does not walk application
+error objects for an implicit chain. By default, root and cause messages are limited to 8 KiB of
+UTF-8, stacks to 16 KiB, and a chain to four causes after the root. Exceeding a field, chain, or
+complete-record limit drops the whole occurrence without truncation.
 
 Errors bypass random sampling but still obey collection, validation, redaction, queue, and delivery
 limits. A capture call creates a new occurrence ID, while retries preserve its ID, timestamp, and
