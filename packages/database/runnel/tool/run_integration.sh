@@ -42,6 +42,7 @@ openssl x509 -req \
   -extfile "$RUNNEL_TLS_EXTENSIONS" \
   -out "$RUNNEL_TEST_DIR/server.crt" >/dev/null 2>&1
 chmod 644 "$RUNNEL_TEST_DIR"/*.key "$RUNNEL_TEST_DIR"/*.crt
+chmod 755 "$RUNNEL_TEST_DIR"
 
 docker run --detach --rm --name "$RUNNEL_REDIS_CONTAINER" \
   --publish 127.0.0.1:16379:6379 \
