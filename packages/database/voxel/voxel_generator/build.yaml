@@ -1,0 +1,7 @@
+builders:
+  voxel:
+    import: "package:voxel_generator/builder.dart"
+    builder_factories: ["voxelBuilder"]
+    build_extensions: {".dart": [".voxel.dart"]}
+    auto_apply: dependents
+    build_to: source

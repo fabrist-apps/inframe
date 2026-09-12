@@ -1,0 +1,9 @@
+name: voxel_fixture_schema
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  voxel: ^0.1.0

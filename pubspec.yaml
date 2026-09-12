@@ -10,12 +10,14 @@ workspace:
   - packages/artificer/providers/artificer_baseten
   - packages/artificer/providers/artificer_google
   - packages/artificer/providers/artificer_openai
+  - packages/artificer/providers/artificer_xai
   - packages/context
   - packages/inlet
   - packages/database/clickhouse
   - packages/database/runnel
   - packages/database/turso
   - packages/database/rivet
+  - packages/database/voxel
   - packages/json_patch
   - packages/chrono_id
   - packages/conflux

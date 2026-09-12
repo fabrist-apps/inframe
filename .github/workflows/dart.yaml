@@ -39,6 +39,13 @@ jobs:
           dart format packages/database/rivet/test/fixtures/app_package/lib/app_database.rivet.dart
           git diff --exit-code
 
+      - name: Generate Voxel consumer fixtures
+        working-directory: packages/database/voxel
+        run: |
+          dart run build_runner build
+          dart format .
+          git diff --exit-code
+
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed .
 
@@ -49,6 +56,12 @@ jobs:
         run: |
           dart test packages/database/rivet/rivet_generator/test --chain-stack-traces
           dart test packages/database/rivet/test/fixtures/app_package/test --chain-stack-traces
+
+      - name: Run Voxel generator and codec tests
+        working-directory: packages/database/voxel
+        run: |
+          dart test --chain-stack-traces
+          dart test voxel_generator/test --chain-stack-traces
 
       - name: Run context tests and consumer checks
         run: dart test packages/context/test --chain-stack-traces
@@ -78,6 +91,11 @@ jobs:
         run: |
           dart test packages/artificer/providers/artificer_baseten/test --chain-stack-traces
           dart run packages/artificer/providers/artificer_baseten/example/text_generation.dart
+
+      - name: Run xAI provider tests and example
+        run: |
+          dart test packages/artificer/providers/artificer_xai/test --chain-stack-traces
+          dart run packages/artificer/providers/artificer_xai/example/text_generation.dart
 
       - name: Run Anthropic provider tests and example
         run: |
