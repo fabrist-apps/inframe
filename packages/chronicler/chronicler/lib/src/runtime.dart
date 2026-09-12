@@ -67,7 +67,12 @@ final class ChroniclerRuntime {
     required this.buildId,
     required this.options,
   }) : validator = RecordValidator(options.limits),
-       codec = ChroniclerCodec(limits: options.limits),
+       codec = ChroniclerCodec(
+         limits: options.limits,
+         maxRecordBytes: options.delivery.maxRecordBytes,
+         maxBatchBytes: options.delivery.maxBatchBytes,
+         maxBatchRecords: options.delivery.maxBatchRecords,
+       ),
        diagnostics = DiagnosticChannel(options.diagnostics);
 
   factory ChroniclerRuntime.create({

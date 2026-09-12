@@ -32,6 +32,10 @@ void main() {
       expect(recordText.indexOf('"a"'), lessThan(recordText.indexOf('"z"')));
       expect(batchText.length - recordText.length, 32);
       expect(batchText, '{"records":[$recordText],"schemaVersion":1}');
+
+      final decoded = codec.decodeRecord(codec.encodeRecord(record));
+      expect(decoded, isA<Decoded<ChroniclerRecord>>());
+      expect((decoded as Decoded<ChroniclerRecord>).value, record);
     });
 
     test('should keep every exported batch within configured bounds', () async {
