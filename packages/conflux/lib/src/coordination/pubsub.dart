@@ -52,7 +52,7 @@ final class PubSub<A> {
     return Effect.build<PubSub<A>, Never>(($) async {
       return $.acquireRelease(
         Effect.sync((_) => PubSub<A>._(capacity)),
-        release: (pubsub) => pubsub.shutdown(),
+        release: (pubsub, _) => pubsub.shutdown(),
       );
     });
   }
@@ -110,7 +110,7 @@ final class PubSub<A> {
         Effect.sync<PubSubSubscription<A>?>(
           (_) => _isShutdown ? null : _createSubscription(),
         ),
-        release: (subscription) => subscription?.unsubscribe() ?? Effect.succeed(null),
+        release: (subscription, _) => subscription?.unsubscribe() ?? Effect.succeed(null),
       );
       return $(acquired == null ? _shutdownEffect() : Effect.succeed(acquired));
     });

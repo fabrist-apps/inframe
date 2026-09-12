@@ -177,11 +177,11 @@ void main() {
       final subscription = flow.subscribe((batch) {
         batches.add(batch);
         return Effect.tryFuture<void, String>(
-          () {
+          (_) {
             if (!consumerStarted.isCompleted) consumerStarted.complete();
             return releaseConsumer.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         );
       });
 
@@ -219,11 +219,11 @@ void main() {
               batches.add(batch);
               if (batches.length > 1) return Effect.succeed(null);
               return Effect.tryFuture<void, String>(
-                () {
+                (_) {
                   consumerStarted.complete();
                   return releaseConsumer.future;
                 },
-                onError: (error, stackTrace) => '$error',
+                onError: (error, stackTrace, _) => '$error',
               );
             }),
       );

@@ -13,11 +13,11 @@ void main() {
       addTearDown(runtime.close);
       final flow = Flow.fromIterable([0, 1, 2]).widenError<String>().mergeMap(
         (value) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             started[value].complete();
             return releases[value].future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         ).asFlow(),
         concurrency: 2,
         capacity: 4,
@@ -40,12 +40,12 @@ void main() {
       final slowCancelled = Completer<void>();
       final never = Completer<int>();
       final slow = Effect.tryFuture<int, String>(
-        () {
+        (_) {
           slowStarted.complete();
           return never.future;
         },
-        onError: (error, stackTrace) => '$error',
-        onCancel: () {
+        onError: (error, stackTrace, _) => '$error',
+        onCancel: (_) {
           slowCancelled.complete();
           throw StateError('cleanup failed');
         },
@@ -105,11 +105,11 @@ void main() {
       final fiber = runtime.fork(
         Flow.merge([source], capacity: 1).runForEach(
           (_) => Effect.tryFuture(
-            () {
+            (_) {
               if (!consumerStarted.isCompleted) consumerStarted.complete();
               return releaseConsumer.future;
             },
-            onError: (error, stackTrace) => '$error',
+            onError: (error, stackTrace, _) => '$error',
           ),
         ),
       );
@@ -143,11 +143,11 @@ void main() {
           consumed.add(value);
           if (value != 1) return Effect.succeed(null);
           return Effect.tryFuture(
-            () {
+            (_) {
               consumerStarted.complete();
               return releaseConsumer.future;
             },
-            onError: (error, stackTrace) => '$error',
+            onError: (error, stackTrace, _) => '$error',
           );
         }),
       );
@@ -178,11 +178,11 @@ void main() {
               values.add(value);
               if (value != 1) return Effect.succeed(null);
               return Effect.tryFuture<void, Never>(
-                () {
+                (_) {
                   consumerStarted.complete();
                   return releaseConsumer.future;
                 },
-                onError: _impossibleFutureError,
+                onError: (error, stackTrace, _) => _impossibleFutureError(error, stackTrace),
               );
             });
         await consumerStarted.future;
@@ -225,11 +225,11 @@ void main() {
       addTearDown(runtime.close);
       final flow = Flow.fromIterable([0, 1]).widenError<String>().mergeMap(
         (value) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             started[value].complete();
             return value == 0 ? first.future : never.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
           onCancel: value == 1 ? innerCancelled.complete : null,
         ).asFlow(),
         concurrency: 2,

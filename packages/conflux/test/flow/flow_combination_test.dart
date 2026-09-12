@@ -24,11 +24,11 @@ void main() {
       final cancelled = Completer<void>();
       final pending = Completer<int>();
       final slow = Effect.tryFuture<int, String>(
-        () {
+        (_) {
           started.complete();
           return pending.future;
         },
-        onError: (error, stackTrace) => '$error',
+        onError: (error, stackTrace, _) => '$error',
         onCancel: cancelled.complete,
       ).asFlow();
       final result = Flow.zip<int, String>([
@@ -81,11 +81,11 @@ void main() {
       final cancelled = Completer<void>();
       final pending = Completer<int>();
       final slow = Effect.tryFuture<int, String>(
-        () {
+        (_) {
           started.complete();
           return pending.future;
         },
-        onError: (error, stackTrace) => '$error',
+        onError: (error, stackTrace, _) => '$error',
         onCancel: cancelled.complete,
       ).asFlow();
       final result = Flow.combineLatest<int, String>([
@@ -176,11 +176,11 @@ void main() {
                   values.add(value);
                   if (values.length > 1) return Effect.succeed(null);
                   return Effect.tryFuture<void, String>(
-                    () {
+                    (_) {
                       consumerStarted.complete();
                       return releaseConsumer.future;
                     },
-                    onError: (error, stackTrace) => '$error',
+                    onError: (error, stackTrace, _) => '$error',
                   );
                 });
 

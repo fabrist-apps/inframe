@@ -60,8 +60,8 @@ final class _SharedFlowState<A, E> {
       if (cleanup == null) break;
       final waited = await EffectAccess.evaluate(
         Effect.tryFuture<Cause<Never>?, Never>(
-          () => cleanup,
-          onError: Error.throwWithStackTrace,
+          (_) => cleanup,
+          onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
         ),
         execution,
       );

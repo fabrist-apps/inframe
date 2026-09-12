@@ -51,7 +51,7 @@ void main() {
       final effect = Effect.forEach<int, int?, String>(
         [0, 1, 2, 3],
         (index, _) => Effect.tryFuture<int?, String>(
-          () async {
+          (_) async {
             active += 1;
             maximumActive = active > maximumActive ? active : maximumActive;
             started[index].complete();
@@ -59,7 +59,7 @@ void main() {
             active -= 1;
             return index == 1 ? null : index;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
         concurrency: 2,
       );
@@ -86,19 +86,19 @@ void main() {
       final effect = Effect.all<int, String>(
         [
           Effect.tryFuture<int, String>(
-            () async {
+            (_) async {
               await siblingStarted.future;
               throw StateError('failed');
             },
-            onError: (_, _) => 'failed',
+            onError: (_, _, _) => 'failed',
           ),
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               siblingStarted.complete();
               return siblingPending.future;
             },
-            onError: (error, _) => '$error',
-            onCancel: () async {
+            onError: (error, _, _) => '$error',
+            onCancel: (_) async {
               await Future<void>.delayed(Duration.zero);
               siblingCleaned = true;
             },
@@ -119,19 +119,19 @@ void main() {
       final effect = Effect.all<int, String>(
         [
           Effect.tryFuture<int, String>(
-            () async {
+            (_) async {
               await siblingStarted.future;
               throw StateError('failed');
             },
-            onError: (_, _) => 'failed',
+            onError: (_, _, _) => 'failed',
           ),
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               siblingStarted.complete();
               return siblingPending.future;
             },
-            onError: (error, _) => '$error',
-            onCancel: () => throw StateError('cleanup'),
+            onError: (error, _, _) => '$error',
+            onCancel: (_) => throw StateError('cleanup'),
           ),
         ],
         concurrency: 2,

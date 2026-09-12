@@ -16,12 +16,12 @@ void main() {
       var lookups = 0;
       final fixture = await _CacheFixture.start(
         lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             lookups += 1;
             lookupStarted.complete();
             return releaseLookup.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -80,11 +80,11 @@ void main() {
       final releaseLookup = Completer<int>();
       final fixture = await _CacheFixture.start(
         lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             lookupStarted.complete();
             return releaseLookup.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -111,11 +111,11 @@ void main() {
       final fixture = await _CacheFixture.start(
         concurrency: 2,
         lookup: (key) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             started.add(key);
             return gates[key]!.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -195,11 +195,11 @@ void main() {
       final fixture = await _CacheFixture.start(
         concurrency: 1,
         lookup: (key) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             started.add(key);
             return key == 'a' ? firstGate.future : secondGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -250,13 +250,13 @@ void main() {
       final fixture = await _CacheFixture.start(
         concurrency: 1,
         lookup: (key) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             started.add(key);
             if (key == 'a') activeStarted.complete();
             return activeGate.future;
           },
-          onError: (error, _) => '$error',
-          onCancel: () => lookupCancelled = true,
+          onError: (error, _, _) => '$error',
+          onCancel: (_) => lookupCancelled = true,
         ),
       );
       final caller = Runtime();
@@ -314,11 +314,11 @@ void main() {
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
         lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             lookupStarted.complete();
             return lookupGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -343,12 +343,12 @@ void main() {
       var lookups = 0;
       final fixture = await _CacheFixture.start<int?>(
         lookup: (_) => Effect.tryFuture<int?, String>(
-          () {
+          (_) {
             lookups += 1;
             lookupStarted.complete();
             return lookupGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -440,8 +440,8 @@ void main() {
           lookups += 1;
           return key == 'pending'
               ? Effect.tryFuture<int, String>(
-                  () => pending.future,
-                  onError: (error, _) => '$error',
+                  (_) => pending.future,
+                  onError: (error, _, _) => '$error',
                 )
               : Effect.succeed(key.codeUnitAt(0));
         }),
@@ -497,11 +497,11 @@ void main() {
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
         lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             lookupStarted.complete();
             return lookupGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -524,8 +524,8 @@ void main() {
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
         lookup: (_) => Effect.tryFuture<int, String>(
-          () => gates[lookups++].future,
-          onError: (error, _) => '$error',
+          (_) => gates[lookups++].future,
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -551,8 +551,8 @@ void main() {
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
         lookup: (_) => Effect.tryFuture<int, String>(
-          () => gates[lookups++].future,
-          onError: (error, _) => '$error',
+          (_) => gates[lookups++].future,
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -585,8 +585,8 @@ void main() {
           lookups.update(key, (count) => count + 1, ifAbsent: () => 1);
           return key == 'pending'
               ? Effect.tryFuture<int, String>(
-                  () => pending.future,
-                  onError: (error, _) => '$error',
+                  (_) => pending.future,
+                  onError: (error, _, _) => '$error',
                 )
               : Effect.succeed(key.codeUnitAt(0));
         }),
@@ -618,8 +618,8 @@ void main() {
         ),
         lookup: (key) => key == 'pending'
             ? Effect.tryFuture<int, String>(
-                () => pending.future,
-                onError: (error, _) => '$error',
+                (_) => pending.future,
+                onError: (error, _, _) => '$error',
               )
             : Effect.succeed(int.parse(key)),
       );
@@ -655,13 +655,13 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         concurrency: 1,
         lookup: (key) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             started.add(key);
             if (key == 'active') return activeGate.future;
             keyLookups += 1;
             return keyLookups == 1 ? oldGate.future : currentGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -732,11 +732,11 @@ void main() {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
-            () {
+            (_) {
               refreshStarted.complete();
               return refreshGate.future;
             },
-            onError: (error, _) => '$error',
+            onError: (error, _, _) => '$error',
           );
         }),
       );
@@ -777,11 +777,11 @@ void main() {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
-            () {
+            (_) {
               refreshStarted.complete();
               return refreshGate.future;
             },
-            onError: (_, _) => 'refresh failed',
+            onError: (_, _, _) => 'refresh failed',
           );
         }),
       );
@@ -831,11 +831,11 @@ void main() {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
-            () {
+            (_) {
               refreshStarted.complete();
               return refreshGate.future;
             },
-            onError: (error, _) => '$error',
+            onError: (error, _, _) => '$error',
           );
         }),
       );
@@ -859,12 +859,12 @@ void main() {
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
         lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+          (_) {
             lookups += 1;
             started.complete();
             return gate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -890,12 +890,12 @@ void main() {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
-            () {
+            (_) {
               refreshStarted.complete();
               return refreshGate.future;
             },
-            onError: (error, _) => '$error',
-            onCancel: () => cancelled = true,
+            onError: (error, _, _) => '$error',
+            onCancel: (_) => cancelled = true,
           );
         }),
       );
@@ -924,8 +924,8 @@ void main() {
           if (count == 1) return Effect.succeed(key.codeUnitAt(0));
           startedRefreshes.add(key);
           return Effect.tryFuture<int, String>(
-            () => key == 'a' ? firstRefresh.future : secondRefresh.future,
-            onError: (error, _) => '$error',
+            (_) => key == 'a' ? firstRefresh.future : secondRefresh.future,
+            onError: (error, _, _) => '$error',
           );
         }),
       );
@@ -983,8 +983,8 @@ final class _CacheFixture<A> {
         created.complete(cache);
         await $(
           Effect.tryFuture<void, Never>(
-            () => keepScopeOpen.future,
-            onError: Error.throwWithStackTrace,
+            (_) => keepScopeOpen.future,
+            onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
           ),
         );
       }),

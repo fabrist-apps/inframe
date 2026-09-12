@@ -14,12 +14,12 @@ void main() {
       addTearDown(runtime.close);
       final flow = Flow.fromIterable([0, 1, 2]).widenError<String>().mapEffect(
         (value) => Effect.tryFuture(
-          () async {
+          (_) async {
             started[value].complete();
             await release[value].future;
             return value * 10;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         ),
       );
 
@@ -58,7 +58,7 @@ void main() {
           await $.acquireRelease(
             Effect.sync((_) => events.add('acquire $value'))
                 .mapError((value, _) => _widenNever(value! as Never)),
-            release: (_) => Effect.sync((_) => events.add('release $value')),
+            release: (_, _) => Effect.sync((_) => events.add('release $value')),
           );
           return value;
         }).asFlow(),
@@ -102,11 +102,11 @@ void main() {
       addTearDown(runtime.close);
       final flow = Flow.succeed<int, String>(1).mapEffect(
         (_) => Effect.tryFuture(
-          () {
+          (_) {
             started.complete();
             return pending.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
           onCancel: cancelled.complete,
         ),
       );

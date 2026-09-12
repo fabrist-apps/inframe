@@ -11,11 +11,11 @@ void main() {
       final running = Effect.race<int, int>([
         for (var index = 0; index < gates.length; index += 1)
           Effect.tryFuture<int, int>(
-            () {
+            (_) {
               starts[index].complete();
               return gates[index].future;
             },
-            onError: (_, _) => index,
+            onError: (_, _, _) => index,
           ),
       ]).runFuture();
       await Future.wait(starts.map((start) => start.future));
@@ -33,8 +33,8 @@ void main() {
       final effect = Effect.race<int, String>([
         Effect.fail<int, String>('first failed'),
         Effect.tryFuture<int, String>(
-          () => success.future,
-          onError: (error, _) => '$error',
+          (_) => success.future,
+          onError: (error, _, _) => '$error',
         ),
       ]);
       final running = Runtime().run(effect);
@@ -54,18 +54,18 @@ void main() {
       final running = Runtime().run(
         Effect.race<int, String>([
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               firstStarted.complete();
               return first.future;
             },
-            onError: (_, _) => 'first',
+            onError: (_, _, _) => 'first',
           ),
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               secondStarted.complete();
               return second.future;
             },
-            onError: (_, _) => 'second',
+            onError: (_, _, _) => 'second',
           ),
         ]),
       );
@@ -89,19 +89,19 @@ void main() {
       final running = Runtime().run(
         Effect.race<int, String>([
           Effect.tryFuture<int, String>(
-            () async {
+            (_) async {
               await loserStarted.future;
               return 42;
             },
-            onError: (error, _) => '$error',
+            onError: (error, _, _) => '$error',
           ),
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               loserStarted.complete();
               return loserPending.future;
             },
-            onError: (error, _) => '$error',
-            onCancel: () async {
+            onError: (error, _, _) => '$error',
+            onCancel: (_) async {
               await Future<void>.delayed(Duration.zero);
               cleaned = true;
             },
@@ -121,19 +121,19 @@ void main() {
       final running = Runtime().run(
         Effect.race<int, String>([
           Effect.tryFuture<int, String>(
-            () async {
+            (_) async {
               await loserStarted.future;
               return 42;
             },
-            onError: (error, _) => '$error',
+            onError: (error, _, _) => '$error',
           ),
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               loserStarted.complete();
               return loserPending.future;
             },
-            onError: (error, _) => '$error',
-            onCancel: () => throw StateError('cleanup'),
+            onError: (error, _, _) => '$error',
+            onCancel: (_) => throw StateError('cleanup'),
           ),
         ]),
       );
@@ -152,12 +152,12 @@ void main() {
         Effect.race<int, String>([
           for (var index = 0; index < 2; index += 1)
             Effect.tryFuture<int, String>(
-              () {
+              (_) {
                 starts[index].complete();
                 return pending[index].future;
               },
-              onError: (error, _) => '$error',
-              onCancel: () => cancellations += 1,
+              onError: (error, _, _) => '$error',
+              onCancel: (_) => cancellations += 1,
             ),
         ]),
       );

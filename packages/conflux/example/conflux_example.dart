@@ -8,7 +8,7 @@ Future<void> main() async {
     final userId = $.sync(_parseUserId('42'));
     final connection = await $.acquireRelease(
       $.context.users.connect(),
-      release: (connection) => connection.closeEffect(),
+      release: (connection, _) => connection.closeEffect(),
     );
     $.addFinalizer(Effect.sync((_) => users.events.add('finished')));
     return $(connection.loadUser(userId));

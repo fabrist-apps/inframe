@@ -39,7 +39,7 @@ final program = Effect.build<String, String>(($) async {
   final service = $.context.require(serviceKey);
   final connection = await $.acquireRelease(
     service.connect(count),
-    release: (connection) => connection.closeEffect(),
+    release: (connection, context) => connection.closeEffect(),
   );
   return await $(connection.load());
 });
@@ -58,6 +58,9 @@ builder cannot be used after its callback ends. Plain Dart `await` has no
 Conflux cancellation hook. Adapt foreign work with `Effect.tryFuture` and
 supply `onCancel` when the external operation can be stopped. Without that
 hook, Conflux observes late completion but cannot claim the work stopped.
+Future factories, failure mappers, cancellation hooks, timeout fallbacks,
+resource releases, and exit observers receive the `Context` captured where
+their owning Effect is evaluated or resource is registered.
 
 Contexts contain borrowed references. Only `acquireRelease`, `addFinalizer`,
 or another explicit cleanup operation transfers ownership to an Effect scope.
@@ -120,7 +123,7 @@ final measured = await Effect.succeed<String, String>('ready')
     .delay(const Duration(milliseconds: 10))
     .timeout(
       const Duration(seconds: 1),
-      onTimeout: () => 'operation timed out',
+      onTimeout: (_) => 'operation timed out',
     )
     .timed()
     .runFuture();

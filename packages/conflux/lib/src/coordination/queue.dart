@@ -42,7 +42,7 @@ final class Queue<A> {
     return Effect.build<Queue<A>, Never>(($) async {
       return $.acquireRelease(
         Effect.sync((_) => Queue<A>._(capacity)),
-        release: (queue) => queue.shutdown(),
+        release: (queue, _) => queue.shutdown(),
       );
     });
   }

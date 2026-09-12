@@ -308,8 +308,8 @@ final class _QueueFixture<A> {
         acquired.complete(queue);
         await $(
           Effect.tryFuture<void, Never>(
-            () => releaseOwner.future,
-            onError: Error.throwWithStackTrace,
+            (_) => releaseOwner.future,
+            onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
           ),
         );
       }),

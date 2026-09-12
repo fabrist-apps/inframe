@@ -29,11 +29,11 @@ void main() {
           firstValues.add(value);
           if (value != 1) return Effect.succeed(null);
           return Effect.tryFuture<void, String>(
-            () {
+            (_) {
               if (!listening.isCompleted) listening.complete();
               return releaseFirst.future;
             },
-            onError: (error, stackTrace) => '$error',
+            onError: (error, stackTrace, _) => '$error',
           );
         });
         final second = shared.subscribe((value) {
@@ -80,11 +80,11 @@ void main() {
       final first = shared.subscribe((value) {
         if (value != 1) return Effect.succeed(null);
         return Effect.tryFuture<void, String>(
-          () {
+          (_) {
             firstBlocked.complete();
             return releaseFirst.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         );
       });
 
@@ -118,11 +118,11 @@ void main() {
       }).onExit((_) => Effect.sync(upstreamFinished.complete)).share();
       final first = shared.subscribe((_) {
         return Effect.tryFuture<void, Never>(
-          () {
+          (_) {
             firstBlocked.complete();
             return releaseFirst.future;
           },
-          onError: _impossibleFutureError,
+          onError: (error, stackTrace, _) => _impossibleFutureError(error, stackTrace),
         );
       });
 
@@ -158,12 +158,12 @@ void main() {
         connections += 1;
         if (connections > 1) return Flow.succeed(connections);
         return Effect.tryFuture<int, String>(
-          () {
+          (_) {
             firstStarted.complete();
             return pending.future;
           },
-          onError: (error, stackTrace) => '$error',
-          onCancel: () async {
+          onError: (error, stackTrace, _) => '$error',
+          onCancel: (_) async {
             cleanupStarted.complete();
             await releaseCleanup.future;
           },
@@ -193,12 +193,12 @@ void main() {
       final shared = Flow.defer<int, String>(() {
         connections += 1;
         return Effect.tryFuture<int, String>(
-          () {
+          (_) {
             firstStarted.complete();
             return pending.future;
           },
-          onError: (error, stackTrace) => '$error',
-          onCancel: () async {
+          onError: (error, stackTrace, _) => '$error',
+          onCancel: (_) async {
             cleanupStarted.complete();
             await releaseCleanup.future;
           },
@@ -241,11 +241,11 @@ void main() {
           .share(capacity: 1, replay: 2);
       final subscription = source.subscribe((_) {
         return Effect.tryFuture<void, String>(
-          () {
+          (_) {
             if (!consumerStarted.isCompleted) consumerStarted.complete();
             return releaseConsumer.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         );
       });
 

@@ -115,12 +115,12 @@ void main() {
           ).mapEffect((value) {
             if (value != 1) return Effect.succeed(value);
             return Effect.tryFuture(
-              () async {
+              (_) async {
                 firstStarted.complete();
                 await releaseFirst.future;
                 return value;
               },
-              onError: (error, stackTrace) => '$error',
+              onError: (error, stackTrace, _) => '$error',
             );
           });
       final valuesFuture = flow.runCollect().runFuture();

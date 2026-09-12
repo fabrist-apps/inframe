@@ -144,12 +144,12 @@ void main() {
       final program = Effect.build<Duration, CronError>(($) async {
         $.addFinalizer(
           Effect.tryFuture<void, Never>(
-            () async {
+            (_) async {
               cleanupStarted.complete();
               await cleanupGate.future;
               throw StateError('cleanup failed');
             },
-            onError: Error.throwWithStackTrace,
+            onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
           ),
         );
         final operation = Effect.succeed<int, CronError>(1);

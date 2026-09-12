@@ -147,13 +147,13 @@ void main() {
           )
           .runForEach(
             (value) => Effect.tryFuture<void, AiError>(
-              () async {
+              (_) async {
                 if (!firstDelivered.isCompleted) {
                   firstDelivered.complete();
                   await release.future;
                 }
               },
-              onError: (error, _) => TransportError(
+              onError: (error, _, _) => TransportError(
                 '$error',
                 deliveryState: RequestDeliveryState.responseStarted,
               ),

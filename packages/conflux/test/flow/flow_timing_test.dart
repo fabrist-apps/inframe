@@ -157,11 +157,11 @@ void main() {
       final subscription = flow.subscribe((value) {
         values.add(value);
         return Effect.tryFuture<void, String>(
-          () {
+          (_) {
             if (!consumerStarted.isCompleted) consumerStarted.complete();
             return releaseConsumer.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         );
       });
 
@@ -198,11 +198,11 @@ void main() {
               )
               .subscribe((_) {
                 return Effect.tryFuture<void, String>(
-                  () {
+                  (_) {
                     if (!consumerStarted.isCompleted) consumerStarted.complete();
                     return releaseConsumer.future;
                   },
-                  onError: (error, stackTrace) => '$error',
+                  onError: (error, stackTrace, _) => '$error',
                 );
               });
 

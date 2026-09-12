@@ -630,7 +630,7 @@ final class Flow<A, E> {
       final cursor = await $(open());
       return $(
         Effect.build<R, E>((consumeEffect) => consume(cursor, consumeEffect)).onExit(
-          (exit) => _finishCursor(cursor, _voidExit(exit)),
+          (exit, _) => _finishCursor(cursor, _voidExit(exit)),
         ),
       );
     }),

@@ -118,16 +118,17 @@ final class Effect<A, E> {
   /// cancellation is requested, [onCancel] may stop adapter-owned work. With
   /// no hook, Conflux observes late completion but cannot stop the Future.
   static Effect<A, E> tryFuture<A, E>(
-    Future<A> Function() factory, {
-    required E Function(Object error, StackTrace stackTrace) onError,
-    FutureOr<void> Function()? onCancel,
+    Future<A> Function(Context context) factory, {
+    required E Function(Object error, StackTrace stackTrace, Context context) onError,
+    FutureOr<void> Function(Context context)? onCancel,
   }) => Effect._((execution) async {
+    final context = execution.context;
     late final Future<A> future;
     try {
-      future = factory();
+      future = factory(context);
     } on Object catch (error, stackTrace) {
       try {
-        return Failed(Expected(onError(error, stackTrace)));
+        return Failed(Expected(onError(error, stackTrace, context)));
       } on Object catch (mapperError, mapperStackTrace) {
         return Failed(Defect(mapperError, mapperStackTrace));
       }
@@ -137,7 +138,7 @@ final class Effect<A, E> {
       Cause<E> cause = Interrupted(reason);
       if (onCancel != null) {
         try {
-          await onCancel();
+          await onCancel(context);
         } on Object catch (error, stackTrace) {
           cause = Sequential([cause, Defect(error, stackTrace)]);
         }
@@ -181,7 +182,7 @@ final class Effect<A, E> {
         onError: (Object error, StackTrace stackTrace) {
           if (settled) return;
           try {
-            complete(Failed(Expected(onError(error, stackTrace))));
+            complete(Failed(Expected(onError(error, stackTrace, context))));
           } on Object catch (mapperError, mapperStackTrace) {
             complete(Failed(Defect(mapperError, mapperStackTrace)));
           }
@@ -339,10 +340,11 @@ extension EffectTiming<A, E> on Effect<A, E> {
   /// cleanup can make the total elapsed time exceed [duration].
   Effect<A, E> timeout(
     Duration duration, {
-    required E Function() onTimeout,
+    required E Function(Context context) onTimeout,
   }) {
     _requireNonNegativeDuration(duration);
     return Effect._((execution) async {
+      final context = execution.context;
       final operation = ScopeAccess.fork(execution.scope, this, execution);
       final timer = ScopeAccess.fork(
         execution.scope,
@@ -377,7 +379,7 @@ extension EffectTiming<A, E> on Effect<A, E> {
           );
           late final E error;
           try {
-            error = onTimeout();
+            error = onTimeout(context);
           } on Object catch (failure, stackTrace) {
             return Failed<A, E>(
               Defect(failure, stackTrace),
@@ -773,16 +775,17 @@ abstract final class _FailureObservation {
 /// Cleanup operations that run before an Effect returns to its caller.
 extension EffectCleanup<A, E> on Effect<A, E> {
   /// Runs [finalizer] after every outcome and preserves both failures.
-  Effect<A, E> ensuring(Effect<void, Never> finalizer) => onExit((_) => finalizer);
+  Effect<A, E> ensuring(Effect<void, Never> finalizer) => onExit((_, _) => finalizer);
 
   /// Runs the Effect returned by [finalizer] after every [Exit].
   Effect<A, E> onExit(
-    Effect<void, Never> Function(Exit<A, E> exit) finalizer,
+    Effect<void, Never> Function(Exit<A, E> exit, Context context) finalizer,
   ) => Effect._((execution) async {
+    final context = execution.context;
     final exit = await _evaluate(execution);
     late final Effect<void, Never> cleanup;
     try {
-      cleanup = finalizer(exit);
+      cleanup = finalizer(exit, context);
     } on Object catch (error, stackTrace) {
       return exit.appendCleanup(Defect(error, stackTrace));
     }
@@ -799,7 +802,7 @@ extension EffectCleanup<A, E> on Effect<A, E> {
   });
 
   /// Runs [finalizer] only when the operation is interrupted.
-  Effect<A, E> onCancel(Effect<void, Never> finalizer) => onExit((exit) {
+  Effect<A, E> onCancel(Effect<void, Never> finalizer) => onExit((exit, _) {
     if (exit case Failed<A, E>(:final cause) when cause.containsInterruption) {
       return finalizer;
     }

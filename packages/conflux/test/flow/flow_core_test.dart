@@ -64,8 +64,8 @@ void main() {
     test('should reject overlapping pulls on one cursor', () async {
       final release = Completer<int>();
       final slow = Effect.tryFuture<int, String>(
-        () => release.future,
-        onError: (error, stackTrace) => '$error',
+        (_) => release.future,
+        onError: (error, stackTrace, _) => '$error',
       ).asFlow();
 
       final exit = await Effect.build<void, String>(($) async {
@@ -84,7 +84,7 @@ void main() {
       final source = Effect.build<int, Never>(($) async {
         await $.acquireRelease(
           Effect.sync((_) => events.add('acquire')),
-          release: (_) => Effect.sync((_) => events.add('release')),
+          release: (_, _) => Effect.sync((_) => events.add('release')),
         );
         return 1;
       }).asFlow();

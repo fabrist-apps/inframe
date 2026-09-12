@@ -11,12 +11,12 @@ void main() {
       var cancelled = false;
       final fiber = Runtime().fork(
         Effect.tryFuture<int, String>(
-          () {
+          (_) {
             started.complete();
             return pending.future;
           },
-          onError: (error, _) => '$error',
-          onCancel: () => cancelled = true,
+          onError: (error, _, _) => '$error',
+          onCancel: (_) => cancelled = true,
         ),
       );
 
@@ -34,12 +34,12 @@ void main() {
       final runtime = Runtime();
       final fiber = runtime.fork(
         Effect.tryFuture<void, Never>(
-          () {
+          (_) {
             started.complete();
             return pending.future;
           },
-          onError: (error, _) => throw StateError('$error'),
-          onCancel: () async {
+          onError: (error, _, _) => throw StateError('$error'),
+          onCancel: (_) async {
             await Future<void>.delayed(Duration.zero);
             cancellationFinished = true;
           },
@@ -64,13 +64,13 @@ void main() {
       runtime = Runtime();
       final fiber = runtime.fork(
         Effect.tryFuture<void, Never>(
-          () {
+          (_) {
             closing = runtime.close();
             started.complete();
             return pending.future;
           },
-          onError: (error, _) => throw StateError('$error'),
-          onCancel: () => cancelled = true,
+          onError: (error, _, _) => throw StateError('$error'),
+          onCancel: (_) => cancelled = true,
         ),
       );
 
@@ -86,14 +86,14 @@ void main() {
     test('should map foreign failures only through the supplied mapper', () async {
       final mapped = await Runtime().run(
         Effect.tryFuture<int, String>(
-          () => Future<int>.error(StateError('foreign')),
-          onError: (error, _) => error.toString(),
+          (_) => Future<int>.error(StateError('foreign')),
+          onError: (error, _, _) => error.toString(),
         ),
       );
       final defective = await Runtime().run(
         Effect.tryFuture<int, String>(
-          () => Future<int>.error(StateError('foreign')),
-          onError: (_, _) => throw StateError('mapper'),
+          (_) => Future<int>.error(StateError('foreign')),
+          onError: (_, _, _) => throw StateError('mapper'),
         ),
       );
 
@@ -108,11 +108,11 @@ void main() {
         final pending = Completer<int>();
         final fiber = Runtime().fork(
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               started.complete();
               return pending.future;
             },
-            onError: (error, _) => '$error',
+            onError: (error, _, _) => '$error',
           ),
         );
         await started.future;

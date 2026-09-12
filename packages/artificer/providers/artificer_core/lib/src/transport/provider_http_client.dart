@@ -478,12 +478,12 @@ final class ProviderHttpClient {
       final acquisition = lifetime.startExchange(() => _client.send(nativeRequest));
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
-          () => lifetime.waitFor(acquisition),
-          onError: (error, _) => TransportError(
+          (_) => lifetime.waitFor(acquisition),
+          onError: (error, _, _) => TransportError(
             _safeForeignMessage(error),
             deliveryState: deliveryState,
           ),
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       if (acquired case _WaitClosed<http.StreamedResponse>(:final reason)) {
@@ -496,8 +496,8 @@ final class ProviderHttpClient {
       final read = _readBody(response, lifetime, maxResponseBytes);
       final body = await $(
         Effect.tryFuture<_WaitResult<List<int>>, AiError>(
-          () => lifetime.waitFor(read),
-          onError: (error, _) => switch (error) {
+          (_) => lifetime.waitFor(read),
+          onError: (error, _, _) => switch (error) {
             _ResponseTooLarge(:final actual) => ResponseLimitError(
               'The response exceeded the configured byte limit.',
               limit: maxResponseBytes,
@@ -508,7 +508,7 @@ final class ProviderHttpClient {
               deliveryState: deliveryState,
             ),
           },
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       if (body case _WaitClosed<List<int>>(:final reason)) {
@@ -632,8 +632,8 @@ final class ProviderHttpClient {
       }
       final sourceStream = await $(
         Effect.tryFuture<Stream<List<int>>, AiError>(
-          () => Future.sync(source.openRead),
-          onError: (error, _) => switch (error) {
+          (_) => Future.sync(source.openRead),
+          onError: (error, _, _) => switch (error) {
             UploadSourceError(:final message) => InvalidRequestError(
               message,
               remoteResourceId: request.remoteResourceId,
@@ -644,7 +644,7 @@ final class ProviderHttpClient {
               remoteResourceId: request.remoteResourceId,
             ),
           },
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       final nativeRequest =
@@ -670,8 +670,8 @@ final class ProviderHttpClient {
       final acquisition = lifetime.startExchange(() => _client.send(nativeRequest));
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
-          () => lifetime.waitFor(acquisition),
-          onError: (error, _) => switch (error) {
+          (_) => lifetime.waitFor(acquisition),
+          onError: (error, _, _) => switch (error) {
             UploadSourceError(:final message) => InvalidRequestError(
               message,
               remoteResourceId: request.remoteResourceId,
@@ -682,7 +682,7 @@ final class ProviderHttpClient {
               remoteResourceId: request.remoteResourceId,
             ),
           },
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       if (acquired case _WaitClosed<http.StreamedResponse>(:final reason)) {
@@ -693,8 +693,8 @@ final class ProviderHttpClient {
       deliveryState = RequestDeliveryState.responseStarted;
       final body = await $(
         Effect.tryFuture<_WaitResult<List<int>>, AiError>(
-          () => lifetime.waitFor(_readBody(response, lifetime, maxResponseBytes)),
-          onError: (error, _) => switch (error) {
+          (_) => lifetime.waitFor(_readBody(response, lifetime, maxResponseBytes)),
+          onError: (error, _, _) => switch (error) {
             _ResponseTooLarge(:final actual) => ResponseLimitError(
               'The response exceeded the configured byte limit.',
               limit: maxResponseBytes,
@@ -707,7 +707,7 @@ final class ProviderHttpClient {
               remoteResourceId: request.remoteResourceId,
             ),
           },
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       if (body case _WaitClosed<List<int>>(:final reason)) {

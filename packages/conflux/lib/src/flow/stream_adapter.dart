@@ -26,7 +26,7 @@ abstract final class StreamFlowSource {
           onOverflow,
         )..start(source),
       ).mapError<E>((value, _) => _widenNever(value! as Never)),
-      release: (cursor) => cursor.close(),
+      release: (cursor, _) => cursor.close(),
     );
   });
 }

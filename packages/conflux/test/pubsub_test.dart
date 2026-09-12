@@ -430,8 +430,8 @@ final class _OwnedSubscription<A> {
 
 Effect<void, Never> _waitFor(Future<void> future) {
   return Effect.tryFuture<void, Never>(
-    () => future,
-    onError: Error.throwWithStackTrace,
+    (_) => future,
+    onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
   );
 }
 

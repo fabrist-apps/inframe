@@ -23,9 +23,9 @@ void main() {
             mapped.add(value);
             if (value == 0) {
               return Effect.tryFuture<int, String>(
-                () => oldResult.future,
-                onError: (error, stackTrace) => '$error',
-                onCancel: () async {
+                (_) => oldResult.future,
+                onError: (error, stackTrace, _) => '$error',
+                onCancel: (_) async {
                   cleanupStarted.complete();
                   await finishCleanup.future;
                 },
@@ -77,11 +77,11 @@ void main() {
                 consumed.add(value);
                 if (value != 0) return Effect.succeed(null);
                 return Effect.tryFuture<void, String>(
-                  () {
+                  (_) {
                     consumingFirst.complete();
                     return releaseFirst.future;
                   },
-                  onError: (error, stackTrace) => '$error',
+                  onError: (error, stackTrace, _) => '$error',
                 );
               });
 
@@ -113,12 +113,12 @@ void main() {
               .switchMap((value) {
                 if (value > 0) return Flow.succeed(value);
                 return Effect.tryFuture<int, String>(
-                  () {
+                  (_) {
                     innerStarted.complete();
                     return pending.future;
                   },
-                  onError: (error, stackTrace) => '$error',
-                  onCancel: () async {
+                  onError: (error, stackTrace, _) => '$error',
+                  onCancel: (_) async {
                     cleanupStarted.complete();
                     await releaseCleanup.future;
                     throw StateError('inner cleanup failed');
@@ -162,11 +162,11 @@ void main() {
               )
               .switchMap(
                 (_) => Effect.tryFuture<int, String>(
-                  () {
+                  (_) {
                     innerStarted.complete();
                     return pending.future;
                   },
-                  onError: (error, stackTrace) => '$error',
+                  onError: (error, stackTrace, _) => '$error',
                   onCancel: innerCancelled.complete,
                 ).asFlow(),
               )
@@ -197,8 +197,8 @@ void main() {
             mapped.add(value);
             if (value == 1) {
               return Effect.tryFuture<int, String>(
-                () => firstResult.future,
-                onError: (error, stackTrace) => '$error',
+                (_) => firstResult.future,
+                onError: (error, stackTrace, _) => '$error',
               ).asFlow().onExit((_) => Effect.sync(firstFinished.complete));
             }
             thirdStarted.complete();

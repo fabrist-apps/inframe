@@ -112,11 +112,11 @@ void main() {
       final started = Completer<void>();
       final pending = Completer<int>();
       final cancelled = Effect.tryFuture<int, String>(
-        () {
+        (_) {
           started.complete();
           return pending.future;
         },
-        onError: (error, stackTrace) => '$error',
+        onError: (error, stackTrace, _) => '$error',
       ).asFlow().onExit((exit) => Effect.sync((_) => exits.add(exit)));
       final runtime = Runtime();
       addTearDown(runtime.close);

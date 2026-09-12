@@ -26,11 +26,11 @@ void main() {
       var cleaned = 0;
       final flow =
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               started.complete();
               return pending.future;
             },
-            onError: (error, stackTrace) => '$error',
+            onError: (error, stackTrace, _) => '$error',
           ).asFlow().ensuring(
             Effect.sleep(const Duration(milliseconds: 20)).tap(
               (_, _) => Effect.sync((_) => cleaned += 1),
@@ -157,11 +157,11 @@ void main() {
       var cleaned = false;
       final stream =
           Effect.tryFuture<int, String>(
-                () {
+                (_) {
                   started.complete();
                   return pending.future;
                 },
-                onError: (error, stackTrace) => '$error',
+                onError: (error, stackTrace, _) => '$error',
               )
               .asFlow()
               .ensuring(

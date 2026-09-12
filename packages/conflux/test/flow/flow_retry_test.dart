@@ -133,11 +133,11 @@ void main() {
         if (attempts > 1) return Flow.succeed(42);
         return Flow.fail<int, String>('again').ensuring(
           Effect.tryFuture<void, Never>(
-            () {
+            (_) {
               cleanupStarted.complete();
               return releaseCleanup.future;
             },
-            onError: _impossibleFutureError,
+            onError: (error, stackTrace, _) => _impossibleFutureError(error, stackTrace),
           ),
         );
       }).retry(Schedule.spaced(const Duration(seconds: 5)));
