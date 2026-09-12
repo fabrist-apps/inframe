@@ -22,15 +22,6 @@ enum XaiServiceTier {
   /// Let Xai choose the tier.
   auto('auto'),
 
-  /// Standard processing.
-  defaultTier('default'),
-
-  /// Fast processing for supported models.
-  fast('fast'),
-
-  /// Scale-tier processing.
-  flex('flex'),
-
   /// Priority processing.
   priority('priority');
 
@@ -66,15 +57,15 @@ final class XaiModelOptions {
   XaiModelOptions({
     Setting<XaiReasoningOptions> reasoning = const Setting<XaiReasoningOptions>.inherit(),
     Setting<String> promptCacheKey = const Setting<String>.inherit(),
-    Setting<String> promptCacheRetention = const Setting<String>.inherit(),
     Setting<XaiServiceTier> serviceTier = const Setting<XaiServiceTier>.inherit(),
+    Setting<XaiInferenceOptions> inference = const Setting<XaiInferenceOptions>.inherit(),
     Setting<List<XaiResponseInclude>> include = const Setting<List<XaiResponseInclude>>.inherit(),
     Setting<List<XaiToolDefinition>> tools = const Setting<List<XaiToolDefinition>>.inherit(),
     JsonObject? extraBody,
   }) : reasoning = _normalizeSetting(reasoning),
        promptCacheKey = _normalizeSetting(promptCacheKey),
-       promptCacheRetention = _normalizeSetting(promptCacheRetention),
        serviceTier = _normalizeSetting(serviceTier),
+       inference = _normalizeSetting(inference),
        include = _freezeListSetting(_normalizeSetting(include)),
        tools = _freezeListSetting(_normalizeSetting(tools)),
        extraBody = extraBody ?? JsonObject({});
@@ -85,11 +76,11 @@ final class XaiModelOptions {
   /// Stable provider cache identifier.
   final Setting<String> promptCacheKey;
 
-  /// Native cache-retention policy.
-  final Setting<String> promptCacheRetention;
-
   /// Requested service tier.
   final Setting<XaiServiceTier> serviceTier;
+
+  /// xAI-specific inference controls.
+  final Setting<XaiInferenceOptions> inference;
 
   /// Additional native response fields to return.
   final Setting<List<XaiResponseInclude>> include;
@@ -109,15 +100,14 @@ final class XaiModelOptions {
       ? promptCacheKey.resolve(null)
       : call.promptCacheKey.resolve(promptCacheKey.resolve(null));
 
-  /// Resolves cache retention against model defaults.
-  String? resolvePromptCacheRetention(XaiModelOptions? call) => call == null
-      ? promptCacheRetention.resolve(null)
-      : call.promptCacheRetention.resolve(promptCacheRetention.resolve(null));
-
   /// Resolves the service tier against model defaults.
   XaiServiceTier? resolveServiceTier(XaiModelOptions? call) => call == null
       ? serviceTier.resolve(null)
       : call.serviceTier.resolve(serviceTier.resolve(null));
+
+  /// Resolves xAI inference controls against model defaults.
+  XaiInferenceOptions? resolveInference(XaiModelOptions? call) =>
+      call == null ? inference.resolve(null) : call.inference.resolve(inference.resolve(null));
 
   /// Resolves include selectors, replacing the inherited collection when set.
   List<XaiResponseInclude>? resolveInclude(XaiModelOptions? call) =>

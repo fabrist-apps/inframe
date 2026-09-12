@@ -194,55 +194,156 @@ final class XaiFunctionTool extends XaiToolDefinition {
 /// Provider-hosted web search.
 final class XaiWebSearchTool extends XaiToolDefinition {
   /// Creates a web-search tool.
-  const XaiWebSearchTool();
+  XaiWebSearchTool({
+    Iterable<String>? allowedDomains,
+    Iterable<String>? excludedDomains,
+    this.enableImageSearch,
+    this.enableImageUnderstanding,
+  }) : allowedDomains = _limitedStrings(allowedDomains, 'allowedDomains', 5),
+       excludedDomains = _limitedStrings(excludedDomains, 'excludedDomains', 5) {
+    if (this.allowedDomains != null && this.excludedDomains != null) {
+      throw ArgumentError('allowedDomains and excludedDomains cannot both be set');
+    }
+  }
+
+  /// Domains xAI may use.
+  final List<String>? allowedDomains;
+
+  /// Domains xAI must exclude.
+  final List<String>? excludedDomains;
+
+  /// Whether image results may be searched.
+  final bool? enableImageSearch;
+
+  /// Whether image understanding is enabled during search.
+  final bool? enableImageUnderstanding;
 
   @override
   String get type => 'web_search';
 
   @override
-  Map<String, Object?> toDart() => {'type': type};
+  Map<String, Object?> toDart() => {
+    'type': type,
+    'allowed_domains': ?allowedDomains,
+    'excluded_domains': ?excludedDomains,
+    'enable_image_search': ?enableImageSearch,
+    'enable_image_understanding': ?enableImageUnderstanding,
+  };
 }
 
-/// Provider-hosted file search over existing vector stores.
-final class XaiFileSearchTool extends XaiToolDefinition {
-  /// Creates file search over [vectorStoreIds].
-  XaiFileSearchTool({required Iterable<String> vectorStoreIds})
-    : vectorStoreIds = List.unmodifiable(vectorStoreIds) {
-    if (this.vectorStoreIds.isEmpty || this.vectorStoreIds.any((id) => id.isEmpty)) {
-      throw ArgumentError.value(vectorStoreIds, 'vectorStoreIds', 'must contain nonempty IDs');
+/// Provider-hosted search over X posts.
+final class XaiXSearchTool extends XaiToolDefinition {
+  /// Creates an X-search tool.
+  XaiXSearchTool({
+    Iterable<String>? allowedHandles,
+    Iterable<String>? excludedHandles,
+    this.fromDate,
+    this.toDate,
+    this.enableImageUnderstanding,
+    this.enableVideoUnderstanding,
+  }) : allowedHandles = _limitedStrings(allowedHandles, 'allowedHandles', 10),
+       excludedHandles = _limitedStrings(excludedHandles, 'excludedHandles', 10) {
+    if (this.allowedHandles != null && this.excludedHandles != null) {
+      throw ArgumentError('allowedHandles and excludedHandles cannot both be set');
     }
   }
 
-  /// Existing vector-store IDs.
-  final List<String> vectorStoreIds;
+  /// X handles xAI may search.
+  final List<String>? allowedHandles;
+
+  /// X handles xAI must exclude.
+  final List<String>? excludedHandles;
+
+  /// Inclusive ISO-8601 start date.
+  final String? fromDate;
+
+  /// Inclusive ISO-8601 end date.
+  final String? toDate;
+
+  /// Whether image understanding is enabled.
+  final bool? enableImageUnderstanding;
+
+  /// Whether video understanding is enabled.
+  final bool? enableVideoUnderstanding;
+
+  @override
+  String get type => 'x_search';
+
+  @override
+  Map<String, Object?> toDart() => {
+    'type': type,
+    'allowed_x_handles': ?allowedHandles,
+    'excluded_x_handles': ?excludedHandles,
+    'from_date': ?fromDate,
+    'to_date': ?toDate,
+    'enable_image_understanding': ?enableImageUnderstanding,
+    'enable_video_understanding': ?enableVideoUnderstanding,
+  };
+}
+
+/// Provider-hosted search over existing xAI collections.
+final class XaiCollectionsSearchTool extends XaiToolDefinition {
+  /// Creates collection search over [collectionIds].
+  XaiCollectionsSearchTool({required Iterable<String> collectionIds, this.maxResults})
+    : collectionIds = List.unmodifiable(collectionIds) {
+    if (this.collectionIds.isEmpty ||
+        this.collectionIds.length > 10 ||
+        this.collectionIds.any((id) => id.isEmpty)) {
+      throw ArgumentError.value(
+        collectionIds,
+        'collectionIds',
+        'must contain between 1 and 10 nonempty IDs',
+      );
+    }
+    if (maxResults != null && maxResults! < 1) {
+      throw ArgumentError.value(maxResults, 'maxResults', 'must be positive');
+    }
+  }
+
+  /// Existing xAI collection IDs.
+  final List<String> collectionIds;
+
+  /// Maximum number of results to return.
+  final int? maxResults;
 
   @override
   String get type => 'file_search';
 
   @override
-  Map<String, Object?> toDart() => {'type': type, 'vector_store_ids': vectorStoreIds};
+  Map<String, Object?> toDart() => {
+    'type': type,
+    'vector_store_ids': collectionIds,
+    'max_num_results': ?maxResults,
+  };
 }
 
 /// Provider-hosted code interpreter.
 final class XaiCodeInterpreterTool extends XaiToolDefinition {
-  /// Creates a code-interpreter tool using an automatic container.
+  /// Creates an xAI code-execution tool.
   const XaiCodeInterpreterTool();
 
   @override
   String get type => 'code_interpreter';
 
   @override
-  Map<String, Object?> toDart() => {
-    'type': type,
-    'container': {'type': 'auto'},
-  };
+  Map<String, Object?> toDart() => {'type': type};
 }
 
 /// Provider-hosted remote MCP access.
 final class XaiRemoteMcpTool extends XaiToolDefinition {
   /// Creates a remote MCP tool.
-  XaiRemoteMcpTool({required String serverLabel, required this.serverUrl})
-    : serverLabel = _nonEmpty(serverLabel, 'serverLabel') {
+  XaiRemoteMcpTool({
+    required String serverLabel,
+    required this.serverUrl,
+    this.serverDescription,
+    this.authorization,
+    Iterable<String>? allowedTools,
+    Map<String, String>? headers,
+    this.requireApproval,
+    this.deferLoading,
+  }) : serverLabel = _nonEmpty(serverLabel, 'serverLabel'),
+       allowedTools = allowedTools == null ? null : List.unmodifiable(allowedTools),
+       headers = headers == null ? null : Map.unmodifiable(headers) {
     if (!serverUrl.isAbsolute || serverUrl.scheme != 'https') {
       throw ArgumentError.value(serverUrl, 'serverUrl', 'must be an absolute HTTPS URL');
     }
@@ -254,6 +355,24 @@ final class XaiRemoteMcpTool extends XaiToolDefinition {
   /// Remote MCP server URL.
   final Uri serverUrl;
 
+  /// Description exposed to the model.
+  final String? serverDescription;
+
+  /// Authorization value forwarded to the server.
+  final String? authorization;
+
+  /// Optional allowlist of remote tool names.
+  final List<String>? allowedTools;
+
+  /// Extra headers forwarded to the remote server.
+  final Map<String, String>? headers;
+
+  /// Native approval policy.
+  final String? requireApproval;
+
+  /// Whether tool definitions are loaded on demand.
+  final bool? deferLoading;
+
   @override
   String get type => 'mcp';
 
@@ -262,43 +381,54 @@ final class XaiRemoteMcpTool extends XaiToolDefinition {
     'type': type,
     'server_label': serverLabel,
     'server_url': serverUrl.toString(),
+    'server_description': ?serverDescription,
+    'authorization': ?authorization,
+    'allowed_tools': ?allowedTools,
+    'headers': ?headers,
+    'require_approval': ?requireApproval,
+    'defer_loading': ?deferLoading,
   };
 }
 
-/// Provider-defined caller-executed computer tool.
-final class XaiComputerTool extends XaiToolDefinition {
-  /// Creates a computer tool.
-  const XaiComputerTool();
+/// xAI-specific inference controls for Responses.
+final class XaiInferenceOptions {
+  /// Creates inference controls from the pinned xAI Responses schema.
+  const XaiInferenceOptions({
+    this.maxTurns,
+    this.minP,
+    this.topK,
+    this.logprobs,
+    this.topLogprobs,
+    this.user,
+  });
 
-  @override
-  String get type => 'computer';
+  /// Maximum number of agentic tool turns.
+  final int? maxTurns;
 
-  @override
-  Map<String, Object?> toDart() => {'type': type};
-}
+  /// Minimum relative token probability.
+  final double? minP;
 
-/// Provider-defined caller-executed shell tool.
-final class XaiShellTool extends XaiToolDefinition {
-  /// Creates a shell tool.
-  const XaiShellTool();
+  /// Maximum candidate-token count per sampling step.
+  final int? topK;
 
-  @override
-  String get type => 'shell';
+  /// Whether token log probabilities are returned.
+  final bool? logprobs;
 
-  @override
-  Map<String, Object?> toDart() => {'type': type};
-}
+  /// Number of alternative token log probabilities to return.
+  final int? topLogprobs;
 
-/// Provider-defined caller-executed patch tool.
-final class XaiApplyPatchTool extends XaiToolDefinition {
-  /// Creates an apply-patch tool.
-  const XaiApplyPatchTool();
+  /// Caller-defined End User identifier.
+  final String? user;
 
-  @override
-  String get type => 'apply_patch';
-
-  @override
-  Map<String, Object?> toDart() => {'type': type};
+  /// Encodes these controls using xAI field names.
+  Map<String, Object?> toDart() => {
+    'max_turns': ?maxTurns,
+    'min_p': ?minP,
+    'top_k': ?topK,
+    'logprobs': ?logprobs,
+    'top_logprobs': ?topLogprobs,
+    'user': ?user,
+  };
 }
 
 /// A typed native request for `POST /responses`.
@@ -315,8 +445,8 @@ final class XaiResponseRequest {
     this.stream,
     this.reasoning,
     this.promptCacheKey,
-    this.promptCacheRetention,
     this.serviceTier,
+    this.inference,
     Iterable<String>? include,
     Iterable<XaiToolDefinition>? tools,
     this.toolChoice,
@@ -334,6 +464,24 @@ final class XaiResponseRequest {
     if (this.input.isEmpty) throw ArgumentError.value(input, 'input', 'must not be empty');
     if (maxOutputTokens != null && maxOutputTokens! <= 0) {
       throw ArgumentError.value(maxOutputTokens, 'maxOutputTokens', 'must be positive');
+    }
+    if (inference case final value?) {
+      if (value.maxTurns != null && value.maxTurns! < 1) {
+        throw ArgumentError.value(value.maxTurns, 'inference.maxTurns', 'must be positive');
+      }
+      if (value.minP != null && (value.minP! < 0 || value.minP! > 1)) {
+        throw ArgumentError.value(value.minP, 'inference.minP', 'must be between 0 and 1');
+      }
+      if (value.topK != null && value.topK! < 1) {
+        throw ArgumentError.value(value.topK, 'inference.topK', 'must be positive');
+      }
+      if (value.topLogprobs != null && (value.topLogprobs! < 0 || value.topLogprobs! > 8)) {
+        throw ArgumentError.value(
+          value.topLogprobs,
+          'inference.topLogprobs',
+          'must be between 0 and 8',
+        );
+      }
     }
     final collision = this.extraBody.toDart().keys.where(_typedResponseFields.contains).firstOrNull;
     if (collision != null) {
@@ -371,11 +519,11 @@ final class XaiResponseRequest {
   /// Stable prompt-cache identifier.
   final String? promptCacheKey;
 
-  /// Prompt-cache retention policy.
-  final String? promptCacheRetention;
-
   /// Native service tier.
   final String? serviceTier;
+
+  /// xAI-specific inference controls.
+  final XaiInferenceOptions? inference;
 
   /// Additional native response fields requested by the caller.
   final List<String>? include;
@@ -416,8 +564,8 @@ final class XaiResponseRequest {
       'stream': ?stream,
       if (reasoning case final value?) 'reasoning': value.toDart(),
       'prompt_cache_key': ?promptCacheKey,
-      'prompt_cache_retention': ?promptCacheRetention,
       'service_tier': ?serviceTier,
+      ...?inference?.toDart(),
       'include': ?include,
       if (tools case final value?) 'tools': value.map((tool) => tool.toDart()).toList(),
       if (toolChoice case final value?) 'tool_choice': value.toDart(),
@@ -546,21 +694,13 @@ sealed class XaiResponseOutputItem {
           _without(value, {'type', 'id', 'call_id', 'name', 'arguments', 'input', 'status'}),
         ),
       ),
-      'computer_call' || 'shell_call' || 'apply_patch_call' => XaiCallerToolOutputItem._(
-        type: type,
-        id: _optionalString(value, 'id'),
-        callId: _string(value, 'call_id'),
-        name: type.replaceFirst('_call', ''),
-        input: JsonObject(_without(value, {'type', 'id', 'call_id', 'status'})).encode(),
-        status: _optionalString(value, 'status'),
-        raw: raw,
-        extensions: JsonObject(_without(value, {'type', 'id', 'call_id', 'status'})),
-      ),
       'web_search_call' ||
+      'x_search_call' ||
       'file_search_call' ||
       'code_interpreter_call' ||
       'mcp_call' ||
-      'mcp_list_tools' => XaiProviderToolOutputItem._(
+      'mcp_list_tools' ||
+      'tool_search_call' => XaiProviderToolOutputItem._(
         type: type,
         id: _optionalString(value, 'id'),
         status: _optionalString(value, 'status'),
@@ -832,6 +972,19 @@ int? _optionalInt(Map<String, Object?> value, String key) {
   return field;
 }
 
+List<String>? _limitedStrings(Iterable<String>? values, String name, int maximum) {
+  if (values == null) return null;
+  final frozen = List<String>.unmodifiable(values);
+  if (frozen.isEmpty || frozen.length > maximum || frozen.any((value) => value.isEmpty)) {
+    throw ArgumentError.value(
+      values,
+      name,
+      'must contain between 1 and $maximum nonempty values',
+    );
+  }
+  return frozen;
+}
+
 Map<String, Object?> _without(Map<String, Object?> value, Set<String> keys) =>
     Map.fromEntries(value.entries.where((entry) => !keys.contains(entry.key)));
 
@@ -856,8 +1009,13 @@ const _typedResponseFields = {
   'stream',
   'reasoning',
   'prompt_cache_key',
-  'prompt_cache_retention',
   'service_tier',
+  'max_turns',
+  'min_p',
+  'top_k',
+  'logprobs',
+  'top_logprobs',
+  'user',
   'include',
   'tools',
   'tool_choice',

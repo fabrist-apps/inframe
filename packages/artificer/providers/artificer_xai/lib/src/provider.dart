@@ -209,8 +209,8 @@ final class XaiLanguageModel implements LanguageModel {
       stream: stream,
       reasoning: reasoning?.toJson(),
       promptCacheKey: options.resolvePromptCacheKey(callOptions),
-      promptCacheRetention: options.resolvePromptCacheRetention(callOptions),
       serviceTier: serviceTier?.wireValue,
+      inference: options.resolveInference(callOptions),
       include: include.map((value) => value.wireValue),
       tools: applicationTools.isEmpty && nativeTools.isEmpty
           ? null
