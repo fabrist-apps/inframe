@@ -30,6 +30,13 @@ final class RivetCompiledQuery {
   final List<Object?> parameters;
 }
 
+final class ScoredRow<Row> {
+  const ScoredRow({required this.row, required this.score});
+
+  final Row row;
+  final double? score;
+}
+
 /// Execution boundary accepted by query terminals.
 // The interface keeps query plans independent from database and transaction owners.
 abstract interface class RivetExecutor {
@@ -107,6 +114,19 @@ final class RivetFind<Definition, Row> {
   final int? _offset;
   final List<RivetInclude<dynamic, dynamic>> _includes;
 
+  RivetScoredFind<Definition, Row, Score> withScore<Score extends double?>(
+    RivetExpression<Score> Function(Definition table) score,
+  ) {
+    final expression = score(_schema.definition);
+    if (expression.codec.cast != 'float8' ||
+        expression.columns.any((column) => !column.belongsTo(_schema))) {
+      throw const RivetUnsupportedQueryException(
+        'A score must be a double expression from the root query scope.',
+      );
+    }
+    return RivetScoredFind<Definition, Row, Score>(this, expression);
+  }
+
   Future<List<Row>> get(RivetExecutor executor) => executor.execute(_compile(), _decodeRow);
 
   Future<Row> getSingle(RivetExecutor executor) async {
@@ -130,21 +150,30 @@ final class RivetFind<Definition, Row> {
     return rows.firstOrNull;
   }
 
-  RivetCompiledQuery _compile({int? terminalLimit}) {
+  RivetCompiledQuery _compile({
+    int? terminalLimit,
+    RivetExpression<dynamic>? score,
+  }) {
     if (_includes.isNotEmpty ||
         (_predicate?.usesRelations ?? false) ||
+        score is RivetAliasedExpression<dynamic> ||
         _orders.any(
           (order) =>
               order.expression is RivetAliasedExpression<dynamic> &&
               (order.expression as RivetAliasedExpression<dynamic>).usesRelations,
         )) {
-      return _compileRelational(terminalLimit: terminalLimit);
+      return _compileRelational(terminalLimit: terminalLimit, score: score);
     }
+    final parameters = <Object?>[];
     final columns = _schema.columns.indexed
         .map((entry) => '${entry.$2.selectionSql} AS "__rivet_c${entry.$1}"')
-        .join(', ');
-    final sql = StringBuffer('SELECT $columns FROM ${_schema.qualifiedName}');
-    final parameters = <Object?>[];
+        .toList();
+    if (score != null) {
+      final rendered = score.renderParameters(startAt: parameters.length + 1);
+      parameters.addAll(score.parameters);
+      columns.add('${score.codec.select(rendered)} AS "__rivet_score"');
+    }
+    final sql = StringBuffer('SELECT ${columns.join(', ')} FROM ${_schema.qualifiedName}');
     if (_predicate case final predicate?) {
       parameters.addAll(predicate.parameters);
       sql.write(' WHERE ${predicate.renderParameters()}');
@@ -177,7 +206,10 @@ final class RivetFind<Definition, Row> {
     );
   }
 
-  RivetCompiledQuery _compileRelational({int? terminalLimit}) {
+  RivetCompiledQuery _compileRelational({
+    int? terminalLimit,
+    RivetExpression<dynamic>? score,
+  }) {
     var aliasIndex = 0;
     String nextAlias() => '__rivet_t${aliasIndex++}';
     final rootAlias = nextAlias();
@@ -188,6 +220,10 @@ final class RivetFind<Definition, Row> {
       for (var index = 0; index < _includes.length; index++)
         '${_compileInclude(_includes[index], _schema, parameters, nextAlias)} AS "__rivet_r$index"',
     ];
+    if (score != null) {
+      final rendered = _renderExpression(score, parameters, nextAlias: nextAlias);
+      selections.add('${score.codec.select(rendered)} AS "__rivet_score"');
+    }
     final sql = StringBuffer(
       'SELECT ${selections.join(', ')} FROM ${_schema.qualifiedName} AS ${quoteIdentifier(rootAlias)}',
     );
@@ -213,6 +249,57 @@ final class RivetFind<Definition, Row> {
     if (effectiveLimit != null) sql.write(' LIMIT $effectiveLimit');
     if (_offset != null) sql.write(' OFFSET $_offset');
     return RivetCompiledQuery(sql.toString(), parameters);
+  }
+}
+
+final class RivetScoredFind<Definition, Row, Score extends double?> {
+  const RivetScoredFind(this._find, this._score);
+
+  final RivetFind<Definition, Row> _find;
+  final RivetExpression<Score> _score;
+
+  Future<List<ScoredRow<Row>>> get(RivetExecutor executor) =>
+      executor.execute(_find._compile(score: _score), _decode);
+
+  Future<ScoredRow<Row>> getSingle(RivetExecutor executor) async {
+    final rows = await executor.execute(
+      _find._compile(terminalLimit: 2, score: _score),
+      _decode,
+    );
+    if (rows.length != 1) {
+      throw RivetCardinalityException(expected: 'exactly one', actual: rows.length);
+    }
+    return rows.single;
+  }
+
+  Future<ScoredRow<Row>?> getSingleOrNull(RivetExecutor executor) async {
+    final rows = await executor.execute(
+      _find._compile(terminalLimit: 2, score: _score),
+      _decode,
+    );
+    if (rows.length > 1) {
+      throw RivetCardinalityException(expected: 'zero or one', actual: rows.length);
+    }
+    return rows.firstOrNull;
+  }
+
+  Future<ScoredRow<Row>?> getFirstOrNull(RivetExecutor executor) async {
+    final rows = await executor.execute(
+      _find._compile(terminalLimit: 1, score: _score),
+      _decode,
+    );
+    return rows.firstOrNull;
+  }
+
+  ScoredRow<Row> _decode(List<Object?> values, List<bool> sqlNulls) {
+    final scoreIndex = _find._schema.columns.length + _find._includes.length;
+    return ScoredRow(
+      row: _find._decodeRow(values, sqlNulls),
+      score: _score.codec.decode(
+        values[scoreIndex],
+        isSqlNull: sqlNulls[scoreIndex],
+      ),
+    );
   }
 }
 
@@ -416,21 +503,30 @@ String _renderOrders(
 }) => orders
     .map((order) {
       final expression = order.expression;
-      final rendered = expression is RivetAliasedExpression<dynamic>
-          ? (expression as RivetAliasedExpression<dynamic>).renderWith(
-              (int index) => '\$${parameters.length + index + 1}',
-              nextAlias ??
-                  (throw const RivetUnsupportedQueryException(
-                    'Relation aggregate ordering requires an aliased query context.',
-                  )),
-            )
-          : expression.renderParameters(startAt: parameters.length + 1);
-      parameters.addAll(expression.parameters);
+      final rendered = _renderExpression(expression, parameters, nextAlias: nextAlias);
       final direction = order.descending ? 'DESC' : 'ASC';
       final nulls = order.nulls == NullsOrder.first ? 'FIRST' : 'LAST';
       return '$rendered $direction NULLS $nulls';
     })
     .join(', ');
+
+String _renderExpression(
+  RivetExpression<dynamic> expression,
+  List<Object?> parameters, {
+  String Function()? nextAlias,
+}) {
+  final rendered = expression is RivetAliasedExpression<dynamic>
+      ? expression.renderWith(
+          (index) => '\$${parameters.length + index + 1}',
+          nextAlias ??
+              (throw const RivetUnsupportedQueryException(
+                'The expression requires an aliased query context.',
+              )),
+        )
+      : expression.renderParameters(startAt: parameters.length + 1);
+  parameters.addAll(expression.parameters);
+  return rendered;
+}
 
 int? _positiveOrNull(int? value, String name) {
   if (value != null && value <= 0) throw ArgumentError.value(value, name, 'must be positive');

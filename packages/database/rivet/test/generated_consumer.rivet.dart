@@ -797,6 +797,8 @@ final class RelationalPostsRow {
     required this.reviewerId,
     required this.title,
     required this.rank,
+    required this.weight,
+    required this.quality,
     this.author = const Relation.unloaded(),
     this.reviewer = const Relation.unloaded(),
     this.comments = const Relation.unloaded(),
@@ -817,6 +819,12 @@ final class RelationalPostsRow {
   /// Value read from `rank`.
   final int rank;
 
+  /// Value read from `weight`.
+  final double weight;
+
+  /// Value read from `quality`.
+  final double? quality;
+
   /// Loaded or unloaded `author` relation.
   final Relation<RelationalUsersRow?> author;
 
@@ -836,6 +844,8 @@ final class RelationalPostsCompanion
     required this.reviewerId,
     required this.title,
     required this.rank,
+    required this.weight,
+    required this.quality,
   });
 
   /// Creates values for an insert, leaving defaulted columns absent.
@@ -844,7 +854,10 @@ final class RelationalPostsCompanion
     required RivetValue<RelationalPosts, int, int> authorId,
     required RivetValue<RelationalPosts, String, String> title,
     required RivetValue<RelationalPosts, int, int> rank,
+    required RivetValue<RelationalPosts, double, double> weight,
     RivetValue<RelationalPosts, int?, int?> reviewerId =
+        const RivetValue.absent(),
+    RivetValue<RelationalPosts, double?, double?> quality =
         const RivetValue.absent(),
   }) => RelationalPostsCompanion._(
     id: id,
@@ -852,6 +865,8 @@ final class RelationalPostsCompanion
     reviewerId: reviewerId,
     title: title,
     rank: rank,
+    weight: weight,
+    quality: quality,
   );
 
   /// Creates values for an update, leaving untouched columns absent.
@@ -863,12 +878,18 @@ final class RelationalPostsCompanion
     RivetValue<RelationalPosts, String, String> title =
         const RivetValue.absent(),
     RivetValue<RelationalPosts, int, int> rank = const RivetValue.absent(),
+    RivetValue<RelationalPosts, double, double> weight =
+        const RivetValue.absent(),
+    RivetValue<RelationalPosts, double?, double?> quality =
+        const RivetValue.absent(),
   }) => RelationalPostsCompanion._(
     id: id,
     authorId: authorId,
     reviewerId: reviewerId,
     title: title,
     rank: rank,
+    weight: weight,
+    quality: quality,
   );
 
   /// Mutation value for `id`.
@@ -886,6 +907,12 @@ final class RelationalPostsCompanion
   /// Mutation value for `rank`.
   final RivetValue<RelationalPosts, int, int> rank;
 
+  /// Mutation value for `weight`.
+  final RivetValue<RelationalPosts, double, double> weight;
+
+  /// Mutation value for `quality`.
+  final RivetValue<RelationalPosts, double?, double?> quality;
+
   /// The generated column assignments in declaration order.
   @override
   List<RivetAssignment<RelationalPosts>> operator [](RivetCompanionKey key) => [
@@ -894,6 +921,8 @@ final class RelationalPostsCompanion
     RivetAssignment('reviewerId', reviewerId),
     RivetAssignment('title', title),
     RivetAssignment('rank', rank),
+    RivetAssignment('weight', weight),
+    RivetAssignment('quality', quality),
   ];
 }
 
@@ -949,6 +978,18 @@ final class _$RelationalPostsDB
               isSqlNull: sqlNulls[4],
             )
           : definition.rank.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      weight: transport
+          ? definition.weight.decodeTransportValue(
+              values[5],
+              isSqlNull: sqlNulls[5],
+            )
+          : definition.weight.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+      quality: transport
+          ? definition.quality.decodeTransportValue(
+              values[6],
+              isSqlNull: sqlNulls[6],
+            )
+          : definition.quality.decodeValue(values[6], isSqlNull: sqlNulls[6]),
       author: relations.read('author'),
       reviewer: relations.read('reviewer'),
       comments: relations.read('comments'),
@@ -964,8 +1005,18 @@ final class _$RelationalPostsDB
         definition.reviewerId as RivetColumn<Object?>,
         definition.title as RivetColumn<Object?>,
         definition.rank as RivetColumn<Object?>,
+        definition.weight as RivetColumn<Object?>,
+        definition.quality as RivetColumn<Object?>,
       ],
-      columnNames: ['id', 'authorId', 'reviewerId', 'title', 'rank'],
+      columnNames: [
+        'id',
+        'authorId',
+        'reviewerId',
+        'title',
+        'rank',
+        'weight',
+        'quality',
+      ],
       createDefinition: createDefinition,
       columnsFor: (definition) => [
         definition.id as RivetColumn<Object?>,
@@ -973,6 +1024,8 @@ final class _$RelationalPostsDB
         definition.reviewerId as RivetColumn<Object?>,
         definition.title as RivetColumn<Object?>,
         definition.rank as RivetColumn<Object?>,
+        definition.weight as RivetColumn<Object?>,
+        definition.quality as RivetColumn<Object?>,
       ],
       decode: (values, sqlNulls) => decodeRow(
         values,
@@ -3676,6 +3729,7 @@ final class CodecRecord {
     required this.payload,
     required this.happenedAt,
     required this.status,
+    required this.score,
     required this.embedding,
     required this.ints,
     required this.optionalInts,
@@ -3701,6 +3755,9 @@ final class CodecRecord {
 
   /// Value read from `status`.
   final WorkStatus status;
+
+  /// Value read from `score`.
+  final double? score;
 
   /// Value read from `embedding`.
   final Float32List embedding;
@@ -3738,6 +3795,7 @@ final class CodecValuesCompanion implements RivetCompanion<CodecValues> {
     required this.payload,
     required this.happenedAt,
     required this.status,
+    required this.score,
     required this.embedding,
     required this.ints,
     required this.optionalInts,
@@ -3765,6 +3823,7 @@ final class CodecValuesCompanion implements RivetCompanion<CodecValues> {
     required RivetValue<CodecValues, List<WorkStatus>, List<WorkStatus>>
     statuses,
     required RivetValue<CodecValues, List<UserCode?>, List<String?>> codes,
+    RivetValue<CodecValues, double?, double?> score = const RivetValue.absent(),
     RivetValue<CodecValues, List<int>?, List<int>?> optionalInts =
         const RivetValue.absent(),
   }) => CodecValuesCompanion._(
@@ -3773,6 +3832,7 @@ final class CodecValuesCompanion implements RivetCompanion<CodecValues> {
     payload: payload,
     happenedAt: happenedAt,
     status: status,
+    score: score,
     embedding: embedding,
     ints: ints,
     optionalInts: optionalInts,
@@ -3793,6 +3853,7 @@ final class CodecValuesCompanion implements RivetCompanion<CodecValues> {
         const RivetValue.absent(),
     RivetValue<CodecValues, WorkStatus, WorkStatus> status =
         const RivetValue.absent(),
+    RivetValue<CodecValues, double?, double?> score = const RivetValue.absent(),
     RivetValue<CodecValues, Float32List, Float32List> embedding =
         const RivetValue.absent(),
     RivetValue<CodecValues, List<int>, List<int>> ints =
@@ -3815,6 +3876,7 @@ final class CodecValuesCompanion implements RivetCompanion<CodecValues> {
     payload: payload,
     happenedAt: happenedAt,
     status: status,
+    score: score,
     embedding: embedding,
     ints: ints,
     optionalInts: optionalInts,
@@ -3839,6 +3901,9 @@ final class CodecValuesCompanion implements RivetCompanion<CodecValues> {
 
   /// Mutation value for `status`.
   final RivetValue<CodecValues, WorkStatus, WorkStatus> status;
+
+  /// Mutation value for `score`.
+  final RivetValue<CodecValues, double?, double?> score;
 
   /// Mutation value for `embedding`.
   final RivetValue<CodecValues, Float32List, Float32List> embedding;
@@ -3872,6 +3937,7 @@ final class CodecValuesCompanion implements RivetCompanion<CodecValues> {
     RivetAssignment('payload', payload),
     RivetAssignment('happenedAt', happenedAt),
     RivetAssignment('status', status),
+    RivetAssignment('score', score),
     RivetAssignment('embedding', embedding),
     RivetAssignment('ints', ints),
     RivetAssignment('optionalInts', optionalInts),
@@ -3936,66 +4002,72 @@ final class _$CodecValuesDB
               isSqlNull: sqlNulls[4],
             )
           : definition.status.decodeValue(values[4], isSqlNull: sqlNulls[4]),
-      embedding: transport
-          ? definition.embedding.decodeTransportValue(
+      score: transport
+          ? definition.score.decodeTransportValue(
               values[5],
               isSqlNull: sqlNulls[5],
             )
-          : definition.embedding.decodeValue(values[5], isSqlNull: sqlNulls[5]),
-      ints: transport
-          ? definition.ints.decodeTransportValue(
+          : definition.score.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+      embedding: transport
+          ? definition.embedding.decodeTransportValue(
               values[6],
               isSqlNull: sqlNulls[6],
             )
-          : definition.ints.decodeValue(values[6], isSqlNull: sqlNulls[6]),
-      optionalInts: transport
-          ? definition.optionalInts.decodeTransportValue(
+          : definition.embedding.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+      ints: transport
+          ? definition.ints.decodeTransportValue(
               values[7],
               isSqlNull: sqlNulls[7],
             )
+          : definition.ints.decodeValue(values[7], isSqlNull: sqlNulls[7]),
+      optionalInts: transport
+          ? definition.optionalInts.decodeTransportValue(
+              values[8],
+              isSqlNull: sqlNulls[8],
+            )
           : definition.optionalInts.decodeValue(
-              values[7],
-              isSqlNull: sqlNulls[7],
+              values[8],
+              isSqlNull: sqlNulls[8],
             ),
       nullableInts: transport
           ? definition.nullableInts.decodeTransportValue(
-              values[8],
-              isSqlNull: sqlNulls[8],
+              values[9],
+              isSqlNull: sqlNulls[9],
             )
           : definition.nullableInts.decodeValue(
-              values[8],
-              isSqlNull: sqlNulls[8],
+              values[9],
+              isSqlNull: sqlNulls[9],
             ),
       jsonValues: transport
           ? definition.jsonValues.decodeTransportValue(
-              values[9],
-              isSqlNull: sqlNulls[9],
-            )
-          : definition.jsonValues.decodeValue(
-              values[9],
-              isSqlNull: sqlNulls[9],
-            ),
-      vectors: transport
-          ? definition.vectors.decodeTransportValue(
               values[10],
               isSqlNull: sqlNulls[10],
             )
-          : definition.vectors.decodeValue(values[10], isSqlNull: sqlNulls[10]),
-      statuses: transport
-          ? definition.statuses.decodeTransportValue(
+          : definition.jsonValues.decodeValue(
+              values[10],
+              isSqlNull: sqlNulls[10],
+            ),
+      vectors: transport
+          ? definition.vectors.decodeTransportValue(
               values[11],
               isSqlNull: sqlNulls[11],
             )
-          : definition.statuses.decodeValue(
-              values[11],
-              isSqlNull: sqlNulls[11],
-            ),
-      codes: transport
-          ? definition.codes.decodeTransportValue(
+          : definition.vectors.decodeValue(values[11], isSqlNull: sqlNulls[11]),
+      statuses: transport
+          ? definition.statuses.decodeTransportValue(
               values[12],
               isSqlNull: sqlNulls[12],
             )
-          : definition.codes.decodeValue(values[12], isSqlNull: sqlNulls[12]),
+          : definition.statuses.decodeValue(
+              values[12],
+              isSqlNull: sqlNulls[12],
+            ),
+      codes: transport
+          ? definition.codes.decodeTransportValue(
+              values[13],
+              isSqlNull: sqlNulls[13],
+            )
+          : definition.codes.decodeValue(values[13], isSqlNull: sqlNulls[13]),
       owner: relations.read('owner'),
     );
 
@@ -4009,6 +4081,7 @@ final class _$CodecValuesDB
         definition.payload as RivetColumn<Object?>,
         definition.happenedAt as RivetColumn<Object?>,
         definition.status as RivetColumn<Object?>,
+        definition.score as RivetColumn<Object?>,
         definition.embedding as RivetColumn<Object?>,
         definition.ints as RivetColumn<Object?>,
         definition.optionalInts as RivetColumn<Object?>,
@@ -4024,6 +4097,7 @@ final class _$CodecValuesDB
         'payload',
         'happenedAt',
         'status',
+        'score',
         'embedding',
         'ints',
         'optionalInts',
@@ -4040,6 +4114,7 @@ final class _$CodecValuesDB
         definition.payload as RivetColumn<Object?>,
         definition.happenedAt as RivetColumn<Object?>,
         definition.status as RivetColumn<Object?>,
+        definition.score as RivetColumn<Object?>,
         definition.embedding as RivetColumn<Object?>,
         definition.ints as RivetColumn<Object?>,
         definition.optionalInts as RivetColumn<Object?>,

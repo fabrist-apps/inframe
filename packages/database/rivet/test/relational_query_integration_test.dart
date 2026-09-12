@@ -31,7 +31,9 @@ void main() {
           "authorId" integer NOT NULL,
           "reviewerId" integer,
           title text NOT NULL,
-          rank integer NOT NULL
+          rank integer NOT NULL,
+          weight double precision NOT NULL,
+          quality double precision
         )
       ''');
       await fixture.execute('''
@@ -47,10 +49,10 @@ void main() {
       ''');
       await fixture.execute('''
         INSERT INTO fbr146."relationalPosts" VALUES
-          (11, 1, 2, 'Ada first', 1),
-          (12, 1, NULL, 'Ada third', 3),
-          (13, 1, 2, 'Ada second', 2),
-          (14, 2, 1, 'Grace only', 4)
+          (11, 1, 2, 'Ada first', 1, 1.0, 1.5),
+          (12, 1, NULL, 'Ada third', 3, 3.0, NULL),
+          (13, 1, 2, 'Ada second', 2, 2.0, 2.5),
+          (14, 2, 1, 'Grace only', 4, 4.0, 4.5)
       ''');
       await fixture.execute('''
         INSERT INTO fbr146."relationalComments" VALUES
@@ -484,6 +486,57 @@ void main() {
         expect(filteredCount.name, 'Ada');
         expect(ordered.every((user) => !user.authoredPosts.isLoaded), isTrue);
         expect(statements, hasLength(4));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should return nullable scores with typed rows and includes',
+      () async {
+        final scored = await RelationalPosts.db
+            .find(
+              orderBy: (post) => [post.id.asc()],
+              include: (include) => [include.author()],
+            )
+            .withScore((post) => post.quality)
+            .get(database);
+        expect(scored.map((result) => result.score), [1.5, null, 2.5, 4.5]);
+        expect(scored.map((result) => result.row.id), [11, 12, 13, 14]);
+        expect(scored.every((result) => result.row.author.isLoaded), isTrue);
+
+        final single = await RelationalPosts.db
+            .find(where: (post) => post.id.equals(11))
+            .withScore((post) => post.weight)
+            .getSingle(database);
+        expect(single.row.id, 11);
+        expect(single.score, 1.0);
+        expect(single.row.author.isLoaded, isFalse);
+
+        final missing = await RelationalPosts.db
+            .find(where: (post) => post.id.equals(99))
+            .withScore((post) => post.quality)
+            .getSingleOrNull(database);
+        expect(missing, isNull);
+
+        final first = await RelationalPosts.db
+            .find(orderBy: (post) => [post.id.asc()])
+            .withScore((post) => post.weight)
+            .getFirstOrNull(database);
+        expect(first?.row.id, 11);
+
+        await expectLater(
+          RelationalPosts.db.find().withScore((post) => post.weight).getSingle(database),
+          throwsA(isA<RivetCardinalityException>()),
+        );
+
+        await database.transaction((tx) async {
+          final nullable = await RelationalPosts.db
+              .find(where: (post) => post.id.equals(12))
+              .withScore((post) => post.quality)
+              .getSingle(tx);
+          expect(nullable.score, isNull);
+        });
+        expect(statements, hasLength(6));
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

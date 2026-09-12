@@ -35,6 +35,7 @@ void main() {
           payload jsonb NOT NULL,
           "happenedAt" timestamptz NOT NULL,
           status fbr120."workStatus" NOT NULL,
+          score double precision,
           embedding vector(3) NOT NULL,
           ints integer[] NOT NULL,
           "optionalInts" integer[],
@@ -56,6 +57,7 @@ void main() {
           'null'::jsonb,
           '1969-12-31 23:59:59.123+00',
           'zeta',
+          7.5,
           '[1,2,3]'::vector,
           ARRAY[]::integer[],
           NULL,
@@ -83,7 +85,7 @@ void main() {
       'should preserve catalog values through one, many, and through envelopes',
       () async {
         final direct = await CodecValues.db.find().getSingle(database);
-        final parent = await CodecParents.db
+        final scoredParent = await CodecParents.db
             .find(
               where: (parent) => parent.id.equals(1),
               include: (include) => [
@@ -91,7 +93,12 @@ void main() {
                 include.linkedValues(),
               ],
             )
+            .withScore(
+              (parent) => parent.linkedValues.max((value) => value.score),
+            )
             .getSingle(database);
+        final parent = scoredParent.row;
+        expect(scoredParent.score, 7.5);
         final nested = (parent.values as LoadedRelation<List<CodecRecord>>).value.single;
         final through = (parent.linkedValues as LoadedRelation<List<CodecRecord>>).value.single;
 
@@ -129,6 +136,7 @@ void main() {
                   DateTime.utc(1969, 12, 31, 23, 59, 59, 123),
                 ),
                 status: const RivetValue.present(WorkStatus.queued),
+                score: const RivetValue.present(null),
                 embedding: RivetValue.present(Float32List.fromList([1, 2, 3])),
                 ints: const RivetValue.present([]),
                 optionalInts: const RivetValue.present(null),
@@ -156,6 +164,17 @@ void main() {
         expect(returned.single.nullableInts, direct.nullableInts);
         expect(returned.single.owner.isLoaded, isFalse);
 
+        final scoredRecord = await CodecValues.db
+            .find(
+              where: (value) => value.id.equals(10),
+              include: (include) => [include.owner()],
+            )
+            .withScore((value) => value.score)
+            .getSingle(database);
+        expect(scoredRecord.row, isA<CodecRecord>());
+        expect(scoredRecord.score, 7.5);
+        expect(scoredRecord.row.owner.isLoaded, isTrue);
+
         final enumAggregate = await CodecParents.db
             .find(
               where: (parent) => parent.values
@@ -170,7 +189,7 @@ void main() {
             )
             .getSingle(database);
         expect(enumAggregate.id, 1);
-        expect(statements, hasLength(4));
+        expect(statements, hasLength(5));
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

@@ -55,6 +55,8 @@ final class RelationalPosts extends RivetTableDefinition<RelationalPosts> {
   late final reviewerId = integer().nullable()();
   late final title = text()();
   late final rank = integer()();
+  late final weight = real()();
+  late final quality = real().nullable()();
   late final author = one<RelationalUsers>(
     fields: [authorId],
     references: (user) => [user.id],
@@ -282,6 +284,7 @@ final class CodecValues extends RivetTableDefinition<CodecValues> {
   late final payload = json()();
   late final happenedAt = dateTime()();
   late final status = enumText<WorkStatus>()();
+  late final score = real().nullable()();
   late final embedding = vector(dimensions: 3)();
   late final ints = integer().array()();
   late final optionalInts = integer().array().nullable()();
