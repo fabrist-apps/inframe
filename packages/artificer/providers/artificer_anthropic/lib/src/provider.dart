@@ -294,12 +294,17 @@ Object _plainTextDocument(List<int> bytes) {
 Object _assistantMessage(AssistantMessage message) {
   final replay = message.replay;
   if (replay != null) {
-    return AnthropicInputMessage(
-      role: AnthropicMessageRole.assistant,
-      content: replay.items
-          .where((item) => item.phase != 'unknown-event')
-          .map((item) => AnthropicContentBlock.fromJson(item.data)),
-    );
+    try {
+      return AnthropicInputMessage(
+        role: AnthropicMessageRole.assistant,
+        content: replay.items
+            .where((item) => item.phase != 'unknown-event')
+            .map((item) => AnthropicContentBlock.fromJson(item.data))
+            .toList(),
+      );
+    } on FormatException catch (error) {
+      return InvalidRequestError(error.message);
+    }
   }
   final content = <AnthropicContentBlock>[];
   for (final part in message.parts) {
@@ -315,7 +320,7 @@ Object _assistantMessage(AssistantMessage message) {
       ),
       OpaqueOutputPart(:final providerId, :final api, :final data)
           when providerId == _providerId && api == _messagesApi =>
-        AnthropicContentBlock.fromJson(data),
+        _decodeContentBlock(data),
       _ => const UnsupportedFeatureError(
         'This assistant content cannot be represented by Anthropic Messages.',
       ),
@@ -329,6 +334,14 @@ Object _assistantMessage(AssistantMessage message) {
     );
   }
   return AnthropicInputMessage(role: AnthropicMessageRole.assistant, content: content);
+}
+
+Object _decodeContentBlock(JsonObject data) {
+  try {
+    return AnthropicContentBlock.fromJson(data);
+  } on FormatException catch (error) {
+    return InvalidRequestError(error.message);
+  }
 }
 
 Object _toolUse(String id, String name, ToolArguments arguments) => switch (arguments) {
@@ -395,11 +408,11 @@ Object _nativeToolResult(NativeToolResult result, Map<String, String> nativeCall
 }
 
 Object _contentToolResult(String callId, Iterable<InputPart> parts) {
-  final content = <Object?>[];
+  final content = <AnthropicContentBlock>[];
   for (final part in parts) {
     final native = _inputPart(part);
     if (native is AiError) return native;
-    content.add((native as AnthropicContentBlock).toDart());
+    content.add(native as AnthropicContentBlock);
   }
   return AnthropicToolResultBlock(toolUseId: callId, content: content);
 }

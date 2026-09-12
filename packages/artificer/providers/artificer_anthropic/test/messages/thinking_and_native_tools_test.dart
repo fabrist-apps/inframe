@@ -243,6 +243,130 @@ void main() {
       );
       expect(call.arguments, isA<JsonToolArguments>());
     });
+
+    test('should allow an omitted thinking signature only in a block-start event', () {
+      final startRaw = JsonObject({
+        'type': 'content_block_start',
+        'index': 0,
+        'content_block': {'type': 'thinking', 'thinking': ''},
+      });
+
+      final event = AnthropicMessageEvent.fromJson(startRaw) as AnthropicContentBlockStartEvent;
+      final thinking = event.contentBlock as AnthropicThinkingBlock;
+
+      expect(thinking.signature, isEmpty);
+      expect(thinking.raw.toDart(), {'type': 'thinking', 'thinking': ''});
+      expect(
+        () => AnthropicContentBlock.fromJson(
+          JsonObject({'type': 'thinking', 'thinking': 'Complete.'}),
+        ),
+        throwsFormatException,
+      );
+      expect(
+        () => AnthropicMessage.fromJson(
+          JsonObject({
+            ..._finalMessage,
+            'content': [
+              {'type': 'thinking', 'thinking': 'Complete.'},
+            ],
+          }),
+        ),
+        throwsFormatException,
+      );
+      expect(
+        () => AnthropicMessageEvent.fromJson(
+          JsonObject({
+            'type': 'content_block_start',
+            'index': 0,
+            'content_block': {
+              'type': 'thinking',
+              'thinking': '',
+              'signature': null,
+            },
+          }),
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('should encode only string or native-block tool-result content', () {
+      final content = <AnthropicContentBlock>[
+        AnthropicTextBlock('Done.'),
+        AnthropicImageBlock.file('file_1'),
+      ];
+      final block = AnthropicToolResultBlock(
+        toolUseId: 'tool_1',
+        content: content,
+        isError: true,
+      );
+
+      content.add(AnthropicTextBlock('Later mutation.'));
+
+      expect(block.content, isA<List<AnthropicContentBlock>>());
+      expect(block.toDart(), {
+        'type': 'tool_result',
+        'tool_use_id': 'tool_1',
+        'content': [
+          {'type': 'text', 'text': 'Done.'},
+          {
+            'type': 'image',
+            'source': {'type': 'file', 'file_id': 'file_1'},
+          },
+        ],
+        'is_error': true,
+      });
+      expect(
+        () => (block.content as List<AnthropicContentBlock>).add(
+          AnthropicTextBlock('Mutation.'),
+        ),
+        throwsUnsupportedError,
+      );
+
+      final decoded = AnthropicContentBlock.fromJson(
+        JsonObject({
+          'type': 'tool_result',
+          'tool_use_id': 'tool_2',
+          'content': [
+            {'type': 'text', 'text': 'Decoded.'},
+          ],
+        }),
+      ) as AnthropicToolResultBlock;
+      expect(decoded.content, isA<List<AnthropicContentBlock>>());
+      expect((decoded.content as List<AnthropicContentBlock>).single, isA<AnthropicTextBlock>());
+
+      for (final invalid in <Object>[
+        1,
+        JsonObject({'status': 'done'}),
+        <Object?>[
+          {'type': 'text', 'text': 'Already encoded.'},
+        ],
+      ]) {
+        expect(
+          () => AnthropicToolResultBlock(toolUseId: 'tool_3', content: invalid),
+          throwsArgumentError,
+        );
+      }
+      expect(
+        () => AnthropicContentBlock.fromJson(
+          JsonObject({
+            'type': 'tool_result',
+            'tool_use_id': 'tool_4',
+            'content': {'status': 'done'},
+          }),
+        ),
+        throwsFormatException,
+      );
+      expect(
+        () => AnthropicContentBlock.fromJson(
+          JsonObject({
+            'type': 'tool_result',
+            'tool_use_id': 'tool_5',
+            'content': ['not-a-block'],
+          }),
+        ),
+        throwsFormatException,
+      );
+    });
   });
 }
 

@@ -99,7 +99,7 @@ final class AnthropicFilePage {
         }
         return AnthropicFileMetadata.fromJson(JsonObject(item));
       }),
-      nextPage: _optionalString(value, 'next_page'),
+      nextPage: _requiredNullableString(value, 'next_page'),
       raw: raw,
       extensions: JsonObject(_without(value, {'data', 'next_page'})),
     );
@@ -130,9 +130,13 @@ final class AnthropicDeletedFile {
   /// Decodes a native deletion acknowledgement.
   factory AnthropicDeletedFile.fromJson(JsonObject raw) {
     final value = raw.toDart();
+    final type = _optionalString(value, 'type');
+    if (type != null && type != 'file_deleted') {
+      throw const FormatException('type must be file_deleted or null.');
+    }
     return AnthropicDeletedFile._(
       id: _string(value, 'id'),
-      type: _optionalString(value, 'type'),
+      type: type,
       raw: raw,
       extensions: JsonObject(_without(value, {'id', 'type'})),
     );
@@ -169,6 +173,11 @@ String? _optionalString(Map<String, Object?> value, String key) {
   if (field == null) return null;
   if (field is! String) throw FormatException('$key must be a string or null.');
   return field;
+}
+
+String? _requiredNullableString(Map<String, Object?> value, String key) {
+  if (!value.containsKey(key)) throw FormatException('$key is required.');
+  return _optionalString(value, key);
 }
 
 int _integer(Map<String, Object?> value, String key) {

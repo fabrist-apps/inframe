@@ -71,6 +71,10 @@ void main() {
       expect(streamed.usage?.outputTokens, 14);
       expect(streamed.usage?.totalTokens, 139);
       expect(nonstream.usage?.toDart(), streamed.usage?.toDart());
+      expect(
+        streamed.message.parts.whereType<TextOutputPart>().single.citations.single.uri.scheme,
+        'anthropic',
+      );
       expect(streamedEvents.whereType<PartStarted>().map((event) => event.index), [
         0,
         1,
@@ -177,6 +181,36 @@ void main() {
       expect(error.details!.toDart(), {'type': 'overloaded_error', 'message': 'busy'});
     });
 
+    test('should reject message_stop while a content block remains open', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        await request.drain<void>();
+        request.response
+          ..headers.contentType = ContentType('text', 'event-stream')
+          ..write(_openBlockStream);
+        await request.response.close();
+      });
+      final provider = AnthropicProvider(
+        apiKey: 'secret',
+        baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1'),
+      );
+      addTearDown(provider.close);
+
+      final exit = await provider.messages
+          .streamCommon(
+            AnthropicMessageRequest(
+              model: 'future-model',
+              maxTokens: 100,
+              messages: [AnthropicInputMessage.userText('hello')],
+            ),
+          )
+          .runCollect()
+          .runFutureExit();
+
+      expect(exit, _failedWith<ProtocolError>());
+    });
+
     test('should limit private data retained while assembling a stream', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
@@ -277,7 +311,7 @@ String _sse(String event, Map<String, Object?> data) =>
 
 final String _completeStream = [
   _sse('message_start', {'type': 'message_start', 'message': _streamStart}),
-  _start(0, {'type': 'thinking', 'thinking': '', 'signature': ''}),
+  _start(0, {'type': 'thinking', 'thinking': ''}),
   _start(1, {'type': 'text', 'text': '', 'citations': null}),
   _delta(0, {'type': 'thinking_delta', 'thinking': 'Check sources.'}),
   _delta(1, {'type': 'text_delta', 'text': 'Found it.'}),
@@ -297,7 +331,7 @@ final String _completeStream = [
     'type': 'citations_delta',
     'citation': {
       'type': 'web_search_result_location',
-      'url': 'https://example.com/source',
+      'url': 'http://example.com:invalid',
       'title': 'Source',
     },
   }),
@@ -380,6 +414,17 @@ final String _errorStream = [
   }),
 ].join();
 
+final String _openBlockStream = [
+  _sse('message_start', {'type': 'message_start', 'message': _streamStart}),
+  _start(0, {'type': 'text', 'text': '', 'citations': null}),
+  _sse('message_delta', {
+    'type': 'message_delta',
+    'delta': {'stop_reason': 'end_turn', 'stop_sequence': null},
+    'usage': {'output_tokens': 1},
+  }),
+  _sse('message_stop', {'type': 'message_stop'}),
+].join();
+
 const _streamStart = <String, Object?>{
   'id': 'msg_stream',
   'type': 'message',
@@ -409,7 +454,7 @@ const _completeMessage = <String, Object?>{
       'citations': [
         {
           'type': 'web_search_result_location',
-          'url': 'https://example.com/source',
+          'url': 'http://example.com:invalid',
           'title': 'Source',
         },
       ],

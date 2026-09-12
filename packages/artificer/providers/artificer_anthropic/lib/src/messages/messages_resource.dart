@@ -367,6 +367,16 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
         partialOutput: partialOutput,
       );
     }
+    final openBlockIndexes = [
+      for (final entry in _blocks.entries)
+        if (!entry.value.finished) entry.key,
+    ]..sort();
+    if (openBlockIndexes.isNotEmpty) {
+      throw ProtocolError(
+        'Messages stream ended before content blocks ${openBlockIndexes.join(', ')} closed.',
+        partialOutput: partialOutput,
+      );
+    }
     final deltaValue = delta.delta.toDart();
     final orderedBlocks = _blocks.keys.toList()..sort();
     final content = <Object?>[
@@ -643,18 +653,7 @@ OutputPart _commonPart(
 }) => switch (block) {
   AnthropicTextBlock(:final text, :final citations) => TextOutputPart(
     text,
-    citations: (citations ?? const []).map(
-      (citation) => Citation(
-        uri: Uri.parse(
-          (citation.toDart()['url'] as String?) ??
-              'anthropic://citation/${Uri.encodeComponent(citation.encode())}',
-        ),
-        title: citation.toDart()['title'] as String?,
-        documentReference:
-            citation.toDart()['document_id'] as String? ?? citation.toDart()['file_id'] as String?,
-        nativeMetadata: citation,
-      ),
-    ),
+    citations: (citations ?? const []).map(_commonCitation),
   ),
   AnthropicToolUseBlock(:final id, :final name, :final input) => ApplicationToolCallPart(
     id: id,
@@ -699,6 +698,19 @@ OutputPart _commonPart(
     data: block.raw,
   ),
 };
+
+Citation _commonCitation(JsonObject citation) {
+  final value = citation.toDart();
+  final url = value['url'] as String?;
+  return Citation(
+    uri:
+        (url == null ? null : Uri.tryParse(url)) ??
+        Uri.parse('anthropic://citation/${Uri.encodeComponent(citation.encode())}'),
+    title: value['title'] as String?,
+    documentReference: value['document_id'] as String? ?? value['file_id'] as String?,
+    nativeMetadata: citation,
+  );
+}
 
 RefusalPart _refusalPart(JsonObject details) {
   final raw = details.toDart();

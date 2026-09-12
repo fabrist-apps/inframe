@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:artificer_anthropic/artificer_anthropic.dart';
+import 'package:artificer_anthropic/src/decode.dart';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
@@ -308,6 +309,49 @@ void main() {
 
       expect(
         () => AnthropicFileMetadata.fromJson(JsonObject(malformed)),
+        throwsFormatException,
+      );
+    });
+  });
+
+  group('AnthropicFilePage', () {
+    test('should require next_page while accepting an explicit null', () async {
+      final withNull = AnthropicFilePage.fromJson(
+        JsonObject({'data': <Object?>[], 'next_page': null}),
+      );
+      final missingNextPage = JsonObject({'data': <Object?>[]});
+      final response = NativeResponse(
+        value: missingNextPage,
+        payload: NativePayload(
+          providerId: 'anthropic',
+          api: 'files',
+          modelId: 'files',
+          json: missingNextPage,
+        ),
+        metadata: ResponseMetadata(statusCode: HttpStatus.ok),
+      );
+
+      final exit = await decodeNativeResponse(
+        response,
+        AnthropicFilePage.fromJson,
+      ).runFutureExit();
+
+      expect(withNull.nextPage, isNull);
+      expect(exit, _failedWith<ProtocolError>());
+    });
+  });
+
+  group('AnthropicDeletedFile', () {
+    test('should preserve null type and reject other non-null discriminators', () {
+      final withoutType = AnthropicDeletedFile.fromJson(
+        JsonObject({'id': 'file_1', 'type': null}),
+      );
+
+      expect(withoutType.type, isNull);
+      expect(
+        () => AnthropicDeletedFile.fromJson(
+          JsonObject({'id': 'file_1', 'type': 'future_deleted'}),
+        ),
         throwsFormatException,
       );
     });

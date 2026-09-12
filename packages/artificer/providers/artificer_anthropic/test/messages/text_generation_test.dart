@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:artificer_anthropic/artificer_anthropic.dart';
 import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/json.dart';
 import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
 
@@ -148,8 +149,55 @@ void main() {
       expect(common.whereType<TextPartDelta>().single.text, 'Hello.');
       expect(common.whereType<GenerationFinished>().single.result.text, 'Hello.');
     });
+
+    test('should report malformed replay and opaque blocks through the error channel', () async {
+      final provider = AnthropicProvider(apiKey: 'secret');
+      addTearDown(provider.close);
+      final invalidBlock = JsonObject({
+        'type': 'thinking',
+        'thinking': 'missing signature',
+      });
+      final replay = AssistantMessage(
+        [TextOutputPart('ignored')],
+        replay: ProviderReplay(
+          providerId: 'anthropic',
+          api: 'messages',
+          modelId: 'future-model',
+          items: [ReplayItem(data: invalidBlock)],
+        ),
+      );
+      final opaque = AssistantMessage([
+        OpaqueOutputPart(
+          providerId: 'anthropic',
+          api: 'messages',
+          kind: 'thinking',
+          data: invalidBlock,
+        ),
+      ]);
+
+      expect(
+        await provider
+            .languageModel('future-model')
+            .generate(GenerationRequest(messages: [replay]))
+            .runFutureExit(),
+        _failedWith<InvalidRequestError>(),
+      );
+      expect(
+        await provider
+            .languageModel('future-model')
+            .generate(GenerationRequest(messages: [opaque]))
+            .runFutureExit(),
+        _failedWith<InvalidRequestError>(),
+      );
+    });
   });
 }
+
+Matcher _failedWith<E extends AiError>() => isA<Failed<Object?, AiError>>().having(
+  (failure) => failure.cause,
+  'cause',
+  isA<Expected<AiError>>().having((expected) => expected.error, 'error', isA<E>()),
+);
 
 String _sse(String event, Map<String, Object?> data) =>
     'event: $event\ndata: ${jsonEncode(data)}\n\n';

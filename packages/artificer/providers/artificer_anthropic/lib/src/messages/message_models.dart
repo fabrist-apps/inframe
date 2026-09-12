@@ -96,7 +96,7 @@ sealed class AnthropicContentBlock {
         input: JsonValue.fromDart(value['input']),
         raw: raw,
       ),
-      'tool_result' => AnthropicToolResultBlock._(raw),
+      'tool_result' => AnthropicToolResultBlock._fromJson(raw),
       'thinking' => AnthropicThinkingBlock._(
         thinking: _string(value, 'thinking'),
         signature: _string(value, 'signature'),
@@ -121,6 +121,16 @@ sealed class AnthropicContentBlock {
       ),
       final type => AnthropicUnknownContentBlock._(type: type, raw: raw),
     };
+  }
+
+  static AnthropicContentBlock _fromStreamStartJson(JsonObject raw) {
+    final value = raw.toDart();
+    if (_string(value, 'type') != 'thinking') return fromJson(raw);
+    return AnthropicThinkingBlock._(
+      thinking: _string(value, 'thinking'),
+      signature: value.containsKey('signature') ? _string(value, 'signature') : '',
+      raw: raw,
+    );
   }
 }
 
@@ -291,18 +301,36 @@ final class AnthropicToolUseBlock extends AnthropicContentBlock {
 /// A caller-supplied tool result replay block.
 final class AnthropicToolResultBlock extends AnthropicContentBlock {
   /// Creates a result with native string or ordered content.
-  AnthropicToolResultBlock({
+  factory AnthropicToolResultBlock({
     required String toolUseId,
     required Object content,
     bool isError = false,
-  }) : raw = JsonObject({
-         'type': 'tool_result',
-         'tool_use_id': _nonEmpty(toolUseId, 'toolUseId'),
-         'content': content,
-         if (isError) 'is_error': true,
-       });
+  }) {
+    final validatedContent = _validateToolResultContent(content);
+    return AnthropicToolResultBlock._(
+      content: validatedContent,
+      raw: JsonObject({
+        'type': 'tool_result',
+        'tool_use_id': _nonEmpty(toolUseId, 'toolUseId'),
+        'content': _toolResultContentToDart(validatedContent),
+        if (isError) 'is_error': true,
+      }),
+    );
+  }
 
-  AnthropicToolResultBlock._(this.raw);
+  factory AnthropicToolResultBlock._fromJson(JsonObject raw) {
+    final value = raw.toDart();
+    _string(value, 'tool_use_id');
+    return AnthropicToolResultBlock._(
+      content: _decodeToolResultContent(value['content']),
+      raw: raw,
+    );
+  }
+
+  AnthropicToolResultBlock._({required this.content, required this.raw});
+
+  /// A native string or immutable ordered Anthropic content blocks.
+  final Object content;
 
   @override
   String get type => 'tool_result';
@@ -975,7 +1003,7 @@ sealed class AnthropicMessageEvent {
       ),
       'content_block_start' => AnthropicContentBlockStartEvent._(
         index: _int(value, 'index'),
-        contentBlock: AnthropicContentBlock.fromJson(
+        contentBlock: AnthropicContentBlock._fromStreamStartJson(
           JsonObject.fromDart(value['content_block']),
         ),
         raw: raw,
@@ -1129,4 +1157,38 @@ List<JsonObject>? _nullableObjects(Map<String, Object?> value, String key) {
 Map<String, Object?> _without(Map<String, Object?> value, Set<String> keys) => {
   for (final entry in value.entries)
     if (!keys.contains(entry.key)) entry.key: entry.value,
+};
+
+Object _validateToolResultContent(Object content) => switch (content) {
+  String() => content,
+  List<Object?>() when content.every((item) => item is AnthropicContentBlock) =>
+    List<AnthropicContentBlock>.unmodifiable(content.cast<AnthropicContentBlock>()),
+  _ => throw ArgumentError.value(
+    content,
+    'content',
+    'must be a String or List<AnthropicContentBlock>',
+  ),
+};
+
+Object _decodeToolResultContent(Object? content) => switch (content) {
+  String() => content,
+  List<Object?>() => List<AnthropicContentBlock>.unmodifiable(
+    content.map(_decodeToolResultBlock),
+  ),
+  _ => throw const FormatException(
+    'tool_result content must be a string or an array of content blocks.',
+  ),
+};
+
+AnthropicContentBlock _decodeToolResultBlock(Object? value) {
+  if (value is! Map<String, Object?>) {
+    throw const FormatException('tool_result content entries must be objects.');
+  }
+  return AnthropicContentBlock.fromJson(JsonObject(value));
+}
+
+Object _toolResultContentToDart(Object content) => switch (content) {
+  String() => content,
+  List<AnthropicContentBlock>() => content.map((block) => block.toDart()).toList(),
+  _ => throw StateError('Validated tool-result content became invalid.'),
 };
