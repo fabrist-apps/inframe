@@ -527,6 +527,7 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
   final GenerationStreamAssembler assembler;
   final StringBuffer _text = StringBuffer();
   final StringBuffer _refusal = StringBuffer();
+  final StringBuffer _reasoningContent = StringBuffer();
   final Map<int, _ToolStreamState> _tools = {};
   final Map<String, Object?> _choiceExtensions = {};
   final List<ReplayItem> _replay = [];
@@ -653,6 +654,9 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
     }
     final extensions = _without(value, {'role', 'content', 'refusal', 'tool_calls'});
     if (extensions.isNotEmpty) {
+      if (extensions['reasoning_content'] case final String reasoningContent) {
+        _reasoningContent.write(reasoningContent);
+      }
       final raw = JsonObject(extensions);
       _replay.add(ReplayItem(phase: 'delta-extension', data: raw));
       yield assembler.providerEvent('compatible.delta-extension', raw);
@@ -722,6 +726,7 @@ final class _OpenAiCompatibleCommonProtocol<O> implements SseProtocol<Generation
             'role': 'assistant',
             if (_startedText) 'content': _text.toString(),
             if (_startedRefusal) 'refusal': _refusal.toString(),
+            if (_reasoningContent.isNotEmpty) 'reasoning_content': _reasoningContent.toString(),
             if (toolCalls.isNotEmpty)
               'tool_calls': [
                 for (final entry in toolCalls)
@@ -924,6 +929,23 @@ Map<String, Object?> _compatibleReplayMessage(ProviderReplay replay) {
   if (message['role'] != 'assistant') {
     throw const InvalidRequestError(
       'Compatible assistant replay must contain an assistant message.',
+    );
+  }
+  final streamedReasoning = StringBuffer();
+  for (final item in replay.items.where((item) => item.phase == 'delta-extension')) {
+    final extension = item.data.toDart();
+    if (extension.keys.any((key) => key != 'reasoning_content') ||
+        extension['reasoning_content'] is! String) {
+      throw const InvalidRequestError(
+        'Compatible assistant replay contains a delta extension that cannot be reconstructed.',
+      );
+    }
+    streamedReasoning.write(extension['reasoning_content']! as String);
+  }
+  if (streamedReasoning.isNotEmpty &&
+      message['reasoning_content'] != streamedReasoning.toString()) {
+    throw const InvalidRequestError(
+      'Compatible assistant replay is missing its reconstructed reasoning content.',
     );
   }
   return message;

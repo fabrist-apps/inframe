@@ -62,9 +62,10 @@ Completions endpoints. Provider packages implement `OpenAiCompatibleChatDialect<
 options and add vendor fields. The codec always requests one candidate, requires an explicit index when
 normalizing a native multi-choice response, retains unknown native extensions, and rejects `extraBody`
 collisions before I/O. Nonstreaming and assembled streaming results retain a native choice for exact
-same-target assistant replay, including refusal, usage, choice, tool-call, and function extensions. It
-does not claim that every OpenAI-shaped service or vendor feature is compatible; Anthropic and Google
-keep their own protocol adapters.
+same-target assistant replay, including refusal, streamed reasoning content, usage, choice, tool-call,
+and function extensions. The codec rejects replay when an opaque streamed delta cannot be reconstructed
+as an assistant message. It does not claim that every OpenAI-shaped service or vendor feature is
+compatible; Anthropic and Google keep their own protocol adapters.
 
 The compatible fixtures are pinned on 2026-09-12 to the published
 [xAI Chat Completions reference](https://docs.x.ai/developers/rest-api-reference/inference/chat-completions)

@@ -564,7 +564,7 @@ final class _RequestLifetime {
     final subscription = _bodySubscription;
     if (subscription != null) {
       await subscription.cancel();
-    } else if (_cancelled.isCompleted) {
+    } else {
       final response = _response;
       if (response != null) await response.stream.listen(null).cancel();
     }

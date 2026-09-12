@@ -174,6 +174,40 @@ void main() {
         ),
         isA<Failure<OpenAiCompatibleChatRequest, AiError>>(),
       );
+      final ambiguousReplay = ProviderReplay(
+        providerId: 'xai',
+        api: 'chat.completions',
+        modelId: 'model-1',
+        items: [
+          ReplayItem(
+            phase: 'choice',
+            data: JsonObject.fromDart({
+              'index': 0,
+              'message': {'role': 'assistant', 'content': 'answer'},
+              'finish_reason': 'stop',
+            }),
+          ),
+          ReplayItem(
+            phase: 'delta-extension',
+            data: JsonObject.fromDart({'opaque_signature': 'cannot merge'}),
+          ),
+        ],
+      );
+      expect(
+        xai.encode(
+          GenerationRequest(
+            messages: [
+              AssistantMessage(
+                [TextOutputPart('answer')],
+                replay: ambiguousReplay,
+              ),
+            ],
+          ),
+          modelId: 'model-1',
+          options: const _Options({'mode': 'auto'}),
+        ),
+        isA<Failure<OpenAiCompatibleChatRequest, AiError>>(),
+      );
     });
 
     test('common and typed streams share framing while preserving malformed arguments', () async {
@@ -261,7 +295,19 @@ void main() {
         9,
       );
       expect(finished.message.replay?.items.first.phase, 'choice');
-      expect(common.whereType<ProviderEvent>(), hasLength(1));
+      final replayed = _success(
+        codec.encode(
+          GenerationRequest(messages: [finished.message]),
+          modelId: 'model-1',
+          options: const _Options({'mode': 'auto'}),
+        ),
+      );
+      final replayedMessages = replayed.body.toDart()['messages']! as List<Object?>;
+      expect(
+        (replayedMessages.single! as Map<String, Object?>)['reasoning_content'],
+        'signed-trace',
+      );
+      expect(common.whereType<ProviderEvent>(), hasLength(3));
       expect(common.last, isA<GenerationFinished>());
       expect(native.whereType<OpenAiCompatibleChunk>(), hasLength(5));
       expect(native.whereType<OpenAiCompatibleUnknownEvent>(), hasLength(1));
@@ -368,7 +414,11 @@ List<int> _streamBody() {
       'choices': [
         {
           'index': 0,
-          'delta': {'role': 'assistant', 'content': 'Answer '},
+          'delta': {
+            'role': 'assistant',
+            'content': 'Answer ',
+            'reasoning_content': 'signed-',
+          },
           'finish_reason': null,
         },
       ],
@@ -404,7 +454,7 @@ List<int> _streamBody() {
       'choices': [
         {
           'index': 0,
-          'delta': {'content': 'done'},
+          'delta': {'content': 'done', 'reasoning_content': 'trace'},
           'finish_reason': null,
         },
       ],

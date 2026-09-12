@@ -352,6 +352,31 @@ void main() {
       }
     });
 
+    test('releases an acquired body when protocol start is defective', () async {
+      var bodyCancelled = false;
+      final body = StreamController<List<int>>(
+        sync: true,
+        onListen: () {},
+        onCancel: () => bodyCancelled = true,
+      );
+      final client = ProviderHttpClient(
+        baseUrl: Uri.parse('https://example.test/'),
+        client: _ResponseClient(() => http.StreamedResponse(body.stream, 200)),
+      );
+
+      final exit = await client
+          .sendSse<String>(
+            ProviderHttpRequest(method: 'GET', path: 'stream'),
+            createProtocol: () => _DefectProtocol(_DefectPhase.start),
+          )
+          .runCollect()
+          .runFutureExit();
+      await client.close();
+
+      expect((exit as Failed<List<String>, AiError>).cause.containsFatal, isTrue);
+      expect(bodyCancelled, isTrue);
+    });
+
     test('retains a cleanup defect after early successful observation', () async {
       final body = StreamController<List<int>>(
         onListen: () {},
