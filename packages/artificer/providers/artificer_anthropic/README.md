@@ -31,6 +31,14 @@ and HTTP metadata. `provider.messages.stream` emits typed native events. Common 
 `message_stop`; an error event or premature EOF fails without a terminal generation result. Unknown
 events and fields remain available for inspection.
 
+Common streaming emits stable indexed part starts, text/reasoning/tool-argument deltas, cumulative
+usage, retained provider events, part finishes, and one `GenerationFinished`. It assembles late
+citations and thinking signatures into the native payload and replay carrier. Malformed tool JSON
+stays available as `MalformedToolArguments.originalText`; the SDK does not repair it. Every Flow is
+cold, so repeated and concurrent consumption owns separate parser and accumulation state. Cancel
+the Dart stream subscription or interrupt its Conflux fiber to stop a request; cleanup completes
+before a terminal result can be emitted.
+
 Common image inputs support documented JPEG, PNG, GIF, and WebP bytes, URLs, and Anthropic file
 references. Document inputs support inline PDF or UTF-8 text, PDF URLs, and Anthropic file
 references. Audio and video fail before network I/O. Native block constructors expose cache-control

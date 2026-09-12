@@ -12,9 +12,19 @@ Future<void> main() async {
     );
     final generation = provider.languageModel(modelId).generate(request);
     final stream = provider.languageModel(modelId).stream(request).runCollect();
+    final nativeStream = provider.messages
+        .stream(
+          AnthropicMessageRequest(
+            model: modelId,
+            maxTokens: request.options.maxOutputTokens,
+            messages: [AnthropicInputMessage.userText('Explain this change.')],
+          ),
+        )
+        .runCollect();
     if (const bool.fromEnvironment('RUN_ANTHROPIC_EXAMPLE')) {
       await generation.runFuture();
       await stream.runFuture();
+      await nativeStream.runFuture();
     }
   } finally {
     await provider.close();

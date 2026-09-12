@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:artificer_anthropic/src/messages/message_models.dart';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
@@ -79,10 +81,7 @@ final class AnthropicMessagesResource {
     final usage = _commonUsage(value.usage);
     final parts = value.content.map(_commonPart).toList();
     if (value.stopReason == 'refusal' && value.stopDetails != null) {
-      final details = value.stopDetails!;
-      final raw = details.toDart();
-      final explanation = raw['message'] as String? ?? raw['reason'] as String? ?? details.encode();
-      parts.add(RefusalPart(explanation));
+      parts.add(_refusalPart(value.stopDetails!));
     }
     return GenerationResult(
       message: AssistantMessage(
@@ -164,7 +163,8 @@ final class _AnthropicNativeProtocol implements SseProtocol<AnthropicMessageEven
 
 final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
   _AnthropicCommonProtocol(this.modelId, {required int maxAssembledBytes})
-    : assembler = GenerationStreamAssembler(
+    : _maxAssembledBytes = maxAssembledBytes,
+      assembler = GenerationStreamAssembler(
         providerId: _providerId,
         api: _api,
         modelId: modelId,
@@ -172,12 +172,13 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
       );
 
   final String modelId;
+  final int _maxAssembledBytes;
   final GenerationStreamAssembler assembler;
-  final Map<int, StringBuffer> _text = {};
-  final Map<int, JsonObject> _startedBlocks = {};
+  final Map<int, _AnthropicBlockAssembly> _blocks = {};
   final List<ReplayItem> _unknownEvents = [];
   AnthropicMessage? _startMessage;
   AnthropicMessageDeltaEvent? _lastDelta;
+  ResponseMetadata? _metadata;
   var _terminal = false;
 
   @override
@@ -187,56 +188,116 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
   Object? get partialOutput => assembler.partialMessage;
 
   @override
-  Iterable<GenerationEvent> start(ResponseMetadata metadata) => [assembler.start(metadata)];
+  Iterable<GenerationEvent> start(ResponseMetadata metadata) {
+    _metadata = metadata;
+    return [assembler.start(metadata)];
+  }
 
   @override
   Iterable<GenerationEvent> decode(SseEvent event) sync* {
     final decoded = _decodeEvent(event);
     switch (decoded) {
       case AnthropicMessageStartEvent(:final message):
+        if (_startMessage != null || _blocks.isNotEmpty || _lastDelta != null) {
+          throw ProtocolError(
+            'message_start arrived after message state was initialized.',
+            partialOutput: partialOutput,
+          );
+        }
         _startMessage = message;
         assembler.setResponseId(message.id);
         yield assembler.updateUsage(_commonUsage(message.usage));
       case AnthropicContentBlockStartEvent(:final index, :final contentBlock):
-        if (contentBlock is! AnthropicTextBlock) {
+        if (_startMessage == null) {
           throw ProtocolError(
-            'Content block ${contentBlock.type} is not supported by this Messages snapshot.',
-            partialOutput: assembler.partialMessage,
+            'Content block started before message_start.',
+            partialOutput: partialOutput,
           );
         }
-        _startedBlocks[index] = contentBlock.raw;
-        _text[index] = StringBuffer(contentBlock.text);
-        yield assembler.startPart(index: index, kind: GenerationPartKind.text);
+        if (_blocks.containsKey(index)) {
+          throw ProtocolError(
+            'Content block $index started more than once.',
+            partialOutput: partialOutput,
+          );
+        }
+        final block = _AnthropicBlockAssembly(contentBlock);
+        _blocks[index] = block;
+        yield assembler.startPart(
+          index: index,
+          kind: block.kind,
+          owner: block.owner,
+        );
       case AnthropicContentBlockDeltaEvent(:final index, :final delta):
+        final block = _blocks[index];
+        if (block == null || block.finished) {
+          throw ProtocolError(
+            'Content block delta arrived outside an open block.',
+            partialOutput: partialOutput,
+          );
+        }
         final value = delta.toDart();
-        if (value['type'] != 'text_delta' || value['text'] is! String) {
-          throw ProtocolError(
-            'Content block delta is not valid text.',
-            partialOutput: assembler.partialMessage,
-          );
+        switch (value['type']) {
+          case 'text_delta':
+            final text = _deltaString(value, 'text', partialOutput);
+            block.appendText(text, expectedType: 'text', partialOutput: partialOutput);
+            yield assembler.appendText(index, text);
+          case 'thinking_delta':
+            final text = _deltaString(value, 'thinking', partialOutput);
+            block.appendText(text, expectedType: 'thinking', partialOutput: partialOutput);
+            yield assembler.appendText(index, text);
+          case 'signature_delta':
+            block.appendSignature(
+              _deltaString(value, 'signature', partialOutput),
+              partialOutput: partialOutput,
+            );
+            yield assembler.providerEvent('signature_delta', delta);
+          case 'citations_delta':
+            try {
+              block.appendCitation(
+                JsonObject.fromDart(value['citation']),
+                partialOutput: partialOutput,
+              );
+            } on FormatException catch (error) {
+              throw ProtocolError(error.message, partialOutput: partialOutput);
+            }
+            yield assembler.providerEvent('citations_delta', delta);
+          case 'input_json_delta':
+            final fragment = _deltaString(value, 'partial_json', partialOutput);
+            block.appendInput(fragment, partialOutput: partialOutput);
+            if (block.kind == GenerationPartKind.applicationToolCall) {
+              yield assembler.appendText(index, fragment);
+            } else {
+              yield assembler.appendOpaque(index, delta);
+            }
+          default:
+            throw ProtocolError(
+              'Unknown content block delta ${value['type']}.',
+              partialOutput: partialOutput,
+            );
         }
-        final text = value['text']! as String;
-        final buffer = _text[index];
-        if (buffer == null) {
-          throw ProtocolError(
-            'Text delta arrived before block start.',
-            partialOutput: partialOutput,
-          );
-        }
-        buffer.write(text);
-        yield assembler.appendText(index, text);
       case AnthropicContentBlockStopEvent(:final index):
-        final buffer = _text[index];
-        final start = _startedBlocks[index];
-        if (buffer == null || start == null) {
+        final block = _blocks[index];
+        if (block == null || block.finished) {
           throw ProtocolError(
-            'Content block stopped before it started.',
+            'Content block stopped outside an open block.',
             partialOutput: partialOutput,
           );
         }
-        final raw = JsonObject({...start.toDart(), 'text': buffer.toString()});
-        yield assembler.finishPart(index, _commonPart(AnthropicContentBlock.fromJson(raw)));
+        block.finished = true;
+        yield assembler.finishPart(
+          index,
+          _commonPart(
+            block.finish(),
+            malformedInputIssue: block.inputIssue,
+          ),
+        );
       case AnthropicMessageDeltaEvent():
+        if (_startMessage == null) {
+          throw ProtocolError(
+            'message_delta arrived before message_start.',
+            partialOutput: partialOutput,
+          );
+        }
         _lastDelta = decoded;
         final start = _startMessage;
         yield assembler.updateUsage(
@@ -250,6 +311,12 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
           ),
         );
       case AnthropicMessageStopEvent():
+        if (_startMessage == null || _lastDelta == null) {
+          throw ProtocolError(
+            'message_stop arrived before required message state.',
+            partialOutput: partialOutput,
+          );
+        }
         _terminal = true;
       case AnthropicPingEvent():
         yield assembler.providerEvent(decoded.type, decoded.raw);
@@ -257,7 +324,7 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
         _unknownEvents.add(ReplayItem(phase: 'unknown-event', data: decoded.raw));
         yield assembler.providerEvent(decoded.type, decoded.raw);
       case AnthropicErrorEvent(:final error):
-        throw _streamError(error, null, partialOutput: partialOutput);
+        throw _streamError(error, _metadata, partialOutput: partialOutput);
     }
   }
 
@@ -278,21 +345,41 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
       );
     }
     final deltaValue = delta.delta.toDart();
+    final orderedBlocks = _blocks.keys.toList()..sort();
     final content = <Object?>[
-      for (final index in (_startedBlocks.keys.toList()..sort()))
-        {..._startedBlocks[index]!.toDart(), 'text': _text[index].toString()},
+      for (final index in orderedBlocks) _blocks[index]!.finish().toDart(),
     ];
     final native = JsonObject({
       ...start.raw.toDart(),
       'content': content,
-      'stop_reason': deltaValue['stop_reason'],
-      'stop_sequence': deltaValue['stop_sequence'],
-      if (deltaValue.containsKey('stop_details')) 'stop_details': deltaValue['stop_details'],
+      ...deltaValue,
       'usage': {
         ...start.usage.raw.toDart(),
         ...delta.usage.raw.toDart(),
       },
     });
+    final retainedBytes =
+        utf8.encode(native.encode()).length +
+        _unknownEvents.fold<int>(
+          0,
+          (total, item) => total + utf8.encode(item.data.encode()).length,
+        );
+    if (retainedBytes > _maxAssembledBytes) {
+      throw ResponseLimitError(
+        'The assembled native response and retained events exceeded the configured byte limit.',
+        limit: _maxAssembledBytes,
+        actual: retainedBytes,
+        partialOutput: partialOutput,
+      );
+    }
+    if (deltaValue['stop_reason'] == 'refusal') {
+      if (deltaValue['stop_details'] case final Map<String, Object?> details) {
+        final index = orderedBlocks.isEmpty ? 0 : orderedBlocks.last + 1;
+        final refusal = _refusalPart(JsonObject(details));
+        yield assembler.startPart(index: index, kind: GenerationPartKind.refusal);
+        yield assembler.finishPart(index, refusal);
+      }
+    }
     yield assembler.finish(
       finishReason: _finishReason(deltaValue['stop_reason'] as String?),
       nativeFinishReason: deltaValue['stop_reason'] as String?,
@@ -303,6 +390,137 @@ final class _AnthropicCommonProtocol implements SseProtocol<GenerationEvent> {
       ],
     );
   }
+}
+
+final class _AnthropicBlockAssembly {
+  _AnthropicBlockAssembly(this.start)
+    : _text = StringBuffer(
+        switch (start) {
+          AnthropicTextBlock(:final text) => text,
+          AnthropicThinkingBlock(:final thinking) => thinking,
+          _ => '',
+        },
+      ),
+      _signature = StringBuffer(
+        start is AnthropicThinkingBlock ? start.signature : '',
+      ),
+      _citations = switch (start) {
+        AnthropicTextBlock(:final citations?) => citations.toList(),
+        _ => <JsonObject>[],
+      };
+
+  final AnthropicContentBlock start;
+  final StringBuffer _text;
+  final StringBuffer _signature;
+  final List<JsonObject> _citations;
+  final StringBuffer _input = StringBuffer();
+  var _hasInputDelta = false;
+  bool finished = false;
+  String? inputIssue;
+
+  GenerationPartKind get kind => switch (_commonPart(start)) {
+    TextOutputPart() => GenerationPartKind.text,
+    ReasoningSummaryPart() => GenerationPartKind.reasoning,
+    RefusalPart() => GenerationPartKind.refusal,
+    ApplicationToolCallPart() => GenerationPartKind.applicationToolCall,
+    ProviderToolRecordPart() => GenerationPartKind.providerTool,
+    OpaqueOutputPart() => GenerationPartKind.opaque,
+  };
+
+  GenerationPartOwner get owner => switch (kind) {
+    GenerationPartKind.providerTool ||
+    GenerationPartKind.reasoning ||
+    GenerationPartKind.opaque => GenerationPartOwner.provider,
+    _ => GenerationPartOwner.application,
+  };
+
+  void appendText(
+    String value, {
+    required String expectedType,
+    required Object? partialOutput,
+  }) {
+    if (start.type != expectedType) {
+      throw ProtocolError(
+        '$expectedType delta does not match ${start.type} block.',
+        partialOutput: partialOutput,
+      );
+    }
+    _text.write(value);
+  }
+
+  void appendSignature(String value, {required Object? partialOutput}) {
+    if (start is! AnthropicThinkingBlock) {
+      throw ProtocolError(
+        'signature delta does not match ${start.type} block.',
+        partialOutput: partialOutput,
+      );
+    }
+    _signature.write(value);
+  }
+
+  void appendCitation(JsonObject value, {required Object? partialOutput}) {
+    if (start is! AnthropicTextBlock) {
+      throw ProtocolError(
+        'citation delta does not match ${start.type} block.',
+        partialOutput: partialOutput,
+      );
+    }
+    _citations.add(value);
+  }
+
+  void appendInput(String value, {required Object? partialOutput}) {
+    if (start is! AnthropicToolUseBlock && start is! AnthropicServerToolUseBlock) {
+      throw ProtocolError(
+        'input JSON delta does not match ${start.type} block.',
+        partialOutput: partialOutput,
+      );
+    }
+    _hasInputDelta = true;
+    _input.write(value);
+  }
+
+  AnthropicContentBlock finish() {
+    final raw = start.raw.toDart();
+    final complete = switch (start) {
+      AnthropicTextBlock(:final citations) => {
+        ...raw,
+        'text': _text.toString(),
+        if (_citations.isNotEmpty)
+          'citations': _citations.map((citation) => citation.toDart()).toList()
+        else if (citations == null)
+          'citations': null,
+      },
+      AnthropicThinkingBlock() => {
+        ...raw,
+        'thinking': _text.toString(),
+        'signature': _signature.toString(),
+      },
+      AnthropicToolUseBlock() || AnthropicServerToolUseBlock() when _hasInputDelta => {
+        ...raw,
+        'input': _decodedInput(),
+      },
+      _ => raw,
+    };
+    return AnthropicContentBlock.fromJson(JsonObject(complete));
+  }
+
+  Object? _decodedInput() {
+    final source = _input.toString();
+    try {
+      return JsonValue.parse(source).toDart();
+    } on FormatException catch (error) {
+      inputIssue = error.message;
+      return source;
+    }
+  }
+}
+
+String _deltaString(Map<String, Object?> value, String field, Object? partialOutput) {
+  final result = value[field];
+  if (result is! String) {
+    throw ProtocolError('$field must be a string.', partialOutput: partialOutput);
+  }
+  return result;
 }
 
 AnthropicMessageEvent _decodeEvent(SseEvent event) {
@@ -336,7 +554,10 @@ Usage _commonUsage(AnthropicUsage usage) => Usage(
 
 int? _sum(int? left, int? right) => left == null || right == null ? null : left + right;
 
-OutputPart _commonPart(AnthropicContentBlock block) => switch (block) {
+OutputPart _commonPart(
+  AnthropicContentBlock block, {
+  String? malformedInputIssue,
+}) => switch (block) {
   AnthropicTextBlock(:final text, :final citations) => TextOutputPart(
     text,
     citations: (citations ?? const []).map(
@@ -360,8 +581,8 @@ OutputPart _commonPart(AnthropicContentBlock block) => switch (block) {
               ? NativeToolArguments(providerId: _providerId, api: _api, action: input)
               : JsonToolArguments(input, originalText: input.encode())
         : MalformedToolArguments(
-            originalText: input.encode(),
-            issue: 'Anthropic client-tool input must be a JSON object.',
+            originalText: input is JsonString ? input.value : input.encode(),
+            issue: malformedInputIssue ?? 'Anthropic client-tool input must be a JSON object.',
           ),
   ),
   AnthropicThinkingBlock(:final thinking) => ReasoningSummaryPart(thinking),
@@ -395,6 +616,13 @@ OutputPart _commonPart(AnthropicContentBlock block) => switch (block) {
     data: block.raw,
   ),
 };
+
+RefusalPart _refusalPart(JsonObject details) {
+  final raw = details.toDart();
+  return RefusalPart(
+    raw['message'] as String? ?? raw['reason'] as String? ?? details.encode(),
+  );
+}
 
 ProviderToolStatus _providerToolStatus(
   JsonObject raw, {
