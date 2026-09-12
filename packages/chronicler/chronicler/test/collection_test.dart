@@ -101,7 +101,7 @@ void main() {
         ..setCollectionEnabled(ChroniclerSignal.logs, false)
         ..setCollectionEnabled(ChroniclerSignal.logs, true);
       exporter.attempts.single.completer.complete(
-        ExportResult.records([
+        ExportResult.perRecord([
           for (final record in records)
             RecordExportOutcome(
               eventId: record.envelope.eventId,
@@ -118,7 +118,7 @@ void main() {
     for (final outcome in <String, void Function(TestExportAttempt)>{
       'accepted': (attempt) => attempt.completer.complete(const ExportResult.accepted()),
       'retryable': (attempt) => attempt.completer.complete(const ExportResult.retryable()),
-      'malformed': (attempt) => attempt.completer.complete(ExportResult.records(const [])),
+      'malformed': (attempt) => attempt.completer.complete(ExportResult.perRecord(const [])),
       'failed': (attempt) => attempt.completer.completeError(Exception('failed')),
     }.entries) {
       test('disable then re-enable suppresses an in-flight ${outcome.key} retry', () async {

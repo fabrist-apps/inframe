@@ -57,5 +57,43 @@ void main() {
       expect(snapshot[DiagnosticReason.invalidRecord], BigInt.one);
       expect(snapshot.clear, throwsUnsupportedError);
     });
+
+    test('should reject lifecycle and configuration calls from a callback', () async {
+      late Chronicler chronicler;
+      final errors = <Object>[];
+      chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: TestExporter(),
+        options: ChroniclerOptions(
+          diagnostics: DiagnosticOptions(
+            onDiagnostic: (_) {
+              for (final operation in <void Function()>[
+                () => chronicler.flush(),
+                () => chronicler.close(),
+                () => chronicler.setCollectionEnabled(ChroniclerSignal.logs, false),
+              ]) {
+                try {
+                  operation();
+                } on Object catch (error) {
+                  errors.add(error);
+                }
+              }
+            },
+          ),
+        ),
+      );
+
+      Context().withChronicler(chronicler.recorder).logs.info('bad', attributes: {'bad': Object()});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(errors, hasLength(3));
+      expect(errors, everyElement(isA<ChroniclerConfigurationException>()));
+      chronicler
+        ..setCollectionEnabled(ChroniclerSignal.logs, false)
+        ..setPropagationEnabled(false);
+      await chronicler.close();
+    });
   });
 }

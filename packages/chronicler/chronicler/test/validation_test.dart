@@ -28,11 +28,35 @@ void main() {
       logs.info('cycle', attributes: cyclic);
       logs.info('nan', attributes: {'value': double.nan});
       logs.info('large integer', attributes: {'value': 9007199254740992});
+      logs.info('large integral double', attributes: {'value': 9007199254740992.0});
       logs.info(String.fromCharCode(0xd800));
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(5));
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(6));
+    });
+
+    test('should stop shared-container expansion at the record budget', () {
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          delivery: DeliveryOptions(maxBatchRecords: 1),
+        ),
+      );
+      final leaf = List<Object?>.filled(128, 'x' * 8192);
+      final shared = List<Object?>.filled(128, leaf);
+
+      Context()
+          .withChronicler(chronicler.recorder)
+          .logs
+          .info('bounded', attributes: {'items': shared});
+
+      expect(exporter.batches, isEmpty);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
     });
 
     test('should count the root map as container depth one', () async {

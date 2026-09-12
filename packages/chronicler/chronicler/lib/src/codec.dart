@@ -48,10 +48,16 @@ final class ChroniclerCodec {
   final int maxBatchBytes;
   final int maxBatchRecords;
 
+  RecordValidator get _recordValidator => RecordValidator(limits, maxSnapshotBytes: maxRecordBytes);
+
   Uint8List encodeRecord(ChroniclerRecord record) {
     try {
       _validateRecord(record);
-      return _encodeObject(_recordMap(record));
+      final encoded = _encodeObject(_recordMap(record));
+      if (encoded.length > maxRecordBytes) {
+        throw const ChroniclerEncodingException('record byte limit exceeded');
+      }
+      return encoded;
     } on ChroniclerEncodingException {
       rethrow;
     } on Object {
@@ -60,18 +66,27 @@ final class ChroniclerCodec {
   }
 
   Uint8List encodeBatch(ChroniclerBatch batch) {
-    if (batch.records.isEmpty) {
-      throw const ChroniclerEncodingException('batch must contain records');
+    if (batch.records.isEmpty || batch.records.length > maxBatchRecords) {
+      throw const ChroniclerEncodingException('batch record count is invalid');
     }
-    return _encodeObject({
+    final recordMaps = batch.records
+        .map((record) {
+          _validateRecord(record);
+          final map = _recordMap(record);
+          if (_encodeObject(map).length > maxRecordBytes) {
+            throw const ChroniclerEncodingException('record byte limit exceeded');
+          }
+          return map;
+        })
+        .toList(growable: false);
+    final encoded = _encodeObject({
       'schemaVersion': 1,
-      'records': batch.records
-          .map((record) {
-            _validateRecord(record);
-            return _recordMap(record);
-          })
-          .toList(growable: false),
+      'records': recordMaps,
     });
+    if (encoded.length > maxBatchBytes) {
+      throw const ChroniclerEncodingException('batch byte limit exceeded');
+    }
+    return encoded;
   }
 
   DecodeResult<ChroniclerRecord> decodeRecord(Uint8List bytes) {
@@ -338,12 +353,17 @@ final class ChroniclerCodec {
     if (!ChronoID.isValid(envelope.eventId, prefix: 'evt')) {
       throw const ChroniclerEncodingException('eventId is invalid');
     }
+    _validateModelString(envelope.eventId, limits.maxIdBytes, allowEmpty: false);
     _validateModelString(envelope.appId, limits.maxIdBytes, allowEmpty: false);
     _validateModelString(envelope.release, limits.maxLabelBytes, allowEmpty: false);
     if (envelope.buildId case final value?) {
       _validateModelString(value, limits.maxLabelBytes, allowEmpty: false);
     }
     for (final value in [envelope.userId, envelope.anonymousId, envelope.sessionId]) {
+      if (value != null) _validateModelString(value, limits.maxIdBytes, allowEmpty: false);
+    }
+    _validateTimestampForEncoding(envelope.timestamp);
+    for (final value in [envelope.traceId, envelope.spanId, envelope.parentSpanId]) {
       if (value != null) _validateModelString(value, limits.maxIdBytes, allowEmpty: false);
     }
     if ((envelope.traceId == null) != (envelope.spanId == null) ||
@@ -358,7 +378,7 @@ final class ChroniclerCodec {
     switch (record) {
       case LogRecord():
         _validateModelString(record.payload.message, limits.maxStringBytes, allowEmpty: true);
-        RecordValidator(limits).snapshotAttributes(record.payload.attributes);
+        _recordValidator.snapshotAttributes(record.payload.attributes);
         if (record.payload.error != null && record.payload.stackTrace != null) {
           throw const ChroniclerEncodingException('log has duplicate stack locations');
         }
@@ -376,7 +396,7 @@ final class ChroniclerCodec {
         if (record.payload.properties.isEmpty) {
           throw const ChroniclerEncodingException('properties must be nonempty');
         }
-        RecordValidator(limits).snapshotAttributes(record.payload.properties);
+        _recordValidator.snapshotAttributes(record.payload.properties);
       case UserPropertiesUnsetRecord():
         _validateModelString(record.payload.userId, limits.maxIdBytes, allowEmpty: false);
         if (record.payload.keys.isEmpty ||
@@ -398,7 +418,7 @@ final class ChroniclerCodec {
           throw const ChroniclerEncodingException('too many causes');
         }
         record.payload.causes.forEach(_validateErrorDetails);
-        RecordValidator(limits).snapshotAttributes(record.payload.attributes);
+        _recordValidator.snapshotAttributes(record.payload.attributes);
       case MetricRecord():
         if (envelope.userId != null ||
             envelope.anonymousId != null ||
@@ -416,9 +436,14 @@ final class ChroniclerCodec {
   void _validateMetric(MetricPayload payload) {
     _validateModelString(payload.name, limits.maxLabelBytes, allowEmpty: false);
     _validateModelString(payload.unit, limits.maxLabelBytes, allowEmpty: false);
-    RecordValidator(limits).snapshotAttributes(payload.attributes);
+    _recordValidator.snapshotAttributes(payload.attributes);
     _validatePortableInt(payload.durationMicros);
     _validatePortableInt(payload.observationCount);
+    _validateTimestampForEncoding(payload.intervalStart);
+    _validateTimestampForEncoding(payload.intervalEnd);
+    if (payload.observedAt case final observedAt?) {
+      _validateTimestampForEncoding(observedAt);
+    }
     if (payload.observationCount == 0) {
       throw const ChroniclerEncodingException('metric observationCount must be positive');
     }
@@ -485,7 +510,7 @@ final class ChroniclerCodec {
 
   void _validateLabelAndAttributes(String label, Map<String, Object?> attributes) {
     _validateModelString(label, limits.maxLabelBytes, allowEmpty: false);
-    RecordValidator(limits).snapshotAttributes(attributes);
+    _recordValidator.snapshotAttributes(attributes);
   }
 
   void _validateErrorDetails(ErrorDetails error) {
@@ -499,7 +524,7 @@ final class ChroniclerCodec {
   void _validateModelString(String value, int maxBytes, {required bool allowEmpty}) {
     if (!allowEmpty && value.isEmpty) throw const ChroniclerEncodingException('string is empty');
     try {
-      RecordValidator(limits).validateString(value, maxBytes, 'string');
+      _recordValidator.validateString(value, maxBytes, 'string');
     } on RecordValidationException catch (failure) {
       throw ChroniclerEncodingException(failure.reason);
     }
@@ -508,6 +533,13 @@ final class ChroniclerCodec {
   void _validatePortableInt(int value) {
     if (value < 0 || value > 9007199254740991) {
       throw const ChroniclerEncodingException('integer is outside the portable range');
+    }
+  }
+
+  void _validateTimestampForEncoding(DateTime value) {
+    final utc = value.toUtc();
+    if (utc.year < 1 || utc.year > 9999) {
+      throw const ChroniclerEncodingException('timestamp year is outside the supported range');
     }
   }
 
@@ -591,7 +623,7 @@ final class ChroniclerCodec {
   };
 
   Map<String, Object?> _attributes(Map<String, Object?> map, String key) =>
-      RecordValidator(limits).snapshotAttributes(_map(map[key]));
+      _recordValidator.snapshotAttributes(_map(map[key]));
 
   Map<String, Object?> _nonemptyAttributes(Map<String, Object?> map, String key) {
     final value = _attributes(map, key);
@@ -610,7 +642,7 @@ final class ChroniclerCodec {
     }
     for (final key in keys) {
       if (key.isEmpty) throw const _CodecFailure(DecodeFailureReason.invalidField);
-      RecordValidator(limits).validateString(key, limits.maxKeyBytes, 'property key');
+      _recordValidator.validateString(key, limits.maxKeyBytes, 'property key');
     }
     return List.unmodifiable(keys);
   }
@@ -697,7 +729,7 @@ final class ChroniclerCodec {
     if (value is! String || !allowEmpty && value.isEmpty) {
       throw const _CodecFailure(DecodeFailureReason.invalidField);
     }
-    RecordValidator(limits).validateString(value, maxBytes, key);
+    _recordValidator.validateString(value, maxBytes, key);
     return value;
   }
 

@@ -10,7 +10,7 @@ sealed class ExportResult {
   const factory ExportResult.accepted() = WholeBatchExportResult.accepted;
   const factory ExportResult.retryable() = WholeBatchExportResult.retryable;
   const factory ExportResult.rejected() = WholeBatchExportResult.rejected;
-  factory ExportResult.records(Iterable<RecordExportOutcome> outcomes) = RecordExportResult;
+  factory ExportResult.perRecord(List<RecordExportOutcome> outcomes) = RecordExportResult;
 }
 
 /// Applies one disposition to the complete submitted batch.
@@ -24,8 +24,7 @@ final class WholeBatchExportResult extends ExportResult {
 
 /// Matches dispositions to submitted event IDs.
 final class RecordExportResult extends ExportResult {
-  RecordExportResult(Iterable<RecordExportOutcome> outcomes)
-    : outcomes = List.unmodifiable(outcomes);
+  RecordExportResult(List<RecordExportOutcome> outcomes) : outcomes = List.unmodifiable(outcomes);
 
   final List<RecordExportOutcome> outcomes;
 }

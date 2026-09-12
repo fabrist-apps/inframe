@@ -86,7 +86,10 @@ final class ChroniclerRuntime {
     required this.exporter,
     required this.buildId,
     required this.options,
-  }) : validator = RecordValidator(options.limits),
+  }) : validator = RecordValidator(
+         options.limits,
+         maxSnapshotBytes: options.delivery.maxRecordBytes,
+       ),
        codec = ChroniclerCodec(
          limits: options.limits,
          maxRecordBytes: options.delivery.maxRecordBytes,
@@ -153,6 +156,7 @@ final class ChroniclerRuntime {
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
 
   Future<DeliveryReport> flush(Duration timeout) {
+    _requireOutsideCallback('flush');
     if (timeout <= Duration.zero) {
       throw const ChroniclerConfigurationException('timeout', 'must be positive');
     }
@@ -183,6 +187,7 @@ final class ChroniclerRuntime {
   }
 
   Future<DeliveryReport> close() {
+    _requireOutsideCallback('close');
     final existing = _closeFuture;
     if (existing != null) return existing;
     final completer = Completer<DeliveryReport>();
@@ -347,10 +352,20 @@ final class ChroniclerRuntime {
   }
 
   void _requireRunningConfiguration() {
+    _requireOutsideCallback('configuration');
     if (_state != ChroniclerRuntimeState.running) {
       throw const ChroniclerConfigurationException(
         'lifecycle',
         'does not allow configuration changes',
+      );
+    }
+  }
+
+  void _requireOutsideCallback(String operation) {
+    if (_insideHook || diagnostics.insideCallback) {
+      throw ChroniclerConfigurationException(
+        operation,
+        'cannot be called from a Chronicler callback',
       );
     }
   }
@@ -541,8 +556,13 @@ final class ChroniclerRuntime {
       return disposition;
     } on RecordValidationException {
       _dropDisposition(disposition, DropReason.invalidRecord);
-    } on ChroniclerEncodingException {
-      _dropDisposition(disposition, DropReason.invalidRecord);
+    } on ChroniclerEncodingException catch (error) {
+      _dropDisposition(
+        disposition,
+        error.reason == 'record byte limit exceeded'
+            ? DropReason.recordTooLarge
+            : DropReason.invalidRecord,
+      );
     } on Object {
       _dropDisposition(disposition, DropReason.invalidRecord);
     }
@@ -691,25 +711,38 @@ final class ChroniclerRuntime {
       for (final record in records) {
         record.attempts++;
       }
-      final active = _ActiveExport(records);
+      final active = _ActiveExport(
+        records,
+        _elapsed.elapsed + options.delivery.attemptTimeout,
+      );
       _active.add(active);
       try {
         final attempt = exporter.export(
           ChroniclerBatch(records.map((pending) => pending.record)),
         );
         active.attempt = attempt;
-        active.timeout = Timer(options.delivery.attemptTimeout, () => _timeOut(active));
+        final result = attempt.result;
         unawaited(
-          attempt.result.then(
+          result.then(
             (result) => _handleResult(active, result),
             onError: (Object _, StackTrace _) => _handleFailure(active),
           ),
         );
+        _scheduleAttemptTimeout(active);
       } on Object {
         _handleFailure(active);
       }
     }
     _scheduleWakeup();
+  }
+
+  void _scheduleAttemptTimeout(_ActiveExport active) {
+    final remaining = active.deadline - _elapsed.elapsed;
+    if (remaining <= Duration.zero) {
+      _timeOut(active);
+    } else {
+      active.timeout = Timer(remaining, () => _timeOut(active));
+    }
   }
 
   void _timeOut(_ActiveExport active) {
@@ -806,16 +839,32 @@ final class ChroniclerRuntime {
       return;
     }
     final ceiling = _retryCeiling(record.attempts);
-    final delay =
-        _retryDelayOverride?.call(record.attempts, ceiling) ??
-        Duration(microseconds: _random.nextInt(ceiling.inMicroseconds + 1));
-    if (delay < Duration.zero || delay > ceiling) {
-      throw StateError('Retry delay must be between zero and its ceiling.');
-    }
+    final delay = _chooseRetryDelay(record.attempts, ceiling);
     record
       ..isRetry = true
       ..readyAt = _elapsed.elapsed + delay;
     _pending.add(record);
+  }
+
+  Duration _chooseRetryDelay(int attempt, Duration ceiling) {
+    try {
+      final override = _retryDelayOverride;
+      final delay = override == null
+          ? Duration(
+              microseconds: min(
+                (_random.nextDouble() * (ceiling.inMicroseconds + 1)).floor(),
+                ceiling.inMicroseconds,
+              ),
+            )
+          : override(attempt, ceiling);
+      if (delay < Duration.zero || delay > ceiling) {
+        throw StateError('Retry delay must be between zero and its ceiling.');
+      }
+      return delay;
+    } on Object {
+      diagnostics.record(DiagnosticReason.exportFailed);
+      return Duration.zero;
+    }
   }
 
   Duration _retryCeiling(int attempts) {
@@ -1022,8 +1071,9 @@ final class _FlushWaiter {
 }
 
 final class _ActiveExport {
-  _ActiveExport(this.records);
+  _ActiveExport(this.records, this.deadline);
   final List<_PendingRecord> records;
+  final Duration deadline;
   ExportAttempt? attempt;
   Timer? timeout;
   bool timedOut = false;

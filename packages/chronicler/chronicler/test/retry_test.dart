@@ -50,7 +50,7 @@ void main() {
       final records = exporter.batches.single.records;
 
       exporter.attempts.single.completer.complete(
-        ExportResult.records([
+        ExportResult.perRecord([
           RecordExportOutcome(
             eventId: records[2].envelope.eventId,
             disposition: ExportDisposition.rejected,
@@ -76,20 +76,20 @@ void main() {
     });
 
     for (final malformed in <String, ExportResult Function(List<ChroniclerRecord>)>{
-      'missing ID': (records) => ExportResult.records([
+      'missing ID': (records) => ExportResult.perRecord([
         RecordExportOutcome(
           eventId: records.first.envelope.eventId,
           disposition: ExportDisposition.accepted,
         ),
       ]),
-      'duplicate ID': (records) => ExportResult.records([
+      'duplicate ID': (records) => ExportResult.perRecord([
         for (var index = 0; index < 2; index++)
           RecordExportOutcome(
             eventId: records.first.envelope.eventId,
             disposition: ExportDisposition.accepted,
           ),
       ]),
-      'unknown ID': (records) => ExportResult.records([
+      'unknown ID': (records) => ExportResult.perRecord([
         RecordExportOutcome(
           eventId: records.first.envelope.eventId,
           disposition: ExportDisposition.accepted,
@@ -220,6 +220,27 @@ void main() {
       ]);
     });
 
+    test('supports retry ceilings larger than Random.nextInt permits', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(
+        exporter,
+        maxAttempts: 2,
+        initialRetryDelay: const Duration(hours: 2),
+        maxRetryDelay: const Duration(hours: 2),
+      );
+      Context().withChronicler(chronicler.recorder).logs.info('long delay');
+      await _waitFor(() => exporter.attempts.length == 1);
+
+      exporter.attempts.single.completer.complete(const ExportResult.retryable());
+      await _settle();
+
+      expect(exporter.attempts, hasLength(1));
+      final closeFuture = chronicler.close();
+      await _waitFor(() => exporter.attempts.length == 2);
+      exporter.attempts.last.completer.complete(const ExportResult.accepted());
+      expect((await closeFuture).accepted, 1);
+    });
+
     test('ready records pass backoff while eligible records retain enqueue order', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(
@@ -301,6 +322,30 @@ void main() {
       expect((exporter.batches.last.records.single as LogRecord).payload.message, 'waiting');
     });
 
+    test('counts synchronous exporter work against the attempt deadline', () async {
+      final exporter = _BlockingAcceptedExporter(const Duration(milliseconds: 10));
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          delivery: DeliveryOptions(
+            maxBatchRecords: 1,
+            attemptTimeout: Duration(milliseconds: 1),
+          ),
+        ),
+      );
+
+      Context().withChronicler(chronicler.recorder).logs.info('blocked export');
+      await _waitFor(() => exporter.attempt != null);
+      await _settle();
+
+      expect(exporter.attempt!.cancelCount, 1);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.exportTimedOut], BigInt.one);
+      await chronicler.close();
+    });
+
     test('late rejection is terminal and cancellation throws are diagnosed', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(
@@ -380,6 +425,26 @@ Chronicler _chronicler(
 );
 
 Future<void> _settle() => Future<void>.delayed(const Duration(milliseconds: 4));
+
+final class _BlockingAcceptedExporter implements ChroniclerExporter {
+  _BlockingAcceptedExporter(this.blockFor);
+
+  final Duration blockFor;
+  TestExportAttempt? attempt;
+
+  @override
+  ExportAttempt export(ChroniclerBatch batch) {
+    final current = TestExportAttempt();
+    current.completer.complete(const ExportResult.accepted());
+    final elapsed = Stopwatch()..start();
+    while (elapsed.elapsed < blockFor) {}
+    attempt = current;
+    return current;
+  }
+
+  @override
+  Future<void> close() async {}
+}
 
 Future<void> _waitFor(bool Function() condition) async {
   final deadline = DateTime.now().add(const Duration(seconds: 1));

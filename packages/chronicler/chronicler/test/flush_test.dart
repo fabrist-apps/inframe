@@ -23,7 +23,7 @@ void main() {
       await _waitFor(() => exporter.attempts.length == 1);
       final records = exporter.batches.single.records;
       exporter.attempts.single.completer.complete(
-        ExportResult.records([
+        ExportResult.perRecord([
           RecordExportOutcome(
             eventId: records[2].envelope.eventId,
             disposition: ExportDisposition.retryable,

@@ -80,6 +80,13 @@ void main() {
         codec.decodeRecord(_mutate(validMap, 'payload', const {})),
         _failure(DecodeFailureReason.invalidField),
       );
+      final unsafeDouble = jsonDecode(jsonEncode(validMap)) as Map<String, Object?>;
+      final payload = unsafeDouble['payload']! as Map<String, Object?>;
+      (payload['attributes']! as Map<String, Object?>)['value'] = 9007199254740992.0;
+      expect(
+        codec.decodeRecord(Uint8List.fromList(utf8.encode(jsonEncode(unsafeDouble)))),
+        _failure(DecodeFailureReason.invalidField),
+      );
       expect(
         const ChroniclerCodec(maxRecordBytes: 4).decodeRecord(
           codec.encodeRecord(_records().first),
@@ -112,6 +119,39 @@ void main() {
       );
 
       expect(() => codec.encodeRecord(invalid), throwsA(isA<ChroniclerEncodingException>()));
+    });
+
+    test('should apply decode limits and timestamp bounds while encoding', () {
+      final records = _records();
+      final log = records.first as LogRecord;
+      final span = records.whereType<SpanRecord>().single;
+      final metric = records.whereType<MetricRecord>().first;
+      final outsideRange = DateTime.utc(0);
+
+      expect(
+        () => const ChroniclerCodec().encodeRecord(
+          log.copyWith(envelope: log.envelope.copyWith(timestamp: outsideRange)),
+        ),
+        throwsA(isA<ChroniclerEncodingException>()),
+      );
+      expect(
+        () => ChroniclerCodec(
+          limits: ChroniclerLimits(maxIdBytes: span.envelope.eventId.length),
+        ).encodeRecord(span),
+        throwsA(isA<ChroniclerEncodingException>()),
+      );
+      expect(
+        () => const ChroniclerCodec().encodeRecord(
+          metric.copyWith(
+            envelope: metric.envelope.copyWith(timestamp: outsideRange),
+            payload: metric.payload.copyWith(
+              intervalStart: outsideRange,
+              intervalEnd: outsideRange,
+            ),
+          ),
+        ),
+        throwsA(isA<ChroniclerEncodingException>()),
+      );
     });
 
     test('should deeply snapshot model collections', () {

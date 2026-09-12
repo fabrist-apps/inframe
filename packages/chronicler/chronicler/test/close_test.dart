@@ -241,7 +241,7 @@ void main() {
       expect(eligible, hasLength(1));
     });
 
-    test('contains close invoked from the capture hook', () async {
+    test('rejects close invoked from the capture hook', () async {
       final exporter = TestExporter();
       late Chronicler chronicler;
       chronicler = _chronicler(
@@ -259,7 +259,7 @@ void main() {
 
       expect(report.accepted, 0);
       expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.runtimeClosed], BigInt.one);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.hookFailed], BigInt.one);
     });
   });
 }
