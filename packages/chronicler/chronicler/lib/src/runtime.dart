@@ -458,6 +458,14 @@ final class ChroniclerRuntime {
     required bool forceRoot,
     required RemoteTraceParent? remoteParent,
   }) {
+    if (_state != ChroniclerRuntimeState.running) {
+      diagnostics.record(DiagnosticReason.runtimeClosed);
+      return _StartedSpan(null, recorder);
+    }
+    if (_insideHook || diagnostics.insideCallback) {
+      diagnostics.record(DiagnosticReason.reentrantRecording);
+      return _StartedSpan(null, recorder);
+    }
     final acceptedRemote = forceRoot && _propagationEnabled ? remoteParent : null;
     final current = recorder._attribution.span;
     final activeParent = !forceRoot && current != null && !current.ended ? current : null;
@@ -470,38 +478,39 @@ final class ChroniclerRuntime {
       diagnostics.record(DiagnosticReason.invalidRecord);
       return _StartedSpan(null, recorder);
     }
-    var snapshot = const <String, Object?>{};
-    var payloadValid = true;
-    try {
-      validator.validateString(name, options.limits.maxLabelBytes, 'span name');
-      if (name.isEmpty) {
-        throw const RecordValidationException('span name must be nonempty');
-      }
-      snapshot = validator.snapshotAttributes(attributes);
-    } on Object {
-      payloadValid = false;
-      diagnostics.record(DiagnosticReason.invalidRecord);
-    }
     final collectionEnabled = _enabledSignals.contains(ChroniclerSignal.traces);
     final sampled = activeParent == null
         ? _selectBoundarySampling(acceptedRemote, collectionEnabled)
         : activeParent.lineageRecording && activeParent.sampled;
     final lineageRecording = activeParent?.lineageRecording ?? (collectionEnabled && sampled);
+    _SpanRecordingState? recording;
+    if (lineageRecording) {
+      try {
+        validator.validateString(name, options.limits.maxLabelBytes, 'span name');
+        if (name.isEmpty) {
+          throw const RecordValidationException('span name must be nonempty');
+        }
+        recording = _SpanRecordingState(
+          eventId: ChronoID.generate(prefix: 'evt'),
+          name: name,
+          kind: kind,
+          attributes: _redactMap(validator.snapshotAttributes(attributes)),
+          startedAt: _elapsedNow,
+          timestamp: _now,
+          attribution: recorder._attribution,
+        );
+      } on Object {
+        diagnostics.record(DiagnosticReason.invalidRecord);
+      }
+    }
     final state = _SpanState(
-      eventId: ChronoID.generate(prefix: 'evt'),
       traceId: traceId,
       spanId: spanId,
       parentSpanId: acceptedRemote?.parentSpanId ?? activeParent?.spanId,
-      name: name,
-      kind: kind,
-      attributes: _redactMap(snapshot),
-      startedAt: _elapsedNow,
-      timestamp: _now,
-      recordPayload: payloadValid && lineageRecording,
       lineageRecording: lineageRecording,
       sampled: sampled,
       tracestate: acceptedRemote?.tracestate ?? activeParent?.tracestate ?? const [],
-      attribution: recorder._attribution,
+      recording: recording,
     );
     _liveSpans.add(state);
     return _StartedSpan(
@@ -525,17 +534,19 @@ final class ChroniclerRuntime {
     if (span.ended) return;
     span.ended = true;
     _liveSpans.remove(span);
-    if (!span.recordPayload) return;
+    final recording = span.recording;
+    if (recording == null) return;
     final finalStatus = status == SpanStatus.success && span.explicitError
         ? SpanStatus.error
         : status;
-    final durationMicros = (_elapsedNow - span.startedAt).inMicroseconds;
+    final durationMicros = (_elapsedNow - recording.startedAt).inMicroseconds;
     _finalizeAndEnqueue(
       _spanRecord(
         span,
+        recording,
         status: finalStatus,
         durationMicros: durationMicros,
-        attributes: span.attributes,
+        attributes: recording.attributes,
       ),
     );
   }
@@ -547,12 +558,14 @@ final class ChroniclerRuntime {
 
   void _setSpanAttributes(_SpanState? span, Map<String, Object?> update) {
     if (!_canUpdateSpan(span)) return;
-    if (!span!.recordPayload) return;
+    final recording = span!.recording;
+    if (recording == null) return;
     try {
-      final proposed = <String, Object?>{...span.attributes, ...update};
+      final proposed = <String, Object?>{...recording.attributes, ...update};
       final snapshot = _redactMap(validator.snapshotAttributes(proposed));
       final reserved = _spanRecord(
         span,
+        recording,
         status: SpanStatus.cancelled,
         durationMicros: 9007199254740991,
         attributes: snapshot,
@@ -560,7 +573,7 @@ final class ChroniclerRuntime {
       codec
         ..validateRecord(reserved)
         ..encodeRecord(reserved);
-      span.attributes = snapshot;
+      recording.attributes = snapshot;
     } on Object {
       diagnostics.record(DiagnosticReason.invalidSpanUpdate);
     }
@@ -579,19 +592,20 @@ final class ChroniclerRuntime {
   }
 
   SpanRecord _spanRecord(
-    _SpanState span, {
+    _SpanState span,
+    _SpanRecordingState recording, {
     required SpanStatus status,
     required int durationMicros,
     required Map<String, Object?> attributes,
   }) {
-    final attribution = span.attribution;
+    final attribution = recording.attribution;
     return SpanRecord(
       envelope: RecordEnvelope(
-        eventId: span.eventId,
+        eventId: recording.eventId,
         appId: appId,
         release: release,
         source: source,
-        timestamp: span.timestamp,
+        timestamp: recording.timestamp,
         buildId: buildId,
         userId: attribution.userId,
         anonymousId: attribution.anonymousId,
@@ -601,8 +615,8 @@ final class ChroniclerRuntime {
         parentSpanId: span.parentSpanId,
       ),
       payload: SpanPayload(
-        name: span.name,
-        spanKind: span.kind,
+        name: recording.name,
+        spanKind: recording.kind,
         status: status,
         durationMicros: durationMicros,
         attributes: attributes,
@@ -834,7 +848,7 @@ final class ChroniclerRuntime {
     if (signal == ChroniclerSignal.traces) {
       for (final span in _liveSpans) {
         span
-          ..recordPayload = false
+          ..recording = null
           ..lineageRecording = false;
       }
     }
@@ -1696,6 +1710,10 @@ final class ChroniclerTracingFixture {
   static void overrideSamplingRandom(Chronicler chronicler, Random random) {
     chronicler._runtime._random = random;
   }
+
+  /// Returns the number of payload attributes retained by [recorder]'s span.
+  static int retainedAttributeCount(ChroniclerRecorder recorder) =>
+      recorder._attribution.span?.recording?.attributes.length ?? 0;
 }
 
 final class _StartedSpan {
@@ -1707,38 +1725,44 @@ final class _StartedSpan {
 
 final class _SpanState {
   _SpanState({
-    required this.eventId,
     required this.traceId,
     required this.spanId,
     required this.parentSpanId,
+    required this.lineageRecording,
+    required this.sampled,
+    required this.tracestate,
+    required this.recording,
+  });
+
+  final String traceId;
+  final String spanId;
+  final String? parentSpanId;
+  bool lineageRecording;
+  final bool sampled;
+  final List<String> tracestate;
+  _SpanRecordingState? recording;
+  bool ended = false;
+  bool explicitError = false;
+}
+
+final class _SpanRecordingState {
+  _SpanRecordingState({
+    required this.eventId,
     required this.name,
     required this.kind,
     required this.attributes,
     required this.startedAt,
     required this.timestamp,
-    required this.recordPayload,
-    required this.lineageRecording,
-    required this.sampled,
-    required this.tracestate,
     required this.attribution,
   });
 
   final String eventId;
-  final String traceId;
-  final String spanId;
-  final String? parentSpanId;
   final String name;
   final SpanKind kind;
   Map<String, Object?> attributes;
   final Duration startedAt;
   final DateTime timestamp;
-  bool recordPayload;
-  bool lineageRecording;
-  final bool sampled;
-  final List<String> tracestate;
   final _RecorderAttribution attribution;
-  bool ended = false;
-  bool explicitError = false;
 }
 
 /// Internal fixture bridge for deterministic delivery tests.

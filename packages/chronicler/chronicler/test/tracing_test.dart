@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:math';
 
 import 'package:chronicler/chronicler.dart';
@@ -204,6 +205,49 @@ void main() {
         'valid child',
       );
       expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+    });
+
+    test('should suppress sync and async tracing started inside a hook', () async {
+      final exporter = TestExporter();
+      late Context context;
+      var hookCalls = 0;
+      var callbackCalls = 0;
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: ChroniclerOptions(
+          delivery: const DeliveryOptions(maxBatchRecords: 1),
+          redaction: RedactionOptions(
+            beforeRecord: (record) {
+              hookCalls++;
+              if (hookCalls == 1) {
+                context.spanSync(
+                  'recursive sync',
+                  run: (_) => callbackCalls++,
+                );
+                unawaited(
+                  context.span(
+                    'recursive async',
+                    run: (_) => callbackCalls++,
+                  ),
+                );
+              }
+              return record;
+            },
+          ),
+        ),
+      );
+      context = Context().withChronicler(chronicler.recorder);
+
+      context.logs.info('outer');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(callbackCalls, 2);
+      expect(hookCalls, 1);
+      expect(exporter.batches.single.records.single, isA<LogRecord>());
+      expect(chronicler.diagnosticCounts[DiagnosticReason.reentrantRecording], BigInt.two);
     });
 
     test('should require a configured Chronicler before invoking a callback', () {
@@ -472,6 +516,44 @@ void main() {
       expect(chronicler.diagnosticCounts[DiagnosticReason.sampledOut], BigInt.one);
     });
 
+    test('should skip and release attributes for non-recording spans', () async {
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          sampling: SamplingOptions(traces: 0),
+        ),
+      );
+      final recorder = chronicler.recorder;
+      final unreadable = _UnreadableAttributes();
+
+      await recorder.span(
+        'unsampled',
+        attributes: unreadable,
+        run: (_) {},
+      );
+      expect(unreadable.reads, 0);
+
+      final recording = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: TestExporter(),
+      );
+      await recording.recorder.span(
+        'disabled while active',
+        attributes: {'secret': 'retained'},
+        run: (active) {
+          expect(ChroniclerTracingFixture.retainedAttributeCount(active), 1);
+          recording.setCollectionEnabled(ChroniclerSignal.traces, false);
+          expect(ChroniclerTracingFixture.retainedAttributeCount(active), 0);
+        },
+      );
+    });
+
     test('should choose sampling once per root and inherit it in children', () async {
       final exporter = TestExporter();
       final chronicler = Chronicler(
@@ -539,4 +621,29 @@ final class _SequenceRandom implements Random {
 
   @override
   int nextInt(int max) => (nextDouble() * max).floor();
+}
+
+final class _UnreadableAttributes extends MapBase<String, Object?> {
+  int reads = 0;
+
+  @override
+  Iterable<String> get keys {
+    reads++;
+    throw StateError('attributes were read');
+  }
+
+  @override
+  Object? operator [](Object? key) {
+    reads++;
+    throw StateError('attributes were read');
+  }
+
+  @override
+  void operator []=(String key, Object? value) => throw UnsupportedError('read only');
+
+  @override
+  void clear() => throw UnsupportedError('read only');
+
+  @override
+  Object? remove(Object? key) => throw UnsupportedError('read only');
 }

@@ -49,6 +49,17 @@ void main() {
         }),
         isNull,
       );
+      const future = '01-$traceId-$parentId-01-vendor';
+      expect(TracePropagation.extract({'traceparent': '$future,$future'}), isNull);
+    });
+
+    test('should ignore empty tracestate list members', () {
+      final parent = TracePropagation.extract({
+        'traceparent': '00-$traceId-$parentId-01',
+        'tracestate': 'rojo=abc, ,congo=xyz',
+      });
+
+      expect(parent!.tracestate, ['rojo=abc', 'congo=xyz']);
     });
 
     test('should enforce input caps and truncate outbound state by whole entries', () async {

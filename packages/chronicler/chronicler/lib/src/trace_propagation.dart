@@ -36,6 +36,7 @@ abstract final class TracePropagation {
   static RemoteTraceParent? extract(Map<String, String> headers) {
     final traceparent = _combinedHeader(headers, 'traceparent');
     if (traceparent == null || utf8.encode(traceparent).length > 1024) return null;
+    if (traceparent.contains(',')) return null;
     final fields = traceparent.split('-');
     if (fields.length < 4) return null;
     final version = fields[0];
@@ -71,10 +72,12 @@ abstract final class TracePropagation {
   static List<String> _decodeTracestate(String? value) {
     if (value == null || value.isEmpty) return const [];
     if (utf8.encode(value).length > 8192) return const [];
-    final entries = value.split(',').map((entry) => entry.trim()).toList();
-    if (entries.isEmpty || entries.length > 32 || entries.any((entry) => entry.isEmpty)) {
-      return const [];
-    }
+    final entries = value
+        .split(',')
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
+    if (entries.length > 32) return const [];
     final keys = <String>{};
     for (final entry in entries) {
       final separator = entry.indexOf('=');
