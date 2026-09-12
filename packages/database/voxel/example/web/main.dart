@@ -1,5 +1,7 @@
 import 'package:turso/turso.dart';
 import 'package:voxel/voxel.dart';
+import 'package:voxel_fixture_app/posts.dart';
+import 'package:voxel_fixture_schema/authors.dart';
 import 'package:web/web.dart' as web;
 
 import '../../test/generated_consumer.dart';
@@ -8,9 +10,37 @@ Future<void> main() async {
   try {
     await _verifyGeneratedTextStorage();
     await _verifyScalarStorage();
+    await _verifyEnumStorage();
     web.document.body!.textContent = 'PASS\nVoxel browser codec fixture';
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
+  }
+}
+
+Future<void> _verifyEnumStorage() async {
+  final status = Posts.db.buildSchema().definition.status;
+  final database = await TursoDatabase.open(
+    TursoLocation.memory(),
+    web: TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js')),
+  );
+  try {
+    await database.execute('CREATE TABLE enumValues (status TEXT)');
+    await database.execute(
+      'INSERT INTO enumValues VALUES (?), (?)',
+      parameters: [
+        status.codec.encode(PostStatus.draft),
+        status.codec.encode(PostStatus.published),
+      ],
+    );
+    final rows = (await database.query('SELECT status FROM enumValues ORDER BY rowid')).rows;
+    _expect(
+      status.codec.decode(rows[0].value('status'), isSqlNull: false) == PostStatus.draft &&
+          status.codec.decode(rows[1].value('status'), isSqlNull: false) == PostStatus.published,
+      'enum row mismatch',
+    );
+    _expectFailure(() => status.codec.decode('unknown', isSqlNull: false));
+  } finally {
+    await database.close();
   }
 }
 

@@ -86,3 +86,20 @@ final class _$AuthorsDB extends VoxelTableAccessor<Authors, AuthorsRow> {
     );
   }
 }
+
+// **************************************************************************
+// VoxelEnumGenerator
+// **************************************************************************
+
+/// Generated Turso metadata and codec for [PostStatus].
+abstract final class PostStatusVoxelEnum {
+  /// Converts [PostStatus] values to and from their stored labels.
+  static const codec = VoxelEnumCodec<PostStatus>(
+    schemaName: 'content',
+    typeName: 'postStatus',
+    renamedFrom: 'articleStatus',
+    values: [PostStatus.draft, PostStatus.published],
+    labels: ['draft', 'live'],
+    renamedLabels: {'live': 'published'},
+  );
+}

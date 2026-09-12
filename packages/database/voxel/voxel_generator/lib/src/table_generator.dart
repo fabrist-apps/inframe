@@ -67,7 +67,7 @@ final class VoxelTableGenerator extends GeneratorForAnnotation<VoxelTable> {
       ...columns.map(
         (field) =>
             '  /// Value read from `${field.displayName}`.\n'
-            '  final ${columnValueType(field.type, field.library)} ${field.displayName};',
+            '  final ${_columnValueType(field)} ${field.displayName};',
       ),
       ...relations.map(
         (field) =>
@@ -251,15 +251,35 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
       inPackage: 'voxel',
     ).isAssignableFromType(type);
     if (isMapped) _validateMappedHookOrder(field);
-    final storage = isMapped && type.typeArguments.length > 1 ? type.typeArguments[1] : domain;
     final defaults = _columnDefaults(field);
+    final domainType = referenceToType(domain, field.library);
+    final recoveredDomainType = domainType == 'InvalidType' ? _columnValueType(field) : domainType;
+    final storageType = isMapped && type.typeArguments.length > 1
+        ? referenceToType(type.typeArguments[1], field.library)
+        : recoveredDomainType;
     return _MutationField(
       element: field,
-      domainType: referenceToType(domain, field.library),
-      storageType: referenceToType(storage, field.library),
+      domainType: recoveredDomainType,
+      storageType: storageType,
       isRequiredInsert:
           domain.nullabilitySuffix != NullabilitySuffix.question && !defaults.hasInsertDefault,
     );
+  }
+
+  String _columnValueType(FieldElement field) {
+    final rendered = columnValueType(field.type, field.library);
+    if (rendered != 'InvalidType') return rendered;
+    final parsed = field.library.session.getParsedLibraryByElement(field.library);
+    if (parsed is! ParsedLibraryResult) return rendered;
+    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
+    if (declaration is! VariableDeclaration || declaration.parent is! VariableDeclarationList) {
+      return rendered;
+    }
+    final declared = (declaration.parent! as VariableDeclarationList).type?.toSource();
+    if (declared == null) return rendered;
+    final start = declared.indexOf('<');
+    final end = declared.lastIndexOf('>');
+    return start < 0 || end <= start ? rendered : declared.substring(start + 1, end);
   }
 
   _ColumnDefaults _columnDefaults(FieldElement field) {

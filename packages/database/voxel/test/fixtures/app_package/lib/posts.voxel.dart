@@ -13,6 +13,7 @@ final class PostsRow {
   const PostsRow({
     required this.id,
     required this.authorID,
+    required this.status,
     this.author = const Relation.unloaded(),
     this.tags = const Relation.unloaded(),
   });
@@ -23,6 +24,9 @@ final class PostsRow {
   /// Value read from `authorID`.
   final String authorID;
 
+  /// Value read from `status`.
+  final schema.PostStatus status;
+
   /// Loaded or unloaded `author` relation.
   final Relation<schema.AuthorsRow?> author;
 
@@ -32,19 +36,27 @@ final class PostsRow {
 
 /// Generated values accepted by mutations of 'content.posts'.
 final class PostsCompanion implements VoxelCompanion<Posts> {
-  const PostsCompanion._({required this.id, required this.authorID});
+  const PostsCompanion._({
+    required this.id,
+    required this.authorID,
+    required this.status,
+  });
 
   /// Creates values for an insert, leaving defaulted columns absent.
   factory PostsCompanion.insert({
     required VoxelValue<Posts, String, String> id,
     required VoxelValue<Posts, String, String> authorID,
-  }) => PostsCompanion._(id: id, authorID: authorID);
+    VoxelValue<Posts, schema.PostStatus, schema.PostStatus> status =
+        const VoxelValue.absent(),
+  }) => PostsCompanion._(id: id, authorID: authorID, status: status);
 
   /// Creates values for an update, leaving untouched columns absent.
   factory PostsCompanion.update({
     VoxelValue<Posts, String, String> id = const VoxelValue.absent(),
     VoxelValue<Posts, String, String> authorID = const VoxelValue.absent(),
-  }) => PostsCompanion._(id: id, authorID: authorID);
+    VoxelValue<Posts, schema.PostStatus, schema.PostStatus> status =
+        const VoxelValue.absent(),
+  }) => PostsCompanion._(id: id, authorID: authorID, status: status);
 
   /// Mutation value for `id`.
   final VoxelValue<Posts, String, String> id;
@@ -52,11 +64,15 @@ final class PostsCompanion implements VoxelCompanion<Posts> {
   /// Mutation value for `authorID`.
   final VoxelValue<Posts, String, String> authorID;
 
+  /// Mutation value for `status`.
+  final VoxelValue<Posts, schema.PostStatus, schema.PostStatus> status;
+
   /// The generated column assignments in declaration order.
   @override
   List<VoxelAssignment<Posts>> operator [](VoxelCompanionKey key) => [
     VoxelAssignment('id', id),
     VoxelAssignment('authorID', authorID),
+    VoxelAssignment('status', status),
   ];
 }
 
@@ -67,7 +83,7 @@ final class _$PostsDB extends VoxelTableAccessor<Posts, PostsRow> {
   VoxelTableSchema<Posts, PostsRow> buildSchema() {
     Posts createDefinition() {
       final definition = Posts();
-
+      definition.status.configureEnum(schema.PostStatusVoxelEnum.codec);
       return definition;
     }
 
@@ -81,18 +97,24 @@ final class _$PostsDB extends VoxelTableAccessor<Posts, PostsRow> {
       columns: [
         definition.id as VoxelColumn<Object?>,
         definition.authorID as VoxelColumn<Object?>,
+        definition.status as VoxelColumn<Object?>,
       ],
-      columnNames: ['id', 'authorID'],
+      columnNames: ['id', 'authorID', 'status'],
       createDefinition: createDefinition,
       columnsFor: (definition) => [
         definition.id as VoxelColumn<Object?>,
         definition.authorID as VoxelColumn<Object?>,
+        definition.status as VoxelColumn<Object?>,
       ],
       decode: (values, sqlNulls) => PostsRow(
         id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
         authorID: definition.authorID.decodeValue(
           values[1],
           isSqlNull: sqlNulls[1],
+        ),
+        status: definition.status.decodeValue(
+          values[2],
+          isSqlNull: sqlNulls[2],
         ),
       ),
       relations: {

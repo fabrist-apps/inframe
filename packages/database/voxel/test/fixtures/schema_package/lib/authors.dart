@@ -5,6 +5,14 @@ import 'package:voxel/voxel.dart';
 
 part 'authors.voxel.dart';
 
+@VoxelEnum(name: 'postStatus', schema: 'content', renamedFrom: 'articleStatus')
+enum PostStatus {
+  draft,
+
+  @VoxelEnumValue(name: 'live', renamedFrom: 'published')
+  published,
+}
+
 @VoxelTable(schema: 'content')
 final class Authors extends VoxelTableDefinition<Authors> {
   static const db = _$AuthorsDB();

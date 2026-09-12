@@ -16,5 +16,7 @@ dev_dependencies:
   test: ^1.26.3
   turso: any
   voxel: any
+  voxel_fixture_app: any
+  voxel_fixture_schema: any
   voxel_generator: any
   web: ^1.1.1

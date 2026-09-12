@@ -93,5 +93,45 @@ final class Values extends VoxelTableDefinition<Values> {
       expect(result.succeeded, isFalse);
       expect(result.errors.single, contains('Mapped runtime hooks must be declared after map'));
     });
+
+    test('rejects duplicate enum labels and ambiguous rename hints', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'voxel_generator');
+      await readerWriter.testing.loadIsolateSources();
+      final duplicate = await testBuilder(
+        voxelBuilder(BuilderOptions.empty),
+        {
+          'voxel_generator|lib/duplicate_enum.dart': '''
+import 'package:voxel/voxel.dart';
+part 'duplicate_enum.voxel.dart';
+@VoxelEnum()
+enum Status {
+  @VoxelEnumValue(name: 'same') first,
+  @VoxelEnumValue(name: 'same') second,
+}
+''',
+        },
+        readerWriter: readerWriter,
+      );
+      expect(duplicate.succeeded, isFalse);
+      expect(duplicate.errors.single, contains('enum labels must be unique'));
+
+      final ambiguous = await testBuilder(
+        voxelBuilder(BuilderOptions.empty),
+        {
+          'voxel_generator|lib/ambiguous_enum.dart': '''
+import 'package:voxel/voxel.dart';
+part 'ambiguous_enum.voxel.dart';
+@VoxelEnum()
+enum Status {
+  @VoxelEnumValue(renamedFrom: 'old') first,
+  @VoxelEnumValue(renamedFrom: 'old') second,
+}
+''',
+        },
+        readerWriter: readerWriter,
+      );
+      expect(ambiguous.succeeded, isFalse);
+      expect(ambiguous.errors.single, contains('rename hints must identify unambiguous'));
+    });
   });
 }

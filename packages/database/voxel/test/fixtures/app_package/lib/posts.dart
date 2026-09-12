@@ -12,6 +12,8 @@ final class Posts extends VoxelTableDefinition<Posts> {
 
   late final id = text().primaryKey()();
   late final authorID = text().references<schema.Authors>((author) => author.id)();
+  late final VoxelOrderableColumn<schema.PostStatus> status = enumText<schema.PostStatus>()
+      .defaultValue(() => schema.PostStatus.draft)();
   late final VoxelOneRelation<schema.Authors> author = one<schema.Authors>(
     fields: [authorID],
     references: (author) => [author.id],
