@@ -51,8 +51,8 @@ final class PubSub<A> {
   static Effect<PubSub<A>, Never> bounded<A>(int capacity) {
     return Effect.build<PubSub<A>, Never>(($) async {
       return $.acquireRelease(
-        Effect.sync(() => PubSub<A>._(capacity)),
-        release: (pubsub) => pubsub.shutdown(),
+        Effect.sync((_) => PubSub<A>._(capacity)),
+        release: (pubsub, _) => pubsub.shutdown(),
       );
     });
   }
@@ -70,7 +70,7 @@ final class PubSub<A> {
   ///
   /// With no subscribers, the item is discarded. Otherwise publication waits
   /// until every still-active target has capacity, then commits atomically.
-  Effect<void, Never> publish(A item) => Effect.defer(() {
+  Effect<void, Never> publish(A item) => Effect.defer((_) {
     final waiter = CoordinationWaiter<void>();
     late final _PendingPublication<A> publication;
     return waiter.awaitValue(
@@ -102,15 +102,15 @@ final class PubSub<A> {
   ///
   /// Scope exit unsubscribes automatically. A subscription receives only
   /// publications whose execution began while it was active.
-  Effect<PubSubSubscription<A>, Never> subscribe() => Effect.defer(() {
+  Effect<PubSubSubscription<A>, Never> subscribe() => Effect.defer((_) {
     if (_isShutdown) return _shutdownEffect();
 
     return Effect.build<PubSubSubscription<A>, Never>(($) async {
       final acquired = await $.acquireRelease(
         Effect.sync<PubSubSubscription<A>?>(
-          () => _isShutdown ? null : _createSubscription(),
+          (_) => _isShutdown ? null : _createSubscription(),
         ),
-        release: (subscription) => subscription?.unsubscribe() ?? Effect.succeed(null),
+        release: (subscription, _) => subscription?.unsubscribe() ?? Effect.succeed(null),
       );
       return $(acquired == null ? _shutdownEffect() : Effect.succeed(acquired));
     });
@@ -120,10 +120,10 @@ final class PubSub<A> {
   ///
   /// Repeated shutdown is harmless. Blocked and subsequent operations are
   /// interrupted with [PubSubShutdown].
-  Effect<void, Never> shutdown() => Effect.sync(_shutdown);
+  Effect<void, Never> shutdown() => Effect.sync((_) => _shutdown());
 
   /// Lazily waits until shutdown bookkeeping and waiter notification finish.
-  Effect<void, Never> awaitShutdown() => Effect.defer(() {
+  Effect<void, Never> awaitShutdown() => Effect.defer((_) {
     final waiter = CoordinationWaiter<void>();
     return waiter.awaitValue(
       onStart: () {
@@ -203,7 +203,7 @@ final class PubSubSubscription<A> {
   /// Lazily waits for and removes the next publication.
   ///
   /// Cancellation removes a pending read without consuming a later value.
-  Effect<A, Never> take() => Effect.defer(() {
+  Effect<A, Never> take() => Effect.defer((_) {
     final taker = CoordinationWaiter<A>();
     return taker.awaitValue(
       onStart: () {
@@ -228,12 +228,12 @@ final class PubSubSubscription<A> {
   /// This never waits for more values and returns an immutable FIFO list. Zero
   /// returns an empty list. A negative limit becomes an [ArgumentError] defect
   /// when the Effect runs.
-  Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer(() {
+  Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer((_) {
     final closedReason = _closedReason;
     if (closedReason != null) return _interrupted(closedReason);
     if (limit < 0) {
       return Effect.sync(
-        () => throw ArgumentError.value(limit, 'limit', 'Must not be negative.'),
+        (_) => throw ArgumentError.value(limit, 'limit', 'Must not be negative.'),
       );
     }
 
@@ -248,7 +248,7 @@ final class PubSubSubscription<A> {
   /// Lazily ends this subscription and releases its retained capacity.
   ///
   /// Repeated unsubscription is harmless and does not affect other subscribers.
-  Effect<void, Never> unsubscribe() => Effect.sync(() => _owner._unsubscribe(this));
+  Effect<void, Never> unsubscribe() => Effect.sync((_) => _owner._unsubscribe(this));
 
   void _enqueue(A item) {
     if (!_isActive) return;

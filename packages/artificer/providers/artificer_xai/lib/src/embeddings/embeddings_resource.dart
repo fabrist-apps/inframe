@@ -24,7 +24,7 @@ final class XaiEmbeddingsResource {
         api: _api,
         modelId: request.model,
       )
-      .flatMap(_decode);
+      .flatMap((value, _) => _decode(value));
 
   Effect<NativeResponse<XaiEmbeddingResponse>, AiError> _decode(
     NativeResponse<JsonObject> response,
@@ -116,7 +116,7 @@ final class XaiEmbeddingModel implements EmbeddingModel {
     return _resource
         .create(native)
         .flatMap(
-          (response) => _normalize(
+          (response, _) => _normalize(
             response,
             inputCount: request.items.length,
             requestedDimensions: dimensions,

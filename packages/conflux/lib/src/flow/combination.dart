@@ -7,6 +7,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show EffectExecution, ScopeAccess;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:context/context.dart';
 
 /// Opens cursors that combine multiple Flow sources.
 abstract final class CombinationFlowSource {
@@ -16,7 +17,7 @@ abstract final class CombinationFlowSource {
   ) => Effect.build(($) async {
     final cursors = <FlowSourceCursor<A, E>>[];
     for (final source in sources) {
-      cursors.add(await $(Effect.defer(source)));
+      cursors.add(await $(Effect.defer((_) => source())));
     }
     return _ZipCursor(cursors);
   });
@@ -26,7 +27,7 @@ abstract final class CombinationFlowSource {
     Iterable<OpenFlowCursor<A, E>> sources, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final sourceList = List<OpenFlowCursor<A, E>>.of(sources);
     final mailbox = FlowMailbox<List<A>, E>(capacity, overflow, onOverflow);
@@ -46,10 +47,10 @@ abstract final class CombinationFlowSource {
   static Effect<FlowSourceCursor<C, E>, E> openWithLatestFrom<A, B, C, E>(
     OpenFlowCursor<A, E> primary,
     OpenFlowCursor<B, E> secondary,
-    C Function(A primary, B latest) combine, {
+    C Function(A primary, B latest, Context context) combine, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<C, E>(capacity, overflow, onOverflow);
     final coordinator = _WithLatestCoordinator<A, B, C, E>(
@@ -72,7 +73,7 @@ bool _registerCombinationCleanup<A, E>(
 ) {
   final registered = ScopeAccess.addFinalizer(
     execution.scope,
-    Effect.sync(() {
+    Effect.sync((_) {
       closeCoordinator();
       mailbox.close();
     }),
@@ -261,7 +262,7 @@ final class _WithLatestCoordinator<A, B, C, E> {
   _WithLatestCoordinator(this._mailbox, this._combine, this._execution);
 
   final FlowMailbox<C, E> _mailbox;
-  final C Function(A primary, B latest) _combine;
+  final C Function(A primary, B latest, Context context) _combine;
   final EffectExecution _execution;
   final Map<int, Fiber<void, E>> _fibers = {};
   Option<B> _latest = const None();
@@ -294,13 +295,13 @@ final class _WithLatestCoordinator<A, B, C, E> {
     if (_terminalizing || _closed) return Future.value(const Succeeded(null));
     final latest = _latest;
     if (latest case None()) return Future.value(const Succeeded(null));
-    final combined = _combine(value, (latest as Some<B>).value);
+    final combined = _combine(value, (latest as Some<B>).value, execution.context);
     return EffectAccess.evaluate(_mailbox.offer(combined), execution);
   });
 
-  Effect<void, E> _acceptSecondary(B value) => Effect.sync(() {
+  Effect<void, E> _acceptSecondary(B value) => Effect.sync((_) {
     if (!_terminalizing && !_closed) _latest = Some(value);
-  }).mapError<E>(_widenNever);
+  }).mapError<E>((value, _) => _widenNever(value! as Never));
 
   Future<void> _finished(
     int index,

@@ -146,14 +146,14 @@ void main() {
             decodedEventCapacity: 2,
           )
           .runForEach(
-            (value) => Effect.tryFuture<void, AiError>(
-              () async {
+            (value, _) => Effect.tryFuture<void, AiError>(
+              (_) async {
                 if (!firstDelivered.isCompleted) {
                   firstDelivered.complete();
                   await release.future;
                 }
               },
-              onError: (error, _) => TransportError(
+              onError: (error, _, _) => TransportError(
                 '$error',
                 deliveryState: RequestDeliveryState.responseStarted,
               ),
@@ -266,7 +266,7 @@ void main() {
       );
 
       final subscribed = Completer<void>();
-      final subscription = stream().subscribe((_) {
+      final subscription = stream().subscribe((_, _) {
         subscribed.complete();
         return Effect.succeed(null);
       });
@@ -323,7 +323,7 @@ void main() {
               decodedEventCapacity: 1,
             )
             .runForEach(
-              (_) => Effect.build(($) async {
+              (_, _) => Effect.build(($) async {
                 if (!firstDelivered.isCompleted) {
                   firstDelivered.complete();
                   await releaseConsumer.future;

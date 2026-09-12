@@ -30,7 +30,7 @@ final class OpenAIFilesResource {
           providerId: _providerId,
           api: _api,
         )
-        .flatMap((response) => _decode(response, OpenAIFile.fromJson));
+        .flatMap((response, _) => _decode(response, OpenAIFile.fromJson));
   }
 
   /// Lists one explicit page without polling or automatic pagination.
@@ -57,7 +57,7 @@ final class OpenAIFilesResource {
           api: _api,
           modelId: 'files',
         )
-        .flatMap((response) => _decode(response, OpenAIFilePage.fromJson));
+        .flatMap((response, _) => _decode(response, OpenAIFilePage.fromJson));
   }
 
   /// Retrieves native file metadata.
@@ -71,7 +71,7 @@ final class OpenAIFilesResource {
         api: _api,
         modelId: 'files',
       )
-      .flatMap((response) => _decode(response, OpenAIFile.fromJson));
+      .flatMap((response, _) => _decode(response, OpenAIFile.fromJson));
 
   /// Streams file bytes without buffering the complete response.
   Flow<List<int>, AiError> content(
@@ -98,7 +98,7 @@ final class OpenAIFilesResource {
         api: _api,
         modelId: 'files',
       )
-      .flatMap((response) => _decode(response, OpenAIDeletedFile.fromJson));
+      .flatMap((response, _) => _decode(response, OpenAIDeletedFile.fromJson));
 }
 
 Effect<NativeResponse<T>, AiError> _decode<T>(

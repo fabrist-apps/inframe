@@ -156,14 +156,14 @@ void main() {
           decodedChunkCapacity: 1,
         )
         .runForEach(
-          (_) => Effect.tryFuture<void, AiError>(
-            () async {
+          (_, _) => Effect.tryFuture<void, AiError>(
+            (_) async {
               if (!firstDelivered.isCompleted) {
                 firstDelivered.complete();
                 await releaseConsumer.future;
               }
             },
-            onError: (error, _) => TransportError(
+            onError: (error, _, _) => TransportError(
               '$error',
               deliveryState: RequestDeliveryState.responseStarted,
             ),

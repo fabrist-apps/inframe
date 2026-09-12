@@ -6,27 +6,29 @@ import 'package:conflux/option.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:context/context.dart';
 
 /// Opens bounded Stream-backed Flow cursors.
 abstract final class StreamFlowSource {
   /// Invokes [source], subscribes, and registers asynchronous cancellation.
   static Effect<FlowSourceCursor<A, E>, E> open<A, E>(
-    Stream<A> Function() source, {
-    required E Function(Object error, StackTrace stackTrace) onError,
+    Stream<A> Function(Context context) source, {
+    required E Function(Object error, StackTrace stackTrace, Context context) onError,
     required int capacity,
     required FlowOverflowPolicy overflow,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => Effect.build<FlowSourceCursor<A, E>, E>(($) async {
     return $.acquireRelease<_StreamCursor<A, E>>(
       Effect.sync<_StreamCursor<A, E>>(
-        () => _StreamCursor<A, E>(
+        (context) => _StreamCursor<A, E>(
           capacity,
           overflow,
           onError,
           onOverflow,
-        )..start(source),
-      ).mapError<E>(_widenNever),
-      release: (cursor) => cursor.close(),
+          context,
+        )..start(() => source(context)),
+      ).mapError<E>((value, _) => _widenNever(value! as Never)),
+      release: (cursor, _) => cursor.close(),
     );
   });
 }
@@ -39,12 +41,14 @@ final class _StreamCursor<A, E> implements FlowSourceCursor<A, E> {
     this._overflow,
     this._onError,
     this._onOverflow,
+    this._context,
   );
 
   final int _capacity;
   final FlowOverflowPolicy _overflow;
-  final E Function(Object error, StackTrace stackTrace) _onError;
-  final E Function(FlowBufferOverflow overflow)? _onOverflow;
+  final E Function(Object error, StackTrace stackTrace, Context context) _onError;
+  final E Function(FlowBufferOverflow overflow, Context context)? _onOverflow;
+  final Context _context;
   final ListQueue<A> _values = ListQueue();
   StreamSubscription<A>? _subscription;
   _PendingStreamPull<A, E>? _pendingPull;
@@ -146,7 +150,7 @@ final class _StreamCursor<A, E> implements FlowSourceCursor<A, E> {
   void _failFromStream(Object error, StackTrace stackTrace) {
     if (_closed || _done || _terminalFailure != null) return;
     try {
-      _terminalFailure = Expected(_onError(error, stackTrace));
+      _terminalFailure = Expected(_onError(error, stackTrace, _context));
     } on Object catch (mapperError, mapperStackTrace) {
       _terminalFailure = Defect(mapperError, mapperStackTrace);
     }
@@ -157,7 +161,7 @@ final class _StreamCursor<A, E> implements FlowSourceCursor<A, E> {
   void _failFromOverflow() {
     try {
       _terminalFailure = Expected(
-        _onOverflow!(FlowBufferOverflow(_capacity)),
+        _onOverflow!(FlowBufferOverflow(_capacity), _context),
       );
     } on Object catch (error, stackTrace) {
       _terminalFailure = Defect(error, stackTrace);

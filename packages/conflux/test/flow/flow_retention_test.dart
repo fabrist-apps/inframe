@@ -13,7 +13,7 @@ void main() {
       final registrations = await Effect.build<({int initial, int after}), Never>((resolve) async {
         final cursor = await resolve(
           Flow.fromIterable(List.generate(101, (index) => index))
-              .concatMap((value) => Flow.succeed<int, Never>(value))
+              .concatMap((value, _) => Flow.succeed<int, Never>(value))
               .open(),
         );
         await resolve(cursor.next());

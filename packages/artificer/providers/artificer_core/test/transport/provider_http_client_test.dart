@@ -299,7 +299,7 @@ final class _LoopbackModel implements LanguageModel {
           api: 'generate',
           modelId: modelId,
         )
-        .flatMap(_normalize);
+        .flatMap((value, _) => _normalize(value));
   }
 
   Effect<GenerationResult, AiError> _normalize(NativeResponse<JsonObject> response) {
@@ -320,5 +320,5 @@ final class _LoopbackModel implements LanguageModel {
 
   @override
   Flow<GenerationEvent, AiError> stream(GenerationRequest request) =>
-      generate(request).asFlow().map(GenerationFinished.new);
+      generate(request).asFlow().map((result, _) => GenerationFinished(result));
 }

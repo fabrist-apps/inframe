@@ -1,12 +1,74 @@
 import 'dart:async';
 
 import 'package:conflux/conflux.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/fake_clock.dart';
 
 void main() {
   group('Effect timing', () {
+    test('should pass the registered Context to foreign failure callbacks', () async {
+      final request = ContextKey<String>('request');
+      final caller = Context().withBinding(request.bind('caller'));
+      final owner = caller.withBinding(request.bind('owner'));
+      final seen = <String>[];
+      final effect = Effect.tryFuture<int, String>(
+        (factoryContext) {
+          seen.add('factory:${factoryContext.require(request)}');
+          return Future<int>.error(StateError('failed'));
+        },
+        onError: (error, _, errorContext) {
+          seen.add('error:${errorContext.require(request)}');
+          return '$error';
+        },
+      ).withContext(owner);
+
+      final exit = await Runtime(context: caller).run(effect);
+
+      expect(exit, isA<Failed<int, String>>());
+      expect(seen, ['factory:owner', 'error:owner']);
+    });
+
+    test('should pass Context to cancellation and timeout callbacks', () async {
+      final request = ContextKey<String>('request');
+      final caller = Context().withBinding(request.bind('caller'));
+      final owner = caller.withBinding(request.bind('owner'));
+      final clock = FakeClock();
+      final started = Completer<void>();
+      final pending = Completer<void>();
+      final seen = <String>[];
+      final runtime = Runtime(context: caller, clock: clock);
+      final fiber = runtime.fork(
+        Effect.tryFuture<void, String>(
+              (factoryContext) {
+                seen.add('factory:${factoryContext.require(request)}');
+                started.complete();
+                return pending.future;
+              },
+              onError: (error, _, _) => '$error',
+              onCancel: (cancelContext) {
+                seen.add('cancel:${cancelContext.require(request)}');
+              },
+            )
+            .withContext(owner)
+            .timeout(
+              const Duration(seconds: 1),
+              onTimeout: (timeoutContext) {
+                seen.add('timeout:${timeoutContext.require(request)}');
+                return 'timeout';
+              },
+            ),
+      );
+      await started.future;
+
+      clock.advance(const Duration(seconds: 1));
+      final exit = await fiber.join();
+
+      expect((exit as Failed<void, String>).cause, isA<Expected<String>>());
+      expect(seen, ['factory:owner', 'cancel:owner', 'timeout:caller']);
+    });
+
     test('should release a failed clock wait before returning its defect', () async {
       final clock = _FailingClock();
 
@@ -65,7 +127,7 @@ void main() {
       final clock = FakeClock();
       var started = false;
       final fiber = Runtime(clock: clock).fork(
-        Effect.sync(() {
+        Effect.sync((_) {
           started = true;
           return 42;
         }).delay(const Duration(seconds: 5)),
@@ -83,7 +145,7 @@ void main() {
 
     test('should measure elapsed time monotonically', () async {
       final clock = FakeClock();
-      final effect = Effect.sync(() {
+      final effect = Effect.sync((_) {
         clock
           ..adjustWall(const Duration(days: 2))
           ..advanceMonotonic(const Duration(seconds: 3));
@@ -104,7 +166,7 @@ void main() {
       final exit = await Runtime(clock: clock).run(
         Effect.succeed<int, String>(42).timeout(
           const Duration(seconds: 5),
-          onTimeout: () {
+          onTimeout: (_) {
             fallbackCalls += 1;
             return 'timeout';
           },
@@ -125,22 +187,22 @@ void main() {
       final runtime = Runtime(clock: clock);
       final fiber = runtime.fork(
         Effect.tryFuture<void, String>(
-              () {
+              (_) {
                 started.complete();
                 return pending.future;
               },
-              onError: (error, _) => '$error',
+              onError: (error, _, _) => '$error',
             )
             .onCancel(
               Effect.tryFuture<void, Never>(
-                () {
+                (_) {
                   cleanupStarted.complete();
                   return cleanupGate.future;
                 },
-                onError: Error.throwWithStackTrace,
+                onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
               ),
             )
-            .timeout(const Duration(seconds: 5), onTimeout: () => 'timeout'),
+            .timeout(const Duration(seconds: 5), onTimeout: (_) => 'timeout'),
       );
       await started.future;
 
@@ -166,16 +228,16 @@ void main() {
       final pending = Completer<void>();
       final fiber = Runtime(clock: clock).fork(
         Effect.tryFuture<void, String>(
-              () {
+              (_) {
                 started.complete();
                 return pending.future;
               },
-              onError: (error, _) => '$error',
+              onError: (error, _, _) => '$error',
             )
             .onCancel(
-              Effect.sync(() => throw StateError('cleanup')),
+              Effect.sync((_) => throw StateError('cleanup')),
             )
-            .timeout(const Duration(seconds: 5), onTimeout: () => 'timeout'),
+            .timeout(const Duration(seconds: 5), onTimeout: (_) => 'timeout'),
       );
       await started.future;
 
@@ -192,7 +254,7 @@ void main() {
       final clock = FakeClock();
       var started = false;
       final fiber = Runtime(clock: clock).fork(
-        Effect.sync(() => started = true).delay(const Duration(seconds: 5)),
+        Effect.sync((_) => started = true).delay(const Duration(seconds: 5)),
       );
       await Future<void>.delayed(Duration.zero);
 
@@ -211,12 +273,12 @@ void main() {
       final pending = Completer<void>();
       final fiber = Runtime(clock: clock).fork(
         Effect.tryFuture<void, String>(
-          () {
+          (_) {
             started.complete();
             return pending.future;
           },
-          onError: (error, _) => '$error',
-        ).timeout(const Duration(seconds: 5), onTimeout: () => 'timeout'),
+          onError: (error, _, _) => '$error',
+        ).timeout(const Duration(seconds: 5), onTimeout: (_) => 'timeout'),
       );
       await started.future;
 
@@ -240,7 +302,7 @@ void main() {
       expect(
         () => Effect.succeed<int, String>(1).timeout(
           const Duration(microseconds: -1),
-          onTimeout: () => 'timeout',
+          onTimeout: (_) => 'timeout',
         ),
         throwsArgumentError,
       );

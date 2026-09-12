@@ -30,7 +30,7 @@ final class BasetenMessagesResource {
         api: _api,
         modelId: request.model,
       )
-      .flatMap(_decodeResponse);
+      .flatMap((response, _) => _decodeResponse(response));
 
   /// Streams typed native beta Messages events.
   Flow<BasetenMessageEvent, AiError> stream(

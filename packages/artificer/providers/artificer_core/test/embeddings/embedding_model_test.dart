@@ -131,7 +131,7 @@ final class _LoopbackEmbeddingModel implements EmbeddingModel {
           api: 'embeddings',
           modelId: modelId,
         )
-        .flatMap((response) => _normalize(response, request));
+        .flatMap((response, _) => _normalize(response, request));
   }
 
   Effect<EmbeddingResult, AiError> _normalize(

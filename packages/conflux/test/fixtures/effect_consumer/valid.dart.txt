@@ -20,7 +20,7 @@ Future<void> main() async {
   );
   final Effect<Result<int, _BaseError>, _BaseError> captured = widened.result();
   final recovered = widened.catchError(
-    (_) => Effect.succeed<int, _BaseError>(1),
+    (_, _) => Effect.succeed<int, _BaseError>(1),
   );
   final capturedExit = await Runtime().run(captured);
   final widenedExit = await Runtime().run(recovered);
@@ -37,18 +37,80 @@ Future<void> main() async {
     () => ScheduleDriver(
       (_) => Effect.fail(const _SpecificError()),
     ),
-  ).mapError<_BaseError>((error) => error);
+  ).mapError<_BaseError>((error, _) => error);
   await Runtime().run(retried);
   await Runtime().run(mappedPolicy.driver().step(0));
+
+  final Flow<String, _BaseError> flow = Flow.fromIterable([1, 2])
+      .widenError<_BaseError>()
+      .map((value, context) => '$value:$context');
+  final folded = flow.runFold<int>(
+    0,
+    (length, value, context) => length + value.length + context.hashCode,
+  );
+  await Runtime().run(folded);
+  final concurrent = Flow.fromIterable([1, 2])
+      .widenError<_BaseError>()
+      .mergeMap(
+        (value, context) => Flow.succeed('$value:$context'),
+        concurrency: 2,
+      );
+  final combined = concurrent.withLatestFrom(
+    Flow.succeed<String, _BaseError>('latest'),
+    (primary, latest, context) => '$primary:$latest:$context',
+  );
+  await Runtime().run(combined.runDrain());
+  final timed = flow
+      .share(
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (overflow, context) => _SpecificError(),
+      )
+      .bufferTime(
+        Duration.zero,
+        maxSize: 2,
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (overflow, context) => _SpecificError(),
+      )
+      .debounce(
+        Duration.zero,
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (overflow, context) => _SpecificError(),
+      )
+      .throttle(
+        Duration.zero,
+        overflow: FlowOverflowPolicy.fail,
+        onOverflow: (overflow, context) => _SpecificError(),
+      );
+  await Runtime().run(timed.runDrain());
 
   final cron = (Cron.fromFields(
     location: tz.UTC,
     seconds: const {0},
   ) as Success<Cron, CronError>).value;
   final Schedule<Option<int?>, Duration, _BaseError> calendar = Schedule.cron<Option<int?>>(cron)
-      .mapError<_BaseError>(_CalendarError.new);
+      .mapError<_BaseError>((error, _) => _CalendarError(error));
   final Effect<int?, _BaseError> nullable = Effect.succeed(null);
   await nullable.schedule(calendar.within(Duration.zero)).runFuture();
+
+  final cacheProgram = Effect.build<void, _BaseError>(($) async {
+    final cache = await $(
+      Cache.make<String, int, _BaseError>(
+        capacity: 2,
+        concurrency: 1,
+        expiry: CacheExpiry.byValue(
+          (key, value, context) => Duration(seconds: key.length + value + context.hashCode.abs() % 2),
+        ),
+        lookup: (key, context) => Effect.succeed(key.length + context.hashCode % 2),
+      ),
+    );
+    await $(cache.set('key', 3));
+    await $(
+      cache.invalidateWhere(
+        (key, value, context) => key.length + value + context.hashCode < 0,
+      ),
+    );
+  });
+  await cacheProgram.runFuture();
 }
 
 sealed class _BaseError {

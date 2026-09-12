@@ -6,16 +6,38 @@ import 'package:test/test.dart';
 
 void main() {
   group('Effect resource cleanup', () {
+    test('should preserve finalizer and observer Context regions', () async {
+      final request = ContextKey<String>('request');
+      final caller = Context().withBinding(request.bind('caller'));
+      final owner = caller.withBinding(request.bind('owner'));
+      final seen = <String>[];
+      final program =
+          Effect.build<void, Never>(($) async {
+            await $.acquireRelease(
+              Effect.succeed<void, Never>(null),
+              release: (_, context) {
+                return Effect.sync((_) => seen.add('release:${context.require(request)}'));
+              },
+            );
+          }).withContext(owner).onExit((_, context) {
+            return Effect.sync((_) => seen.add('exit:${context.require(request)}'));
+          });
+
+      await Runtime(context: caller).run(program);
+
+      expect(seen, ['exit:caller', 'release:owner']);
+    });
+
     test('should release acquired resources once in reverse order', () async {
       final events = <String>[];
       final program = Effect.build<void, String>(($) async {
         await $.acquireRelease(
           Effect.succeed<String, String>('first'),
-          release: (resource) => Effect.sync(() => events.add(resource)),
+          release: (resource, _) => Effect.sync((_) => events.add(resource)),
         );
         await $.acquireRelease(
           Effect.succeed<String, String>('second'),
-          release: (resource) => Effect.sync(() => events.add(resource)),
+          release: (resource, _) => Effect.sync((_) => events.add(resource)),
         );
       });
 
@@ -28,7 +50,7 @@ void main() {
     test('should preserve execution and cleanup failures sequentially', () async {
       final program = Effect.build<void, String>(($) {
         $
-          ..addFinalizer(Effect.sync(() => throw StateError('cleanup')))
+          ..addFinalizer(Effect.sync((_) => throw StateError('cleanup')))
           ..sync<void>(const Failure('operation'));
       });
 
@@ -47,7 +69,7 @@ void main() {
         Effect.build<int, Never>(($) async {
           return $.acquireRelease(
             Effect.succeed<int, Never>(42),
-            release: (_) => Effect.sync(() => released = true),
+            release: (_, _) => Effect.sync((_) => released = true),
           );
         }),
       );
@@ -64,9 +86,9 @@ void main() {
     test('should run ensuring and onExit for success and failure', () async {
       final seen = <String>[];
       final success = Effect.succeed<int, String>(1)
-          .onExit((exit) => Effect.sync(() => seen.add('$exit')));
+          .onExit((exit, _) => Effect.sync((_) => seen.add('$exit')));
       final failure = Effect.fail<int, String>('no')
-          .ensuring(Effect.sync(() => seen.add('failure')));
+          .ensuring(Effect.sync((_) => seen.add('failure')));
 
       await Runtime().run(success);
       await Runtime().run(failure);
@@ -82,21 +104,21 @@ void main() {
       final runtime = Runtime();
       final fiber = runtime.fork(
         Effect.tryFuture<void, String>(
-          () {
+          (_) {
             started.complete();
             return pending.future;
           },
-          onError: (error, _) => '$error',
-        ).onCancel(Effect.sync(() => cancellations += 1)),
+          onError: (error, _, _) => '$error',
+        ).onCancel(Effect.sync((_) => cancellations += 1)),
       );
       await started.future;
 
       await fiber.interrupt('test');
       await Runtime().run(
-        Effect.succeed<void, String>(null).onCancel(Effect.sync(() => cancellations += 1)),
+        Effect.succeed<void, String>(null).onCancel(Effect.sync((_) => cancellations += 1)),
       );
       await Runtime().run(
-        Effect.fail<void, String>('no').onCancel(Effect.sync(() => cancellations += 1)),
+        Effect.fail<void, String>('no').onCancel(Effect.sync((_) => cancellations += 1)),
       );
 
       expect(cancellations, 1);
@@ -112,7 +134,7 @@ void main() {
         final borrowed = $.context.require(key);
         final connection = await $.acquireRelease(
           Effect.succeed<_Connection, Never>(borrowed.connect()),
-          release: (value) => Effect.sync(value.close),
+          release: (value, _) => Effect.sync((_) => value.close()),
         );
         return connection.value;
       });
@@ -135,19 +157,19 @@ void main() {
         Effect.build<void, String>(($) async {
           await $.acquireRelease(
             Effect.tryFuture<_Connection, String>(
-              () {
+              (_) {
                 acquireStarted.complete();
                 return acquired.future;
               },
-              onError: (error, _) => '$error',
+              onError: (error, _, _) => '$error',
             ),
-            release: (resource) => Effect.sync(resource.close),
+            release: (resource, _) => Effect.sync((_) => resource.close()),
           );
           registered.complete();
           await $(
             Effect.tryFuture<void, String>(
-              () => pending.future,
-              onError: (error, _) => '$error',
+              (_) => pending.future,
+              onError: (error, _, _) => '$error',
             ),
           );
         }),
@@ -168,10 +190,10 @@ void main() {
       final program = Effect.build<void, String>(($) {
         acquisition = $.acquireRelease(
           Effect.tryFuture<_Connection, String>(
-            () => acquired.future,
-            onError: (error, _) => '$error',
+            (_) => acquired.future,
+            onError: (error, _, _) => '$error',
           ),
-          release: (resource) => Effect.sync(resource.close),
+          release: (resource, _) => Effect.sync((_) => resource.close()),
         );
       });
 
@@ -193,19 +215,19 @@ void main() {
         Effect.build<void, String>(($) async {
           await $.acquireRelease(
             Effect.succeed<void, String>(null),
-            release: (_) => Effect.tryFuture<void, Never>(
-              () {
+            release: (_, _) => Effect.tryFuture<void, Never>(
+              (_) {
                 releaseStarted.complete();
                 return releaseGate.future;
               },
-              onError: (error, _) => throw StateError('$error'),
+              onError: (error, _, _) => throw StateError('$error'),
             ),
           );
           bodyStarted.complete();
           await $(
             Effect.tryFuture<void, String>(
-              () => bodyPending.future,
-              onError: (error, _) => '$error',
+              (_) => bodyPending.future,
+              onError: (error, _, _) => '$error',
             ),
           );
         }),
@@ -232,8 +254,8 @@ void main() {
     test('should keep multiple cleanup failures in reverse order', () async {
       final program = Effect.build<void, String>(($) {
         $
-          ..addFinalizer(Effect.sync(() => throw StateError('first')))
-          ..addFinalizer(Effect.sync(() => throw StateError('second')))
+          ..addFinalizer(Effect.sync((_) => throw StateError('first')))
+          ..addFinalizer(Effect.sync((_) => throw StateError('second')))
           ..sync<void>(const Failure('operation'));
       });
 
@@ -252,24 +274,24 @@ void main() {
       final program = Effect.build<void, String>(($) async {
         await $.acquireRelease(
           Effect.succeed<void, String>(null),
-          release: (_) => Effect.sync(() => events.add('release')),
+          release: (_, _) => Effect.sync((_) => events.add('release')),
         );
         await $(
           Effect.all<int, String>([
             Effect.tryFuture<int, String>(
-              () async {
+              (_) async {
                 await childStarted.future;
                 throw StateError('failed');
               },
-              onError: (_, _) => 'failed',
+              onError: (_, _, _) => 'failed',
             ),
             Effect.tryFuture<int, String>(
-              () {
+              (_) {
                 childStarted.complete();
                 return childPending.future;
               },
-              onError: (error, _) => '$error',
-              onCancel: () async {
+              onError: (error, _, _) => '$error',
+              onCancel: (_) async {
                 await Future<void>.delayed(Duration.zero);
                 events.add('child');
               },

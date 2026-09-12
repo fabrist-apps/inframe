@@ -9,6 +9,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show EffectExecution, ScopeAccess;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:context/context.dart';
 
 /// Opens cursors for concurrent Flow composition.
 abstract final class ConcurrentFlowSource {
@@ -17,7 +18,7 @@ abstract final class ConcurrentFlowSource {
     Iterable<OpenFlowCursor<A, E>> sources, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<A, E>(capacity, overflow, onOverflow);
     final coordinator = _MergeCoordinator<A, E>(mailbox, execution);
@@ -31,11 +32,11 @@ abstract final class ConcurrentFlowSource {
   /// Maps outer values to at most [concurrency] active inner cursors.
   static Effect<FlowSourceCursor<B, E>, E> openMergeMap<A, B, E>(
     OpenFlowCursor<A, E> upstream,
-    OpenFlowCursor<B, E> Function(A value) transform, {
+    OpenFlowCursor<B, E> Function(A value, Context context) transform, {
     required int concurrency,
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<B, E>(capacity, overflow, onOverflow);
     final coordinator = _MergeCoordinator<B, E>(mailbox, execution);
@@ -50,10 +51,10 @@ abstract final class ConcurrentFlowSource {
   /// Replaces an active inner cursor after its cleanup completes.
   static Effect<FlowSourceCursor<B, E>, E> openSwitchMap<A, B, E>(
     OpenFlowCursor<A, E> upstream,
-    OpenFlowCursor<B, E> Function(A value) transform, {
+    OpenFlowCursor<B, E> Function(A value, Context context) transform, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<_GenerationValue<B>, E>(
       capacity,
@@ -68,7 +69,7 @@ abstract final class ConcurrentFlowSource {
     );
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync(() {
+      Effect.sync((_) {
         coordinator.close();
         mailbox.close();
       }),
@@ -87,10 +88,10 @@ abstract final class ConcurrentFlowSource {
   /// Ignores outer values while one inner cursor remains active.
   static Effect<FlowSourceCursor<B, E>, E> openExhaustMap<A, B, E>(
     OpenFlowCursor<A, E> upstream,
-    OpenFlowCursor<B, E> Function(A value) transform, {
+    OpenFlowCursor<B, E> Function(A value, Context context) transform, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<B, E>(capacity, overflow, onOverflow);
     final coordinator = _ExhaustCoordinator<A, B, E>(
@@ -101,7 +102,7 @@ abstract final class ConcurrentFlowSource {
     );
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync(() {
+      Effect.sync((_) {
         coordinator.close();
         mailbox.close();
       }),
@@ -125,7 +126,7 @@ abstract final class ConcurrentFlowSource {
   }) {
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync(() {
+      Effect.sync((_) {
         coordinator.close();
         gate?.close();
         mailbox.close();
@@ -170,26 +171,27 @@ final class _MergeCoordinator<A, E> {
 
   void startMappedSource<B>(
     OpenFlowCursor<B, E> upstream,
-    OpenFlowCursor<A, E> Function(B value) transform,
+    OpenFlowCursor<A, E> Function(B value, Context context) transform,
     _ConcurrencyGate gate,
   ) {
     _gate = gate;
     _startPump(
       upstream,
-      (value) => gate.acquire().mapError<E>(_widenNever).tap((_) {
-        return Effect.sync(() {
-          if (_closed || _terminalizing) {
-            gate.release();
-            return;
-          }
-          _activeInners += 1;
-          _startPump(
-            () => Effect.defer(() => transform(value)()),
-            _mailbox.offer,
-            _PumpKind.inner,
-          );
-        }).mapError<E>(_widenNever);
-      }),
+      (value) =>
+          gate.acquire().mapError<E>((value, _) => _widenNever(value! as Never)).tap((_, context) {
+            return Effect.sync((_) {
+              if (_closed || _terminalizing) {
+                gate.release();
+                return;
+              }
+              _activeInners += 1;
+              _startPump(
+                () => Effect.defer((_) => transform(value, context)()),
+                _mailbox.offer,
+                _PumpKind.inner,
+              );
+            }).mapError<E>((value, _) => _widenNever(value! as Never));
+          }),
       _PumpKind.outer,
     );
   }
@@ -266,7 +268,7 @@ final class _SwitchCoordinator<Outer, A, E> {
   );
 
   final OpenFlowCursor<Outer, E> _upstream;
-  final OpenFlowCursor<A, E> Function(Outer value) _transform;
+  final OpenFlowCursor<A, E> Function(Outer value, Context context) _transform;
   final FlowMailbox<_GenerationValue<A>, E> _mailbox;
   final EffectExecution _execution;
   final _LatestSlot<Outer> _slot = _LatestSlot();
@@ -293,7 +295,9 @@ final class _SwitchCoordinator<Outer, A, E> {
       _execution.scope,
       pumpFlow(
         _upstream,
-        (value) => Effect.sync(() => _slot.put(value)).mapError<E>(_widenNever),
+        (value) =>
+            Effect.sync((_) => _slot.put(value))
+                .mapError<E>((value, _) => _widenNever(value! as Never)),
       ),
       _execution,
     );
@@ -341,7 +345,7 @@ final class _SwitchCoordinator<Outer, A, E> {
     final inner = ScopeAccess.fork(
       _execution.scope,
       pumpFlow(
-        () => Effect.defer(() => _transform(value)()),
+        () => Effect.defer((context) => _transform(value, context)()),
         (value) => _mailbox.offer(_GenerationValue(value, generation)),
       ),
       _execution,
@@ -447,7 +451,7 @@ final class _ExhaustCoordinator<Outer, A, E> {
   );
 
   final OpenFlowCursor<Outer, E> _upstream;
-  final OpenFlowCursor<A, E> Function(Outer value) _transform;
+  final OpenFlowCursor<A, E> Function(Outer value, Context context) _transform;
   final FlowMailbox<A, E> _mailbox;
   final EffectExecution _execution;
   Fiber<void, E>? _outer;
@@ -466,19 +470,19 @@ final class _ExhaustCoordinator<Outer, A, E> {
     unawaited(outer.exit.then((exit) => _outerFinished(outer, exit)));
   }
 
-  Effect<void, E> _accept(Outer value) => Effect.sync(() {
+  Effect<void, E> _accept(Outer value) => Effect.sync((_) {
     if (_inner != null || _terminalizing || _closed) return;
     final inner = ScopeAccess.fork(
       _execution.scope,
       pumpFlow(
-        () => Effect.defer(() => _transform(value)()),
+        () => Effect.defer((context) => _transform(value, context)()),
         _mailbox.offer,
       ),
       _execution,
     );
     _inner = inner;
     unawaited(inner.exit.then((exit) => _innerFinished(inner, exit)));
-  }).mapError<E>(_widenNever);
+  }).mapError<E>((value, _) => _widenNever(value! as Never));
 
   Future<void> _outerFinished(Fiber<void, E> outer, Exit<void, E> exit) async {
     if (identical(_outer, outer)) _outer = null;
@@ -546,7 +550,7 @@ final class _LatestSlot<A> {
     return pending;
   }
 
-  Effect<void, Never> wait() => Effect.defer(() {
+  Effect<void, Never> wait() => Effect.defer((_) {
     final waiter = CoordinationWaiter<void>();
     return waiter.awaitValue(
       onStart: () {
@@ -614,7 +618,7 @@ final class _ConcurrencyGate {
   var _active = 0;
   var _closed = false;
 
-  Effect<void, Never> acquire() => Effect.defer(() {
+  Effect<void, Never> acquire() => Effect.defer((_) {
     final waiter = CoordinationWaiter<void>();
     return waiter.awaitValue(
       onStart: () {

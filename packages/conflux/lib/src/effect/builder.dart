@@ -61,7 +61,7 @@ final class EffectBuilder<E> {
   /// Acquires a resource and atomically transfers its cleanup to this scope.
   Future<A> acquireRelease<A>(
     Effect<A, E> acquire, {
-    required Effect<void, Never> Function(A resource) release,
+    required Effect<void, Never> Function(A resource, Context context) release,
   }) async {
     _checkUsable();
     final exit = await EffectAccess.evaluate(acquire, _execution);
@@ -73,9 +73,12 @@ final class EffectBuilder<E> {
 
   Future<A> _registerRelease<A>(
     A resource,
-    Effect<void, Never> Function(A resource) release,
+    Effect<void, Never> Function(A resource, Context context) release,
   ) async {
-    final finalizer = Effect.defer<void, Never>(() => release(resource));
+    final finalizerContext = _execution.context;
+    final finalizer = Effect.defer<void, Never>(
+      (_) => release(resource, finalizerContext),
+    );
     if (ScopeAccess.addFinalizer(
       _execution.scope,
       finalizer,

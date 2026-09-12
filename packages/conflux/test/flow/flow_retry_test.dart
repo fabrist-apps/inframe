@@ -11,7 +11,7 @@ void main() {
   group('Flow retry', () {
     test('should resubscribe and permit values from failed attempts to repeat', () async {
       var attempts = 0;
-      final flow = Flow.defer<int, String>(() {
+      final flow = Flow.defer<int, String>((_) {
         attempts += 1;
         final tail = attempts < 3
             ? Flow.fail<int, String>('failure $attempts')
@@ -25,7 +25,7 @@ void main() {
 
     test('should create a fresh bounded driver for every consumption', () async {
       var attempts = 0;
-      final flow = Flow.defer<int, String>(() {
+      final flow = Flow.defer<int, String>((_) {
         attempts += 1;
         return Flow.fail('failure $attempts');
       }).retry(Schedule.recurs(1));
@@ -61,7 +61,7 @@ void main() {
         const Expected('final first'),
         const Expected('final second'),
       ]);
-      final flow = Flow.defer<int, String>(() {
+      final flow = Flow.defer<int, String>((_) {
         attempts += 1;
         final cause = attempts == 1
             ? Sequential<String>([
@@ -106,8 +106,8 @@ void main() {
       var attempts = 0;
       final policy = Schedule<String, int, int>.fromDriver(
         () => ScheduleDriver((_) => Effect.fail(7)),
-      ).mapError((error) => 'policy $error');
-      final flow = Flow.defer<int, String>(() {
+      ).mapError((error, _) => 'policy $error');
+      final flow = Flow.defer<int, String>((_) {
         attempts += 1;
         return Flow.fail('source failed');
       }).retry(policy);
@@ -128,16 +128,16 @@ void main() {
       final cleanupStarted = Completer<void>();
       final releaseCleanup = Completer<void>();
       var attempts = 0;
-      final flow = Flow.defer<int, String>(() {
+      final flow = Flow.defer<int, String>((_) {
         attempts += 1;
         if (attempts > 1) return Flow.succeed(42);
         return Flow.fail<int, String>('again').ensuring(
           Effect.tryFuture<void, Never>(
-            () {
+            (_) {
               cleanupStarted.complete();
               return releaseCleanup.future;
             },
-            onError: _impossibleFutureError,
+            onError: (error, stackTrace, _) => _impossibleFutureError(error, stackTrace),
           ),
         );
       }).retry(Schedule.spaced(const Duration(seconds: 5)));
@@ -161,7 +161,7 @@ void main() {
       final runtime = Runtime(clock: clock);
       addTearDown(runtime.close);
       var attempts = 0;
-      final flow = Flow.defer<int, String>(() {
+      final flow = Flow.defer<int, String>((_) {
         attempts += 1;
         return Flow.fail('again');
       }).retry(Schedule.spaced(const Duration(seconds: 5)));

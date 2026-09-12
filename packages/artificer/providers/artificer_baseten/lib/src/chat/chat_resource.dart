@@ -34,7 +34,7 @@ final class BasetenChatCompletionsResource {
         api: _api,
         modelId: request.model,
       )
-      .flatMap((response) => Effect.fromResult(_codec.decodeNative(response)));
+      .flatMap((response, _) => Effect.fromResult(_codec.decodeNative(response)));
 
   /// Streams typed native chunks and a terminal done event.
   Flow<BasetenChatEvent, AiError> stream(
@@ -88,8 +88,8 @@ final class BasetenChatCompletionsResource {
               api: _api,
               modelId: modelId,
             )
-            .flatMap((response) => Effect.fromResult(_codec.decodeNative(response)))
-            .flatMap((response) => Effect.fromResult(_codec.normalize(response))),
+            .flatMap((response, _) => Effect.fromResult(_codec.decodeNative(response)))
+            .flatMap((response, _) => Effect.fromResult(_codec.normalize(response))),
     };
   }
 

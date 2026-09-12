@@ -321,8 +321,8 @@ final class ProviderHttpClient {
       throw ArgumentError.value(responseLimit, 'maxResponseBytes', 'must be positive');
     }
     return Flow.fromStream<Uint8List, _SseSignal>(
-          () => _openByteStream(request, maxResponseBytes: responseLimit),
-          onError: (error, stackTrace) => switch (error) {
+          (_) => _openByteStream(request, maxResponseBytes: responseLimit),
+          onError: (error, stackTrace, _) => switch (error) {
             _SseSignal() => error,
             AiError() => _SseExpected(error),
             _ => _SseTerminal(Defect(error, stackTrace)),
@@ -330,13 +330,13 @@ final class ProviderHttpClient {
           capacity: decodedChunkCapacity,
         )
         .catchError(
-          (signal) => switch (signal) {
+          (signal, _) => switch (signal) {
             _SseExpected() => Flow.fail<Uint8List, _SseSignal>(signal),
             _SseTerminal(:final cause) => Effect.failCause<Uint8List, _SseSignal>(cause).asFlow(),
           },
         )
         .mapError(
-          (signal) => switch (signal) {
+          (signal, _) => switch (signal) {
             _SseExpected(:final error) => error,
             _SseTerminal() => throw StateError('A byte-stream terminal cause was not expanded.'),
           },
@@ -366,13 +366,13 @@ final class ProviderHttpClient {
       throw ArgumentError.value(responseLimit, 'maxStreamBytes', 'must be positive');
     }
     return Flow.fromStream<A, _SseSignal>(
-          () => _openSseStream(
+          (_) => _openSseStream(
             request,
             protocol: createProtocol(),
             maxEventBytes: maxEventBytes,
             maxStreamBytes: responseLimit,
           ),
-          onError: (error, stackTrace) => switch (error) {
+          onError: (error, stackTrace, _) => switch (error) {
             _SseSignal() => error,
             AiError() => _SseExpected(error),
             _ => _SseTerminal(Defect(error, stackTrace)),
@@ -380,13 +380,13 @@ final class ProviderHttpClient {
           capacity: decodedEventCapacity,
         )
         .catchError(
-          (signal) => switch (signal) {
+          (signal, _) => switch (signal) {
             _SseExpected() => Flow.fail<A, _SseSignal>(signal),
             _SseTerminal(:final cause) => Effect.failCause<A, _SseSignal>(cause).asFlow(),
           },
         )
         .mapError(
-          (signal) => switch (signal) {
+          (signal, _) => switch (signal) {
             _SseExpected(:final error) => error,
             _SseTerminal() => throw StateError('An SSE terminal cause was not expanded.'),
           },
@@ -446,7 +446,7 @@ final class ProviderHttpClient {
   Effect<A, AiError> _execute<A>(
     Effect<A, AiError> Function(_RequestLifetime lifetime) operation,
   ) {
-    return Effect.defer(() {
+    return Effect.defer((_) {
       if (_state != _ClientState.open) return Effect.fail(const ClientClosedError());
       final lifetime = _RequestLifetime();
       _active.add(lifetime);
@@ -478,7 +478,7 @@ final class ProviderHttpClient {
         api: api,
         modelId: modelId,
         allowEmptySuccess: allowEmptySuccess,
-      ).flatMap((response) {
+      ).flatMap((response, _) {
         final value = response.value;
         if (value is! JsonObject) {
           return Effect.fail(const ProtocolError('The response was not a JSON object.'));
@@ -525,12 +525,12 @@ final class ProviderHttpClient {
       final acquisition = lifetime.startExchange(() => _client.send(nativeRequest));
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
-          () => lifetime.waitFor(acquisition),
-          onError: (error, _) => TransportError(
+          (_) => lifetime.waitFor(acquisition),
+          onError: (error, _, _) => TransportError(
             _safeForeignMessage(error),
             deliveryState: deliveryState,
           ),
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       if (acquired case _WaitClosed<http.StreamedResponse>(:final reason)) {
@@ -543,8 +543,8 @@ final class ProviderHttpClient {
       final read = _readBody(response, lifetime, maxResponseBytes);
       final body = await $(
         Effect.tryFuture<_WaitResult<List<int>>, AiError>(
-          () => lifetime.waitFor(read),
-          onError: (error, _) => switch (error) {
+          (_) => lifetime.waitFor(read),
+          onError: (error, _, _) => switch (error) {
             _ResponseTooLarge(:final actual) => ResponseLimitError(
               'The response exceeded the configured byte limit.',
               limit: maxResponseBytes,
@@ -555,7 +555,7 @@ final class ProviderHttpClient {
               deliveryState: deliveryState,
             ),
           },
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       if (body case _WaitClosed<List<int>>(:final reason)) {
@@ -682,8 +682,8 @@ final class ProviderHttpClient {
       }
       final sourceStream = await $(
         Effect.tryFuture<Stream<List<int>>, AiError>(
-          () => Future.sync(source.openRead),
-          onError: (error, _) => switch (error) {
+          (_) => Future.sync(source.openRead),
+          onError: (error, _, _) => switch (error) {
             UploadSourceError(:final message) => InvalidRequestError(
               message,
               remoteResourceId: request.remoteResourceId,
@@ -694,7 +694,7 @@ final class ProviderHttpClient {
               remoteResourceId: request.remoteResourceId,
             ),
           },
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       final nativeRequest =
@@ -720,8 +720,8 @@ final class ProviderHttpClient {
       final acquisition = lifetime.startExchange(() => _client.send(nativeRequest));
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
-          () => lifetime.waitFor(acquisition),
-          onError: (error, _) => switch (error) {
+          (_) => lifetime.waitFor(acquisition),
+          onError: (error, _, _) => switch (error) {
             UploadSourceError(:final message) => InvalidRequestError(
               message,
               remoteResourceId: request.remoteResourceId,
@@ -732,7 +732,7 @@ final class ProviderHttpClient {
               remoteResourceId: request.remoteResourceId,
             ),
           },
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       if (acquired case _WaitClosed<http.StreamedResponse>(:final reason)) {
@@ -743,8 +743,8 @@ final class ProviderHttpClient {
       deliveryState = RequestDeliveryState.responseStarted;
       final body = await $(
         Effect.tryFuture<_WaitResult<List<int>>, AiError>(
-          () => lifetime.waitFor(_readBody(response, lifetime, maxResponseBytes)),
-          onError: (error, _) => switch (error) {
+          (_) => lifetime.waitFor(_readBody(response, lifetime, maxResponseBytes)),
+          onError: (error, _, _) => switch (error) {
             _ResponseTooLarge(:final actual) => ResponseLimitError(
               'The response exceeded the configured byte limit.',
               limit: maxResponseBytes,
@@ -757,7 +757,7 @@ final class ProviderHttpClient {
               remoteResourceId: request.remoteResourceId,
             ),
           },
-          onCancel: () => lifetime.cancelAndCleanup('caller interrupted'),
+          onCancel: (_) => lifetime.cancelAndCleanup('caller interrupted'),
         ),
       );
       if (body case _WaitClosed<List<int>>(:final reason)) {

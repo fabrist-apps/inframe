@@ -9,7 +9,7 @@ void main() {
   group('PubSub', () {
     test('should lazily acquire independent bounded PubSubs', () async {
       var acquisitions = 0;
-      final acquisition = PubSub.bounded<int>(2).tap((_) {
+      final acquisition = PubSub.bounded<int>(2).tap((_, _) {
         acquisitions += 1;
         return Effect.succeed(null);
       });
@@ -430,8 +430,8 @@ final class _OwnedSubscription<A> {
 
 Effect<void, Never> _waitFor(Future<void> future) {
   return Effect.tryFuture<void, Never>(
-    () => future,
-    onError: Error.throwWithStackTrace,
+    (_) => future,
+    onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
   );
 }
 
@@ -475,7 +475,7 @@ Effect<A, E> _afterEvaluationSteps<A, E>(Effect<A, E> effect, int count) {
   var wrapped = effect;
   for (var index = 0; index < count; index += 1) {
     final inner = wrapped;
-    wrapped = Effect.defer(() => inner);
+    wrapped = Effect.defer((_) => inner);
   }
   return wrapped;
 }

@@ -26,7 +26,7 @@ void main() {
     test('should repeat immediately then wait until tomorrow at 9am', () async {
       final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 11));
       final executions = <DateTime>[];
-      final Effect<void, CronError> operation = Effect.sync(() {
+      final Effect<void, CronError> operation = Effect.sync((_) {
         executions.add(clock.wallTime());
       });
       final fiber = Runtime(clock: clock).fork(
@@ -47,7 +47,7 @@ void main() {
     test('should schedule its first execution tomorrow at 9am', () async {
       final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 11));
       final executions = <DateTime>[];
-      final Effect<int?, CronError> operation = Effect.sync(() {
+      final Effect<int?, CronError> operation = Effect.sync((_) {
         executions.add(clock.wallTime());
         return null;
       });
@@ -68,7 +68,7 @@ void main() {
     test('should execute one overdue wait then skip the backlog', () async {
       final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 8));
       final executions = <DateTime>[];
-      final Effect<void, CronError> operation = Effect.sync(() {
+      final Effect<void, CronError> operation = Effect.sync((_) {
         executions.add(clock.wallTime());
       });
       final fiber = Runtime(clock: clock).fork(
@@ -106,7 +106,7 @@ void main() {
     test('should cancel its runtime wait without another execution', () async {
       final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 8));
       var executions = 0;
-      final Effect<int, CronError> operation = Effect.sync(() => ++executions);
+      final Effect<int, CronError> operation = Effect.sync((_) => ++executions);
       final fiber = Runtime(clock: clock).fork(
         operation.schedule(Schedule.cron<Option<int>>(parse('0 0 9 * * *'))),
       );
@@ -125,10 +125,10 @@ void main() {
       final impossible = parse('0 0 0 31 feb *');
       final clock = FakeClock(wallTime: DateTime.utc(2026));
       var executions = 0;
-      final Effect<int, _OperationError> operation = Effect.sync(() => ++executions);
+      final Effect<int, _OperationError> operation = Effect.sync((_) => ++executions);
       final policy = Schedule.cron<Option<int>>(
         impossible,
-      ).mapError<_OperationError>(_CalendarError.new);
+      ).mapError<_OperationError>((error, _) => _CalendarError(error));
 
       final exit = await operation.schedule(policy).runFutureExit(clock: clock);
 
@@ -144,12 +144,12 @@ void main() {
       final program = Effect.build<Duration, CronError>(($) async {
         $.addFinalizer(
           Effect.tryFuture<void, Never>(
-            () async {
+            (_) async {
               cleanupStarted.complete();
               await cleanupGate.future;
               throw StateError('cleanup failed');
             },
-            onError: Error.throwWithStackTrace,
+            onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
           ),
         );
         final operation = Effect.succeed<int, CronError>(1);
@@ -191,7 +191,7 @@ void main() {
       final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 8));
       var cleanups = 0;
       final operation = Effect.build<String, CronError>(($) {
-        $.addFinalizer(Effect.sync(() => cleanups += 1));
+        $.addFinalizer(Effect.sync((_) => cleanups += 1));
         return $.context.require(key);
       });
       final values = <String>[];
@@ -201,7 +201,7 @@ void main() {
             context: Context().withBinding(key.bind('inherited')),
           ).fork(
             operation
-                .tap((value) => Effect.sync(() => values.add(value)))
+                .tap((value, _) => Effect.sync((_) => values.add(value)))
                 .schedule(Schedule.cron<Option<String>>(parse('0 0 9 * * *'))),
           );
       await flush();

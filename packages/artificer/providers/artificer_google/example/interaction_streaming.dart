@@ -29,7 +29,7 @@ Future<void> main() async {
         await provider.interactions
             .streamRetrieve(interactionId, lastEventId: cursor)
             .runForEach(
-              (event) => Effect.sync(() {
+              (event, _) => Effect.sync((_) {
                 switch (event) {
                   case GoogleInteractionStepDeltaEvent(:final delta):
                     if (delta.text case final text?) stdout.write(text);

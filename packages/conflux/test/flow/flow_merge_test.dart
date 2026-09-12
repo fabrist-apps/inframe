@@ -2,22 +2,88 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('Flow concurrent merge', () {
+    test('should preserve mapper and overflow Context regions', () async {
+      final request = ContextKey<String>('request');
+      final caller = Context().withBinding(request.bind('caller'));
+      final owner = caller.withBinding(request.bind('owner'));
+      final release = Completer<void>();
+      final overflowed = Completer<void>();
+      final seen = <String>[];
+      var blocked = false;
+      final flow = Flow.fromIterable([1, 2, 3])
+          .widenError<String>()
+          .mergeMap(
+            (value, context) {
+              seen.add('map:$value:${context.require(request)}');
+              return Flow.defer((innerContext) {
+                seen.add('inner:$value:${innerContext.require(request)}');
+                return Flow.succeed(value);
+              });
+            },
+            concurrency: 3,
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: (event, context) {
+              seen.add('overflow:${context.require(request)}');
+              if (!overflowed.isCompleted) overflowed.complete();
+              return 'capacity ${event.capacity}';
+            },
+          )
+          .withContext(owner)
+          .mapEffect((value, context) {
+            seen.add('consumer:$value:${context.require(request)}');
+            if (blocked) return Effect.succeed(value);
+            blocked = true;
+            return Effect.tryFuture(
+              (_) async {
+                await release.future;
+                return value;
+              },
+              onError: (error, stackTrace, _) => '$error',
+            );
+          });
+      final runtime = Runtime(context: caller);
+      addTearDown(runtime.close);
+
+      final exit = runtime.run(flow.runDrain());
+      await overflowed.future;
+      release.complete();
+
+      expect(await exit, isA<Failed<void, String>>());
+      expect(seen, contains('overflow:owner'));
+      final consumers = seen.where((entry) => entry.startsWith('consumer:'));
+      expect(consumers, isNotEmpty);
+      expect(consumers.every((entry) => entry.endsWith(':caller')), isTrue);
+      expect(seen.where((entry) => entry.startsWith('map:')), isNotEmpty);
+      expect(
+        seen.where((entry) => entry.startsWith('map:')).every((entry) => entry.endsWith(':owner')),
+        isTrue,
+      );
+      expect(
+        seen
+            .where((entry) => entry.startsWith('inner:'))
+            .every((entry) => entry.endsWith(':owner')),
+        isTrue,
+      );
+    });
+
     test('should merge inner values by availability within its concurrency limit', () async {
       final started = List.generate(3, (_) => Completer<void>());
       final releases = List.generate(3, (_) => Completer<int>());
       final runtime = Runtime();
       addTearDown(runtime.close);
       final flow = Flow.fromIterable([0, 1, 2]).widenError<String>().mergeMap(
-        (value) => Effect.tryFuture<int, String>(
-          () {
+        (value, _) => Effect.tryFuture<int, String>(
+          (_) {
             started[value].complete();
             return releases[value].future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         ).asFlow(),
         concurrency: 2,
         capacity: 4,
@@ -40,12 +106,12 @@ void main() {
       final slowCancelled = Completer<void>();
       final never = Completer<int>();
       final slow = Effect.tryFuture<int, String>(
-        () {
+        (_) {
           slowStarted.complete();
           return never.future;
         },
-        onError: (error, stackTrace) => '$error',
-        onCancel: () {
+        onError: (error, stackTrace, _) => '$error',
+        onCancel: (_) {
           slowCancelled.complete();
           throw StateError('cleanup failed');
         },
@@ -95,17 +161,21 @@ void main() {
       var pulled = 0;
       final source = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
-          .tap((_) => Effect.sync(() => pulled += 1).mapError(_widenNever));
+          .tap(
+            (_, _) =>
+                Effect.sync((_) => pulled += 1)
+                    .mapError((value, _) => _widenNever(value! as Never)),
+          );
       final runtime = Runtime();
       addTearDown(runtime.close);
       final fiber = runtime.fork(
         Flow.merge([source], capacity: 1).runForEach(
-          (_) => Effect.tryFuture(
-            () {
+          (_, _) => Effect.tryFuture(
+            (_) {
               if (!consumerStarted.isCompleted) consumerStarted.complete();
               return releaseConsumer.future;
             },
-            onError: (error, stackTrace) => '$error',
+            onError: (error, stackTrace, _) => '$error',
           ),
         ),
       );
@@ -132,18 +202,18 @@ void main() {
         ],
         capacity: 1,
         overflow: FlowOverflowPolicy.fail,
-        onOverflow: (overflow) => 'capacity ${overflow.capacity}',
+        onOverflow: (overflow, _) => 'capacity ${overflow.capacity}',
       );
       final fiber = runtime.fork(
-        flow.runForEach((value) {
+        flow.runForEach((value, _) {
           consumed.add(value);
           if (value != 1) return Effect.succeed(null);
           return Effect.tryFuture(
-            () {
+            (_) {
               consumerStarted.complete();
               return releaseConsumer.future;
             },
-            onError: (error, stackTrace) => '$error',
+            onError: (error, stackTrace, _) => '$error',
           );
         }),
       );
@@ -170,15 +240,15 @@ void main() {
               ],
               capacity: 1,
               overflow: overflow,
-            ).subscribe((value) {
+            ).subscribe((value, _) {
               values.add(value);
               if (value != 1) return Effect.succeed(null);
               return Effect.tryFuture<void, Never>(
-                () {
+                (_) {
                   consumerStarted.complete();
                   return releaseConsumer.future;
                 },
-                onError: _impossibleFutureError,
+                onError: (error, stackTrace, _) => _impossibleFutureError(error, stackTrace),
               );
             });
         await consumerStarted.future;
@@ -196,7 +266,7 @@ void main() {
       final source = Flow.succeed<int, String>(1);
 
       expect(
-        () => source.mergeMap(Flow.succeed, concurrency: 0),
+        () => source.mergeMap((value, _) => Flow.succeed(value), concurrency: 0),
         throwsArgumentError,
       );
       expect(
@@ -220,12 +290,12 @@ void main() {
       final runtime = Runtime();
       addTearDown(runtime.close);
       final flow = Flow.fromIterable([0, 1]).widenError<String>().mergeMap(
-        (value) => Effect.tryFuture<int, String>(
-          () {
+        (value, _) => Effect.tryFuture<int, String>(
+          (_) {
             started[value].complete();
             return value == 0 ? first.future : never.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
           onCancel: value == 1 ? innerCancelled.complete : null,
         ).asFlow(),
         concurrency: 2,

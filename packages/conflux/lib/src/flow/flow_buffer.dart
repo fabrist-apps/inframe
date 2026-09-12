@@ -9,6 +9,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show EffectExecution, ScopeAccess;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:context/context.dart';
 
 /// The action a Flow operation takes when its owned buffer is full.
 enum FlowOverflowPolicy {
@@ -38,10 +39,10 @@ final class FlowBufferOverflow {
 }
 
 /// Validates the shared bounded-buffer configuration used by Flow operators.
-void validateFlowBuffer<E>(
+void validateFlowBuffer(
   int capacity,
   FlowOverflowPolicy overflow,
-  E Function(FlowBufferOverflow overflow)? onOverflow,
+  Object? onOverflow,
 ) {
   if (capacity <= 0) {
     throw ArgumentError.value(capacity, 'capacity', 'Must be positive.');
@@ -69,7 +70,7 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   /// Behavior when [capacity] values are already buffered.
   final FlowOverflowPolicy overflow;
 
-  final E Function(FlowBufferOverflow overflow)? _onOverflow;
+  final E Function(FlowBufferOverflow overflow, Context context)? _onOverflow;
   final ListQueue<A> _values = ListQueue();
   final ListQueue<_PendingMailboxOffer<A, E>> _offers = ListQueue();
   CoordinationWaiter<Exit<Option<A>, E>>? _taker;
@@ -80,7 +81,7 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   Effect<void, E> offer(A value) => EffectAccess.create((execution) async {
     final waiter = CoordinationWaiter<Exit<void, E>>();
     late final _PendingMailboxOffer<A, E> offer;
-    offer = _PendingMailboxOffer(value, waiter);
+    offer = _PendingMailboxOffer(value, waiter, execution.context);
     final waited = await EffectAccess.evaluate(
       waiter.awaitValue(
         onStart: () => _startOffer(offer),
@@ -244,7 +245,11 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
       case FlowOverflowPolicy.fail:
         try {
           offer.waiter.succeed(
-            Failed(Expected(_onOverflow!(FlowBufferOverflow(capacity)))),
+            Failed(
+              Expected(
+                _onOverflow!(FlowBufferOverflow(capacity), offer.context),
+              ),
+            ),
           );
         } on Object catch (error, stackTrace) {
           offer.waiter.succeed(Failed(Defect(error, stackTrace)));
@@ -311,7 +316,7 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   /// Registers [close] in [execution]'s scope.
   bool registerClose(EffectExecution execution) => ScopeAccess.addFinalizer(
     execution.scope,
-    Effect.sync(close),
+    Effect.sync((_) => close()),
     execution.context,
     execution.clock,
   );
@@ -346,10 +351,11 @@ final class _MailboxRaceLost {
 }
 
 final class _PendingMailboxOffer<A, E> {
-  const _PendingMailboxOffer(this.value, this.waiter);
+  const _PendingMailboxOffer(this.value, this.waiter, this.context);
 
   final A value;
   final CoordinationWaiter<Exit<void, E>> waiter;
+  final Context context;
 }
 
 sealed class _MailboxTerminal<E> {

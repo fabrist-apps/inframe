@@ -34,7 +34,7 @@ final class FlowSubscription<E> {
 
   static FlowSubscription<E> _start<A, E>(
     Flow<A, E> flow,
-    Effect<void, E> Function(A value) consume,
+    Effect<void, E> Function(A value, Context context) consume,
     Context? context,
   ) {
     final runtime = Runtime(context: context);
@@ -66,7 +66,7 @@ extension FlowInterop<A, E> on Flow<A, E> {
   /// The returned handle owns a temporary Runtime using [context]. Its
   /// [FlowSubscription.completion] resolves only after Flow and Runtime cleanup.
   FlowSubscription<E> subscribe(
-    Effect<void, E> Function(A value) consume, {
+    Effect<void, E> Function(A value, Context context) consume, {
     Context? context,
   }) => FlowSubscription._start(this, consume, context);
 
@@ -121,7 +121,10 @@ final class _StreamPump<A, E> {
   var _cancelled = false;
 
   void start() {
-    final subscription = _flow.subscribe(_deliver, context: _context);
+    final subscription = _flow.subscribe(
+      (value, _) => _deliver(value),
+      context: _context,
+    );
     _subscription = subscription;
     unawaited(subscription.completion.then(_complete));
   }

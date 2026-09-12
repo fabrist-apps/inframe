@@ -21,12 +21,12 @@ final class CoordinationWaiter<A> {
     required void Function() onCancel,
   }) {
     return Effect.tryFuture<Effect<A, Never>, Never>(
-      () {
+      (_) {
         onStart();
         return _completion.future;
       },
-      onError: Error.throwWithStackTrace,
-      onCancel: () {
+      onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
+      onCancel: (_) {
         if (_settled) return;
         _settled = true;
         onCancel();

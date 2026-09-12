@@ -13,13 +13,13 @@ void main() {
       final runtime = Runtime();
       addTearDown(runtime.close);
       final flow = Flow.fromIterable([0, 1, 2]).widenError<String>().mapEffect(
-        (value) => Effect.tryFuture(
-          () async {
+        (value, _) => Effect.tryFuture(
+          (_) async {
             started[value].complete();
             await release[value].future;
             return value * 10;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         ),
       );
 
@@ -40,7 +40,7 @@ void main() {
       final events = <String>[];
       final values = await Flow.fromIterable([1, 2])
           .widenError<String>()
-          .concatMap((outer) {
+          .concatMap((outer, _) {
             events.add('open $outer');
             return Flow.fromIterable([outer, outer * 10]).widenError();
           })
@@ -54,10 +54,11 @@ void main() {
     test('should close each concatMap inner scope before opening the next', () async {
       final events = <String>[];
       final flow = Flow.fromIterable([1, 2]).widenError<String>().concatMap(
-        (value) => Effect.build<int, String>(($) async {
+        (value, _) => Effect.build<int, String>(($) async {
           await $.acquireRelease(
-            Effect.sync(() => events.add('acquire $value')).mapError(_widenNever),
-            release: (_) => Effect.sync(() => events.add('release $value')),
+            Effect.sync((_) => events.add('acquire $value'))
+                .mapError((value, _) => _widenNever(value! as Never)),
+            release: (_, _) => Effect.sync((_) => events.add('release $value')),
           );
           return value;
         }).asFlow(),
@@ -69,7 +70,7 @@ void main() {
 
     test('should sequence runForEach and stop after failure', () async {
       final consumed = <int>[];
-      final exit = await Flow.fromIterable([1, 2, 3]).widenError<String>().runForEach((value) {
+      final exit = await Flow.fromIterable([1, 2, 3]).widenError<String>().runForEach((value, _) {
         consumed.add(value);
         return value == 2 ? Effect.fail('stop') : Effect.succeed(null);
       }).runFutureExit();
@@ -82,10 +83,10 @@ void main() {
       final source = Flow.fromIterable<int?>([1, 3, null]);
 
       expect(
-        await source.runFold(0, (count, _) => count + 1).runFuture(),
+        await source.runFold(0, (count, _, _) => count + 1).runFuture(),
         3,
       );
-      expect(await Flow.empty<int, Never>().runFold(4, (a, b) => a + b).runFuture(), 4);
+      expect(await Flow.empty<int, Never>().runFold(4, (a, b, _) => a + b).runFuture(), 4);
       await source.runDrain().runFuture();
       final last = await source.runLast().runFuture();
       expect(last, isA<Some<int?>>());
@@ -100,12 +101,12 @@ void main() {
       final runtime = Runtime();
       addTearDown(runtime.close);
       final flow = Flow.succeed<int, String>(1).mapEffect(
-        (_) => Effect.tryFuture(
-          () {
+        (_, _) => Effect.tryFuture(
+          (_) {
             started.complete();
             return pending.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
           onCancel: cancelled.complete,
         ),
       );

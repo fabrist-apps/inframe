@@ -33,7 +33,7 @@ final class GoogleEmbeddingsResource {
           api: _api,
           modelId: modelId,
         )
-        .flatMap((response) => _decode(response, GoogleEmbedContentResponse.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleEmbedContentResponse.fromJson));
   }
 
   /// Runs one native synchronous `models.batchEmbedContents` attempt.
@@ -52,7 +52,7 @@ final class GoogleEmbeddingsResource {
           api: _api,
           modelId: modelId,
         )
-        .flatMap((response) => _decode(response, GoogleBatchEmbedContentsResponse.fromJson));
+        .flatMap((response, _) => _decode(response, GoogleBatchEmbedContentsResponse.fromJson));
   }
 
   /// Normalizes an already-decoded single response without issuing another request.
@@ -134,7 +134,7 @@ final class GoogleEmbeddingModel implements EmbeddingModel {
         _resource
             .embedContent(requests.single)
             .flatMap(
-              (response) => _normalize(
+              (response, _) => _normalize(
                 () => _resource.normalizeEmbedContent(
                   response,
                   requestedDimensions: _requestedDimensions(request, options),
@@ -150,7 +150,7 @@ final class GoogleEmbeddingModel implements EmbeddingModel {
               ),
             )
             .flatMap(
-              (response) => _normalize(
+              (response, _) => _normalize(
                 () => _resource.normalizeBatchEmbedContents(
                   response,
                   inputCount: request.items.length,

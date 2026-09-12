@@ -28,7 +28,7 @@ final class BasetenEmbeddingsResource {
         api: _api,
         modelId: request.model,
       )
-      .flatMap(_decode);
+      .flatMap((response, _) => _decode(response));
 
   /// Normalizes an already-decoded batch without issuing I/O.
   Result<EmbeddingResult, AiError> normalize(
@@ -141,7 +141,7 @@ final class BasetenEmbeddingModel implements EmbeddingModel {
     return _resource
         .create(native)
         .flatMap(
-          (response) => Effect.fromResult(
+          (response, _) => Effect.fromResult(
             _resource.normalize(
               response,
               inputCount: request.items.length,

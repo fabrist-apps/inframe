@@ -2,12 +2,81 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import '../support/fake_clock.dart';
 
 void main() {
   group('Flow timing', () {
+    test('should retain timed operator Context for delayed overflow callbacks', () async {
+      final request = ContextKey<String>('request');
+      final owner = Context().withBinding(request.bind('owner'));
+      final subscriber = Context().withBinding(request.bind('subscriber'));
+
+      for (final operation in ['bufferTime', 'debounce', 'throttle']) {
+        final listening = Completer<void>();
+        final blocked = Completer<void>();
+        final release = Completer<void>();
+        final overflowed = Completer<String>();
+        final controller = StreamController<int>(
+          sync: true,
+          onListen: listening.complete,
+        );
+        final source = Flow.fromStream<int, String>(
+          (_) => controller.stream,
+          onError: (error, stackTrace, _) => '$error',
+        );
+        String onOverflow(FlowBufferOverflow _, Context context) {
+          final value = context.require(request);
+          if (!overflowed.isCompleted) overflowed.complete(value);
+          return 'overflow';
+        }
+
+        final timed = switch (operation) {
+          'bufferTime' => source.bufferTime(
+            Duration.zero,
+            maxSize: 1,
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: onOverflow,
+          ),
+          'debounce' => source.debounce(
+            Duration.zero,
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: onOverflow,
+          ),
+          _ => source.throttle(
+            Duration.zero,
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: onOverflow,
+          ),
+        };
+        final running = timed.withContext(owner).subscribe((_, _) {
+          return Effect.tryFuture<void, String>(
+            (_) {
+              if (!blocked.isCompleted) blocked.complete();
+              return release.future;
+            },
+            onError: (error, stackTrace, _) => '$error',
+          );
+        }, context: subscriber);
+
+        await listening.future;
+        controller.add(1);
+        await blocked.future;
+        controller.add(2);
+        await _flushMicrotasks();
+        controller.add(3);
+        expect(await overflowed.future, 'owner', reason: operation);
+        release.complete();
+        await controller.close();
+        expect(await running.completion, isA<Failed<void, String>>(), reason: operation);
+      }
+    });
+
     test('should debounce to the latest value after a monotonic quiet interval', () async {
       final clock = FakeClock();
       final runtime = Runtime(clock: clock);
@@ -18,13 +87,17 @@ void main() {
       final values = <int>[];
       final fiber = runtime.fork(
         Flow.fromStream<int, String>(
-              () => controller.stream,
-              onError: (error, stackTrace) => '$error',
+              (_) => controller.stream,
+              onError: (error, stackTrace, _) => '$error',
             )
             .debounce(
               const Duration(seconds: 5),
             )
-            .runForEach((value) => Effect.sync(() => values.add(value)).mapError(_widenNever)),
+            .runForEach(
+              (value, _) =>
+                  Effect.sync((_) => values.add(value))
+                      .mapError((value, _) => _widenNever(value! as Never)),
+            ),
       );
 
       await listening.future;
@@ -60,7 +133,9 @@ void main() {
           .concat(Flow.fail('failed'))
           .debounce(const Duration(days: 1))
           .runForEach(
-            (value) => Effect.sync(() => failedValues.add(value)).mapError(_widenNever),
+            (value, _) =>
+                Effect.sync((_) => failedValues.add(value))
+                    .mapError((value, _) => _widenNever(value! as Never)),
           )
           .runFutureExit();
 
@@ -79,13 +154,13 @@ void main() {
       final values = <int>[];
       final fiber = runtime.fork(
         Flow.fromStream<int, Never>(
-              () => controller.stream,
-              onError: _impossibleStreamError,
+              (_) => controller.stream,
+              onError: (error, stackTrace, _) => _impossibleStreamError(error, stackTrace),
             )
             .throttle(
               const Duration(seconds: 5),
             )
-            .runForEach((value) => Effect.sync(() => values.add(value))),
+            .runForEach((value, _) => Effect.sync((_) => values.add(value))),
       );
 
       await listening.future;
@@ -121,8 +196,8 @@ void main() {
       addTearDown(controller.close);
       final fiber = runtime.fork(
         Flow.fromStream<int, String>(
-          () => controller.stream,
-          onError: (error, stackTrace) => '$error',
+          (_) => controller.stream,
+          onError: (error, stackTrace, _) => '$error',
         ).debounce(const Duration(seconds: 5)).runDrain(),
       );
 
@@ -142,16 +217,20 @@ void main() {
       final values = <int>[];
       final flow = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
-          .tap((_) => Effect.sync(() => pulled += 1).mapError(_widenNever))
+          .tap(
+            (_, _) =>
+                Effect.sync((_) => pulled += 1)
+                    .mapError((value, _) => _widenNever(value! as Never)),
+          )
           .debounce(Duration.zero, capacity: 1);
-      final subscription = flow.subscribe((value) {
+      final subscription = flow.subscribe((value, _) {
         values.add(value);
         return Effect.tryFuture<void, String>(
-          () {
+          (_) {
             if (!consumerStarted.isCompleted) consumerStarted.complete();
             return releaseConsumer.future;
           },
-          onError: (error, stackTrace) => '$error',
+          onError: (error, stackTrace, _) => '$error',
         );
       });
 
@@ -177,22 +256,22 @@ void main() {
       addTearDown(controller.close);
       final subscription =
           Flow.fromStream<int, String>(
-                () => controller.stream,
-                onError: (error, stackTrace) => '$error',
+                (_) => controller.stream,
+                onError: (error, stackTrace, _) => '$error',
               )
               .debounce(
                 Duration.zero,
                 capacity: 1,
                 overflow: FlowOverflowPolicy.fail,
-                onOverflow: (_) => 'overflow',
+                onOverflow: (_, _) => 'overflow',
               )
-              .subscribe((_) {
+              .subscribe((_, _) {
                 return Effect.tryFuture<void, String>(
-                  () {
+                  (_) {
                     if (!consumerStarted.isCompleted) consumerStarted.complete();
                     return releaseConsumer.future;
                   },
-                  onError: (error, stackTrace) => '$error',
+                  onError: (error, stackTrace, _) => '$error',
                 );
               });
 

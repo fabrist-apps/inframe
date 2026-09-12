@@ -28,7 +28,7 @@ final class XaiResponsesResource {
           api: _api,
           modelId: request.model,
         )
-        .flatMap(_decode);
+        .flatMap((value, _) => _decode(value));
   }
 
   /// Retrieves one stored response without polling.
@@ -47,7 +47,7 @@ final class XaiResponsesResource {
           api: _api,
           modelId: 'responses',
         )
-        .flatMap((response) => _decodeTyped(response, XaiDeletedResponse.fromJson));
+        .flatMap((response, _) => _decodeTyped(response, XaiDeletedResponse.fromJson));
   }
 
   /// Lists one input-item page without following its cursor.
@@ -77,7 +77,7 @@ final class XaiResponsesResource {
           api: _api,
           modelId: 'responses',
         )
-        .flatMap((response) => _decodeTyped(response, XaiResponseInputItemPage.fromJson));
+        .flatMap((response, _) => _decodeTyped(response, XaiResponseInputItemPage.fromJson));
   }
 
   /// Compacts one explicit native input without storing hidden client state.
@@ -90,7 +90,7 @@ final class XaiResponsesResource {
         api: _api,
         modelId: request.model,
       )
-      .flatMap((response) => _decodeTyped(response, XaiCompactResponse.fromJson));
+      .flatMap((response, _) => _decodeTyped(response, XaiCompactResponse.fromJson));
 
   /// Streams typed native Responses events.
   Flow<XaiResponseEvent, AiError> stream(
@@ -212,7 +212,7 @@ final class XaiResponsesResource {
         api: _api,
         modelId: 'responses',
       )
-      .flatMap(_decode);
+      .flatMap((value, _) => _decode(value));
 }
 
 Effect<NativeResponse<T>, AiError> _decodeTyped<T>(

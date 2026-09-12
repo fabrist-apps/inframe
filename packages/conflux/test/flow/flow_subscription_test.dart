@@ -2,16 +2,33 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('Flow subscriptions and Stream interop', () {
+    test('should pass the selected root Context to subscribe callbacks', () async {
+      final request = ContextKey<String>('request');
+      final context = Context().withBinding(request.bind('subscriber'));
+      final seen = <String>[];
+
+      final subscription = Flow.succeed<int, Never>(1).subscribe(
+        (value, callbackContext) => Effect.sync(
+          (_) => seen.add('$value:${callbackContext.require(request)}'),
+        ),
+        context: context,
+      );
+
+      expect(await subscription.completion, isA<Succeeded<void, Never>>());
+      expect(seen, ['1:subscriber']);
+    });
+
     test('should expose consumer completion after scoped cleanup', () async {
       final values = <int>[];
       final events = <String>[];
       final subscription = Flow.fromIterable([1, 2])
-          .ensuring(Effect.sync(() => events.add('cleanup')))
-          .subscribe((value) => Effect.sync(() => values.add(value)));
+          .ensuring(Effect.sync((_) => events.add('cleanup')))
+          .subscribe((value, _) => Effect.sync((_) => values.add(value)));
 
       final exit = await subscription.completion;
 
@@ -26,17 +43,17 @@ void main() {
       var cleaned = 0;
       final flow =
           Effect.tryFuture<int, String>(
-            () {
+            (_) {
               started.complete();
               return pending.future;
             },
-            onError: (error, stackTrace) => '$error',
+            onError: (error, stackTrace, _) => '$error',
           ).asFlow().ensuring(
             Effect.sleep(const Duration(milliseconds: 20)).tap(
-              (_) => Effect.sync(() => cleaned += 1),
+              (_, _) => Effect.sync((_) => cleaned += 1),
             ),
           );
-      final subscription = flow.subscribe((_) => Effect.succeed(null));
+      final subscription = flow.subscribe((_, _) => Effect.succeed(null));
       await started.future;
 
       var completed = false;
@@ -72,7 +89,7 @@ void main() {
       final first = Completer<void>();
       final done = Completer<void>();
       final stream = Flow.fromIterable([1, 2, 3])
-          .tap((_) => Effect.sync(() => pulled += 1))
+          .tap((_, _) => Effect.sync((_) => pulled += 1))
           .toStream();
 
       subscription = stream.listen(
@@ -130,7 +147,7 @@ void main() {
       final secondPulled = Completer<void>();
       late StreamSubscription<int> subscription;
       subscription = Flow.fromIterable([1, 2])
-          .tap((value) {
+          .tap((value, _) {
             if (value == 2) secondPulled.complete();
             return Effect.succeed(null);
           })
@@ -157,16 +174,16 @@ void main() {
       var cleaned = false;
       final stream =
           Effect.tryFuture<int, String>(
-                () {
+                (_) {
                   started.complete();
                   return pending.future;
                 },
-                onError: (error, stackTrace) => '$error',
+                onError: (error, stackTrace, _) => '$error',
               )
               .asFlow()
               .ensuring(
                 Effect.sleep(const Duration(milliseconds: 20)).tap(
-                  (_) => Effect.sync(() => cleaned = true),
+                  (_, _) => Effect.sync((_) => cleaned = true),
                 ),
               )
               .toStream();

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -24,11 +25,11 @@ void main() {
       final cancelled = Completer<void>();
       final pending = Completer<int>();
       final slow = Effect.tryFuture<int, String>(
-        () {
+        (_) {
           started.complete();
           return pending.future;
         },
-        onError: (error, stackTrace) => '$error',
+        onError: (error, stackTrace, _) => '$error',
         onCancel: cancelled.complete,
       ).asFlow();
       final result = Flow.zip<int, String>([
@@ -50,12 +51,12 @@ void main() {
       addTearDown(right.close);
       final result = Flow.combineLatest<int?, String>([
         Flow.fromStream(
-          () => left.stream,
-          onError: (error, stackTrace) => '$error',
+          (_) => left.stream,
+          onError: (error, stackTrace, _) => '$error',
         ),
         Flow.fromStream(
-          () => right.stream,
-          onError: (error, stackTrace) => '$error',
+          (_) => right.stream,
+          onError: (error, stackTrace, _) => '$error',
         ),
       ]).runCollect().runFuture();
 
@@ -81,11 +82,11 @@ void main() {
       final cancelled = Completer<void>();
       final pending = Completer<int>();
       final slow = Effect.tryFuture<int, String>(
-        () {
+        (_) {
           started.complete();
           return pending.future;
         },
-        onError: (error, stackTrace) => '$error',
+        onError: (error, stackTrace, _) => '$error',
         onCancel: cancelled.complete,
       ).asFlow();
       final result = Flow.combineLatest<int, String>([
@@ -99,6 +100,9 @@ void main() {
     });
 
     test('should emit withLatestFrom only on ready primary triggers', () async {
+      final request = ContextKey<String>('request');
+      final owner = Context().withBinding(request.bind('owner'));
+      final contexts = <String>[];
       final primaryListening = Completer<void>();
       final secondaryListening = Completer<void>();
       final secondaryCancelled = Completer<void>();
@@ -113,20 +117,24 @@ void main() {
       addTearDown(secondary.close);
       final result =
           Flow.fromStream<int, String>(
-                () => primary.stream,
-                onError: (error, stackTrace) => '$error',
+                (_) => primary.stream,
+                onError: (error, stackTrace, _) => '$error',
               )
               .withLatestFrom(
                 Flow.fromStream(
-                  () => secondary.stream,
-                  onError: (error, stackTrace) => '$error',
+                  (_) => secondary.stream,
+                  onError: (error, stackTrace, _) => '$error',
                 ).tap(
-                  (value) => Effect.sync(() {
+                  (value, _) => Effect.sync((_) {
                     if (value == 11) secondLatestObserved.complete();
-                  }).mapError<String>(_widenNever),
+                  }).mapError<String>((value, _) => _widenNever(value! as Never)),
                 ),
-                (trigger, latest) => trigger + latest,
+                (trigger, latest, context) {
+                  contexts.add(context.require(request));
+                  return trigger + latest;
+                },
               )
+              .withContext(owner)
               .runCollect()
               .runFuture();
 
@@ -140,6 +148,7 @@ void main() {
       await primary.close();
 
       expect(await result, [13]);
+      expect(contexts, ['owner']);
       expect(secondaryCancelled.isCompleted, isTrue);
     });
 
@@ -159,28 +168,28 @@ void main() {
         final values = <int>[];
         final subscription =
             Flow.fromStream<int, String>(
-                  () => primary.stream,
-                  onError: (error, stackTrace) => '$error',
+                  (_) => primary.stream,
+                  onError: (error, stackTrace, _) => '$error',
                 )
                 .withLatestFrom(
                   Flow.fromStream(
-                    () => secondary.stream,
-                    onError: (error, stackTrace) => '$error',
+                    (_) => secondary.stream,
+                    onError: (error, stackTrace, _) => '$error',
                   ),
-                  (trigger, latest) => trigger + latest,
+                  (trigger, latest, _) => trigger + latest,
                   capacity: 1,
                   overflow: overflow,
-                  onOverflow: (_) => 'overflow',
+                  onOverflow: (_, _) => 'overflow',
                 )
-                .subscribe((value) {
+                .subscribe((value, _) {
                   values.add(value);
                   if (values.length > 1) return Effect.succeed(null);
                   return Effect.tryFuture<void, String>(
-                    () {
+                    (_) {
                       consumerStarted.complete();
                       return releaseConsumer.future;
                     },
-                    onError: (error, stackTrace) => '$error',
+                    onError: (error, stackTrace, _) => '$error',
                   );
                 });
 

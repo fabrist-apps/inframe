@@ -29,7 +29,7 @@ final class BasetenPredictionEndpoint<I, O> {
   final int _decodedChunkCapacity;
 
   /// Encodes, posts, and decodes one prediction when the effect executes.
-  Effect<NativeResponse<O>, AiError> predict(I input) => Effect.defer(() {
+  Effect<NativeResponse<O>, AiError> predict(I input) => Effect.defer((_) {
     final body = _encode(input);
     return _client
         .sendJsonValue(
@@ -38,7 +38,7 @@ final class BasetenPredictionEndpoint<I, O> {
           api: _api,
           modelId: _api,
         )
-        .flatMap((response) {
+        .flatMap((response, _) {
           try {
             return Effect.succeed(
               NativeResponse(
@@ -60,7 +60,7 @@ final class BasetenPredictionEndpoint<I, O> {
   /// The encoder selects any provider-specific stream fields. No response
   /// framing, sentinel, or terminal event is inferred, and [_decode] is not
   /// invoked.
-  Flow<Uint8List, AiError> predictRawStream(I input) => Flow.defer(() {
+  Flow<Uint8List, AiError> predictRawStream(I input) => Flow.defer((_) {
     final body = _encode(input);
     return _client.sendBytes(
       ProviderHttpRequest(method: 'POST', path: _path, body: body),

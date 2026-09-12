@@ -41,8 +41,8 @@ final class Queue<A> {
   static Effect<Queue<A>, Never> bounded<A>(int capacity) {
     return Effect.build<Queue<A>, Never>(($) async {
       return $.acquireRelease(
-        Effect.sync(() => Queue<A>._(capacity)),
-        release: (queue) => queue.shutdown(),
+        Effect.sync((_) => Queue<A>._(capacity)),
+        release: (queue, _) => queue.shutdown(),
       );
     });
   }
@@ -66,7 +66,7 @@ final class Queue<A> {
   ///
   /// Cancellation before the offer commits removes it. Cancellation after the
   /// item is accepted cannot retract its delivery.
-  Effect<void, Never> offer(A item) => Effect.defer(() {
+  Effect<void, Never> offer(A item) => Effect.defer((_) {
     final offer = _PendingOffer(item);
     return offer.waiter.awaitValue(
       onStart: () {
@@ -87,7 +87,7 @@ final class Queue<A> {
   /// Lazily waits for and removes the next item.
   ///
   /// Cancellation removes a pending take without consuming a later item.
-  Effect<A, Never> take() => Effect.defer(() {
+  Effect<A, Never> take() => Effect.defer((_) {
     final taker = CoordinationWaiter<A>();
     return taker.awaitValue(
       onStart: () {
@@ -114,7 +114,7 @@ final class Queue<A> {
   ///
   /// Returns [None] while an open Queue is empty. A present nullable item is
   /// returned as [Some] containing `null`.
-  Effect<Option<A>, Never> poll() => Effect.defer(() {
+  Effect<Option<A>, Never> poll() => Effect.defer((_) {
     if (_isShutdown) return _shutdownEffect();
     if (_items.isEmpty) return Effect.succeed(const None());
 
@@ -126,7 +126,7 @@ final class Queue<A> {
   /// Lazily observes an available item without removing it or waiting.
   ///
   /// Returns [None] while an open Queue is empty.
-  Effect<Option<A>, Never> peek() => Effect.defer(() {
+  Effect<Option<A>, Never> peek() => Effect.defer((_) {
     if (_isShutdown) return _shutdownEffect();
     if (_items.isEmpty) return Effect.succeed(const None());
     return Effect.succeed(Some(_items.first));
@@ -137,11 +137,11 @@ final class Queue<A> {
   /// This operation never waits for more items and returns an immutable list.
   /// Zero returns an empty list. A negative limit becomes an [ArgumentError]
   /// defect when the Effect runs.
-  Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer(() {
+  Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer((_) {
     if (_isShutdown) return _shutdownEffect();
     if (limit < 0) {
       return Effect.sync(
-        () => throw ArgumentError.value(
+        (_) => throw ArgumentError.value(
           limit,
           'limit',
           'Must not be negative.',
@@ -161,12 +161,12 @@ final class Queue<A> {
   ///
   /// Repeated shutdown is harmless. Blocked and subsequent data operations are
   /// interrupted with [QueueShutdown].
-  Effect<void, Never> shutdown() => Effect.sync(_shutdown);
+  Effect<void, Never> shutdown() => Effect.sync((_) => _shutdown());
 
   /// Lazily waits until shutdown bookkeeping and waiter notification finish.
   ///
   /// This does not wait for previously accepted items to be processed.
-  Effect<void, Never> awaitShutdown() => Effect.defer(() {
+  Effect<void, Never> awaitShutdown() => Effect.defer((_) {
     final waiter = CoordinationWaiter<void>();
     return waiter.awaitValue(
       onStart: () {

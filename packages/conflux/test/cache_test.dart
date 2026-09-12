@@ -15,13 +15,13 @@ void main() {
       final releaseLookup = Completer<int>();
       var lookups = 0;
       final fixture = await _CacheFixture.start(
-        lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (_, _) => Effect.tryFuture<int, String>(
+          (_) {
             lookups += 1;
             lookupStarted.complete();
             return releaseLookup.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -40,7 +40,7 @@ void main() {
     test('should retry a failed lookup without caching its error', () async {
       var lookups = 0;
       final fixture = await _CacheFixture.start(
-        lookup: (_) => Effect.defer(() {
+        lookup: (_, _) => Effect.defer((_) {
           lookups += 1;
           return lookups == 1
               ? Effect.fail<int, String>('unavailable')
@@ -58,33 +58,65 @@ void main() {
       expect(lookups, 2);
     });
 
-    test('should use the Context captured when the Cache is created', () async {
-      final serviceKey = ContextKey<int>('service');
+    test('should keep owner and caller callback Contexts separate', () async {
+      final serviceKey = ContextKey<String>('service');
+      final lookupStarted = Completer<void>();
+      final releaseLookup = Completer<int>();
+      final lookupContexts = <String>[];
+      final expiryContexts = <String>[];
       final fixture = await _CacheFixture.start(
-        ownerContext: Context().withBinding(serviceKey.bind(1)),
-        lookup: (_) => Effect.context((context) => context.require(serviceKey)),
+        ownerContext: Context().withBinding(serviceKey.bind('owner')),
+        expiry: CacheExpiry.byValue((_, _, context) {
+          expiryContexts.add(context.require(serviceKey));
+          return const Duration(minutes: 1);
+        }),
+        lookup: (_, context) {
+          lookupContexts.add(context.require(serviceKey));
+          lookupStarted.complete();
+          return Effect.tryFuture(
+            (_) => releaseLookup.future,
+            onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
+          );
+        },
       );
       addTearDown(fixture.close);
-      final caller = Runtime(
-        context: Context().withBinding(serviceKey.bind(2)),
+      final callerB = Runtime(context: Context().withBinding(serviceKey.bind('caller-b')));
+      final callerC = Runtime(context: Context().withBinding(serviceKey.bind('caller-c')));
+      addTearDown(callerB.close);
+      addTearDown(callerC.close);
+
+      final first = callerB.fork(fixture.cache.get('loaded'));
+      final second = callerC.fork(fixture.cache.get('loaded'));
+      await lookupStarted.future;
+      releaseLookup.complete(1);
+      await Future.wait([first.join(), second.join()]);
+      await callerB.run(fixture.cache.set('set', 2));
+      final invalidationContexts = <String>[];
+      final override = Context().withBinding(serviceKey.bind('override'));
+      await callerB.run(
+        fixture.cache
+            .invalidateWhere((_, _, context) {
+              invalidationContexts.add(context.require(serviceKey));
+              return false;
+            })
+            .withContext(override),
       );
-      addTearDown(caller.close);
 
-      final exit = await caller.run(fixture.cache.get('key'));
-
-      expect((exit as Succeeded<int, String>).value, 1);
+      expect(lookupContexts, ['owner']);
+      expect(expiryContexts, ['owner', 'owner']);
+      expect(invalidationContexts, ['override', 'override']);
     });
 
     test('should keep a shared load running when one waiter is cancelled', () async {
       final lookupStarted = Completer<void>();
       final releaseLookup = Completer<int>();
       final fixture = await _CacheFixture.start(
-        lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (_, _) => Effect.tryFuture<int, String>(
+          (_) {
             lookupStarted.complete();
             return releaseLookup.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -110,12 +142,12 @@ void main() {
       final started = <String>[];
       final fixture = await _CacheFixture.start(
         concurrency: 2,
-        lookup: (key) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (key, _) => Effect.tryFuture<int, String>(
+          (_) {
             started.add(key);
             return gates[key]!.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -142,7 +174,7 @@ void main() {
       final lookups = <String, int>{};
       final fixture = await _CacheFixture.start(
         capacity: 2,
-        lookup: (key) => Effect.sync(() {
+        lookup: (key, _) => Effect.sync((_) {
           lookups.update(key, (count) => count + 1, ifAbsent: () => 1);
           return key.codeUnitAt(0);
         }),
@@ -164,9 +196,9 @@ void main() {
         ownerClock: clock,
         capacity: 2,
         expiry: CacheExpiry.byValue(
-          (_, value) => value == 1 ? const Duration(seconds: 1) : const Duration(minutes: 1),
+          (_, value, _) => value == 1 ? const Duration(seconds: 1) : const Duration(minutes: 1),
         ),
-        lookup: (key) => Effect.succeed(
+        lookup: (key, _) => Effect.succeed(
           switch (key) {
             'live' => 2,
             'expired' => 1,
@@ -194,12 +226,12 @@ void main() {
       final started = <String>[];
       final fixture = await _CacheFixture.start(
         concurrency: 1,
-        lookup: (key) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (key, _) => Effect.tryFuture<int, String>(
+          (_) {
             started.add(key);
             return key == 'a' ? firstGate.future : secondGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -225,7 +257,7 @@ void main() {
       final started = <String>[];
       final fixture = await _CacheFixture.start(
         concurrency: 1,
-        lookup: (key) => Effect.defer(() {
+        lookup: (key, _) => Effect.defer((_) {
           started.add(key);
           return key == 'a' ? Effect.fail<int, String>('failed') : Effect.succeed<int, String>(2);
         }),
@@ -249,14 +281,14 @@ void main() {
       var lookupCancelled = false;
       final fixture = await _CacheFixture.start(
         concurrency: 1,
-        lookup: (key) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (key, _) => Effect.tryFuture<int, String>(
+          (_) {
             started.add(key);
             if (key == 'a') activeStarted.complete();
             return activeGate.future;
           },
-          onError: (error, _) => '$error',
-          onCancel: () => lookupCancelled = true,
+          onError: (error, _, _) => '$error',
+          onCancel: (_) => lookupCancelled = true,
         ),
       );
       final caller = Runtime();
@@ -281,7 +313,7 @@ void main() {
           capacity: configuration.capacity,
           concurrency: configuration.concurrency,
           expiry: CacheExpiry.fixed(const Duration(minutes: 1)),
-          lookup: (_) => Effect.succeed(1),
+          lookup: (_, _) => Effect.succeed(1),
         ).runFutureExit();
 
         final cause = (exit as Failed<Cache<String, int, String>, Never>).cause;
@@ -294,7 +326,7 @@ void main() {
       final values = <String, _BorrowedValue>{};
       final fixture = await _CacheFixture.start(
         capacity: 1,
-        lookup: (key) => Effect.sync(() {
+        lookup: (key, _) => Effect.sync((_) {
           return values.putIfAbsent(key, _BorrowedValue.new);
         }),
       );
@@ -313,12 +345,12 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (_, _) => Effect.tryFuture<int, String>(
+          (_) {
             lookupStarted.complete();
             return lookupGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -342,13 +374,13 @@ void main() {
       final lookupGate = Completer<int?>();
       var lookups = 0;
       final fixture = await _CacheFixture.start<int?>(
-        lookup: (_) => Effect.tryFuture<int?, String>(
-          () {
+        lookup: (_, _) => Effect.tryFuture<int?, String>(
+          (_) {
             lookups += 1;
             lookupStarted.complete();
             return lookupGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -375,11 +407,11 @@ void main() {
       final expiryInputs = <(String, int)>[];
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
-        expiry: CacheExpiry.byValue((key, value) {
+        expiry: CacheExpiry.byValue((key, value, _) {
           expiryInputs.add((key, value));
           return Duration(seconds: value);
         }),
-        lookup: (_) => Effect.succeed(3),
+        lookup: (_, _) => Effect.succeed(3),
       );
       addTearDown(fixture.close);
 
@@ -398,7 +430,7 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: ownerClock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (_) => Effect.succeed(42),
+        lookup: (_, _) => Effect.succeed(42),
       );
       addTearDown(fixture.close);
       await fixture.cache.get('key').runFuture();
@@ -420,7 +452,7 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 1)),
-        lookup: (_) => Effect.sync(() => ++lookups),
+        lookup: (_, _) => Effect.sync((_) => ++lookups),
       );
       addTearDown(fixture.close);
 
@@ -436,12 +468,12 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (key) => Effect.defer(() {
+        lookup: (key, _) => Effect.defer((_) {
           lookups += 1;
           return key == 'pending'
               ? Effect.tryFuture<int, String>(
-                  () => pending.future,
-                  onError: (error, _) => '$error',
+                  (_) => pending.future,
+                  onError: (error, _, _) => '$error',
                 )
               : Effect.succeed(key.codeUnitAt(0));
         }),
@@ -473,7 +505,7 @@ void main() {
 
     test('should reject ready observations after scope closure', () async {
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.succeed(42),
+        lookup: (_, _) => Effect.succeed(42),
       );
       await fixture.cache.get('key').runFuture();
       await fixture.close();
@@ -496,12 +528,12 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (_, _) => Effect.tryFuture<int, String>(
+          (_) {
             lookupStarted.complete();
             return lookupGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -523,9 +555,9 @@ void main() {
       final gates = [Completer<int>(), Completer<int>()];
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.tryFuture<int, String>(
-          () => gates[lookups++].future,
-          onError: (error, _) => '$error',
+        lookup: (_, _) => Effect.tryFuture<int, String>(
+          (_) => gates[lookups++].future,
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -550,9 +582,9 @@ void main() {
       final gates = [Completer<int>(), Completer<int>()];
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.tryFuture<int, String>(
-          () => gates[lookups++].future,
-          onError: (error, _) => '$error',
+        lookup: (_, _) => Effect.tryFuture<int, String>(
+          (_) => gates[lookups++].future,
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -581,12 +613,12 @@ void main() {
       final pending = Completer<int>();
       final lookups = <String, int>{};
       final fixture = await _CacheFixture.start<int>(
-        lookup: (key) => Effect.defer(() {
+        lookup: (key, _) => Effect.defer((_) {
           lookups.update(key, (count) => count + 1, ifAbsent: () => 1);
           return key == 'pending'
               ? Effect.tryFuture<int, String>(
-                  () => pending.future,
-                  onError: (error, _) => '$error',
+                  (_) => pending.future,
+                  onError: (error, _, _) => '$error',
                 )
               : Effect.succeed(key.codeUnitAt(0));
         }),
@@ -614,12 +646,12 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.byValue(
-          (_, value) => Duration(seconds: value == 3 ? 1 : 10),
+          (_, value, _) => Duration(seconds: value == 3 ? 1 : 10),
         ),
-        lookup: (key) => key == 'pending'
+        lookup: (key, _) => key == 'pending'
             ? Effect.tryFuture<int, String>(
-                () => pending.future,
-                onError: (error, _) => '$error',
+                (_) => pending.future,
+                onError: (error, _, _) => '$error',
               )
             : Effect.succeed(int.parse(key)),
       );
@@ -634,7 +666,7 @@ void main() {
       clock.advanceMonotonic(const Duration(seconds: 1));
       final inspected = <(String, int)>[];
 
-      await fixture.cache.invalidateWhere((key, value) {
+      await fixture.cache.invalidateWhere((key, value, _) {
         inspected.add((key, value));
         return value.isEven;
       }).runFuture();
@@ -654,14 +686,14 @@ void main() {
       final started = <String>[];
       final fixture = await _CacheFixture.start<int>(
         concurrency: 1,
-        lookup: (key) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (key, _) => Effect.tryFuture<int, String>(
+          (_) {
             started.add(key);
             if (key == 'active') return activeGate.future;
             keyLookups += 1;
             return keyLookups == 1 ? oldGate.future : currentGate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -690,7 +722,7 @@ void main() {
 
     test('should reject mutation after scope closure', () async {
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.succeed(1),
+        lookup: (_, _) => Effect.succeed(1),
       );
       await fixture.close();
 
@@ -698,7 +730,7 @@ void main() {
         fixture.cache.set('key', 1).runFutureExit(),
         fixture.cache.invalidate('key').runFutureExit(),
         fixture.cache.invalidateAll().runFutureExit(),
-        fixture.cache.invalidateWhere((_, _) => true).runFutureExit(),
+        fixture.cache.invalidateWhere((_, _, _) => true).runFutureExit(),
       ]);
 
       for (final exit in exits) {
@@ -711,7 +743,7 @@ void main() {
       final second = _BorrowedValue();
       final fixture = await _CacheFixture.start<_BorrowedValue>(
         capacity: 1,
-        lookup: (_) => Effect.succeed(_BorrowedValue()),
+        lookup: (_, _) => Effect.succeed(_BorrowedValue()),
       );
       addTearDown(fixture.close);
 
@@ -728,15 +760,15 @@ void main() {
       final refreshGate = Completer<int>();
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.defer(() {
+        lookup: (_, _) => Effect.defer((_) {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
-            () {
+            (_) {
               refreshStarted.complete();
               return refreshGate.future;
             },
-            onError: (error, _) => '$error',
+            onError: (error, _, _) => '$error',
           );
         }),
       );
@@ -773,15 +805,15 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (_) => Effect.defer(() {
+        lookup: (_, _) => Effect.defer((_) {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
-            () {
+            (_) {
               refreshStarted.complete();
               return refreshGate.future;
             },
-            onError: (_, _) => 'refresh failed',
+            onError: (_, _, _) => 'refresh failed',
           );
         }),
       );
@@ -808,7 +840,7 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         ownerClock: clock,
         expiry: CacheExpiry.fixed(const Duration(seconds: 5)),
-        lookup: (_) => Effect.sync(() => ++lookups),
+        lookup: (_, _) => Effect.sync((_) => ++lookups),
       );
       addTearDown(fixture.close);
       await fixture.cache.get('key').runFuture();
@@ -827,15 +859,15 @@ void main() {
       final refreshGate = Completer<int>();
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.defer(() {
+        lookup: (_, _) => Effect.defer((_) {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
-            () {
+            (_) {
               refreshStarted.complete();
               return refreshGate.future;
             },
-            onError: (error, _) => '$error',
+            onError: (error, _, _) => '$error',
           );
         }),
       );
@@ -858,13 +890,13 @@ void main() {
       final gate = Completer<int>();
       var lookups = 0;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.tryFuture<int, String>(
-          () {
+        lookup: (_, _) => Effect.tryFuture<int, String>(
+          (_) {
             lookups += 1;
             started.complete();
             return gate.future;
           },
-          onError: (error, _) => '$error',
+          onError: (error, _, _) => '$error',
         ),
       );
       addTearDown(fixture.close);
@@ -886,16 +918,16 @@ void main() {
       var lookups = 0;
       var cancelled = false;
       final fixture = await _CacheFixture.start<int>(
-        lookup: (_) => Effect.defer(() {
+        lookup: (_, _) => Effect.defer((_) {
           lookups += 1;
           if (lookups == 1) return Effect.succeed<int, String>(1);
           return Effect.tryFuture<int, String>(
-            () {
+            (_) {
               refreshStarted.complete();
               return refreshGate.future;
             },
-            onError: (error, _) => '$error',
-            onCancel: () => cancelled = true,
+            onError: (error, _, _) => '$error',
+            onCancel: (_) => cancelled = true,
           );
         }),
       );
@@ -919,13 +951,13 @@ void main() {
       final fixture = await _CacheFixture.start<int>(
         capacity: 2,
         concurrency: 1,
-        lookup: (key) => Effect.defer(() {
+        lookup: (key, _) => Effect.defer((_) {
           final count = lookups.update(key, (value) => value + 1, ifAbsent: () => 1);
           if (count == 1) return Effect.succeed(key.codeUnitAt(0));
           startedRefreshes.add(key);
           return Effect.tryFuture<int, String>(
-            () => key == 'a' ? firstRefresh.future : secondRefresh.future,
-            onError: (error, _) => '$error',
+            (_) => key == 'a' ? firstRefresh.future : secondRefresh.future,
+            onError: (error, _, _) => '$error',
           );
         }),
       );
@@ -960,7 +992,7 @@ final class _CacheFixture<A> {
   final Runtime _owner;
 
   static Future<_CacheFixture<A>> start<A>({
-    required Effect<A, String> Function(String key) lookup,
+    required Effect<A, String> Function(String key, Context context) lookup,
     Context? ownerContext,
     Clock? ownerClock,
     CacheExpiry<String, A>? expiry,
@@ -983,8 +1015,8 @@ final class _CacheFixture<A> {
         created.complete(cache);
         await $(
           Effect.tryFuture<void, Never>(
-            () => keepScopeOpen.future,
-            onError: Error.throwWithStackTrace,
+            (_) => keepScopeOpen.future,
+            onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
           ),
         );
       }),

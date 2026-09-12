@@ -27,7 +27,7 @@ final class OpenAIResponsesResource {
           api: _api,
           modelId: request.model,
         )
-        .flatMap(_decode);
+        .flatMap((value, _) => _decode(value));
   }
 
   /// Retrieves one stored response without polling.
@@ -52,7 +52,7 @@ final class OpenAIResponsesResource {
           api: _api,
           modelId: 'responses',
         )
-        .flatMap((response) => _decodeTyped(response, OpenAIDeletedResponse.fromJson));
+        .flatMap((response, _) => _decodeTyped(response, OpenAIDeletedResponse.fromJson));
   }
 
   /// Lists one input-item page without following its cursor.
@@ -84,7 +84,7 @@ final class OpenAIResponsesResource {
           api: _api,
           modelId: 'responses',
         )
-        .flatMap((response) => _decodeTyped(response, OpenAIResponseInputItemPage.fromJson));
+        .flatMap((response, _) => _decodeTyped(response, OpenAIResponseInputItemPage.fromJson));
   }
 
   /// Counts input tokens in one explicit native request.
@@ -97,7 +97,7 @@ final class OpenAIResponsesResource {
         api: _api,
         modelId: request.model,
       )
-      .flatMap((response) => _decodeTyped(response, OpenAIResponseInputTokens.fromJson));
+      .flatMap((response, _) => _decodeTyped(response, OpenAIResponseInputTokens.fromJson));
 
   /// Compacts one explicit native input without storing hidden client state.
   Effect<NativeResponse<OpenAICompactResponse>, AiError> compact(
@@ -109,7 +109,7 @@ final class OpenAIResponsesResource {
         api: _api,
         modelId: request.model,
       )
-      .flatMap((response) => _decodeTyped(response, OpenAICompactResponse.fromJson));
+      .flatMap((response, _) => _decodeTyped(response, OpenAICompactResponse.fromJson));
 
   /// Streams typed native Responses events.
   Flow<OpenAIResponseEvent, AiError> stream(
@@ -231,7 +231,7 @@ final class OpenAIResponsesResource {
         api: _api,
         modelId: 'responses',
       )
-      .flatMap(_decode);
+      .flatMap((value, _) => _decode(value));
 }
 
 Effect<NativeResponse<T>, AiError> _decodeTyped<T>(

@@ -44,7 +44,7 @@ final class AnthropicFilesResource {
           providerId: _providerId,
           api: _api,
         )
-        .flatMap((response) => decodeNativeResponse(response, AnthropicFileMetadata.fromJson));
+        .flatMap((response, _) => decodeNativeResponse(response, AnthropicFileMetadata.fromJson));
   }
 
   /// Lists one explicit page without automatically following [AnthropicFilePage.nextPage].
@@ -88,7 +88,7 @@ final class AnthropicFilesResource {
           api: _api,
           modelId: 'files',
         )
-        .flatMap((response) => decodeNativeResponse(response, AnthropicFilePage.fromJson));
+        .flatMap((response, _) => decodeNativeResponse(response, AnthropicFilePage.fromJson));
   }
 
   /// Retrieves one file's native metadata.
@@ -99,7 +99,7 @@ final class AnthropicFilesResource {
         api: _api,
         modelId: 'files',
       )
-      .flatMap((response) => decodeNativeResponse(response, AnthropicFileMetadata.fromJson));
+      .flatMap((response, _) => decodeNativeResponse(response, AnthropicFileMetadata.fromJson));
 
   /// Downloads file bytes subject to Anthropic's native download restrictions.
   ///
@@ -128,7 +128,7 @@ final class AnthropicFilesResource {
         api: _api,
         modelId: 'files',
       )
-      .flatMap((response) => decodeNativeResponse(response, AnthropicDeletedFile.fromJson));
+      .flatMap((response, _) => decodeNativeResponse(response, AnthropicDeletedFile.fromJson));
 }
 
 String _filePath(String fileId) => 'files/${Uri.encodeComponent(_nonEmpty(fileId, 'fileId'))}';

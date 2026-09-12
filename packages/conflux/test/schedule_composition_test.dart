@@ -1,10 +1,47 @@
 import 'package:conflux/conflux.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/fake_clock.dart';
 
 void main() {
   group('Schedule composition', () {
+    test('should evaluate callbacks in each driver step context', () async {
+      final request = ContextKey<String>('request');
+      final seen = <String>[];
+      final schedule =
+          Schedule.spaced<int>(
+                const Duration(seconds: 1),
+              )
+              .modifyDelay((delay, context) {
+                seen.add('delay:${context.require(request)}');
+                return delay;
+              })
+              .whileInput((_, context) {
+                seen.add('input:${context.require(request)}');
+                return true;
+              })
+              .tap((decision, context) {
+                seen.add('tap:${context.require(request)}');
+                return Effect.succeed(null);
+              });
+
+      expect(seen, isEmpty);
+      for (final name in ['first', 'second']) {
+        final context = Context().withBinding(request.bind(name));
+        await Runtime(context: context).run(schedule.driver().step(1));
+      }
+
+      expect(seen, [
+        'delay:first',
+        'input:first',
+        'tap:first',
+        'delay:second',
+        'input:second',
+        'tap:second',
+      ]);
+    });
+
     test('should distinguish anchored fixed delays from spaced delays', () async {
       final clock = FakeClock();
       final fixed = Schedule.fixed<String>(
@@ -54,7 +91,7 @@ void main() {
                 const Duration(milliseconds: 100),
               )
               .modifyDelay(
-                (delay) => delay > const Duration(milliseconds: 150)
+                (delay, _) => delay > const Duration(milliseconds: 150)
                     ? const Duration(milliseconds: 150)
                     : delay,
               )
@@ -127,7 +164,7 @@ void main() {
       final clock = FakeClock();
       var executions = 0;
       final program =
-          Effect.sync(() {
+          Effect.sync((_) {
             executions += 1;
             if (executions == 2) {
               clock.advance(const Duration(seconds: 30));
@@ -153,8 +190,8 @@ void main() {
           Schedule.spaced<Object?>(
                 const Duration(seconds: 10),
               )
-              .tap((_) {
-                return Effect.sync(() {
+              .tap((_, _) {
+                return Effect.sync((_) {
                   clock.advanceMonotonic(const Duration(seconds: 20));
                 });
               })
@@ -235,7 +272,7 @@ void main() {
     test('should stop before another execution when input is rejected', () async {
       final driver = Schedule.spaced<int>(
         const Duration(seconds: 1),
-      ).whileInput((input) => input > 0).driver();
+      ).whileInput((input, _) => input > 0).driver();
 
       final accepted = await driver.step(1).runFuture();
       final rejected = await driver.step(0).runFuture();
@@ -260,7 +297,7 @@ void main() {
       final observed = <int>[];
       final driver = Schedule.recurs<Object?>(1)
           .tap(
-            (decision) => Effect.sync(() => observed.add(decision.output)),
+            (decision, _) => Effect.sync((_) => observed.add(decision.output)),
           )
           .driver();
 
@@ -273,7 +310,7 @@ void main() {
     test('should retain a tap defect', () async {
       final driver = Schedule.recurs<Object?>(1)
           .tap(
-            (_) => Effect.sync(() => throw StateError('tap failed')),
+            (_, _) => Effect.sync((_) => throw StateError('tap failed')),
           )
           .driver();
 
@@ -285,7 +322,7 @@ void main() {
     test('should retain tap interruption', () async {
       final driver = Schedule.recurs<Object?>(1)
           .tap(
-            (_) => Effect.failCause<void, Never>(const Interrupted('hook')),
+            (_, _) => Effect.failCause<void, Never>(const Interrupted('hook')),
           )
           .driver();
 

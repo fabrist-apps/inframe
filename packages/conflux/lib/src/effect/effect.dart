@@ -47,12 +47,12 @@ final class Effect<A, E> {
   /// Lazily invokes a synchronous callback when the effect runs.
   ///
   /// A thrown object becomes a [Defect] with its original stack trace.
-  static Effect<A, Never> sync<A>(A Function() callback) =>
-      Effect._((_) async => Succeeded(callback()));
+  static Effect<A, Never> sync<A>(A Function(Context context) callback) =>
+      Effect._((execution) async => Succeeded(callback(execution.context)));
 
   /// Lazily chooses another effect for each execution.
-  static Effect<A, E> defer<A, E>(Effect<A, E> Function() factory) =>
-      Effect._((execution) => factory()._evaluate(execution));
+  static Effect<A, E> defer<A, E>(Effect<A, E> Function(Context context) factory) =>
+      Effect._((execution) => factory(execution.context)._evaluate(execution));
 
   /// Waits for [duration] using the execution's cancellable [Clock].
   ///
@@ -106,10 +106,10 @@ final class Effect<A, E> {
   /// Converts an [Option], evaluating [onNone] only when it is absent.
   static Effect<A, E> fromOption<A, E>(
     Option<A> option,
-    E Function() onNone,
+    E Function(Context context) onNone,
   ) => switch (option) {
     Some<A>(:final value) => succeed(value),
-    None() => defer(() => fail(onNone())),
+    None() => defer((context) => fail(onNone(context))),
   };
 
   /// Adapts a foreign [Future] factory to typed Effect execution.
@@ -118,16 +118,17 @@ final class Effect<A, E> {
   /// cancellation is requested, [onCancel] may stop adapter-owned work. With
   /// no hook, Conflux observes late completion but cannot stop the Future.
   static Effect<A, E> tryFuture<A, E>(
-    Future<A> Function() factory, {
-    required E Function(Object error, StackTrace stackTrace) onError,
-    FutureOr<void> Function()? onCancel,
+    Future<A> Function(Context context) factory, {
+    required E Function(Object error, StackTrace stackTrace, Context context) onError,
+    FutureOr<void> Function(Context context)? onCancel,
   }) => Effect._((execution) async {
+    final context = execution.context;
     late final Future<A> future;
     try {
-      future = factory();
+      future = factory(context);
     } on Object catch (error, stackTrace) {
       try {
-        return Failed(Expected(onError(error, stackTrace)));
+        return Failed(Expected(onError(error, stackTrace, context)));
       } on Object catch (mapperError, mapperStackTrace) {
         return Failed(Defect(mapperError, mapperStackTrace));
       }
@@ -137,7 +138,7 @@ final class Effect<A, E> {
       Cause<E> cause = Interrupted(reason);
       if (onCancel != null) {
         try {
-          await onCancel();
+          await onCancel(context);
         } on Object catch (error, stackTrace) {
           cause = Sequential([cause, Defect(error, stackTrace)]);
         }
@@ -181,7 +182,7 @@ final class Effect<A, E> {
         onError: (Object error, StackTrace stackTrace) {
           if (settled) return;
           try {
-            complete(Failed(Expected(onError(error, stackTrace))));
+            complete(Failed(Expected(onError(error, stackTrace, context))));
           } on Object catch (mapperError, mapperStackTrace) {
             complete(Failed(Defect(mapperError, mapperStackTrace)));
           }
@@ -255,15 +256,15 @@ final class Effect<A, E> {
   /// Maps [inputs] to Effects and collects their values in input order.
   static Effect<List<A>, E> forEach<I, A, E>(
     Iterable<I> inputs,
-    Effect<A, E> Function(I input) effect, {
+    Effect<A, E> Function(I input, Context context) effect, {
     int concurrency = 1,
   }) {
     if (concurrency <= 0) {
       throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
     }
-    return Effect.defer(() {
+    return Effect.defer((_) {
       final effects = inputs.map(
-        (input) => Effect.defer<A, E>(() => effect(input)),
+        (input) => Effect.defer<A, E>((context) => effect(input, context)),
       );
       return all(effects, concurrency: concurrency);
     });
@@ -281,12 +282,14 @@ final class Effect<A, E> {
   /// Evaluates every input and accumulates all expected errors in input order.
   static Effect<List<A>, NonEmptyList<E>> validate<I, A, E>(
     Iterable<I> inputs,
-    Effect<A, E> Function(I input) validate,
+    Effect<A, E> Function(I input, Context context) validate,
   ) => Effect._((execution) async {
     final values = <A>[];
     final errors = <E>[];
     for (final input in inputs) {
-      final exit = await Effect.defer(() => validate(input))._evaluate(execution);
+      final exit = await Effect.defer(
+        (context) => validate(input, context),
+      )._evaluate(execution);
       switch (exit) {
         case Succeeded<A, E>(:final value):
           values.add(value);
@@ -337,10 +340,11 @@ extension EffectTiming<A, E> on Effect<A, E> {
   /// cleanup can make the total elapsed time exceed [duration].
   Effect<A, E> timeout(
     Duration duration, {
-    required E Function() onTimeout,
+    required E Function(Context context) onTimeout,
   }) {
     _requireNonNegativeDuration(duration);
     return Effect._((execution) async {
+      final context = execution.context;
       final operation = ScopeAccess.fork(execution.scope, this, execution);
       final timer = ScopeAccess.fork(
         execution.scope,
@@ -375,7 +379,7 @@ extension EffectTiming<A, E> on Effect<A, E> {
           );
           late final E error;
           try {
-            error = onTimeout();
+            error = onTimeout(context);
           } on Object catch (failure, stackTrace) {
             return Failed<A, E>(
               Defect(failure, stackTrace),
@@ -585,68 +589,83 @@ final class _RaceLost {
 /// Type-preserving transformations for an Effect.
 extension EffectTransformation<A, E> on Effect<A, E> {
   /// Transforms a successful value.
-  Effect<B, E> map<B>(B Function(A value) transform) => Effect._((execution) async {
-    return switch (await _evaluate(execution)) {
-      Succeeded<A, E>(:final value) => Succeeded(transform(value)),
-      Failed<A, E>(:final cause) => Failed(cause),
-    };
-  });
+  Effect<B, E> map<B>(B Function(A value, Context context) transform) =>
+      Effect._((execution) async {
+        return switch (await _evaluate(execution)) {
+          Succeeded<A, E>(:final value) => Succeeded(transform(value, execution.context)),
+          Failed<A, E>(:final cause) => Failed(cause),
+        };
+      });
 
   /// Sequences another Effect after success.
-  Effect<B, E> flatMap<B>(Effect<B, E> Function(A value) transform) => Effect._((execution) async {
+  Effect<B, E> flatMap<B>(
+    Effect<B, E> Function(A value, Context context) transform,
+  ) => Effect._((execution) async {
     return switch (await _evaluate(execution)) {
-      Succeeded<A, E>(:final value) => await transform(value)._evaluate(execution),
+      Succeeded<A, E>(:final value) => await transform(
+        value,
+        execution.context,
+      )._evaluate(execution),
       Failed<A, E>(:final cause) => Failed(cause),
     };
   });
 
   /// Transforms every expected error leaf while preserving cause structure.
-  Effect<A, F> mapError<F>(F Function(E error) transform) => Effect._((execution) async {
-    return switch (await _evaluate(execution)) {
-      Succeeded<A, E>(:final value) => Succeeded(value),
-      Failed<A, E>(:final cause) => Failed(cause.mapExpected(transform)),
-    };
-  });
+  Effect<A, F> mapError<F>(F Function(E error, Context context) transform) =>
+      Effect._((execution) async {
+        return switch (await _evaluate(execution)) {
+          Succeeded<A, E>(:final value) => Succeeded(value),
+          Failed<A, E>(:final cause) => Failed(
+            cause.mapExpected((error) => transform(error, execution.context)),
+          ),
+        };
+      });
 
   /// Transforms success and every expected error leaf.
   Effect<B, F> mapBoth<B, F>({
-    required B Function(A value) onSuccess,
-    required F Function(E error) onFailure,
+    required B Function(A value, Context context) onSuccess,
+    required F Function(E error, Context context) onFailure,
   }) => map(onSuccess).mapError(onFailure);
 
   /// Discards a successful value.
-  Effect<void, E> asVoid() => map((_) {});
+  Effect<void, E> asVoid() => map((_, _) {});
 
   /// Combines two successful values in sequence.
   Effect<C, E> zipWith<B, C>(
     Effect<B, E> other,
-    C Function(A left, B right) combine,
-  ) => flatMap((left) => other.map((right) => combine(left, right)));
+    C Function(A left, B right, Context context) combine,
+  ) => flatMap(
+    (left, _) => other.map((right, context) => combine(left, right, context)),
+  );
 
   /// Keeps a successful value or creates an expected failure.
   Effect<A, E> filterOrFail(
-    bool Function(A value) predicate,
-    E Function(A value) onFailure,
-  ) => flatMap((value) {
-    return predicate(value) ? Effect.succeed(value) : Effect.fail(onFailure(value));
+    bool Function(A value, Context context) predicate,
+    E Function(A value, Context context) onFailure,
+  ) => flatMap((value, context) {
+    return predicate(value, context)
+        ? Effect.succeed(value)
+        : Effect.fail(onFailure(value, context));
   });
 }
 
 /// Removes one Effect layer while preserving its expected error type.
 extension FlattenEffect<A, E> on Effect<Effect<A, E>, E> {
   /// Sequences the nested Effect.
-  Effect<A, E> flatten() => flatMap((effect) => effect);
+  Effect<A, E> flatten() => flatMap((effect, _) => effect);
 }
 
 /// Expected-error recovery under the deterministic primary-error contract.
 extension EffectRecovery<A, E> on Effect<A, E> {
   /// Recovers an all-expected cause once using its primary error.
-  Effect<A, E> catchError(Effect<A, E> Function(E error) recover) => Effect._((execution) async {
+  Effect<A, E> catchError(
+    Effect<A, E> Function(E error, Context context) recover,
+  ) => Effect._((execution) async {
     final exit = await _evaluate(execution);
     if (exit case Failed<A, E>(:final cause)) {
       final primary = cause.primaryError;
       if (primary case Some<E>(:final value)) {
-        return recover(value)._evaluate(execution);
+        return recover(value, execution.context)._evaluate(execution);
       }
     }
     return exit;
@@ -654,23 +673,23 @@ extension EffectRecovery<A, E> on Effect<A, E> {
 
   /// Maps success or an all-expected failure to a value.
   Effect<B, E> match<B>({
-    required B Function(A value) onSuccess,
-    required B Function(E error) onFailure,
+    required B Function(A value, Context context) onSuccess,
+    required B Function(E error, Context context) onFailure,
   }) => matchEffect(
-    onSuccess: (value) => Effect.succeed(onSuccess(value)),
-    onFailure: (error) => Effect.succeed(onFailure(error)),
+    onSuccess: (value, context) => Effect.succeed(onSuccess(value, context)),
+    onFailure: (error, context) => Effect.succeed(onFailure(error, context)),
   );
 
   /// Selects another Effect for success or an all-expected failure.
   Effect<B, E> matchEffect<B>({
-    required Effect<B, E> Function(A value) onSuccess,
-    required Effect<B, E> Function(E error) onFailure,
+    required Effect<B, E> Function(A value, Context context) onSuccess,
+    required Effect<B, E> Function(E error, Context context) onFailure,
   }) => Effect._((execution) async {
     final exit = await _evaluate(execution);
     return switch (exit) {
-      Succeeded<A, E>(:final value) => onSuccess(value)._evaluate(execution),
+      Succeeded<A, E>(:final value) => onSuccess(value, execution.context)._evaluate(execution),
       Failed<A, E>(:final cause) => switch (cause.primaryError) {
-        Some<E>(value: final error) => onFailure(error)._evaluate(execution),
+        Some<E>(value: final error) => onFailure(error, execution.context)._evaluate(execution),
         None() => Future.value(Failed(cause)),
       },
     };
@@ -695,12 +714,15 @@ extension EffectRecovery<A, E> on Effect<A, E> {
 /// Effectful observation that leaves the observed branch unchanged.
 extension EffectObservation<A, E> on Effect<A, E> {
   /// Runs [observe] after success and retains the original value.
-  Effect<A, E> tap(Effect<void, E> Function(A value) observe) =>
-      flatMap((value) => observe(value).map((_) => value));
+  Effect<A, E> tap(
+    Effect<void, E> Function(A value, Context context) observe,
+  ) => flatMap(
+    (value, context) => observe(value, context).map((_, _) => value),
+  );
 
   /// Observes the primary expected error without recovering it.
   Effect<A, E> tapError(
-    Effect<void, Never> Function(E error) observe,
+    Effect<void, Never> Function(E error, Context context) observe,
   ) => Effect._((execution) async {
     final exit = await _evaluate(execution);
     if (exit case Failed<A, E>(:final cause)) {
@@ -708,7 +730,7 @@ extension EffectObservation<A, E> on Effect<A, E> {
       if (primary case Some<E>(:final value)) {
         return _FailureObservation.run(
           exit,
-          Effect.defer(() => observe(value)),
+          Effect.defer((context) => observe(value, context)),
           execution,
         );
       }
@@ -718,14 +740,14 @@ extension EffectObservation<A, E> on Effect<A, E> {
 
   /// Observes the complete cause without recovering it.
   Effect<A, E> tapCause(
-    Effect<void, Never> Function(Cause<E> cause) observe,
+    Effect<void, Never> Function(Cause<E> cause, Context context) observe,
   ) => Effect._((execution) async {
     final exit = await _evaluate(execution);
     return switch (exit) {
       Succeeded<A, E>() => exit,
       Failed<A, E>(:final cause) => _FailureObservation.run(
         exit,
-        Effect.defer(() => observe(cause)),
+        Effect.defer((context) => observe(cause, context)),
         execution,
       ),
     };
@@ -753,16 +775,17 @@ abstract final class _FailureObservation {
 /// Cleanup operations that run before an Effect returns to its caller.
 extension EffectCleanup<A, E> on Effect<A, E> {
   /// Runs [finalizer] after every outcome and preserves both failures.
-  Effect<A, E> ensuring(Effect<void, Never> finalizer) => onExit((_) => finalizer);
+  Effect<A, E> ensuring(Effect<void, Never> finalizer) => onExit((_, _) => finalizer);
 
   /// Runs the Effect returned by [finalizer] after every [Exit].
   Effect<A, E> onExit(
-    Effect<void, Never> Function(Exit<A, E> exit) finalizer,
+    Effect<void, Never> Function(Exit<A, E> exit, Context context) finalizer,
   ) => Effect._((execution) async {
+    final context = execution.context;
     final exit = await _evaluate(execution);
     late final Effect<void, Never> cleanup;
     try {
-      cleanup = finalizer(exit);
+      cleanup = finalizer(exit, context);
     } on Object catch (error, stackTrace) {
       return exit.appendCleanup(Defect(error, stackTrace));
     }
@@ -779,7 +802,7 @@ extension EffectCleanup<A, E> on Effect<A, E> {
   });
 
   /// Runs [finalizer] only when the operation is interrupted.
-  Effect<A, E> onCancel(Effect<void, Never> finalizer) => onExit((exit) {
+  Effect<A, E> onCancel(Effect<void, Never> finalizer) => onExit((exit, _) {
     if (exit case Failed<A, E>(:final cause) when cause.containsInterruption) {
       return finalizer;
     }

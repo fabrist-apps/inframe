@@ -39,7 +39,7 @@ final program = Effect.build<String, String>(($) async {
   final service = $.context.require(serviceKey);
   final connection = await $.acquireRelease(
     service.connect(count),
-    release: (connection) => connection.closeEffect(),
+    release: (connection, context) => connection.closeEffect(),
   );
   return await $(connection.load());
 });
@@ -58,6 +58,9 @@ builder cannot be used after its callback ends. Plain Dart `await` has no
 Conflux cancellation hook. Adapt foreign work with `Effect.tryFuture` and
 supply `onCancel` when the external operation can be stopped. Without that
 hook, Conflux observes late completion but cannot claim the work stopped.
+Future factories, failure mappers, cancellation hooks, timeout fallbacks,
+resource releases, and exit observers receive the `Context` captured where
+their owning Effect is evaluated or resource is registered.
 
 Contexts contain borrowed references. Only `acquireRelease`, `addFinalizer`,
 or another explicit cleanup operation transfers ownership to an Effect scope.
@@ -75,7 +78,7 @@ final cachedLengths = Effect.build<(int, int), Never>(($) async {
       capacity: 100,
       concurrency: 8,
       expiry: CacheExpiry.fixed(const Duration(minutes: 5)),
-      lookup: (key) => Effect.sync(key.length),
+      lookup: (key, _) => Effect.succeed(key.length),
     ),
   );
 
@@ -85,10 +88,13 @@ final cachedLengths = Effect.build<(int, int), Never>(($) async {
 });
 ```
 
-`Cache.make` captures its creation scope's Context and Clock. A lookup started
-by another caller still uses those dependencies. Put request-dependent data in
-the key or acquire the Cache inside the request scope. Cache coordination is
-confined to one isolate.
+`Cache.make` captures its creation scope's Context and Clock. Its lookup
+callback receives `(key, context)`, and a lookup started by another caller still
+uses those captured dependencies. Value-dependent expiry receives
+`(key, value, context)` from the same owner. `invalidateWhere` instead receives
+the calling Effect's Context. Put request-dependent data in the key or acquire
+the Cache inside the request scope. Cache coordination is confined to one
+isolate.
 
 Concurrent requests for one key and generation share a load. Cancelling one
 waiter leaves that owner-scoped load available to other waiters. `concurrency`
@@ -120,7 +126,7 @@ final measured = await Effect.succeed<String, String>('ready')
     .delay(const Duration(milliseconds: 10))
     .timeout(
       const Duration(seconds: 1),
-      onTimeout: () => 'operation timed out',
+      onTimeout: (_) => 'operation timed out',
     )
     .timed()
     .runFuture();
@@ -139,7 +145,7 @@ to its driver, `repeat` runs immediately and feeds successful values, and
 
 ```dart
 var attempts = 0;
-final loaded = Effect.defer<int, String>(() {
+final loaded = Effect.defer<int, String>((_) {
   attempts += 1;
   return attempts < 3 ? Effect.fail('try again') : Effect.succeed(42);
 }).retry(Schedule.recurs(3));
@@ -155,13 +161,15 @@ expected-error channel and ends the operation; it is distinct from
 
 `spaced` measures each delay from the prior completion. `fixed` instead keeps an
 anchored cadence and skips missed ticks. Exponential delays have no implicit
-cap; add one explicitly with `modifyDelay` when the operation needs it:
+cap; add one explicitly with `modifyDelay` when the operation needs it. Schedule
+callbacks receive the consuming driver's execution `Context` as their final
+argument:
 
 ```dart
 final backoff = Schedule.exponential<String>(
   const Duration(milliseconds: 100),
 ).jittered().modifyDelay(
-  (delay) => delay > const Duration(seconds: 10)
+  (delay, _) => delay > const Duration(seconds: 10)
       ? const Duration(seconds: 10)
       : delay,
 );
@@ -231,8 +239,10 @@ final cron = switch (Cron.parse('0 9 * * mon-fri', location)) {
   Success(value: final value) => value,
   Failure(error: final error) => throw FormatException('$error'),
 };
-final policy = Schedule.cron<void>(cron).mapError<JobError>(InvalidCalendar.new);
-final Effect<void, JobError> job = Effect.sync(() => print('run job'));
+final policy = Schedule.cron<void>(
+  cron,
+).mapError<JobError>((error, _) => InvalidCalendar(error));
+final Effect<void, JobError> job = Effect.sync((_) => print('run job'));
 final scheduled = job.repeat(policy);
 ```
 
@@ -279,7 +289,7 @@ runner has its result:
 
 ```dart
 final firstThree = Flow.fromIterable([1, 2, 3, 4])
-    .map((value) => value * 2)
+    .map((value, _) => value * 2)
     .take(3)
     .runCollect();
 
@@ -291,12 +301,25 @@ Flow-owned buffer behaves when a producer outruns its consumer:
 
 ```dart
 final events = Flow.fromStream<int, String>(
-  () => eventStream,
-  onError: (error, stackTrace) => 'stream failed: $error',
+  (_) => eventStream,
+  onError: (error, stackTrace, _) => 'stream failed: $error',
   capacity: 32,
   overflow: FlowOverflowPolicy.backpressure,
 );
 ```
+
+Flow source callbacks receive the source execution `Context`. Transformations,
+selection, recovery, observation, and terminal consumers receive their current
+consumption `Context`. Stream errors and overflow retain the `Context` captured
+when that subscription opened. The named `context` arguments on `subscribe`
+and `toStream` still select the root execution context.
+Concurrent flattening mappers and `withLatestFrom` combiners receive the
+operator's execution `Context`. Delayed overflow callbacks for merge and
+combination buffers retain that same owning region.
+Shared Flow work and overflow remain in the first subscriber's connection
+`Context`; live and replayed values are observed in each subscriber's own
+region. Timed buffer, debounce, and throttle overflow callbacks retain their
+operator's execution `Context` across timer activity.
 
 `Flow.fromQueue(queue)` creates competing consumers: one consumer receives each
 accepted item. `Flow.fromPubSub(pubsub)` acquires an independent subscription

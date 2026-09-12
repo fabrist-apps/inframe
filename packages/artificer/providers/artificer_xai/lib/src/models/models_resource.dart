@@ -54,7 +54,7 @@ final class XaiModelsResource {
         api: _api,
         modelId: modelId,
       )
-      .flatMap((response) => _decode(response, decode));
+      .flatMap((response, _) => _decode(response, decode));
 }
 
 /// One model from xAI's compatible `/models` view.
