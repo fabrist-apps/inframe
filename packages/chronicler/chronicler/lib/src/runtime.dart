@@ -6,6 +6,7 @@ import 'package:chronicler/src/codec.dart';
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/diagnostics.dart';
 import 'package:chronicler/src/lifecycle.dart';
+import 'package:chronicler/src/metrics.dart';
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/record_validation.dart';
 import 'package:chronicler/src/trace_propagation.dart';
@@ -88,6 +89,9 @@ final class ChroniclerRecorder {
 
   final ChroniclerRuntime _runtime;
   final _RecorderAttribution _attribution;
+
+  /// Metric instruments shared by this recorder's application runtime.
+  ChroniclerMetrics get metrics => _runtime.metrics;
 
   /// Runs [run] in a new root trace and records its callback lifetime.
   Future<T> trace<T>(
@@ -347,6 +351,19 @@ final class ChroniclerRuntime {
 
   /// Payload-free runtime diagnostic channel.
   final DiagnosticChannel diagnostics;
+
+  /// Runtime-owned metric registry.
+  late final ChroniclerMetrics metrics = ChroniclerMetrics.internal(
+    options: options.metrics,
+    limits: options.limits,
+    canRecord: () => _canRecord(ChroniclerSignal.metrics, null),
+    diagnose: diagnostics.record,
+    redact: _redactMap,
+    createRecord: _metricRecord,
+    finalize: _finalizeAndEnqueue,
+    now: () => _now,
+    elapsed: () => _elapsedNow,
+  );
   Random _secureRandom;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
@@ -744,6 +761,7 @@ final class ChroniclerRuntime {
 
   void _beginClose(Completer<DeliveryReport> completer) {
     _state = ChroniclerRuntimeState.closing;
+    metrics.stop();
     diagnostics.close();
     final startedAt = _elapsed.elapsed;
     final finalizations = <_RecordDisposition>[];
@@ -1121,6 +1139,18 @@ final class ChroniclerRuntime {
     sessionId: attribution.sessionId,
     traceId: attribution.traceId,
     spanId: attribution.spanId,
+  );
+
+  MetricRecord _metricRecord(MetricPayload payload) => MetricRecord(
+    envelope: RecordEnvelope(
+      eventId: ChronoID.generate(prefix: 'evt'),
+      appId: appId,
+      release: release,
+      source: source,
+      timestamp: payload.intervalEnd,
+      buildId: buildId,
+    ),
+    payload: payload,
   );
 
   bool _allowsCapture(ChroniclerSignal signal, double? sampleRate) {
@@ -1859,6 +1889,43 @@ final class ChroniclerDeliveryFixture {
   static int activeFlushes(Chronicler chronicler) => chronicler._runtime._flushWaiters.length;
 }
 
+/// Internal fixture bridge for deterministic metric aggregation tests.
+final class ChroniclerMetricFixture {
+  const ChroniclerMetricFixture._();
+
+  /// Replaces wall and monotonic clocks before accessing metric instruments.
+  static void overrideClocks(
+    Chronicler chronicler, {
+    required DateTime Function() now,
+    required Duration Function() elapsed,
+  }) {
+    chronicler._runtime
+      .._nowOverride = now
+      .._elapsedOverride = elapsed;
+  }
+
+  /// Rotates the current interval synchronously and stops its next timer.
+  static void rotate(Chronicler chronicler) {
+    chronicler._runtime.metrics.rotateForTesting();
+  }
+
+  /// Places an existing counter series at an arithmetic boundary.
+  static void setCounterAggregate(
+    Chronicler chronicler, {
+    required int count,
+    required String name,
+    required double sum,
+    Map<String, Object?> attributes = const {},
+  }) {
+    chronicler._runtime.metrics.setCounterAggregateForTesting(
+      name: name,
+      attributes: attributes,
+      count: count,
+      sum: sum,
+    );
+  }
+}
+
 final class _PendingRecord {
   _PendingRecord(
     this.record,
@@ -2009,6 +2076,24 @@ ChroniclerOptions _validateAndSnapshotOptions(ChroniclerOptions options) {
       'notificationInterval',
       'must be positive',
     );
+  }
+  final metrics = options.metrics;
+  for (final MapEntry(:key, :value) in {
+    'maxInstruments': metrics.maxInstruments,
+    'maxSeries': metrics.maxSeries,
+    'maxSeriesPerInstrument': metrics.maxSeriesPerInstrument,
+    'maxAttributes': metrics.maxAttributes,
+    'maxHistogramBoundaries': metrics.maxHistogramBoundaries,
+  }.entries) {
+    if (value <= 0) throw ChroniclerConfigurationException(key, 'must be positive');
+  }
+  for (final MapEntry(:key, :value) in {
+    'metricInterval': metrics.interval,
+    'metricIdleTimeout': metrics.idleTimeout,
+  }.entries) {
+    if (value <= Duration.zero) {
+      throw ChroniclerConfigurationException(key, 'must be positive');
+    }
   }
   final terms = <String>{};
   for (final term in options.redaction.fieldTerms) {

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:chronicler/src/metrics.dart';
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/runtime.dart';
 import 'package:chronicler/src/trace_propagation.dart';
@@ -30,6 +31,12 @@ extension ChroniclerContextBinding on Context {
       ),
     ),
   );
+}
+
+/// Exposes runtime-owned metric instruments from a configured [Context].
+extension ChroniclerContextMetrics on Context {
+  /// Metric instruments shared by every recorder for this runtime.
+  ChroniclerMetrics get metrics => require(_chroniclerKey).metrics;
 }
 
 /// Exposes structured log capture from a configured [Context].

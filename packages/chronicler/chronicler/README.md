@@ -86,6 +86,29 @@ The base queue is in memory. Process termination can lose unsent telemetry, so a
 not durable application storage. Diagnostics use a payload-free callback and exact counters rather
 than entering the telemetry path recursively.
 
+## Metric counters
+
+Metric instruments are shared by the Chronicler runtime, so request Contexts contribute to the same
+bounded interval aggregates without adding request identity as a dimension. Repeating a compatible
+lookup returns the registered instrument:
+
+```dart
+final completed = context.metrics.counter('orders.completed', unit: 'orders');
+completed.add(1, attributes: {'channel': 'mobile'});
+```
+
+Counters export nonnegative changes measured during each interval rather than lifetime totals. The
+default interval is ten seconds. Recording zero still produces an aggregate, while an interval with
+no measurements produces none. Metric measurements are aggregated without random sampling.
+
+Names and units are case-sensitive. Values use finite double precision, so large integer inputs may
+be approximate and business-critical accounting belongs in application storage. Dimensions accept
+bounded strings, booleans, and portable finite numbers. Attribute order, `1` versus `1.0`, and signed
+zero select the same series. Chronicler validates and redacts dimensions before series selection;
+different sensitive values replaced by `[REDACTED]` therefore intentionally share a series. The
+configured total and per-instrument series limits reject new dimensions while existing series remain
+usable.
+
 ## Error occurrences
 
 Capture an error occurrence explicitly when an application boundary handles or observes it:
