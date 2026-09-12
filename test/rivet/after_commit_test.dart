@@ -97,13 +97,27 @@ void main() {
     test(
       'should run database callbacks immediately and reject transaction ambiguity',
       () async {
+        final transactionEntered = Completer<void>();
+        final releaseTransaction = Completer<void>();
+        final unrelatedTransaction = database.transaction<void>((transaction) async {
+          transactionEntered.complete();
+          await releaseTransaction.future;
+        });
+        await transactionEntered.future;
+
         final completed = Completer<void>();
         final immediate = database.afterCommit(() async {
           await Future<void>.delayed(const Duration(milliseconds: 10));
           completed.complete();
         });
-        await immediate;
+        await immediate.timeout(const Duration(milliseconds: 100));
         expect(completed.isCompleted, isTrue);
+        await expectLater(
+          database.afterCommit(() => throw StateError('immediate')),
+          throwsStateError,
+        );
+        releaseTransaction.complete();
+        await unrelatedTransaction;
 
         await database.transaction((transaction) async {
           await expectLater(
@@ -111,6 +125,31 @@ void main() {
             throwsA(isA<RivetExecutorClosedException>()),
           );
         });
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should drain an accepted database callback during external close',
+      () async {
+        final entered = Completer<void>();
+        final release = Completer<void>();
+        final callback = database.afterCommit(() async {
+          entered.complete();
+          await release.future;
+        });
+        await entered.future;
+
+        var closed = false;
+        final close = database.close();
+        unawaited(close.then((_) => closed = true));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(closed, isFalse);
+
+        release.complete();
+        await callback;
+        await close;
+        expect(closed, isTrue);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

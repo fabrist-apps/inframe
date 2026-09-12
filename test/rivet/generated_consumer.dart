@@ -120,6 +120,13 @@ final class ArrayValues extends RivetTableDefinition<ArrayValues> {
   late final codes = text().map(const UserCodeConverter()).nullable().array()();
 }
 
+@RivetTable(schema: 'fbr122')
+final class MalformedArrays extends RivetTableDefinition<MalformedArrays> {
+  static const db = _$MalformedArraysDB();
+
+  late final ints = integer().array()();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -129,6 +136,7 @@ final class ArrayValues extends RivetTableDefinition<ArrayValues> {
     EnumValues,
     VectorValues,
     ArrayValues,
+    MalformedArrays,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

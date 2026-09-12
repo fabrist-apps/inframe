@@ -377,6 +377,35 @@ final class _$ArrayValuesDB extends RivetTableAccessor<ArrayValues, ArrayValuesR
   }
 }
 
+/// Generated row returned by reads from `fbr122.malformedArrays`.
+final class MalformedArraysRow {
+  /// Creates a row from decoded column and relation values.
+  const MalformedArraysRow({required this.ints});
+
+  /// Value read from `ints`.
+  final List<int> ints;
+}
+
+final class _$MalformedArraysDB extends RivetTableAccessor<MalformedArrays, MalformedArraysRow> {
+  const _$MalformedArraysDB();
+
+  @override
+  RivetTableSchema<MalformedArrays, MalformedArraysRow> buildSchema() {
+    final definition = MalformedArrays();
+
+    return RivetTableSchema<MalformedArrays, MalformedArraysRow>(
+      schemaName: 'fbr122',
+      tableName: 'malformedArrays',
+      definition: definition,
+      columns: [definition.ints as RivetColumn<Object?>],
+      columnNames: ['ints'],
+      decode: (values, sqlNulls) => MalformedArraysRow(
+        ints: definition.ints.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      ),
+    );
+  }
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -395,6 +424,7 @@ abstract class _$RivetTestDatabase {
       EnumValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       VectorValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       ArrayValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      MalformedArrays.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }

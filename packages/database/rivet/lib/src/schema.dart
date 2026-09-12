@@ -883,10 +883,11 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
 
   @override
   String select(String columnSql) {
+    final checkedColumn = _checkedArray(columnSql);
     final elementSelection = elementCodec.select('"__rivet_element"');
-    if (elementSelection == '"__rivet_element"') return columnSql;
-    return 'CASE WHEN $columnSql IS NULL THEN NULL ELSE ARRAY( '
-        'SELECT $elementSelection FROM unnest($columnSql) WITH ORDINALITY '
+    if (elementSelection == '"__rivet_element"') return checkedColumn;
+    return 'CASE WHEN $checkedColumn IS NULL THEN NULL ELSE ARRAY( '
+        'SELECT $elementSelection FROM unnest($checkedColumn) WITH ORDINALITY '
         'AS "__rivet_array"("__rivet_element", "__rivet_order") '
         'ORDER BY "__rivet_order") END';
   }
@@ -934,6 +935,14 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
     pg.TypedValue() => value.value,
     _ => value,
   };
+
+  String _checkedArray(String columnSql) {
+    final dimensions = 'array_ndims($columnSql)';
+    final lowerBound = 'array_lower($columnSql, 1)';
+    return 'CASE WHEN $columnSql IS NULL OR $dimensions IS NULL OR '
+        '($dimensions = 1 AND $lowerBound = 1) THEN $columnSql '
+        'ELSE ARRAY[$columnSql[1 / ($lowerBound - $lowerBound)]] END';
+  }
 }
 
 enum NullsOrder { first, last }

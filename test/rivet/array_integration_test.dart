@@ -60,6 +60,11 @@ void main() {
           )
         ''');
         await fixture.execute('''
+          CREATE TABLE fbr122."malformedArrays" (
+            ints integer[] NOT NULL
+          )
+        ''');
+        await fixture.execute('''
           INSERT INTO fbr122."arrayValues" VALUES (
             ARRAY[]::integer[],
             ARRAY[1, NULL, 3]::integer[],
@@ -117,6 +122,20 @@ void main() {
           const JsonNull(),
           JsonValue.from(const {'ok': true}),
         ]);
+
+        await fixture.execute("INSERT INTO fbr122.\"malformedArrays\" VALUES ('[0:1]={1,2}')");
+        await expectLater(
+          MalformedArrays.db.find().get(database),
+          throwsA(isA<RivetDatabaseException>()),
+        );
+        await fixture.execute('TRUNCATE fbr122."malformedArrays"');
+        await fixture.execute('''
+          INSERT INTO fbr122."malformedArrays" VALUES (ARRAY[[1, 2], [3, 4]])
+        ''');
+        await expectLater(
+          MalformedArrays.db.find().get(database),
+          throwsA(isA<RivetDatabaseException>()),
+        );
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
