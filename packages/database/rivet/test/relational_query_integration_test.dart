@@ -363,5 +363,85 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should update and return targets selected through relations',
+      () async {
+        final returned = await RelationalPosts.db
+            .update(
+              RelationalPostsCompanion.update(
+                title: const RivetValue.present('selected'),
+              ),
+              where: (post) => post.author.matches(
+                (user) => user.name.equals('Ada'),
+              ),
+            )
+            .returning()
+            .get(database);
+
+        expect(returned.map((post) => post.id), containsAll([11, 12, 13]));
+        expect(returned.every((post) => post.title == 'selected'), isTrue);
+        expect(returned.every((post) => !post.author.isLoaded), isTrue);
+        expect(statements, hasLength(1));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should delete targets selected by nested relations in one statement',
+      () async {
+        final deleted = await RelationalPosts.db
+            .delete(
+              where: (post) => post.comments.any(
+                (comment) => comment.body.equals('old'),
+              ),
+            )
+            .returning()
+            .get(database);
+
+        expect(deleted.map((post) => post.id), [11]);
+        expect(deleted.single.comments.isLoaded, isFalse);
+        expect(statements, hasLength(1));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should preserve zero-match counts and transaction rollback',
+      () async {
+        final deleted = await RelationalPosts.db
+            .delete(
+              where: (post) => post.author.matches(
+                (user) => user.name.equals('Missing'),
+              ),
+            )
+            .execute(database);
+        expect(deleted, 0);
+
+        await expectLater(
+          database.transaction((tx) async {
+            final affected = await RelationalPosts.db
+                .update(
+                  RelationalPostsCompanion.update(
+                    title: const RivetValue.present('rolled back'),
+                  ),
+                  where: (post) => post.comments.any(
+                    (comment) => comment.body.equals('old'),
+                  ),
+                )
+                .execute(tx);
+            expect(affected, 1);
+            throw StateError('rollback');
+          }),
+          throwsStateError,
+        );
+        final titles = await fixture.execute(
+          'SELECT title FROM fbr146."relationalPosts" WHERE id = 11',
+        );
+        expect(titles.single.single, 'Ada first');
+        expect(statements, hasLength(2));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }

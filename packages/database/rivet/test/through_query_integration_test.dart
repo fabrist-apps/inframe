@@ -181,5 +181,28 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should mutate targets selected through composite junction paths',
+      () async {
+        final changed = await ThroughBooks.db
+            .update(
+              ThroughBooksCompanion.update(
+                title: const RivetValue.present('matched'),
+              ),
+              where: (book) => book.tags.any(
+                (tag) => tag.name.equals('Beta'),
+              ),
+            )
+            .returning()
+            .get(database);
+
+        expect(changed.map((book) => book.id), [10]);
+        expect(changed.single.title, 'matched');
+        expect(changed.single.tags.isLoaded, isFalse);
+        expect(statements, hasLength(1));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }

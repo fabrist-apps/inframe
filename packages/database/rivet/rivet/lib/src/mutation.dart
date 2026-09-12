@@ -504,6 +504,11 @@ RivetCompiledQuery _compileUpdate<Definition, Row>(
   RivetPredicate? predicate, {
   required bool returning,
 }) {
+  final usesRelations = predicate?.usesRelations ?? false;
+  var aliasIndex = 0;
+  String nextAlias() => '__rivet_t${aliasIndex++}';
+  final rootAlias = usesRelations ? nextAlias() : null;
+  if (rootAlias != null) schema.qualify(rootAlias);
   final parameters = <Object?>[];
   final assignments = _compileUpdateAssignments(schema, companion, parameters);
   if (assignments.isEmpty) {
@@ -512,12 +517,16 @@ RivetCompiledQuery _compileUpdate<Definition, Row>(
     );
   }
   final sql = StringBuffer(
-    'UPDATE ${schema.qualifiedName} SET ${assignments.join(', ')}',
+    'UPDATE ${schema.qualifiedName}'
+    '${rootAlias == null ? '' : ' AS ${quoteIdentifier(rootAlias)}'} '
+    'SET ${assignments.join(', ')}',
   );
   if (predicate != null) {
-    sql.write(
-      ' WHERE ${predicate.renderParameters(startAt: parameters.length + 1)}',
+    final rendered = predicate.renderParameters(
+      startAt: parameters.length + 1,
+      nextAlias: usesRelations ? nextAlias : null,
     );
+    sql.write(' WHERE $rendered');
     parameters.addAll(predicate.parameters);
   }
   if (returning) {
@@ -584,10 +593,21 @@ RivetCompiledQuery _compileDelete<Definition, Row>(
   RivetPredicate? predicate, {
   required bool returning,
 }) {
-  final sql = StringBuffer('DELETE FROM ${schema.qualifiedName}');
+  final usesRelations = predicate?.usesRelations ?? false;
+  var aliasIndex = 0;
+  String nextAlias() => '__rivet_t${aliasIndex++}';
+  final rootAlias = usesRelations ? nextAlias() : null;
+  if (rootAlias != null) schema.qualify(rootAlias);
+  final sql = StringBuffer(
+    'DELETE FROM ${schema.qualifiedName}'
+    '${rootAlias == null ? '' : ' AS ${quoteIdentifier(rootAlias)}'}',
+  );
   final parameters = <Object?>[];
   if (predicate != null) {
-    sql.write(' WHERE ${predicate.renderParameters()}');
+    final rendered = predicate.renderParameters(
+      nextAlias: usesRelations ? nextAlias : null,
+    );
+    sql.write(' WHERE $rendered');
     parameters.addAll(predicate.parameters);
   }
   if (returning) {
