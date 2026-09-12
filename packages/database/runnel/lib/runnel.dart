@@ -2,6 +2,7 @@
 library;
 
 export 'src/batch.dart';
+export 'src/blocking.dart';
 export 'src/client.dart';
 export 'src/command.dart';
 export 'src/commands/collections.dart';

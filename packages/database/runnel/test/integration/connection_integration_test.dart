@@ -345,6 +345,57 @@ void main() {
               throwsA(isA<RedisServerException>()),
             );
             expect(await client.get(partialWriteKey), 'written');
+
+            final blocking = await client.blocking();
+            addTearDown(blocking.close);
+            final blockingList = 'runnel:integration:blocking-list:$suffix';
+            final leftPop = blocking.blpop(
+              [blockingList],
+              wait: const Duration(seconds: 1),
+            );
+            expect(await client.rpush(blockingList, ['left']), 1);
+            expect(await leftPop, (key: blockingList, value: 'left'));
+
+            final rightPop = blocking.brpop(
+              [blockingList],
+              wait: const Duration(seconds: 1),
+            );
+            expect(await client.lpush(blockingList, ['right']), 1);
+            expect(await rightPop, (key: blockingList, value: 'right'));
+            expect(
+              await blocking.blpop(
+                ['runnel:integration:empty-list:$suffix'],
+                wait: const Duration(milliseconds: 1),
+              ),
+              isNull,
+            );
+
+            final blockingStream = 'runnel:integration:blocking-stream:$suffix';
+            final blockingRead = blocking.xread(
+              {blockingStream: StreamId(BigInt.zero, BigInt.zero)},
+              wait: const Duration(seconds: 1),
+            );
+            final deliveredStreamId = await client.xadd(
+              blockingStream,
+              [StreamField.text('event', 'delivered')],
+            );
+            expect((await blockingRead).single.entries.single.id, deliveredStreamId);
+            expect(
+              await blocking.xread(
+                {blockingStream: deliveredStreamId},
+                wait: const Duration(milliseconds: 1),
+              ),
+              isEmpty,
+            );
+
+            final isolatedWait = blocking.blpop(
+              [blockingList],
+              wait: const Duration(seconds: 1),
+            );
+            expect(await client.set('$blockingList:ordinary', 'ready'), isTrue);
+            expect(await client.get('$blockingList:ordinary'), 'ready');
+            expect(await client.rpush(blockingList, ['release']), 1);
+            expect(await isolatedWait, (key: blockingList, value: 'release'));
           },
         );
       }

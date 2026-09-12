@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:runnel/src/batch.dart';
+import 'package:runnel/src/blocking.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/command_validation.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
@@ -33,6 +34,7 @@ final class Runnel {
   final RunnelLimits _limits;
   final ReconnectBackoff _backoff = ReconnectBackoff();
   final Set<RedisConnection> _transactionConnections = {};
+  final Set<BlockingSession> _blockingSessions = {};
 
   RedisConnection? _connection;
   Timer? _reconnectTimer;
@@ -235,6 +237,22 @@ final class Runnel {
     );
   }
 
+  /// Opens a dedicated connection for one blocking operation at a time.
+  Future<BlockingSession> blocking() async {
+    _readyConnection();
+    final session = await BlockingSession.internal(
+      openConnection: _openPhysicalConnection,
+      commandTimeout: _commandTimeout,
+      onClosed: _blockingSessions.remove,
+    );
+    if (_state != _ClientState.ready) {
+      await session.close();
+      throw const RedisClosedException(message: 'The Runnel client is closing.');
+    }
+    _blockingSessions.add(session);
+    return session;
+  }
+
   Future<List<BatchOutcome<Object?>>> _executePipeline(
     List<RedisCommand<Object?>> commands,
     Duration timeout,
@@ -327,6 +345,9 @@ final class Runnel {
     _connection = null;
     final transactions = List<RedisConnection>.of(_transactionConnections);
     _transactionConnections.clear();
+    final blockingSessions = List<BlockingSession>.of(_blockingSessions);
+    _blockingSessions.clear();
+    await Future.wait(blockingSessions.map((session) => session.close()));
     await Future.wait(
       transactions.map((transaction) => transaction.close(commandsAreUncertain: true)),
     );
