@@ -55,6 +55,35 @@ void main() {
       ]);
     });
 
+    test('should redact nested maps with erased generic types', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter: exporter);
+      final now = DateTime.now().toUtc();
+
+      ChroniclerCaptureFixture.capture(
+        chronicler,
+        ProductEventRecord(
+          envelope: RecordEnvelope(
+            eventId: ChronoID.generate(prefix: 'evt'),
+            appId: 'app',
+            release: 'release',
+            source: ChroniclerSource.server,
+            timestamp: now,
+          ),
+          payload: ProductEventPayload(
+            name: 'fixture',
+            properties: <String, Object?>{
+              'nested': <dynamic, dynamic>{'access_token': 'secret'},
+            },
+          ),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final event = exporter.batches.single.records.single as ProductEventRecord;
+      expect(event.payload.properties['nested'], {'access_token': '[REDACTED]'});
+    });
+
     test('should snapshot replaced, extended, and empty field rules', () async {
       final mutableTerms = <String>['custom'];
       final exporter = TestExporter();

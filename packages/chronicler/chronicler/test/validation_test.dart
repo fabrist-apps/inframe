@@ -28,12 +28,13 @@ void main() {
       logs.info('cycle', attributes: cyclic);
       logs.info('nan', attributes: {'value': double.nan});
       logs.info('large integer', attributes: {'value': 9007199254740992});
+      logs.info('minimum integer', attributes: {'value': -9223372036854775808});
       logs.info('large integral double', attributes: {'value': 9007199254740992.0});
       logs.info(String.fromCharCode(0xd800));
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(6));
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(7));
     });
 
     test('should stop shared-container expansion at the record budget', () {

@@ -127,7 +127,9 @@ final class ChroniclerCodec {
       final map = _map((parsed as Decoded<Object?>).value);
       _version(map);
       final rawRecords = map['records'];
-      if (rawRecords is! List<Object?> || rawRecords.length > maxBatchRecords) {
+      if (rawRecords is! List<Object?> ||
+          rawRecords.isEmpty ||
+          rawRecords.length > maxBatchRecords) {
         throw const _CodecFailure(DecodeFailureReason.invalidField);
       }
       final records = <ChroniclerRecord>[];

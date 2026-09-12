@@ -110,6 +110,22 @@ void main() {
       expect(result, isA<DecodeFailure<ChroniclerBatch>>());
     });
 
+    test('should reject an empty decoded batch', () {
+      const codec = ChroniclerCodec();
+      final encoded = Uint8List.fromList(
+        utf8.encode('{"records":[],"schemaVersion":1}'),
+      );
+
+      expect(
+        codec.decodeBatch(encoded),
+        isA<DecodeFailure<ChroniclerBatch>>().having(
+          (failure) => failure.reason,
+          'reason',
+          DecodeFailureReason.invalidField,
+        ),
+      );
+    });
+
     test('should reject invalid explicitly constructed models', () {
       const codec = ChroniclerCodec();
       final valid = _records().first as LogRecord;

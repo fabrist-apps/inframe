@@ -597,15 +597,20 @@ final class ChroniclerRuntime {
     IdentityLinkRecord() || UserPropertiesUnsetRecord() => record,
   };
 
-  Map<String, Object?> _redactMap(Map<String, Object?> source) => Map.unmodifiable({
-    for (final MapEntry(:key, :value) in source.entries)
-      key: options.redaction.fieldTerms.any(key.toLowerCase().contains)
-          ? '[REDACTED]'
-          : _redactValue(value),
-  });
+  Map<String, Object?> _redactMap(Map<Object?, Object?> source) => Map.unmodifiable(
+    source.map((key, value) {
+      final stringKey = key! as String;
+      return MapEntry(
+        stringKey,
+        options.redaction.fieldTerms.any(stringKey.toLowerCase().contains)
+            ? '[REDACTED]'
+            : _redactValue(value),
+      );
+    }),
+  );
 
   Object? _redactValue(Object? value) => switch (value) {
-    Map<String, Object?>() => _redactMap(value),
+    Map<Object?, Object?>() => _redactMap(value),
     List<Object?>() => List<Object?>.unmodifiable(value.map(_redactValue)),
     _ => value,
   };

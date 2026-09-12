@@ -87,11 +87,8 @@ final class RecordValidator {
       null => _countScalar(value, 4, budget),
       bool() => _countScalar(value, value ? 4 : 5, budget),
       String() => _snapshotString(value, budget),
-      int() when value.abs() <= _maximumPortableInteger => _countScalar(
-        value,
-        value.toString().length,
-        budget,
-      ),
+      int() when value >= -_maximumPortableInteger && value <= _maximumPortableInteger =>
+        _countScalar(value, value.toString().length, budget),
       int() => throw const RecordValidationException('integer is not portable'),
       double()
           when value.isFinite &&
