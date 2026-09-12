@@ -69,3 +69,9 @@ Completions administration are intentionally outside this package's endpoint sna
 common input must contain exactly one text part; media and multipart inputs fail before I/O. Native
 `embeddings.create` additionally accepts explicit token-ID inputs and base64 output, without local
 tokenization, vector normalization, retries, or asynchronous batch jobs.
+
+Files remain caller-owned remote resources. `files.create` performs one explicit multipart upload;
+listing and metadata calls neither poll nor paginate; `files.content` exposes a bounded scoped byte
+stream; and only `files.delete` removes a remote file. Closing the provider releases local HTTP
+work but never deletes uploaded files. `OpenAIFile.asResponseSource` creates a matching explicit
+Responses reference without uploading or fetching the file again.

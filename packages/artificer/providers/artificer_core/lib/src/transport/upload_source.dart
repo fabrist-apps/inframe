@@ -10,6 +10,9 @@ sealed class UploadSource {
     if (filename.contains('\n') || filename.contains('\r')) {
       throw ArgumentError.value(filename, 'filename', 'must not contain line breaks');
     }
+    if (mimeType.contains('\n') || mimeType.contains('\r')) {
+      throw ArgumentError.value(mimeType, 'mimeType', 'must not contain line breaks');
+    }
   }
 
   factory UploadSource.bytes(

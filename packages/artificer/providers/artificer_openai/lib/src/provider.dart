@@ -6,6 +6,7 @@ import 'package:artificer_core/transport.dart';
 import 'package:artificer_openai/src/chat/chat_completions_resource.dart';
 import 'package:artificer_openai/src/embeddings/embedding_models.dart';
 import 'package:artificer_openai/src/embeddings/embeddings_resource.dart';
+import 'package:artificer_openai/src/files/files_resource.dart';
 import 'package:artificer_openai/src/models/models_resource.dart';
 import 'package:artificer_openai/src/options.dart';
 import 'package:artificer_openai/src/responses/response_models.dart';
@@ -36,6 +37,7 @@ final class OpenAIProvider {
        ) {
     chatCompletions = OpenAIChatCompletionsResource(_client);
     embeddings = OpenAIEmbeddingsResource(_client);
+    files = OpenAIFilesResource(_client);
     responses = OpenAIResponsesResource(_client);
     models = OpenAIModelsResource(_client);
   }
@@ -47,6 +49,9 @@ final class OpenAIProvider {
 
   /// Typed native embedding operations.
   late final OpenAIEmbeddingsResource embeddings;
+
+  /// Explicit caller-managed native file operations.
+  late final OpenAIFilesResource files;
 
   /// Typed native Responses operations.
   late final OpenAIResponsesResource responses;
