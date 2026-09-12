@@ -45,3 +45,9 @@ Returned assistant messages carry native replay items for stateless same-provide
 same-model follow-up requests. Application code owns the ordered history and explicit tool results.
 Structured output is forwarded through the native response format; generated JSON is returned
 without Ack validation, repair, or retries.
+
+`chatCompletions.create` and `chatCompletions.stream` expose xAI's typed native Chat Completions
+shape while common generation continues to use Responses. Native requests type xAI sampling,
+reasoning, cache routing, service, tool, search, stop, and End User fields. Normalizing a response
+with multiple choices requires an explicit `choiceIndex`; SSE success requires the native `[DONE]`
+sentinel.

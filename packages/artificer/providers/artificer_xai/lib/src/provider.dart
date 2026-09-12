@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
+import 'package:artificer_xai/src/chat/chat_completions_resource.dart';
 import 'package:artificer_xai/src/options.dart';
 import 'package:artificer_xai/src/responses/response_models.dart';
 import 'package:artificer_xai/src/responses/responses_resource.dart';
@@ -26,10 +27,14 @@ final class XaiProvider {
            'authorization': 'Bearer ${_nonEmpty(apiKey, 'apiKey')}',
          },
        ) {
+    chatCompletions = XaiChatCompletionsResource(_client);
     responses = XaiResponsesResource(_client);
   }
 
   final ProviderHttpClient _client;
+
+  /// Typed native Chat Completions operations.
+  late final XaiChatCompletionsResource chatCompletions;
 
   /// Typed native Responses operations.
   late final XaiResponsesResource responses;
