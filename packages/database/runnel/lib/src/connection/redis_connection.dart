@@ -1,5 +1,4 @@
 // This class is package-internal; callers use the documented Runnel API.
-// ignore_for_file: public_member_api_docs
 
 import 'dart:async';
 import 'dart:io';
@@ -12,6 +11,7 @@ import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/resp/resp_parser.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
+/// Receives an unexpected terminal failure from [connection].
 typedef ConnectionTerminated = void Function(RedisConnection connection, Object cause);
 
 /// One physical socket owns submission order, reply alignment, timers, and reservations.
@@ -43,11 +43,19 @@ final class RedisConnection {
   var _flushScheduled = false;
   var _closed = false;
 
+  /// Whether this physical connection has released its socket.
   bool get isClosed => _closed;
+
+  /// Whether every accepted command has settled.
   bool get isIdle => _pending.isEmpty;
+
+  /// Number of commands accepted and awaiting settlement.
   int get pendingCount => _pending.length;
+
+  /// Encoded bytes reserved by commands awaiting settlement.
   int get pendingBytes => _pendingBytes;
 
+  /// Opens one physical connection and transfers its ownership to the returned instance.
   static Future<RedisConnection> open({
     required String host,
     required int port,
@@ -77,6 +85,7 @@ final class RedisConnection {
     return connection;
   }
 
+  /// Accepts [command] for ordered execution within [timeout].
   Future<T> execute<T>(
     RedisCommand<T> command, {
     required Duration timeout,
@@ -123,6 +132,7 @@ final class RedisConnection {
     return pending.completer.future;
   }
 
+  /// Atomically reserves capacity for [commands] and queues them in order.
   List<Future<Object?>> executeBatch(
     List<RedisCommand<Object?>> commands, {
     required Duration timeout,
@@ -346,12 +356,17 @@ final class RedisConnection {
     };
   }
 
+  /// Completes when every accepted command settles or the connection closes.
   Future<void> waitUntilIdle() async {
     while (!_closed && _pending.isNotEmpty) {
       await Future<void>.delayed(Duration.zero);
     }
   }
 
+  /// Releases this socket and fails any remaining commands.
+  ///
+  /// When [commandsAreUncertain] is true, the socket is destroyed because submitted work may have
+  /// reached the server.
   Future<void> close({bool commandsAreUncertain = false}) async {
     if (_closed) return;
     _closed = true;

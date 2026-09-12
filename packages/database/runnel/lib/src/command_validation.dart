@@ -1,5 +1,4 @@
 // Package-internal validation shared by ordinary execution and batch builders.
-// ignore_for_file: public_member_api_docs
 
 import 'dart:convert';
 
@@ -33,6 +32,7 @@ const _reservedCommands = {
   'WAITAOF',
 };
 
+/// Rejects commands whose reply or connection mode requires a dedicated session.
 void validateOrdinaryCommand(RedisCommand<Object?> command) {
   final name = ascii.decode(command.arguments.first.bytes).toUpperCase();
   if (_reservedCommands.contains(name)) {
