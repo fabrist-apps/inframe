@@ -83,20 +83,15 @@ Future<ConnectionSocket> _openPlainSocket(
 ) async {
   final task = await Socket.startConnect(host, port);
   if (!(attempt?.attachConnect(task.cancel) ?? true)) {
-    try {
-      await task.socket;
-    } on Object {
-      // Cancellation is represented to the caller by RedisClosedException below.
-    }
+    await _discardTaskResult(task.socket, (socket) => socket.destroy());
     throw const RedisClosedException(message: 'The connection attempt was cancelled.');
   }
   try {
-    final socket = await task.socket.timeout(
-      _remaining(timeout, elapsed),
-      onTimeout: () {
-        task.cancel();
-        throw TimeoutException('The socket connection deadline expired.');
-      },
+    final socket = await _awaitTask(
+      task,
+      timeout,
+      elapsed,
+      (socket) => socket.destroy(),
     );
     final connection = _IoConnectionSocket(socket);
     if (!(attempt?.attachResource(() async => connection.destroy()) ?? true)) {
@@ -119,21 +114,16 @@ Future<ConnectionSocket> _openSecureSocket(
 ) async {
   final task = await RawSocket.startConnect(host, port);
   if (!(attempt?.attachConnect(task.cancel) ?? true)) {
-    try {
-      await task.socket;
-    } on Object {
-      // Cancellation is represented to the caller by RedisClosedException below.
-    }
+    await _discardTaskResult(task.socket, (socket) => unawaited(socket.close()));
     throw const RedisClosedException(message: 'The connection attempt was cancelled.');
   }
   late final RawSocket plainSocket;
   try {
-    plainSocket = await task.socket.timeout(
-      _remaining(timeout, elapsed),
-      onTimeout: () {
-        task.cancel();
-        throw TimeoutException('The socket connection deadline expired.');
-      },
+    plainSocket = await _awaitTask(
+      task,
+      timeout,
+      elapsed,
+      (socket) => unawaited(socket.close()),
     );
   } finally {
     attempt?.detachConnect(task.cancel);
@@ -190,6 +180,48 @@ Duration _remaining(Duration timeout, Stopwatch elapsed) {
   return remaining;
 }
 
+Future<T> _awaitTask<T>(
+  ConnectionTask<T> task,
+  Duration timeout,
+  Stopwatch elapsed,
+  void Function(T resource) dispose,
+) async {
+  var abandoned = false;
+  unawaited(
+    task.socket.then<void>(
+      (resource) {
+        if (abandoned) dispose(resource);
+      },
+      onError: (_, _) {},
+    ),
+  );
+  try {
+    return await task.socket.timeout(
+      _remaining(timeout, elapsed),
+      onTimeout: () {
+        abandoned = true;
+        task.cancel();
+        throw TimeoutException('The socket connection deadline expired.');
+      },
+    );
+  } on TimeoutException {
+    abandoned = true;
+    task.cancel();
+    rethrow;
+  }
+}
+
+Future<void> _discardTaskResult<T>(
+  Future<T> result,
+  void Function(T resource) dispose,
+) async {
+  try {
+    dispose(await result);
+  } on Object {
+    // Cancellation is represented to the caller by RedisClosedException.
+  }
+}
+
 final class _IoConnectionSocket extends ConnectionSocket {
   _IoConnectionSocket(this._socket);
 
@@ -222,7 +254,7 @@ final class _RawSecureConnectionSocket extends ConnectionSocket {
   _RawSecureConnectionSocket(this._socket) {
     _subscription = _socket.listen(
       _onEvent,
-      onError: _controller.addError,
+      onError: _reportError,
       onDone: _closeController,
       cancelOnError: true,
     );
@@ -243,10 +275,17 @@ final class _RawSecureConnectionSocket extends ConnectionSocket {
   }
 
   void _onEvent(RawSocketEvent event) {
+    if (_closed) return;
     if (event == RawSocketEvent.read) {
-      Uint8List? bytes;
-      while ((bytes = _socket.read()) != null) {
-        _controller.add(bytes!);
+      while (!_closed) {
+        try {
+          final bytes = _socket.read();
+          if (bytes == null) return;
+          _controller.add(bytes);
+        } on Object catch (error, stackTrace) {
+          _reportError(error, stackTrace);
+          return;
+        }
       }
     } else if (event == RawSocketEvent.write) {
       _drainWrites();
@@ -256,16 +295,24 @@ final class _RawSecureConnectionSocket extends ConnectionSocket {
   }
 
   void _drainWrites() {
-    while (_writes.isNotEmpty) {
-      final bytes = _writes.first;
-      _writeOffset += _socket.write(bytes, _writeOffset);
-      if (_writeOffset != bytes.length) {
-        _socket.writeEventsEnabled = true;
-        return;
+    try {
+      while (!_closed && _writes.isNotEmpty) {
+        final bytes = _writes.first;
+        _writeOffset += _socket.write(bytes, _writeOffset);
+        if (_writeOffset != bytes.length) {
+          _socket.writeEventsEnabled = true;
+          return;
+        }
+        _writes.removeFirst();
+        _writeOffset = 0;
       }
-      _writes.removeFirst();
-      _writeOffset = 0;
+    } on Object catch (error, stackTrace) {
+      _reportError(error, stackTrace);
     }
+  }
+
+  void _reportError(Object error, StackTrace stackTrace) {
+    if (!_closed && !_controller.isClosed) _controller.addError(error, stackTrace);
   }
 
   void _closeController() {
