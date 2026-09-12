@@ -4,6 +4,7 @@
 import 'dart:typed_data';
 
 import 'package:voxel/voxel.dart';
+import 'package:voxel_fixture_schema/authors.dart' as schema;
 
 part 'generated_consumer.voxel.dart';
 
@@ -74,6 +75,22 @@ final class PreferencesConverter implements VoxelTypeConverter<Preferences, Json
   JsonValue toSql(Preferences value) => JsonValue.from({'darkMode': value.darkMode});
 }
 
+final class CountValue {
+  const CountValue(this.value);
+
+  final int value;
+}
+
+final class CountValueConverter implements VoxelTypeConverter<CountValue, int> {
+  const CountValueConverter();
+
+  @override
+  CountValue fromSql(int value) => CountValue(value);
+
+  @override
+  int toSql(CountValue value) => value.value;
+}
+
 @VoxelTable(schema: 'codec')
 final class ScalarValues extends VoxelTableDefinition<ScalarValues> {
   static const db = _$ScalarValuesDB();
@@ -95,4 +112,28 @@ final class VectorValues extends VoxelTableDefinition<VectorValues> {
 
   late final embedding = vector(dimensions: 3)();
   late final optionalEmbedding = vector(dimensions: 3).nullable()();
+}
+
+@VoxelTable(schema: 'codec')
+final class ArrayValues extends VoxelTableDefinition<ArrayValues> {
+  static const db = _$ArrayValuesDB();
+
+  late final texts = text().array()();
+  late final nullableElements = text().nullable().array()();
+  late final nullableArray = text().array().nullable()();
+  late final nullableElementsAndArray = text().nullable().array().nullable()();
+  late final integers = integer().array()();
+  late final reals = real().array()();
+  late final booleans = boolean().array()();
+  late final timestamps = dateTime().array()();
+  late final jsonValues = json().array()();
+  late final nullableJsonValues = json().nullable().array()();
+  late final VoxelColumn<List<schema.PostStatus>> statuses = enumText<schema.PostStatus>()
+      .array()
+      .defaultValue(() => [schema.PostStatus.draft])();
+  late final vectors = vector(dimensions: 3).array()();
+  late final codes = text().map(const UserCodeConverter()).array()();
+  late final nullableCodes = text().map(const UserCodeConverter()).nullable().array()();
+  late final counts = integer().map(const CountValueConverter()).array()();
+  late final preferencesList = json().map(const PreferencesConverter()).array()();
 }

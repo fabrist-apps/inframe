@@ -424,11 +424,27 @@ abstract class VoxelCodec<T> {
   const VoxelCodec();
 
   String get cast;
+  int get codecVersion => 1;
   bool get acceptsNull => false;
   bool get encodesJsonValue => false;
+  bool get isArray => false;
   String select(String columnSql) => columnSql;
   Object? encode(T value);
   T decode(Object? value, {required bool isSqlNull});
+
+  Object? encodeArrayElement(T value) {
+    final stored = encode(value);
+    return stored is BigInt ? stored.toInt() : stored;
+  }
+
+  T decodeArrayElement(Object? value) {
+    final driverValue = switch (cast) {
+      'integer' when value is num && value == value.truncate() => BigInt.from(value),
+      'real' when value is num => value.toDouble(),
+      _ => value,
+    };
+    return decode(driverValue, isSqlNull: false);
+  }
 
   VoxelCodec<T> configureEnum<E extends Enum>(VoxelEnumCodec<E> enumCodec) => this;
 }
@@ -464,14 +480,26 @@ final class VoxelNullableCodec<T> extends VoxelCodec<T?> {
   bool get encodesJsonValue => inner.encodesJsonValue;
 
   @override
+  int get codecVersion => inner.codecVersion;
+
+  @override
+  bool get isArray => inner.isArray;
+
+  @override
   String select(String columnSql) => inner.select(columnSql);
 
   @override
   Object? encode(T? value) => value == null ? null : inner.encode(value);
 
   @override
+  Object? encodeArrayElement(T? value) => value == null ? null : inner.encodeArrayElement(value);
+
+  @override
   T? decode(Object? value, {required bool isSqlNull}) =>
       isSqlNull ? null : inner.decode(value, isSqlNull: false);
+
+  @override
+  T? decodeArrayElement(Object? value) => inner.decodeArrayElement(value);
 
   @override
   VoxelCodec<T?> configureEnum<E extends Enum>(VoxelEnumCodec<E> enumCodec) =>
@@ -563,6 +591,15 @@ final class VoxelBooleanCodec extends VoxelCodec<bool> {
   Object encode(bool value) => value ? BigInt.one : BigInt.zero;
 
   @override
+  Object encodeArrayElement(bool value) => value;
+
+  @override
+  bool decodeArrayElement(Object? value) {
+    if (value is! bool) throw const FormatException('expected a JSON boolean');
+    return value;
+  }
+
+  @override
   bool decode(Object? value, {required bool isSqlNull}) {
     if (isSqlNull || value is! BigInt || (value != BigInt.zero && value != BigInt.one)) {
       throw const FormatException('expected a Turso INTEGER boolean (0 or 1)');
@@ -636,6 +673,12 @@ final class VoxelJsonCodec extends VoxelCodec<JsonValue> {
 
   @override
   Object encode(JsonValue value) => jsonEncode(value.toDart());
+
+  @override
+  Object? encodeArrayElement(JsonValue value) => value.toDart();
+
+  @override
+  JsonValue decodeArrayElement(Object? value) => JsonValue.from(value);
 
   @override
   JsonValue decode(Object? value, {required bool isSqlNull}) {
@@ -723,6 +766,17 @@ final class VoxelVectorCodec extends VoxelCodec<Float32List> {
   Object encode(Float32List value) {
     final checked = _validate(value);
     return '[${checked.join(',')}]';
+  }
+
+  @override
+  Object encodeArrayElement(Float32List value) => _validate(value).toList(growable: false);
+
+  @override
+  Float32List decodeArrayElement(Object? value) {
+    if (value is! List<Object?> || value.any((component) => component is! num)) {
+      throw const FormatException('expected a JSON float32 vector');
+    }
+    return _validate([for (final component in value) (component! as num).toDouble()]);
   }
 
   @override
@@ -824,14 +878,26 @@ final class VoxelMappedCodec<Domain, Storage> extends VoxelCodec<Domain> {
   bool get encodesJsonValue => storage.encodesJsonValue;
 
   @override
+  int get codecVersion => storage.codecVersion;
+
+  @override
+  bool get isArray => storage.isArray;
+
+  @override
   String select(String columnSql) => storage.select(columnSql);
 
   @override
   Object? encode(Domain value) => storage.encode(converter.toSql(value));
 
   @override
+  Object? encodeArrayElement(Domain value) => storage.encodeArrayElement(converter.toSql(value));
+
+  @override
   Domain decode(Object? value, {required bool isSqlNull}) =>
       converter.fromSql(storage.decode(value, isSqlNull: isSqlNull));
+
+  @override
+  Domain decodeArrayElement(Object? value) => converter.fromSql(storage.decodeArrayElement(value));
 
   @override
   VoxelCodec<Domain> configureEnum<E extends Enum>(VoxelEnumCodec<E> enumCodec) =>
@@ -1678,8 +1744,11 @@ final class VoxelNullableArrayColumnBuilder<Element> {
 }
 
 final class VoxelArrayCodec<Element> extends VoxelCodec<List<Element>> {
-  VoxelArrayCodec(this.elementCodec) {
-    if (elementCodec is VoxelArrayCodec<dynamic>) {
+  VoxelArrayCodec(this.elementCodec, {this.codecVersion = 1}) {
+    if (codecVersion != 1) {
+      throw UnsupportedError('Voxel array codec version $codecVersion is not supported');
+    }
+    if (elementCodec.isArray) {
       throw const FormatException('multidimensional arrays are not supported');
     }
   }
@@ -1687,10 +1756,17 @@ final class VoxelArrayCodec<Element> extends VoxelCodec<List<Element>> {
   final VoxelCodec<Element> elementCodec;
 
   @override
+  final int codecVersion;
+
+  @override
+  bool get isArray => true;
+
+  @override
   String get cast => 'text';
 
   @override
   Object encode(List<Element> value) {
+    if (codecVersion != 1) throw UnsupportedError('unsupported Voxel array codec version');
     final encoded = <Object?>[];
     for (final element in value) {
       if (element == null) {
@@ -1700,18 +1776,19 @@ final class VoxelArrayCodec<Element> extends VoxelCodec<List<Element>> {
         encoded.add(null);
         continue;
       }
-      final stored = elementCodec.encode(element);
-      encoded.add(elementCodec.encodesJsonValue ? [jsonDecode(stored! as String)] : stored);
+      final stored = elementCodec.encodeArrayElement(element);
+      encoded.add(elementCodec.encodesJsonValue ? [stored] : stored);
     }
     return jsonEncode(encoded);
   }
 
   @override
   VoxelCodec<List<Element>> configureEnum<E extends Enum>(VoxelEnumCodec<E> enumCodec) =>
-      VoxelArrayCodec(elementCodec.configureEnum(enumCodec));
+      VoxelArrayCodec(elementCodec.configureEnum(enumCodec), codecVersion: codecVersion);
 
   @override
   List<Element> decode(Object? value, {required bool isSqlNull}) {
+    if (codecVersion != 1) throw UnsupportedError('unsupported Voxel array codec version');
     if (isSqlNull || value is! String) {
       throw const FormatException('expected a one-dimensional JSON array in TEXT');
     }
@@ -1733,14 +1810,9 @@ final class VoxelArrayCodec<Element> extends VoxelCodec<List<Element>> {
       if (stored is! List<Object?> || stored.length != 1) {
         throw const FormatException('expected a version 1 JSON element envelope');
       }
-      return elementCodec.decode(jsonEncode(stored.single), isSqlNull: false);
+      return elementCodec.decodeArrayElement(stored.single);
     }
-    final driverValue = switch (elementCodec.cast) {
-      'integer' when stored is num && stored == stored.truncate() => BigInt.from(stored),
-      'real' when stored is num => stored.toDouble(),
-      _ => stored,
-    };
-    return elementCodec.decode(driverValue, isSqlNull: false);
+    return elementCodec.decodeArrayElement(stored);
   }
 }
 

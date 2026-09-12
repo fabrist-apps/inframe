@@ -581,3 +581,414 @@ final class _$VectorValuesDB
     );
   }
 }
+
+/// Generated row returned by reads from 'codec.arrayValues'.
+final class ArrayValuesRow {
+  /// Creates a row from decoded column and relation values.
+  const ArrayValuesRow({
+    required this.texts,
+    required this.nullableElements,
+    required this.nullableArray,
+    required this.nullableElementsAndArray,
+    required this.integers,
+    required this.reals,
+    required this.booleans,
+    required this.timestamps,
+    required this.jsonValues,
+    required this.nullableJsonValues,
+    required this.statuses,
+    required this.vectors,
+    required this.codes,
+    required this.nullableCodes,
+    required this.counts,
+    required this.preferencesList,
+  });
+
+  /// Value read from `texts`.
+  final List<String> texts;
+
+  /// Value read from `nullableElements`.
+  final List<String?> nullableElements;
+
+  /// Value read from `nullableArray`.
+  final List<String>? nullableArray;
+
+  /// Value read from `nullableElementsAndArray`.
+  final List<String?>? nullableElementsAndArray;
+
+  /// Value read from `integers`.
+  final List<int> integers;
+
+  /// Value read from `reals`.
+  final List<double> reals;
+
+  /// Value read from `booleans`.
+  final List<bool> booleans;
+
+  /// Value read from `timestamps`.
+  final List<DateTime> timestamps;
+
+  /// Value read from `jsonValues`.
+  final List<JsonValue> jsonValues;
+
+  /// Value read from `nullableJsonValues`.
+  final List<JsonValue?> nullableJsonValues;
+
+  /// Value read from `statuses`.
+  final List<schema.PostStatus> statuses;
+
+  /// Value read from `vectors`.
+  final List<Float32List> vectors;
+
+  /// Value read from `codes`.
+  final List<UserCode> codes;
+
+  /// Value read from `nullableCodes`.
+  final List<UserCode?> nullableCodes;
+
+  /// Value read from `counts`.
+  final List<CountValue> counts;
+
+  /// Value read from `preferencesList`.
+  final List<Preferences> preferencesList;
+}
+
+/// Generated values accepted by mutations of 'codec.arrayValues'.
+final class ArrayValuesCompanion implements VoxelCompanion<ArrayValues> {
+  const ArrayValuesCompanion._({
+    required this.texts,
+    required this.nullableElements,
+    required this.nullableArray,
+    required this.nullableElementsAndArray,
+    required this.integers,
+    required this.reals,
+    required this.booleans,
+    required this.timestamps,
+    required this.jsonValues,
+    required this.nullableJsonValues,
+    required this.statuses,
+    required this.vectors,
+    required this.codes,
+    required this.nullableCodes,
+    required this.counts,
+    required this.preferencesList,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory ArrayValuesCompanion.insert({
+    required VoxelValue<ArrayValues, List<String>, List<String>> texts,
+    required VoxelValue<ArrayValues, List<String?>, List<String?>>
+    nullableElements,
+    required VoxelValue<ArrayValues, List<int>, List<int>> integers,
+    required VoxelValue<ArrayValues, List<double>, List<double>> reals,
+    required VoxelValue<ArrayValues, List<bool>, List<bool>> booleans,
+    required VoxelValue<ArrayValues, List<DateTime>, List<DateTime>> timestamps,
+    required VoxelValue<ArrayValues, List<JsonValue>, List<JsonValue>>
+    jsonValues,
+    required VoxelValue<ArrayValues, List<JsonValue?>, List<JsonValue?>>
+    nullableJsonValues,
+    required VoxelValue<ArrayValues, List<Float32List>, List<Float32List>>
+    vectors,
+    required VoxelValue<ArrayValues, List<UserCode>, List<String>> codes,
+    required VoxelValue<ArrayValues, List<UserCode?>, List<String?>>
+    nullableCodes,
+    required VoxelValue<ArrayValues, List<CountValue>, List<int>> counts,
+    required VoxelValue<ArrayValues, List<Preferences>, List<JsonValue>>
+    preferencesList,
+    VoxelValue<ArrayValues, List<String>?, List<String>?> nullableArray =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<String?>?, List<String?>?>
+        nullableElementsAndArray =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<schema.PostStatus>, List<schema.PostStatus>>
+        statuses =
+        const VoxelValue.absent(),
+  }) => ArrayValuesCompanion._(
+    texts: texts,
+    nullableElements: nullableElements,
+    nullableArray: nullableArray,
+    nullableElementsAndArray: nullableElementsAndArray,
+    integers: integers,
+    reals: reals,
+    booleans: booleans,
+    timestamps: timestamps,
+    jsonValues: jsonValues,
+    nullableJsonValues: nullableJsonValues,
+    statuses: statuses,
+    vectors: vectors,
+    codes: codes,
+    nullableCodes: nullableCodes,
+    counts: counts,
+    preferencesList: preferencesList,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ArrayValuesCompanion.update({
+    VoxelValue<ArrayValues, List<String>, List<String>> texts =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<String?>, List<String?>> nullableElements =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<String>?, List<String>?> nullableArray =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<String?>?, List<String?>?>
+        nullableElementsAndArray =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<int>, List<int>> integers =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<double>, List<double>> reals =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<bool>, List<bool>> booleans =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<DateTime>, List<DateTime>> timestamps =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<JsonValue>, List<JsonValue>> jsonValues =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<JsonValue?>, List<JsonValue?>>
+        nullableJsonValues =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<schema.PostStatus>, List<schema.PostStatus>>
+        statuses =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<Float32List>, List<Float32List>> vectors =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<UserCode>, List<String>> codes =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<UserCode?>, List<String?>> nullableCodes =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<CountValue>, List<int>> counts =
+        const VoxelValue.absent(),
+    VoxelValue<ArrayValues, List<Preferences>, List<JsonValue>>
+        preferencesList =
+        const VoxelValue.absent(),
+  }) => ArrayValuesCompanion._(
+    texts: texts,
+    nullableElements: nullableElements,
+    nullableArray: nullableArray,
+    nullableElementsAndArray: nullableElementsAndArray,
+    integers: integers,
+    reals: reals,
+    booleans: booleans,
+    timestamps: timestamps,
+    jsonValues: jsonValues,
+    nullableJsonValues: nullableJsonValues,
+    statuses: statuses,
+    vectors: vectors,
+    codes: codes,
+    nullableCodes: nullableCodes,
+    counts: counts,
+    preferencesList: preferencesList,
+  );
+
+  /// Mutation value for `texts`.
+  final VoxelValue<ArrayValues, List<String>, List<String>> texts;
+
+  /// Mutation value for `nullableElements`.
+  final VoxelValue<ArrayValues, List<String?>, List<String?>> nullableElements;
+
+  /// Mutation value for `nullableArray`.
+  final VoxelValue<ArrayValues, List<String>?, List<String>?> nullableArray;
+
+  /// Mutation value for `nullableElementsAndArray`.
+  final VoxelValue<ArrayValues, List<String?>?, List<String?>?>
+  nullableElementsAndArray;
+
+  /// Mutation value for `integers`.
+  final VoxelValue<ArrayValues, List<int>, List<int>> integers;
+
+  /// Mutation value for `reals`.
+  final VoxelValue<ArrayValues, List<double>, List<double>> reals;
+
+  /// Mutation value for `booleans`.
+  final VoxelValue<ArrayValues, List<bool>, List<bool>> booleans;
+
+  /// Mutation value for `timestamps`.
+  final VoxelValue<ArrayValues, List<DateTime>, List<DateTime>> timestamps;
+
+  /// Mutation value for `jsonValues`.
+  final VoxelValue<ArrayValues, List<JsonValue>, List<JsonValue>> jsonValues;
+
+  /// Mutation value for `nullableJsonValues`.
+  final VoxelValue<ArrayValues, List<JsonValue?>, List<JsonValue?>>
+  nullableJsonValues;
+
+  /// Mutation value for `statuses`.
+  final VoxelValue<
+    ArrayValues,
+    List<schema.PostStatus>,
+    List<schema.PostStatus>
+  >
+  statuses;
+
+  /// Mutation value for `vectors`.
+  final VoxelValue<ArrayValues, List<Float32List>, List<Float32List>> vectors;
+
+  /// Mutation value for `codes`.
+  final VoxelValue<ArrayValues, List<UserCode>, List<String>> codes;
+
+  /// Mutation value for `nullableCodes`.
+  final VoxelValue<ArrayValues, List<UserCode?>, List<String?>> nullableCodes;
+
+  /// Mutation value for `counts`.
+  final VoxelValue<ArrayValues, List<CountValue>, List<int>> counts;
+
+  /// Mutation value for `preferencesList`.
+  final VoxelValue<ArrayValues, List<Preferences>, List<JsonValue>>
+  preferencesList;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<VoxelAssignment<ArrayValues>> operator [](VoxelCompanionKey key) => [
+    VoxelAssignment('texts', texts),
+    VoxelAssignment('nullableElements', nullableElements),
+    VoxelAssignment('nullableArray', nullableArray),
+    VoxelAssignment('nullableElementsAndArray', nullableElementsAndArray),
+    VoxelAssignment('integers', integers),
+    VoxelAssignment('reals', reals),
+    VoxelAssignment('booleans', booleans),
+    VoxelAssignment('timestamps', timestamps),
+    VoxelAssignment('jsonValues', jsonValues),
+    VoxelAssignment('nullableJsonValues', nullableJsonValues),
+    VoxelAssignment('statuses', statuses),
+    VoxelAssignment('vectors', vectors),
+    VoxelAssignment('codes', codes),
+    VoxelAssignment('nullableCodes', nullableCodes),
+    VoxelAssignment('counts', counts),
+    VoxelAssignment('preferencesList', preferencesList),
+  ];
+}
+
+final class _$ArrayValuesDB
+    extends VoxelTableAccessor<ArrayValues, ArrayValuesRow> {
+  const _$ArrayValuesDB();
+
+  @override
+  VoxelTableSchema<ArrayValues, ArrayValuesRow> buildSchema() {
+    ArrayValues createDefinition() {
+      final definition = ArrayValues();
+      definition.statuses.configureEnum(schema.PostStatusVoxelEnum.codec);
+      return definition;
+    }
+
+    final definition = createDefinition();
+    return VoxelTableSchema<ArrayValues, ArrayValuesRow>(
+      schemaName: 'codec',
+      tableName: 'arrayValues',
+      definition: definition,
+      definitionType: ArrayValues,
+      rowType: ArrayValuesRow,
+      columns: [
+        definition.texts as VoxelColumn<Object?>,
+        definition.nullableElements as VoxelColumn<Object?>,
+        definition.nullableArray as VoxelColumn<Object?>,
+        definition.nullableElementsAndArray as VoxelColumn<Object?>,
+        definition.integers as VoxelColumn<Object?>,
+        definition.reals as VoxelColumn<Object?>,
+        definition.booleans as VoxelColumn<Object?>,
+        definition.timestamps as VoxelColumn<Object?>,
+        definition.jsonValues as VoxelColumn<Object?>,
+        definition.nullableJsonValues as VoxelColumn<Object?>,
+        definition.statuses as VoxelColumn<Object?>,
+        definition.vectors as VoxelColumn<Object?>,
+        definition.codes as VoxelColumn<Object?>,
+        definition.nullableCodes as VoxelColumn<Object?>,
+        definition.counts as VoxelColumn<Object?>,
+        definition.preferencesList as VoxelColumn<Object?>,
+      ],
+      columnNames: [
+        'texts',
+        'nullableElements',
+        'nullableArray',
+        'nullableElementsAndArray',
+        'integers',
+        'reals',
+        'booleans',
+        'timestamps',
+        'jsonValues',
+        'nullableJsonValues',
+        'statuses',
+        'vectors',
+        'codes',
+        'nullableCodes',
+        'counts',
+        'preferencesList',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.texts as VoxelColumn<Object?>,
+        definition.nullableElements as VoxelColumn<Object?>,
+        definition.nullableArray as VoxelColumn<Object?>,
+        definition.nullableElementsAndArray as VoxelColumn<Object?>,
+        definition.integers as VoxelColumn<Object?>,
+        definition.reals as VoxelColumn<Object?>,
+        definition.booleans as VoxelColumn<Object?>,
+        definition.timestamps as VoxelColumn<Object?>,
+        definition.jsonValues as VoxelColumn<Object?>,
+        definition.nullableJsonValues as VoxelColumn<Object?>,
+        definition.statuses as VoxelColumn<Object?>,
+        definition.vectors as VoxelColumn<Object?>,
+        definition.codes as VoxelColumn<Object?>,
+        definition.nullableCodes as VoxelColumn<Object?>,
+        definition.counts as VoxelColumn<Object?>,
+        definition.preferencesList as VoxelColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => ArrayValuesRow(
+        texts: definition.texts.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        nullableElements: definition.nullableElements.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+        nullableArray: definition.nullableArray.decodeValue(
+          values[2],
+          isSqlNull: sqlNulls[2],
+        ),
+        nullableElementsAndArray: definition.nullableElementsAndArray
+            .decodeValue(values[3], isSqlNull: sqlNulls[3]),
+        integers: definition.integers.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+        reals: definition.reals.decodeValue(values[5], isSqlNull: sqlNulls[5]),
+        booleans: definition.booleans.decodeValue(
+          values[6],
+          isSqlNull: sqlNulls[6],
+        ),
+        timestamps: definition.timestamps.decodeValue(
+          values[7],
+          isSqlNull: sqlNulls[7],
+        ),
+        jsonValues: definition.jsonValues.decodeValue(
+          values[8],
+          isSqlNull: sqlNulls[8],
+        ),
+        nullableJsonValues: definition.nullableJsonValues.decodeValue(
+          values[9],
+          isSqlNull: sqlNulls[9],
+        ),
+        statuses: definition.statuses.decodeValue(
+          values[10],
+          isSqlNull: sqlNulls[10],
+        ),
+        vectors: definition.vectors.decodeValue(
+          values[11],
+          isSqlNull: sqlNulls[11],
+        ),
+        codes: definition.codes.decodeValue(
+          values[12],
+          isSqlNull: sqlNulls[12],
+        ),
+        nullableCodes: definition.nullableCodes.decodeValue(
+          values[13],
+          isSqlNull: sqlNulls[13],
+        ),
+        counts: definition.counts.decodeValue(
+          values[14],
+          isSqlNull: sqlNulls[14],
+        ),
+        preferencesList: definition.preferencesList.decodeValue(
+          values[15],
+          isSqlNull: sqlNulls[15],
+        ),
+      ),
+    );
+  }
+}

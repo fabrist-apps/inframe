@@ -14,9 +14,77 @@ Future<void> main() async {
     await _verifyScalarStorage();
     await _verifyEnumStorage();
     await _verifyVectorStorage();
+    await _verifyArrayStorage();
     web.document.body!.textContent = 'PASS\nVoxel browser codec fixture';
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
+  }
+}
+
+Future<void> _verifyArrayStorage() async {
+  final schema = ArrayValues.db.buildSchema();
+  final table = schema.definition;
+  final database = await TursoDatabase.open(
+    TursoLocation.memory(),
+    web: TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js')),
+  );
+  try {
+    await database.execute(
+      'CREATE TABLE arrayValues (${schema.columns.map((column) => '"${column.physicalName}" TEXT').join(', ')})',
+    );
+    final parameters = <Object?>[
+      table.texts.codec.encode([]),
+      table.nullableElements.codec.encode([null, 'value']),
+      table.nullableArray.codec.encode(['present']),
+      table.nullableElementsAndArray.codec.encode(null),
+      table.integers.codec.encode([-2147483648, 2147483647]),
+      table.reals.codec.encode([1.5]),
+      table.booleans.codec.encode([true, false]),
+      table.timestamps.codec.encode([DateTime.fromMicrosecondsSinceEpoch(-1)]),
+      table.jsonValues.codec.encode([
+        const JsonNull(),
+        JsonValue.from(const [1, null]),
+      ]),
+      table.nullableJsonValues.codec.encode([null, const JsonNull()]),
+      table.statuses.codec.encode([PostStatus.draft, PostStatus.published]),
+      table.vectors.codec.encode([
+        Float32List.fromList([0.5, -2, 3.25]),
+      ]),
+      table.codes.codec.encode([const UserCode('ada')]),
+      table.nullableCodes.codec.encode([null, const UserCode('grace')]),
+      table.counts.codec.encode([const CountValue(7)]),
+      table.preferencesList.codec.encode([const Preferences(darkMode: true)]),
+    ];
+    await database.execute(
+      'INSERT INTO arrayValues VALUES (${List.filled(parameters.length, '?').join(', ')})',
+      parameters: parameters,
+    );
+    final stored = (await database.query('SELECT * FROM arrayValues')).rows.single;
+    final values = [for (final column in schema.columns) stored.value(column.physicalName)];
+    final row = schema.decode(values, [for (final value in values) value == null]);
+    _expect(
+      row.texts.isEmpty &&
+          row.nullableElements[0] == null &&
+          row.nullableArray!.single == 'present' &&
+          row.nullableElementsAndArray == null &&
+          row.integers.last == 2147483647 &&
+          row.booleans.first &&
+          row.timestamps.single.microsecondsSinceEpoch == -1000 &&
+          row.jsonValues.first == const JsonNull() &&
+          row.nullableJsonValues[1] == const JsonNull() &&
+          row.statuses.last == PostStatus.published &&
+          _listEquals(row.vectors.single, Float32List.fromList([0.5, -2, 3.25])) &&
+          row.codes.single.value == 'ada' &&
+          row.nullableCodes.first == null &&
+          row.counts.single.value == 7 &&
+          row.preferencesList.single.darkMode,
+      'array row mismatch',
+    );
+    for (final column in schema.columns) {
+      _expectFailure(() => column.decodeValue('{}', isSqlNull: false));
+    }
+  } finally {
+    await database.close();
   }
 }
 

@@ -4,11 +4,15 @@ on:
   pull_request:
     paths:
       - 'packages/database/turso/**'
+      - 'packages/database/voxel/**'
+      - '.github/workflows/turso.yaml'
   push:
     branches:
       - main
     paths:
       - 'packages/database/turso/**'
+      - 'packages/database/voxel/**'
+      - '.github/workflows/turso.yaml'
 
 permissions:
   contents: read
@@ -32,6 +36,13 @@ jobs:
       - name: Run Turso engine tests
         working-directory: packages/database/turso
         run: dart test test --chain-stack-traces
+      - name: Generate and test Voxel on native Turso
+        working-directory: packages/database/voxel
+        run: |
+          dart run build_runner build
+          dart format .
+          git diff --exit-code
+          dart test --chain-stack-traces
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -115,6 +126,21 @@ jobs:
           curl --fail --head http://localhost:8080
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py chrome
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py firefox
+      - name: Run Voxel in Chrome and Firefox
+        working-directory: packages/database/voxel
+        run: |
+          dart run ../turso/tool/install_web.dart example/web/turso
+          dart compile js example/web/main.dart -O1 -o example/web/main.dart.js
+          dart run tool/serve_web_example.dart 8081 > "$RUNNER_TEMP/voxel-web-server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent http://localhost:8081 > /dev/null && break
+            sleep 1
+          done
+          curl --fail --head http://localhost:8081
+          "$RUNNER_TEMP/turso-selenium/bin/python" ../turso/tool/run_web_verification.py chrome --url http://localhost:8081
+          "$RUNNER_TEMP/turso-selenium/bin/python" ../turso/tool/run_web_verification.py firefox --url http://localhost:8081
 
   turso-apple:
     runs-on: blacksmith-6vcpu-macos-latest
@@ -136,6 +162,13 @@ jobs:
       - name: Run the complete Turso native contract
         working-directory: packages/database/turso
         run: dart test test --chain-stack-traces
+      - name: Generate and test Voxel on native Turso
+        working-directory: packages/database/voxel
+        run: |
+          dart run build_runner build
+          dart format .
+          git diff --exit-code
+          dart test --chain-stack-traces
 
       - name: Verify packaged iOS SDK artifacts
         run: |
@@ -207,3 +240,17 @@ jobs:
           fi
           curl --fail --head http://localhost:8080
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py safari
+      - name: Run Voxel in Safari
+        working-directory: packages/database/voxel
+        run: |
+          dart run ../turso/tool/install_web.dart example/web/turso
+          dart compile js example/web/main.dart -O1 -o example/web/main.dart.js
+          dart run tool/serve_web_example.dart 8081 > "$RUNNER_TEMP/voxel-web-server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent http://localhost:8081 > /dev/null && break
+            sleep 1
+          done
+          curl --fail --head http://localhost:8081
+          "$RUNNER_TEMP/turso-selenium/bin/python" ../turso/tool/run_web_verification.py safari --url http://localhost:8081
