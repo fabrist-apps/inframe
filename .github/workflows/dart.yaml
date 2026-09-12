@@ -53,6 +53,9 @@ jobs:
       - name: Run controlled HTTP tests
         run: dart test packages/database/clickhouse/test --exclude-tags integration --chain-stack-traces
 
+      - name: Run Runnel unit tests
+        run: dart test packages/database/runnel/test --exclude-tags integration --chain-stack-traces
+
       - name: Run JSON Patch tests on the Dart VM
         run: dart test packages/json_patch/test --chain-stack-traces
 
@@ -82,3 +85,6 @@ jobs:
             --user default:test-password \
             http://127.0.0.1:18123/ping
           dart test packages/database/clickhouse/test/integration --chain-stack-traces
+
+      - name: Run Runnel integration tests
+        run: packages/database/runnel/tool/run_integration.sh
