@@ -136,6 +136,10 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
       orderBy: orderBy,
       limit: limit,
 ''';
+          final throughDeclaration = types.through == null
+              ? ''
+              : '    final through = ${types.through}.db.buildSchema();\n';
+          final throughArgument = types.through == null ? '' : '      throughSchema: through,\n';
           final nestedParameter = types.hasRelations
               ? '    RivetIncludes<${types.include}>? include,\n'
               : '';
@@ -150,12 +154,14 @@ $collectionParameters
 $nestedParameter
   }) {
     final target = ${types.target}.db.buildSchema();
+$throughDeclaration
     final relationPath = path.isEmpty ? ${literal(fieldName)} : '\$path.$fieldName';
     return RivetInclude<${types.target}, ${types.row}>(
       name: ${literal(fieldName)},
       path: relationPath,
       relation: _schema.relations[${literal(fieldName)}]!,
       targetSchema: target,
+$throughArgument
       where: where,
 $collectionArguments
 $nestedArgument
@@ -527,22 +533,36 @@ $findMethod
                 inPackage: 'rivet',
               ).isAssignableFromType(field.type),
         );
+    final through =
+        const TypeChecker.typeNamed(
+          RivetManyThroughRelation,
+          inPackage: 'rivet',
+        ).isAssignableFromType(type)
+        ? _typeReference(type.typeArguments[1], field.library)
+        : null;
     return _RelationTypes(
       targetReference,
       targetRow,
       '$prefix${targetName}Include',
       targetHasRelations,
+      through,
     );
+  }
+
+  String _typeReference(DartType type, LibraryElement library) {
+    final element = type.element;
+    return element == null ? type.getDisplayString() : referenceTo(element, library);
   }
 }
 
 final class _RelationTypes {
-  const _RelationTypes(this.target, this.row, this.include, this.hasRelations);
+  const _RelationTypes(this.target, this.row, this.include, this.hasRelations, this.through);
 
   final String target;
   final String row;
   final String include;
   final bool hasRelations;
+  final String? through;
 }
 
 final class _MutationField {

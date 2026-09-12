@@ -33,3 +33,25 @@ final class PackageUsers extends RivetTableDefinition<PackageUsers> {
   late final name = text()();
   late final access = enumText<AccessLevel>()();
 }
+
+@RivetTable(schema: 'fixture', name: 'packageLabels')
+final class PackageLabels extends RivetTableDefinition<PackageLabels> {
+  static const db = _$PackageLabelsDB();
+
+  late final code = text()();
+  late final name = text()();
+  late final notes = many<PackageLabelNotes>()();
+}
+
+@RivetTable(schema: 'fixture', name: 'packageLabelNotes')
+final class PackageLabelNotes extends RivetTableDefinition<PackageLabelNotes> {
+  static const db = _$PackageLabelNotesDB();
+
+  late final id = integer()();
+  late final labelCode = text()();
+  late final body = text()();
+  late final label = one<PackageLabels>(
+    fields: [labelCode],
+    references: (label) => [label.code],
+  )();
+}

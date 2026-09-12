@@ -22,12 +22,14 @@ final class PackageUsersInclude {
     RivetWhere<schema.PackageUsers>? where,
   }) {
     final target = schema.PackageUsers.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'package' : '$path.package';
     return RivetInclude<schema.PackageUsers, schema.PackageUsersRow>(
       name: 'package',
       path: relationPath,
       relation: _schema.relations['package']!,
       targetSchema: target,
+
       where: where,
     );
   }
@@ -41,12 +43,14 @@ final class PackageUsersInclude {
     RivetIncludes<AppProjectsInclude>? include,
   }) {
     final target = AppProjects.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'projects' : '$path.projects';
     return RivetInclude<AppProjects, AppProjectsRow>(
       name: 'projects',
       path: relationPath,
       relation: _schema.relations['projects']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -372,12 +376,14 @@ final class AppProjectsInclude {
     RivetIncludes<PackageUsersInclude>? include,
   }) {
     final target = PackageUsers.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'owner' : '$path.owner';
     return RivetInclude<PackageUsers, PackageUsersRow>(
       name: 'owner',
       path: relationPath,
       relation: _schema.relations['owner']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -391,13 +397,46 @@ final class AppProjectsInclude {
     RivetWhere<schema.PackageUsers>? where,
   }) {
     final target = schema.PackageUsers.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'packageOwner' : '$path.packageOwner';
     return RivetInclude<schema.PackageUsers, schema.PackageUsersRow>(
       name: 'packageOwner',
       path: relationPath,
       relation: _schema.relations['packageOwner']!,
       targetSchema: target,
+
       where: where,
+    );
+  }
+
+  /// Includes the [labels] relation.
+  RivetInclude<schema.PackageLabels, schema.PackageLabelsRow> labels({
+    RivetWhere<schema.PackageLabels>? where,
+    RivetOrderBy<schema.PackageLabels>? orderBy,
+    int? limit,
+
+    RivetIncludes<schema.PackageLabelsInclude>? include,
+  }) {
+    final target = schema.PackageLabels.db.buildSchema();
+    final through = AppProjectLabels.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'labels' : '$path.labels';
+    return RivetInclude<schema.PackageLabels, schema.PackageLabelsRow>(
+      name: 'labels',
+      path: relationPath,
+      relation: _schema.relations['labels']!,
+      targetSchema: target,
+      throughSchema: through,
+
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(
+            schema.PackageLabelsInclude(target, path: relationPath),
+          ) ??
+          const [],
     );
   }
 }
@@ -411,6 +450,7 @@ final class AppProjectsRow {
     required this.packageOwnerName,
     this.owner = const Relation.unloaded(),
     this.packageOwner = const Relation.unloaded(),
+    this.labels = const Relation.unloaded(),
   });
 
   /// Value read from `id`.
@@ -427,6 +467,9 @@ final class AppProjectsRow {
 
   /// Loaded or unloaded `packageOwner` relation.
   final Relation<schema.PackageUsersRow?> packageOwner;
+
+  /// Loaded or unloaded `labels` relation.
+  final Relation<List<schema.PackageLabelsRow>> labels;
 }
 
 /// Generated values accepted by mutations of 'fixture.appProjects'.
@@ -521,6 +564,7 @@ final class _$AppProjectsDB
             ),
       owner: relations.read('owner'),
       packageOwner: relations.read('packageOwner'),
+      labels: relations.read('labels'),
     );
 
     return RivetTableSchema<AppProjects, AppProjectsRow>(
@@ -551,6 +595,7 @@ final class _$AppProjectsDB
         'owner': definition.owner as RivetRelationDescriptor<Object?>,
         'packageOwner':
             definition.packageOwner as RivetRelationDescriptor<Object?>,
+        'labels': definition.labels as RivetRelationDescriptor<Object?>,
       },
     );
   }
@@ -598,6 +643,232 @@ final class _$AppProjectsDB
   }) => RivetDelete(buildSchema(), where: where);
 }
 
+/// Typed relation include scope for [AppProjectLabels].
+final class AppProjectLabelsInclude {
+  /// Creates the generated include scope.
+  const AppProjectLabelsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<AppProjectLabels, AppProjectLabelsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [project] relation.
+  RivetInclude<AppProjects, AppProjectsRow> project({
+    RivetWhere<AppProjects>? where,
+
+    RivetIncludes<AppProjectsInclude>? include,
+  }) {
+    final target = AppProjects.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'project' : '$path.project';
+    return RivetInclude<AppProjects, AppProjectsRow>(
+      name: 'project',
+      path: relationPath,
+      relation: _schema.relations['project']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(AppProjectsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [label] relation.
+  RivetInclude<schema.PackageLabels, schema.PackageLabelsRow> label({
+    RivetWhere<schema.PackageLabels>? where,
+
+    RivetIncludes<schema.PackageLabelsInclude>? include,
+  }) {
+    final target = schema.PackageLabels.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'label' : '$path.label';
+    return RivetInclude<schema.PackageLabels, schema.PackageLabelsRow>(
+      name: 'label',
+      path: relationPath,
+      relation: _schema.relations['label']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(
+            schema.PackageLabelsInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fixture.appProjectLabels'.
+final class AppProjectLabelsRow {
+  /// Creates a row from decoded column and relation values.
+  const AppProjectLabelsRow({
+    required this.projectId,
+    required this.labelCode,
+    this.project = const Relation.unloaded(),
+    this.label = const Relation.unloaded(),
+  });
+
+  /// Value read from `projectId`.
+  final int projectId;
+
+  /// Value read from `labelCode`.
+  final String labelCode;
+
+  /// Loaded or unloaded `project` relation.
+  final Relation<AppProjectsRow?> project;
+
+  /// Loaded or unloaded `label` relation.
+  final Relation<schema.PackageLabelsRow?> label;
+}
+
+/// Generated values accepted by mutations of 'fixture.appProjectLabels'.
+final class AppProjectLabelsCompanion
+    implements RivetCompanion<AppProjectLabels> {
+  const AppProjectLabelsCompanion._({
+    required this.projectId,
+    required this.labelCode,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory AppProjectLabelsCompanion.insert({
+    required RivetValue<AppProjectLabels, int, int> projectId,
+    required RivetValue<AppProjectLabels, String, String> labelCode,
+  }) => AppProjectLabelsCompanion._(projectId: projectId, labelCode: labelCode);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory AppProjectLabelsCompanion.update({
+    RivetValue<AppProjectLabels, int, int> projectId =
+        const RivetValue.absent(),
+    RivetValue<AppProjectLabels, String, String> labelCode =
+        const RivetValue.absent(),
+  }) => AppProjectLabelsCompanion._(projectId: projectId, labelCode: labelCode);
+
+  /// Mutation value for `projectId`.
+  final RivetValue<AppProjectLabels, int, int> projectId;
+
+  /// Mutation value for `labelCode`.
+  final RivetValue<AppProjectLabels, String, String> labelCode;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<AppProjectLabels>> operator [](RivetCompanionKey key) =>
+      [
+        RivetAssignment('projectId', projectId),
+        RivetAssignment('labelCode', labelCode),
+      ];
+}
+
+final class _$AppProjectLabelsDB
+    extends RivetTableAccessor<AppProjectLabels, AppProjectLabelsRow> {
+  const _$AppProjectLabelsDB();
+
+  @override
+  RivetTableSchema<AppProjectLabels, AppProjectLabelsRow> buildSchema() {
+    AppProjectLabels createDefinition() {
+      final definition = AppProjectLabels();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    AppProjectLabelsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => AppProjectLabelsRow(
+      projectId: transport
+          ? definition.projectId.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.projectId.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      labelCode: transport
+          ? definition.labelCode.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.labelCode.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      project: relations.read('project'),
+      label: relations.read('label'),
+    );
+
+    return RivetTableSchema<AppProjectLabels, AppProjectLabelsRow>(
+      schemaName: 'fixture',
+      tableName: 'appProjectLabels',
+      definition: definition,
+      columns: [
+        definition.projectId as RivetColumn<Object?>,
+        definition.labelCode as RivetColumn<Object?>,
+      ],
+      columnNames: ['projectId', 'labelCode'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.projectId as RivetColumn<Object?>,
+        definition.labelCode as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'project': definition.project as RivetRelationDescriptor<Object?>,
+        'label': definition.label as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<AppProjectLabels, AppProjectLabelsRow> find({
+    RivetWhere<AppProjectLabels>? where,
+    RivetOrderBy<AppProjectLabels>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<AppProjectLabelsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(AppProjectLabelsInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<AppProjectLabels, AppProjectLabelsRow> insert(
+    AppProjectLabelsCompanion companion, {
+    RivetOnConflict<AppProjectLabels>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<AppProjectLabels, AppProjectLabelsRow> insertMany(
+    Iterable<AppProjectLabelsCompanion> companions, {
+    RivetOnConflict<AppProjectLabels>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<AppProjectLabels, AppProjectLabelsRow> update(
+    AppProjectLabelsCompanion companion, {
+    RivetWhere<AppProjectLabels>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<AppProjectLabels, AppProjectLabelsRow> delete({
+    RivetWhere<AppProjectLabels>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -613,8 +884,13 @@ abstract class _$FixtureAppDatabase {
     tables: [
       schema.PackageUsers.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
+      schema.PackageLabels.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      schema.PackageLabelNotes.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
       PackageUsers.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       AppProjects.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      AppProjectLabels.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }

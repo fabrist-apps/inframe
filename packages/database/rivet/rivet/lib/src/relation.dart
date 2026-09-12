@@ -88,13 +88,32 @@ final class RivetOneRelation<Target> extends RivetRelationDescriptor<Target> {
 final class RivetManyRelation<Target> extends RivetRelationDescriptor<Target> {
   RivetManyRelation(
     Type targetTable, {
-    super.through,
     RivetRelationDescriptor<dynamic> Function(Target table)? relation,
   }) : super(
-         kind: through == null ? RivetRelationKind.many : RivetRelationKind.manyThrough,
+         kind: RivetRelationKind.many,
          targetTable: targetTable,
          inverse: relation,
        );
+}
+
+final class RivetManyThroughRelation<Target, Junction, Source>
+    extends RivetRelationDescriptor<Target> {
+  RivetManyThroughRelation({required this.source, required this.target})
+    : super(
+        kind: RivetRelationKind.manyThrough,
+        targetTable: Target,
+        through: Junction,
+      );
+
+  final RivetOneRelation<Source> Function(Junction junction) source;
+  final RivetOneRelation<Target> Function(Junction junction) target;
+  RivetOneRelation<Source>? sourceRelation;
+  RivetOneRelation<Target>? targetRelation;
+
+  void resolveThrough(Junction definition) {
+    sourceRelation = source(definition);
+    targetRelation = target(definition);
+  }
 }
 
 final class RivetRelationBuilder<Target, RelationType extends RivetRelationDescriptor<Target>> {
@@ -105,12 +124,29 @@ final class RivetRelationBuilder<Target, RelationType extends RivetRelationDescr
   RelationType call() => descriptor;
 }
 
+final class RivetManyRelationBuilder<Source, Target> {
+  const RivetManyRelationBuilder(this.descriptor);
+
+  final RivetManyRelation<Target> descriptor;
+
+  RivetManyRelation<Target> call() => descriptor;
+
+  RivetRelationBuilder<Target, RivetManyThroughRelation<Target, Junction, Source>>
+  through<Junction>({
+    required RivetOneRelation<Source> Function(Junction junction) source,
+    required RivetOneRelation<Target> Function(Junction junction) target,
+  }) => RivetRelationBuilder(
+    RivetManyThroughRelation<Target, Junction, Source>(source: source, target: target),
+  );
+}
+
 final class RivetInclude<Definition, Row> {
   RivetInclude({
     required this.name,
     required this.path,
     required this.relation,
     required this.targetSchema,
+    this.throughSchema,
     RivetWhere<Definition>? where,
     RivetOrderBy<Definition>? orderBy,
     this.limit,
@@ -118,6 +154,12 @@ final class RivetInclude<Definition, Row> {
   }) : predicate = where?.call(targetSchema.definition),
        orders = List.unmodifiable(orderBy?.call(targetSchema.definition) ?? const []),
        includes = List.unmodifiable(includes) {
+    if ((relation.kind == RivetRelationKind.manyThrough) != (throughSchema != null)) {
+      throw ArgumentError('Relation $path requires exactly one matching through schema.');
+    }
+    if (throughSchema != null && throughSchema!.definition.runtimeType != relation.through) {
+      throw ArgumentError('Relation $path received the wrong through schema.');
+    }
     if (limit != null && limit! <= 0) {
       throw ArgumentError.value(limit, 'limit', 'must be positive');
     }
@@ -148,6 +190,7 @@ final class RivetInclude<Definition, Row> {
   final String path;
   final RivetRelationDescriptor<dynamic> relation;
   final RivetTableSchema<Definition, Row> targetSchema;
+  final RivetTableSchema<dynamic, dynamic>? throughSchema;
   final RivetPredicate? predicate;
   final List<RivetOrder> orders;
   final int? limit;

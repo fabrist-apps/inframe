@@ -73,6 +73,77 @@ final class RelationalComments extends RivetTableDefinition<RelationalComments> 
   )();
 }
 
+@RivetTable(schema: 'fbr147')
+final class ThroughBooks extends RivetTableDefinition<ThroughBooks> {
+  static const db = _$ThroughBooksDB();
+
+  late final tenant = integer()();
+  late final id = integer()();
+  late final title = text()();
+  late final tags = many<ThroughTags>().through<ThroughBookTags>(
+    source: (link) => link.book,
+    target: (link) => link.tag,
+  )();
+  late final reviews = many<ThroughReviews>()();
+}
+
+@RivetTable(schema: 'fbr147')
+final class ThroughTags extends RivetTableDefinition<ThroughTags> {
+  static const db = _$ThroughTagsDB();
+
+  late final namespace = text()();
+  late final code = text()();
+  late final name = text()();
+  late final notes = many<ThroughTagNotes>()();
+}
+
+@RivetTable(schema: 'fbr147', rowName: 'ThroughBookTagRecord')
+final class ThroughBookTags extends RivetTableDefinition<ThroughBookTags> {
+  static const db = _$ThroughBookTagsDB();
+
+  late final bookTenant = integer()();
+  late final bookId = integer()();
+  late final tagNamespace = text()();
+  late final tagCode = text()();
+  late final position = integer()();
+  late final book = one<ThroughBooks>(
+    fields: [bookId, bookTenant],
+    references: (book) => [book.id, book.tenant],
+  )();
+  late final tag = one<ThroughTags>(
+    fields: [tagCode, tagNamespace],
+    references: (tag) => [tag.code, tag.namespace],
+  )();
+}
+
+@RivetTable(schema: 'fbr147')
+final class ThroughReviews extends RivetTableDefinition<ThroughReviews> {
+  static const db = _$ThroughReviewsDB();
+
+  late final id = integer()();
+  late final bookTenant = integer()();
+  late final bookId = integer()();
+  late final body = text()();
+  late final book = one<ThroughBooks>(
+    fields: [bookTenant, bookId],
+    references: (book) => [book.tenant, book.id],
+  )();
+}
+
+@RivetTable(schema: 'fbr147')
+final class ThroughTagNotes extends RivetTableDefinition<ThroughTagNotes> {
+  static const db = _$ThroughTagNotesDB();
+
+  late final id = integer()();
+  late final tagNamespace = text()();
+  late final tagCode = text()();
+  late final body = text()();
+  late final tag = one<ThroughTags>(
+    fields: [tagNamespace, tagCode],
+    references: (tag) => [tag.namespace, tag.code],
+  )();
+}
+
 final class UserCode {
   const UserCode(this.value);
 
@@ -628,6 +699,11 @@ final class MutationAssignmentNames extends RivetTableDefinition<MutationAssignm
     RelationalUsers,
     RelationalPosts,
     RelationalComments,
+    ThroughBooks,
+    ThroughTags,
+    ThroughBookTags,
+    ThroughReviews,
+    ThroughTagNotes,
     ScalarValues,
     EnumValues,
     VectorValues,

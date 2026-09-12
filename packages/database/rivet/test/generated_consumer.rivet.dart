@@ -26,12 +26,14 @@ final class UserProfilesInclude {
     RivetIncludes<PostsInclude>? include,
   }) {
     final target = Posts.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'posts' : '$path.posts';
     return RivetInclude<Posts, PostsRow>(
       name: 'posts',
       path: relationPath,
       relation: _schema.relations['posts']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -200,12 +202,14 @@ final class PostsInclude {
     RivetIncludes<UserProfilesInclude>? include,
   }) {
     final target = UserProfiles.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'author' : '$path.author';
     return RivetInclude<UserProfiles, UserProfilesRow>(
       name: 'author',
       path: relationPath,
       relation: _schema.relations['author']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -369,12 +373,14 @@ final class RelationalUsersInclude {
     RivetIncludes<RelationalPostsInclude>? include,
   }) {
     final target = RelationalPosts.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'authoredPosts' : '$path.authoredPosts';
     return RivetInclude<RelationalPosts, RelationalPostsRow>(
       name: 'authoredPosts',
       path: relationPath,
       relation: _schema.relations['authoredPosts']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -394,12 +400,14 @@ final class RelationalUsersInclude {
     RivetIncludes<RelationalPostsInclude>? include,
   }) {
     final target = RelationalPosts.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'reviewedPosts' : '$path.reviewedPosts';
     return RivetInclude<RelationalPosts, RelationalPostsRow>(
       name: 'reviewedPosts',
       path: relationPath,
       relation: _schema.relations['reviewedPosts']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -592,12 +600,14 @@ final class RelationalPostsInclude {
     RivetIncludes<RelationalUsersInclude>? include,
   }) {
     final target = RelationalUsers.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'author' : '$path.author';
     return RivetInclude<RelationalUsers, RelationalUsersRow>(
       name: 'author',
       path: relationPath,
       relation: _schema.relations['author']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -613,12 +623,14 @@ final class RelationalPostsInclude {
     RivetIncludes<RelationalUsersInclude>? include,
   }) {
     final target = RelationalUsers.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'reviewer' : '$path.reviewer';
     return RivetInclude<RelationalUsers, RelationalUsersRow>(
       name: 'reviewer',
       path: relationPath,
       relation: _schema.relations['reviewer']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -636,12 +648,14 @@ final class RelationalPostsInclude {
     RivetIncludes<RelationalCommentsInclude>? include,
   }) {
     final target = RelationalComments.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'comments' : '$path.comments';
     return RivetInclude<RelationalComments, RelationalCommentsRow>(
       name: 'comments',
       path: relationPath,
       relation: _schema.relations['comments']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -917,12 +931,14 @@ final class RelationalCommentsInclude {
     RivetIncludes<RelationalPostsInclude>? include,
   }) {
     final target = RelationalPosts.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'post' : '$path.post';
     return RivetInclude<RelationalPosts, RelationalPostsRow>(
       name: 'post',
       path: relationPath,
       relation: _schema.relations['post']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -1107,6 +1123,1259 @@ final class _$RelationalCommentsDB
   /// Creates a reusable delete plan.
   RivetDelete<RelationalComments, RelationalCommentsRow> delete({
     RivetWhere<RelationalComments>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [ThroughBooks].
+final class ThroughBooksInclude {
+  /// Creates the generated include scope.
+  const ThroughBooksInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<ThroughBooks, ThroughBooksRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [tags] relation.
+  RivetInclude<ThroughTags, ThroughTagsRow> tags({
+    RivetWhere<ThroughTags>? where,
+    RivetOrderBy<ThroughTags>? orderBy,
+    int? limit,
+
+    RivetIncludes<ThroughTagsInclude>? include,
+  }) {
+    final target = ThroughTags.db.buildSchema();
+    final through = ThroughBookTags.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'tags' : '$path.tags';
+    return RivetInclude<ThroughTags, ThroughTagsRow>(
+      name: 'tags',
+      path: relationPath,
+      relation: _schema.relations['tags']!,
+      targetSchema: target,
+      throughSchema: through,
+
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(ThroughTagsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [reviews] relation.
+  RivetInclude<ThroughReviews, ThroughReviewsRow> reviews({
+    RivetWhere<ThroughReviews>? where,
+    RivetOrderBy<ThroughReviews>? orderBy,
+    int? limit,
+
+    RivetIncludes<ThroughReviewsInclude>? include,
+  }) {
+    final target = ThroughReviews.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'reviews' : '$path.reviews';
+    return RivetInclude<ThroughReviews, ThroughReviewsRow>(
+      name: 'reviews',
+      path: relationPath,
+      relation: _schema.relations['reviews']!,
+      targetSchema: target,
+
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(ThroughReviewsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr147.throughBooks'.
+final class ThroughBooksRow {
+  /// Creates a row from decoded column and relation values.
+  const ThroughBooksRow({
+    required this.tenant,
+    required this.id,
+    required this.title,
+    this.tags = const Relation.unloaded(),
+    this.reviews = const Relation.unloaded(),
+  });
+
+  /// Value read from `tenant`.
+  final int tenant;
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `title`.
+  final String title;
+
+  /// Loaded or unloaded `tags` relation.
+  final Relation<List<ThroughTagsRow>> tags;
+
+  /// Loaded or unloaded `reviews` relation.
+  final Relation<List<ThroughReviewsRow>> reviews;
+}
+
+/// Generated values accepted by mutations of 'fbr147.throughBooks'.
+final class ThroughBooksCompanion implements RivetCompanion<ThroughBooks> {
+  const ThroughBooksCompanion._({
+    required this.tenant,
+    required this.id,
+    required this.title,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory ThroughBooksCompanion.insert({
+    required RivetValue<ThroughBooks, int, int> tenant,
+    required RivetValue<ThroughBooks, int, int> id,
+    required RivetValue<ThroughBooks, String, String> title,
+  }) => ThroughBooksCompanion._(tenant: tenant, id: id, title: title);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ThroughBooksCompanion.update({
+    RivetValue<ThroughBooks, int, int> tenant = const RivetValue.absent(),
+    RivetValue<ThroughBooks, int, int> id = const RivetValue.absent(),
+    RivetValue<ThroughBooks, String, String> title = const RivetValue.absent(),
+  }) => ThroughBooksCompanion._(tenant: tenant, id: id, title: title);
+
+  /// Mutation value for `tenant`.
+  final RivetValue<ThroughBooks, int, int> tenant;
+
+  /// Mutation value for `id`.
+  final RivetValue<ThroughBooks, int, int> id;
+
+  /// Mutation value for `title`.
+  final RivetValue<ThroughBooks, String, String> title;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<ThroughBooks>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('tenant', tenant),
+    RivetAssignment('id', id),
+    RivetAssignment('title', title),
+  ];
+}
+
+final class _$ThroughBooksDB
+    extends RivetTableAccessor<ThroughBooks, ThroughBooksRow> {
+  const _$ThroughBooksDB();
+
+  @override
+  RivetTableSchema<ThroughBooks, ThroughBooksRow> buildSchema() {
+    ThroughBooks createDefinition() {
+      final definition = ThroughBooks();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    ThroughBooksRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => ThroughBooksRow(
+      tenant: transport
+          ? definition.tenant.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.tenant.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.id.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      title: transport
+          ? definition.title.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.title.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      tags: relations.read('tags'),
+      reviews: relations.read('reviews'),
+    );
+
+    return RivetTableSchema<ThroughBooks, ThroughBooksRow>(
+      schemaName: 'fbr147',
+      tableName: 'throughBooks',
+      definition: definition,
+      columns: [
+        definition.tenant as RivetColumn<Object?>,
+        definition.id as RivetColumn<Object?>,
+        definition.title as RivetColumn<Object?>,
+      ],
+      columnNames: ['tenant', 'id', 'title'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.tenant as RivetColumn<Object?>,
+        definition.id as RivetColumn<Object?>,
+        definition.title as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'tags': definition.tags as RivetRelationDescriptor<Object?>,
+        'reviews': definition.reviews as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<ThroughBooks, ThroughBooksRow> find({
+    RivetWhere<ThroughBooks>? where,
+    RivetOrderBy<ThroughBooks>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<ThroughBooksInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(ThroughBooksInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<ThroughBooks, ThroughBooksRow> insert(
+    ThroughBooksCompanion companion, {
+    RivetOnConflict<ThroughBooks>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<ThroughBooks, ThroughBooksRow> insertMany(
+    Iterable<ThroughBooksCompanion> companions, {
+    RivetOnConflict<ThroughBooks>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<ThroughBooks, ThroughBooksRow> update(
+    ThroughBooksCompanion companion, {
+    RivetWhere<ThroughBooks>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<ThroughBooks, ThroughBooksRow> delete({
+    RivetWhere<ThroughBooks>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [ThroughTags].
+final class ThroughTagsInclude {
+  /// Creates the generated include scope.
+  const ThroughTagsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<ThroughTags, ThroughTagsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [notes] relation.
+  RivetInclude<ThroughTagNotes, ThroughTagNotesRow> notes({
+    RivetWhere<ThroughTagNotes>? where,
+    RivetOrderBy<ThroughTagNotes>? orderBy,
+    int? limit,
+
+    RivetIncludes<ThroughTagNotesInclude>? include,
+  }) {
+    final target = ThroughTagNotes.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'notes' : '$path.notes';
+    return RivetInclude<ThroughTagNotes, ThroughTagNotesRow>(
+      name: 'notes',
+      path: relationPath,
+      relation: _schema.relations['notes']!,
+      targetSchema: target,
+
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(ThroughTagNotesInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr147.throughTags'.
+final class ThroughTagsRow {
+  /// Creates a row from decoded column and relation values.
+  const ThroughTagsRow({
+    required this.namespace,
+    required this.code,
+    required this.name,
+    this.notes = const Relation.unloaded(),
+  });
+
+  /// Value read from `namespace`.
+  final String namespace;
+
+  /// Value read from `code`.
+  final String code;
+
+  /// Value read from `name`.
+  final String name;
+
+  /// Loaded or unloaded `notes` relation.
+  final Relation<List<ThroughTagNotesRow>> notes;
+}
+
+/// Generated values accepted by mutations of 'fbr147.throughTags'.
+final class ThroughTagsCompanion implements RivetCompanion<ThroughTags> {
+  const ThroughTagsCompanion._({
+    required this.namespace,
+    required this.code,
+    required this.name,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory ThroughTagsCompanion.insert({
+    required RivetValue<ThroughTags, String, String> namespace,
+    required RivetValue<ThroughTags, String, String> code,
+    required RivetValue<ThroughTags, String, String> name,
+  }) => ThroughTagsCompanion._(namespace: namespace, code: code, name: name);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ThroughTagsCompanion.update({
+    RivetValue<ThroughTags, String, String> namespace =
+        const RivetValue.absent(),
+    RivetValue<ThroughTags, String, String> code = const RivetValue.absent(),
+    RivetValue<ThroughTags, String, String> name = const RivetValue.absent(),
+  }) => ThroughTagsCompanion._(namespace: namespace, code: code, name: name);
+
+  /// Mutation value for `namespace`.
+  final RivetValue<ThroughTags, String, String> namespace;
+
+  /// Mutation value for `code`.
+  final RivetValue<ThroughTags, String, String> code;
+
+  /// Mutation value for `name`.
+  final RivetValue<ThroughTags, String, String> name;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<ThroughTags>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('namespace', namespace),
+    RivetAssignment('code', code),
+    RivetAssignment('name', name),
+  ];
+}
+
+final class _$ThroughTagsDB
+    extends RivetTableAccessor<ThroughTags, ThroughTagsRow> {
+  const _$ThroughTagsDB();
+
+  @override
+  RivetTableSchema<ThroughTags, ThroughTagsRow> buildSchema() {
+    ThroughTags createDefinition() {
+      final definition = ThroughTags();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    ThroughTagsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => ThroughTagsRow(
+      namespace: transport
+          ? definition.namespace.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.namespace.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      code: transport
+          ? definition.code.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.code.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.name.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      notes: relations.read('notes'),
+    );
+
+    return RivetTableSchema<ThroughTags, ThroughTagsRow>(
+      schemaName: 'fbr147',
+      tableName: 'throughTags',
+      definition: definition,
+      columns: [
+        definition.namespace as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+      ],
+      columnNames: ['namespace', 'code', 'name'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.namespace as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'notes': definition.notes as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<ThroughTags, ThroughTagsRow> find({
+    RivetWhere<ThroughTags>? where,
+    RivetOrderBy<ThroughTags>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<ThroughTagsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(ThroughTagsInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<ThroughTags, ThroughTagsRow> insert(
+    ThroughTagsCompanion companion, {
+    RivetOnConflict<ThroughTags>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<ThroughTags, ThroughTagsRow> insertMany(
+    Iterable<ThroughTagsCompanion> companions, {
+    RivetOnConflict<ThroughTags>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<ThroughTags, ThroughTagsRow> update(
+    ThroughTagsCompanion companion, {
+    RivetWhere<ThroughTags>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<ThroughTags, ThroughTagsRow> delete({
+    RivetWhere<ThroughTags>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [ThroughBookTags].
+final class ThroughBookTagsInclude {
+  /// Creates the generated include scope.
+  const ThroughBookTagsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<ThroughBookTags, ThroughBookTagRecord> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [book] relation.
+  RivetInclude<ThroughBooks, ThroughBooksRow> book({
+    RivetWhere<ThroughBooks>? where,
+
+    RivetIncludes<ThroughBooksInclude>? include,
+  }) {
+    final target = ThroughBooks.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'book' : '$path.book';
+    return RivetInclude<ThroughBooks, ThroughBooksRow>(
+      name: 'book',
+      path: relationPath,
+      relation: _schema.relations['book']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(ThroughBooksInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [tag] relation.
+  RivetInclude<ThroughTags, ThroughTagsRow> tag({
+    RivetWhere<ThroughTags>? where,
+
+    RivetIncludes<ThroughTagsInclude>? include,
+  }) {
+    final target = ThroughTags.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'tag' : '$path.tag';
+    return RivetInclude<ThroughTags, ThroughTagsRow>(
+      name: 'tag',
+      path: relationPath,
+      relation: _schema.relations['tag']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(ThroughTagsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr147.throughBookTags'.
+final class ThroughBookTagRecord {
+  /// Creates a row from decoded column and relation values.
+  const ThroughBookTagRecord({
+    required this.bookTenant,
+    required this.bookId,
+    required this.tagNamespace,
+    required this.tagCode,
+    required this.position,
+    this.book = const Relation.unloaded(),
+    this.tag = const Relation.unloaded(),
+  });
+
+  /// Value read from `bookTenant`.
+  final int bookTenant;
+
+  /// Value read from `bookId`.
+  final int bookId;
+
+  /// Value read from `tagNamespace`.
+  final String tagNamespace;
+
+  /// Value read from `tagCode`.
+  final String tagCode;
+
+  /// Value read from `position`.
+  final int position;
+
+  /// Loaded or unloaded `book` relation.
+  final Relation<ThroughBooksRow?> book;
+
+  /// Loaded or unloaded `tag` relation.
+  final Relation<ThroughTagsRow?> tag;
+}
+
+/// Generated values accepted by mutations of 'fbr147.throughBookTags'.
+final class ThroughBookTagsCompanion
+    implements RivetCompanion<ThroughBookTags> {
+  const ThroughBookTagsCompanion._({
+    required this.bookTenant,
+    required this.bookId,
+    required this.tagNamespace,
+    required this.tagCode,
+    required this.position,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory ThroughBookTagsCompanion.insert({
+    required RivetValue<ThroughBookTags, int, int> bookTenant,
+    required RivetValue<ThroughBookTags, int, int> bookId,
+    required RivetValue<ThroughBookTags, String, String> tagNamespace,
+    required RivetValue<ThroughBookTags, String, String> tagCode,
+    required RivetValue<ThroughBookTags, int, int> position,
+  }) => ThroughBookTagsCompanion._(
+    bookTenant: bookTenant,
+    bookId: bookId,
+    tagNamespace: tagNamespace,
+    tagCode: tagCode,
+    position: position,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ThroughBookTagsCompanion.update({
+    RivetValue<ThroughBookTags, int, int> bookTenant =
+        const RivetValue.absent(),
+    RivetValue<ThroughBookTags, int, int> bookId = const RivetValue.absent(),
+    RivetValue<ThroughBookTags, String, String> tagNamespace =
+        const RivetValue.absent(),
+    RivetValue<ThroughBookTags, String, String> tagCode =
+        const RivetValue.absent(),
+    RivetValue<ThroughBookTags, int, int> position = const RivetValue.absent(),
+  }) => ThroughBookTagsCompanion._(
+    bookTenant: bookTenant,
+    bookId: bookId,
+    tagNamespace: tagNamespace,
+    tagCode: tagCode,
+    position: position,
+  );
+
+  /// Mutation value for `bookTenant`.
+  final RivetValue<ThroughBookTags, int, int> bookTenant;
+
+  /// Mutation value for `bookId`.
+  final RivetValue<ThroughBookTags, int, int> bookId;
+
+  /// Mutation value for `tagNamespace`.
+  final RivetValue<ThroughBookTags, String, String> tagNamespace;
+
+  /// Mutation value for `tagCode`.
+  final RivetValue<ThroughBookTags, String, String> tagCode;
+
+  /// Mutation value for `position`.
+  final RivetValue<ThroughBookTags, int, int> position;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<ThroughBookTags>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('bookTenant', bookTenant),
+    RivetAssignment('bookId', bookId),
+    RivetAssignment('tagNamespace', tagNamespace),
+    RivetAssignment('tagCode', tagCode),
+    RivetAssignment('position', position),
+  ];
+}
+
+final class _$ThroughBookTagsDB
+    extends RivetTableAccessor<ThroughBookTags, ThroughBookTagRecord> {
+  const _$ThroughBookTagsDB();
+
+  @override
+  RivetTableSchema<ThroughBookTags, ThroughBookTagRecord> buildSchema() {
+    ThroughBookTags createDefinition() {
+      final definition = ThroughBookTags();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    ThroughBookTagRecord decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => ThroughBookTagRecord(
+      bookTenant: transport
+          ? definition.bookTenant.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.bookTenant.decodeValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            ),
+      bookId: transport
+          ? definition.bookId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.bookId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      tagNamespace: transport
+          ? definition.tagNamespace.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.tagNamespace.decodeValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            ),
+      tagCode: transport
+          ? definition.tagCode.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.tagCode.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      position: transport
+          ? definition.position.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.position.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      book: relations.read('book'),
+      tag: relations.read('tag'),
+    );
+
+    return RivetTableSchema<ThroughBookTags, ThroughBookTagRecord>(
+      schemaName: 'fbr147',
+      tableName: 'throughBookTags',
+      definition: definition,
+      columns: [
+        definition.bookTenant as RivetColumn<Object?>,
+        definition.bookId as RivetColumn<Object?>,
+        definition.tagNamespace as RivetColumn<Object?>,
+        definition.tagCode as RivetColumn<Object?>,
+        definition.position as RivetColumn<Object?>,
+      ],
+      columnNames: [
+        'bookTenant',
+        'bookId',
+        'tagNamespace',
+        'tagCode',
+        'position',
+      ],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.bookTenant as RivetColumn<Object?>,
+        definition.bookId as RivetColumn<Object?>,
+        definition.tagNamespace as RivetColumn<Object?>,
+        definition.tagCode as RivetColumn<Object?>,
+        definition.position as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'book': definition.book as RivetRelationDescriptor<Object?>,
+        'tag': definition.tag as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<ThroughBookTags, ThroughBookTagRecord> find({
+    RivetWhere<ThroughBookTags>? where,
+    RivetOrderBy<ThroughBookTags>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<ThroughBookTagsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(ThroughBookTagsInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<ThroughBookTags, ThroughBookTagRecord> insert(
+    ThroughBookTagsCompanion companion, {
+    RivetOnConflict<ThroughBookTags>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<ThroughBookTags, ThroughBookTagRecord> insertMany(
+    Iterable<ThroughBookTagsCompanion> companions, {
+    RivetOnConflict<ThroughBookTags>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<ThroughBookTags, ThroughBookTagRecord> update(
+    ThroughBookTagsCompanion companion, {
+    RivetWhere<ThroughBookTags>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<ThroughBookTags, ThroughBookTagRecord> delete({
+    RivetWhere<ThroughBookTags>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [ThroughReviews].
+final class ThroughReviewsInclude {
+  /// Creates the generated include scope.
+  const ThroughReviewsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<ThroughReviews, ThroughReviewsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [book] relation.
+  RivetInclude<ThroughBooks, ThroughBooksRow> book({
+    RivetWhere<ThroughBooks>? where,
+
+    RivetIncludes<ThroughBooksInclude>? include,
+  }) {
+    final target = ThroughBooks.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'book' : '$path.book';
+    return RivetInclude<ThroughBooks, ThroughBooksRow>(
+      name: 'book',
+      path: relationPath,
+      relation: _schema.relations['book']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(ThroughBooksInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr147.throughReviews'.
+final class ThroughReviewsRow {
+  /// Creates a row from decoded column and relation values.
+  const ThroughReviewsRow({
+    required this.id,
+    required this.bookTenant,
+    required this.bookId,
+    required this.body,
+    this.book = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `bookTenant`.
+  final int bookTenant;
+
+  /// Value read from `bookId`.
+  final int bookId;
+
+  /// Value read from `body`.
+  final String body;
+
+  /// Loaded or unloaded `book` relation.
+  final Relation<ThroughBooksRow?> book;
+}
+
+/// Generated values accepted by mutations of 'fbr147.throughReviews'.
+final class ThroughReviewsCompanion implements RivetCompanion<ThroughReviews> {
+  const ThroughReviewsCompanion._({
+    required this.id,
+    required this.bookTenant,
+    required this.bookId,
+    required this.body,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory ThroughReviewsCompanion.insert({
+    required RivetValue<ThroughReviews, int, int> id,
+    required RivetValue<ThroughReviews, int, int> bookTenant,
+    required RivetValue<ThroughReviews, int, int> bookId,
+    required RivetValue<ThroughReviews, String, String> body,
+  }) => ThroughReviewsCompanion._(
+    id: id,
+    bookTenant: bookTenant,
+    bookId: bookId,
+    body: body,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ThroughReviewsCompanion.update({
+    RivetValue<ThroughReviews, int, int> id = const RivetValue.absent(),
+    RivetValue<ThroughReviews, int, int> bookTenant = const RivetValue.absent(),
+    RivetValue<ThroughReviews, int, int> bookId = const RivetValue.absent(),
+    RivetValue<ThroughReviews, String, String> body = const RivetValue.absent(),
+  }) => ThroughReviewsCompanion._(
+    id: id,
+    bookTenant: bookTenant,
+    bookId: bookId,
+    body: body,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<ThroughReviews, int, int> id;
+
+  /// Mutation value for `bookTenant`.
+  final RivetValue<ThroughReviews, int, int> bookTenant;
+
+  /// Mutation value for `bookId`.
+  final RivetValue<ThroughReviews, int, int> bookId;
+
+  /// Mutation value for `body`.
+  final RivetValue<ThroughReviews, String, String> body;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<ThroughReviews>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+    RivetAssignment('bookTenant', bookTenant),
+    RivetAssignment('bookId', bookId),
+    RivetAssignment('body', body),
+  ];
+}
+
+final class _$ThroughReviewsDB
+    extends RivetTableAccessor<ThroughReviews, ThroughReviewsRow> {
+  const _$ThroughReviewsDB();
+
+  @override
+  RivetTableSchema<ThroughReviews, ThroughReviewsRow> buildSchema() {
+    ThroughReviews createDefinition() {
+      final definition = ThroughReviews();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    ThroughReviewsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => ThroughReviewsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      bookTenant: transport
+          ? definition.bookTenant.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.bookTenant.decodeValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            ),
+      bookId: transport
+          ? definition.bookId.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.bookId.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      body: transport
+          ? definition.body.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.body.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      book: relations.read('book'),
+    );
+
+    return RivetTableSchema<ThroughReviews, ThroughReviewsRow>(
+      schemaName: 'fbr147',
+      tableName: 'throughReviews',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.bookTenant as RivetColumn<Object?>,
+        definition.bookId as RivetColumn<Object?>,
+        definition.body as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'bookTenant', 'bookId', 'body'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.bookTenant as RivetColumn<Object?>,
+        definition.bookId as RivetColumn<Object?>,
+        definition.body as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {'book': definition.book as RivetRelationDescriptor<Object?>},
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<ThroughReviews, ThroughReviewsRow> find({
+    RivetWhere<ThroughReviews>? where,
+    RivetOrderBy<ThroughReviews>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<ThroughReviewsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(ThroughReviewsInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<ThroughReviews, ThroughReviewsRow> insert(
+    ThroughReviewsCompanion companion, {
+    RivetOnConflict<ThroughReviews>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<ThroughReviews, ThroughReviewsRow> insertMany(
+    Iterable<ThroughReviewsCompanion> companions, {
+    RivetOnConflict<ThroughReviews>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<ThroughReviews, ThroughReviewsRow> update(
+    ThroughReviewsCompanion companion, {
+    RivetWhere<ThroughReviews>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<ThroughReviews, ThroughReviewsRow> delete({
+    RivetWhere<ThroughReviews>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [ThroughTagNotes].
+final class ThroughTagNotesInclude {
+  /// Creates the generated include scope.
+  const ThroughTagNotesInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<ThroughTagNotes, ThroughTagNotesRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [tag] relation.
+  RivetInclude<ThroughTags, ThroughTagsRow> tag({
+    RivetWhere<ThroughTags>? where,
+
+    RivetIncludes<ThroughTagsInclude>? include,
+  }) {
+    final target = ThroughTags.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'tag' : '$path.tag';
+    return RivetInclude<ThroughTags, ThroughTagsRow>(
+      name: 'tag',
+      path: relationPath,
+      relation: _schema.relations['tag']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(ThroughTagsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr147.throughTagNotes'.
+final class ThroughTagNotesRow {
+  /// Creates a row from decoded column and relation values.
+  const ThroughTagNotesRow({
+    required this.id,
+    required this.tagNamespace,
+    required this.tagCode,
+    required this.body,
+    this.tag = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `tagNamespace`.
+  final String tagNamespace;
+
+  /// Value read from `tagCode`.
+  final String tagCode;
+
+  /// Value read from `body`.
+  final String body;
+
+  /// Loaded or unloaded `tag` relation.
+  final Relation<ThroughTagsRow?> tag;
+}
+
+/// Generated values accepted by mutations of 'fbr147.throughTagNotes'.
+final class ThroughTagNotesCompanion
+    implements RivetCompanion<ThroughTagNotes> {
+  const ThroughTagNotesCompanion._({
+    required this.id,
+    required this.tagNamespace,
+    required this.tagCode,
+    required this.body,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory ThroughTagNotesCompanion.insert({
+    required RivetValue<ThroughTagNotes, int, int> id,
+    required RivetValue<ThroughTagNotes, String, String> tagNamespace,
+    required RivetValue<ThroughTagNotes, String, String> tagCode,
+    required RivetValue<ThroughTagNotes, String, String> body,
+  }) => ThroughTagNotesCompanion._(
+    id: id,
+    tagNamespace: tagNamespace,
+    tagCode: tagCode,
+    body: body,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory ThroughTagNotesCompanion.update({
+    RivetValue<ThroughTagNotes, int, int> id = const RivetValue.absent(),
+    RivetValue<ThroughTagNotes, String, String> tagNamespace =
+        const RivetValue.absent(),
+    RivetValue<ThroughTagNotes, String, String> tagCode =
+        const RivetValue.absent(),
+    RivetValue<ThroughTagNotes, String, String> body =
+        const RivetValue.absent(),
+  }) => ThroughTagNotesCompanion._(
+    id: id,
+    tagNamespace: tagNamespace,
+    tagCode: tagCode,
+    body: body,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<ThroughTagNotes, int, int> id;
+
+  /// Mutation value for `tagNamespace`.
+  final RivetValue<ThroughTagNotes, String, String> tagNamespace;
+
+  /// Mutation value for `tagCode`.
+  final RivetValue<ThroughTagNotes, String, String> tagCode;
+
+  /// Mutation value for `body`.
+  final RivetValue<ThroughTagNotes, String, String> body;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<ThroughTagNotes>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+    RivetAssignment('tagNamespace', tagNamespace),
+    RivetAssignment('tagCode', tagCode),
+    RivetAssignment('body', body),
+  ];
+}
+
+final class _$ThroughTagNotesDB
+    extends RivetTableAccessor<ThroughTagNotes, ThroughTagNotesRow> {
+  const _$ThroughTagNotesDB();
+
+  @override
+  RivetTableSchema<ThroughTagNotes, ThroughTagNotesRow> buildSchema() {
+    ThroughTagNotes createDefinition() {
+      final definition = ThroughTagNotes();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    ThroughTagNotesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => ThroughTagNotesRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      tagNamespace: transport
+          ? definition.tagNamespace.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.tagNamespace.decodeValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            ),
+      tagCode: transport
+          ? definition.tagCode.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.tagCode.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      body: transport
+          ? definition.body.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.body.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      tag: relations.read('tag'),
+    );
+
+    return RivetTableSchema<ThroughTagNotes, ThroughTagNotesRow>(
+      schemaName: 'fbr147',
+      tableName: 'throughTagNotes',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.tagNamespace as RivetColumn<Object?>,
+        definition.tagCode as RivetColumn<Object?>,
+        definition.body as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'tagNamespace', 'tagCode', 'body'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.tagNamespace as RivetColumn<Object?>,
+        definition.tagCode as RivetColumn<Object?>,
+        definition.body as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {'tag': definition.tag as RivetRelationDescriptor<Object?>},
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<ThroughTagNotes, ThroughTagNotesRow> find({
+    RivetWhere<ThroughTagNotes>? where,
+    RivetOrderBy<ThroughTagNotes>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<ThroughTagNotesInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(ThroughTagNotesInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<ThroughTagNotes, ThroughTagNotesRow> insert(
+    ThroughTagNotesCompanion companion, {
+    RivetOnConflict<ThroughTagNotes>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<ThroughTagNotes, ThroughTagNotesRow> insertMany(
+    Iterable<ThroughTagNotesCompanion> companions, {
+    RivetOnConflict<ThroughTagNotes>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<ThroughTagNotes, ThroughTagNotesRow> update(
+    ThroughTagNotesCompanion companion, {
+    RivetWhere<ThroughTagNotes>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<ThroughTagNotes, ThroughTagNotesRow> delete({
+    RivetWhere<ThroughTagNotes>? where,
   }) => RivetDelete(buildSchema(), where: where);
 }
 
@@ -3238,12 +4507,14 @@ final class MutationParentsInclude {
     RivetIncludes<MutationChildrenInclude>? include,
   }) {
     final target = MutationChildren.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'children' : '$path.children';
     return RivetInclude<MutationChildren, MutationChildrenRow>(
       name: 'children',
       path: relationPath,
       relation: _schema.relations['children']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -3428,12 +4699,14 @@ final class MutationChildrenInclude {
     RivetIncludes<MutationParentsInclude>? include,
   }) {
     final target = MutationParents.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'parent' : '$path.parent';
     return RivetInclude<MutationParents, MutationParentsRow>(
       name: 'parent',
       path: relationPath,
       relation: _schema.relations['parent']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -3615,12 +4888,14 @@ final class MutationUpdateUsersInclude {
     RivetIncludes<MutationUpdateChildrenInclude>? include,
   }) {
     final target = MutationUpdateChildren.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'children' : '$path.children';
     return RivetInclude<MutationUpdateChildren, MutationUpdateChildrenRow>(
       name: 'children',
       path: relationPath,
       relation: _schema.relations['children']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -3973,12 +5248,14 @@ final class MutationUpdateChildrenInclude {
     RivetIncludes<MutationUpdateUsersInclude>? include,
   }) {
     final target = MutationUpdateUsers.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'user' : '$path.user';
     return RivetInclude<MutationUpdateUsers, MutationUpdateUsersRow>(
       name: 'user',
       path: relationPath,
       relation: _schema.relations['user']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -4170,6 +5447,7 @@ final class MutationDeleteParentsInclude {
     RivetIncludes<MutationCascadeChildrenInclude>? include,
   }) {
     final target = MutationCascadeChildren.db.buildSchema();
+
     final relationPath = path.isEmpty
         ? 'cascadeChildren'
         : '$path.cascadeChildren';
@@ -4178,6 +5456,7 @@ final class MutationDeleteParentsInclude {
       path: relationPath,
       relation: _schema.relations['cascadeChildren']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -4200,6 +5479,7 @@ final class MutationDeleteParentsInclude {
     RivetIncludes<MutationRestrictChildrenInclude>? include,
   }) {
     final target = MutationRestrictChildren.db.buildSchema();
+
     final relationPath = path.isEmpty
         ? 'restrictChildren'
         : '$path.restrictChildren';
@@ -4208,6 +5488,7 @@ final class MutationDeleteParentsInclude {
       path: relationPath,
       relation: _schema.relations['restrictChildren']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -4407,12 +5688,14 @@ final class MutationCascadeChildrenInclude {
     RivetIncludes<MutationDeleteParentsInclude>? include,
   }) {
     final target = MutationDeleteParents.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'parent' : '$path.parent';
     return RivetInclude<MutationDeleteParents, MutationDeleteParentsRow>(
       name: 'parent',
       path: relationPath,
       relation: _schema.relations['parent']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -4611,12 +5894,14 @@ final class MutationRestrictChildrenInclude {
     RivetIncludes<MutationDeleteParentsInclude>? include,
   }) {
     final target = MutationDeleteParents.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'parent' : '$path.parent';
     return RivetInclude<MutationDeleteParents, MutationDeleteParentsRow>(
       name: 'parent',
       path: relationPath,
       relation: _schema.relations['parent']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -4816,12 +6101,14 @@ final class MutationBatchParentsInclude {
     RivetIncludes<MutationBatchChildrenInclude>? include,
   }) {
     final target = MutationBatchChildren.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'children' : '$path.children';
     return RivetInclude<MutationBatchChildren, MutationBatchChildrenRow>(
       name: 'children',
       path: relationPath,
       relation: _schema.relations['children']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -5093,12 +6380,14 @@ final class MutationBatchChildrenInclude {
     RivetIncludes<MutationBatchParentsInclude>? include,
   }) {
     final target = MutationBatchParents.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'parent' : '$path.parent';
     return RivetInclude<MutationBatchParents, MutationBatchParentsRow>(
       name: 'parent',
       path: relationPath,
       relation: _schema.relations['parent']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -5378,12 +6667,14 @@ final class MutationConflictParentsInclude {
     RivetIncludes<MutationConflictChildrenInclude>? include,
   }) {
     final target = MutationConflictChildren.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'children' : '$path.children';
     return RivetInclude<MutationConflictChildren, MutationConflictChildrenRow>(
       name: 'children',
       path: relationPath,
       relation: _schema.relations['children']!,
       targetSchema: target,
+
       where: where,
       orderBy: orderBy,
       limit: limit,
@@ -5764,12 +7055,14 @@ final class MutationConflictChildrenInclude {
     RivetIncludes<MutationConflictParentsInclude>? include,
   }) {
     final target = MutationConflictParents.db.buildSchema();
+
     final relationPath = path.isEmpty ? 'parent' : '$path.parent';
     return RivetInclude<MutationConflictParents, MutationConflictParentsRow>(
       name: 'parent',
       path: relationPath,
       relation: _schema.relations['parent']!,
       targetSchema: target,
+
       where: where,
 
       includes:
@@ -6350,6 +7643,11 @@ abstract class _$RivetTestDatabase {
       RelationalUsers.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       RelationalPosts.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       RelationalComments.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      ThroughBooks.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      ThroughTags.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      ThroughBookTags.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      ThroughReviews.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      ThroughTagNotes.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       ScalarValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       EnumValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       VectorValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,

@@ -619,6 +619,21 @@ void _validateSchemas(List<RivetTableSchema<Object?, Object?>> tables) {
           '$through, which is not registered.',
         );
       }
+      if (descriptor is RivetManyThroughRelation<dynamic, dynamic, dynamic>) {
+        final junction = registeredTables[descriptor.through]!;
+        descriptor.resolveThrough(junction.definition);
+        final sourceRelation = descriptor.sourceRelation!;
+        final targetRelation = descriptor.targetRelation!;
+        if (!junction.relations.values.contains(sourceRelation) ||
+            !junction.relations.values.contains(targetRelation) ||
+            sourceRelation.targetTable != table.definition.runtimeType ||
+            targetRelation.targetTable != target.definition.runtimeType) {
+          throw ArgumentError(
+            'Through relation ${table.schemaName}.${table.tableName}.${relation.key} must select '
+            'junction one-relations to its source and target.',
+          );
+        }
+      }
       descriptor.resolve(target.definition);
       if (descriptor.kind == RivetRelationKind.many && descriptor.inverseRelation == null) {
         final candidates = target.relations.values

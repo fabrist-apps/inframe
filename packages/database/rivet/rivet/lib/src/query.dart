@@ -219,30 +219,9 @@ String _compileInclude(
   final alias = nextAlias();
   target.qualify(alias);
   final relation = include.relation;
-  if (relation.kind == RivetRelationKind.manyThrough) {
-    throw RivetUnsupportedQueryException(
-      'Through relation `${include.path}` is implemented by its dependent slice.',
-    );
-  }
-  final mapping = relation.kind == RivetRelationKind.one
-      ? _resolveOneMapping(relation, source, target)
-      : _resolveManyMapping(include, source, target);
-  if (mapping.source.isEmpty || mapping.source.length != mapping.target.length) {
-    throw ArgumentError(
-      'Relation ${include.path} must map the same non-zero number of columns.',
-    );
-  }
-  if (mapping.source.any((column) => !source.columns.contains(column)) ||
-      mapping.target.any((column) => !target.columns.contains(column))) {
-    throw ArgumentError(
-      'Relation ${include.path} maps columns outside its source or target table.',
-    );
-  }
-  for (var index = 0; index < mapping.source.length; index++) {
-    if (mapping.source[index].codec.cast != mapping.target[index].codec.cast) {
-      throw ArgumentError('Relation ${include.path} maps incompatible column storage types.');
-    }
-  }
+  final join = relation.kind == RivetRelationKind.manyThrough
+      ? _resolveThroughJoin(include, source, target, alias, nextAlias)
+      : _resolveDirectJoin(include, source, target, alias);
   final nestedSelections = [
     for (final nested in include.includes) _compileInclude(nested, target, parameters, nextAlias),
   ];
@@ -251,10 +230,7 @@ String _compileInclude(
       'jsonb_build_array(${column.sql} IS NULL, to_jsonb(${column.selectionSql}))',
     ...nestedSelections,
   ];
-  final predicates = [
-    for (var index = 0; index < mapping.source.length; index++)
-      '${mapping.target[index].sql} = ${mapping.source[index].sql}',
-  ];
+  final predicates = [...join.predicates];
   if (include.predicate case final predicate?) {
     predicates.add(predicate.renderParameters(startAt: parameters.length + 1));
     parameters.addAll(predicate.parameters);
@@ -274,10 +250,99 @@ SELECT jsonb_build_object(
 )
 FROM (
   SELECT jsonb_build_array(${cells.join(', ')}) AS "__rivet_row"$ordinal
-  FROM ${target.qualifiedName} AS ${quoteIdentifier(alias)}
+  FROM ${join.fromSql}
   WHERE ${predicates.join(' AND ')}$orderSql$limitSql
 ) AS "__rivet_relation"
 )''';
+}
+
+({String fromSql, List<String> predicates}) _resolveDirectJoin(
+  RivetInclude<dynamic, dynamic> include,
+  RivetTableSchema<dynamic, dynamic> source,
+  RivetTableSchema<dynamic, dynamic> target,
+  String targetAlias,
+) {
+  final relation = include.relation;
+  final mapping = relation.kind == RivetRelationKind.one
+      ? _resolveOneMapping(relation, source, target)
+      : _resolveManyMapping(include, source, target);
+  _validateMapping(include.path, mapping, source, target);
+  return (
+    fromSql: '${target.qualifiedName} AS ${quoteIdentifier(targetAlias)}',
+    predicates: [
+      for (var index = 0; index < mapping.source.length; index++)
+        '${mapping.target[index].sql} = ${mapping.source[index].sql}',
+    ],
+  );
+}
+
+({String fromSql, List<String> predicates}) _resolveThroughJoin(
+  RivetInclude<dynamic, dynamic> include,
+  RivetTableSchema<dynamic, dynamic> source,
+  RivetTableSchema<dynamic, dynamic> target,
+  String targetAlias,
+  String Function() nextAlias,
+) {
+  final through = include.throughSchema!;
+  final throughAlias = nextAlias();
+  through.qualify(throughAlias);
+  final relation = include.relation as RivetManyThroughRelation<dynamic, dynamic, dynamic>;
+  relation.resolveThrough(through.definition);
+  final sourceRelation = relation.sourceRelation!;
+  final targetRelation = relation.targetRelation!;
+  if (!through.relations.values.contains(sourceRelation) ||
+      !through.relations.values.contains(targetRelation) ||
+      sourceRelation.targetTable != source.definition.runtimeType ||
+      targetRelation.targetTable != target.definition.runtimeType) {
+    throw ArgumentError(
+      'Through relation ${include.path} must select junction one-relations to its source and target.',
+    );
+  }
+  sourceRelation.resolve(source.definition);
+  targetRelation.resolve(target.definition);
+  final sourceMapping = (
+    source: sourceRelation.references,
+    target: sourceRelation.fields,
+  );
+  final targetMapping = (
+    source: targetRelation.fields,
+    target: targetRelation.references,
+  );
+  _validateMapping('${include.path}.source', sourceMapping, source, through);
+  _validateMapping('${include.path}.target', targetMapping, through, target);
+  final targetJoin = [
+    for (var index = 0; index < targetMapping.source.length; index++)
+      '${targetMapping.target[index].sql} = ${targetMapping.source[index].sql}',
+  ].join(' AND ');
+  return (
+    fromSql:
+        '${target.qualifiedName} AS ${quoteIdentifier(targetAlias)} '
+        'JOIN ${through.qualifiedName} AS ${quoteIdentifier(throughAlias)} ON $targetJoin',
+    predicates: [
+      for (var index = 0; index < sourceMapping.source.length; index++)
+        '${sourceMapping.target[index].sql} = ${sourceMapping.source[index].sql}',
+    ],
+  );
+}
+
+void _validateMapping(
+  String path,
+  ({List<RivetColumn<dynamic>> source, List<RivetColumn<dynamic>> target}) mapping,
+  RivetTableSchema<dynamic, dynamic> source,
+  RivetTableSchema<dynamic, dynamic> target,
+) {
+  if (mapping.source.isEmpty || mapping.source.length != mapping.target.length) {
+    throw ArgumentError('Relation $path must map the same non-zero number of columns.');
+  }
+  if (mapping.source.any((column) => !source.columns.contains(column)) ||
+      mapping.target.any((column) => !target.columns.contains(column))) {
+    throw ArgumentError('Relation $path maps columns outside its source or target table.');
+  }
+  for (var index = 0; index < mapping.source.length; index++) {
+    if (mapping.source[index].codec.cast != mapping.target[index].codec.cast) {
+      throw ArgumentError('Relation $path maps incompatible column storage types.');
+    }
+  }
 }
 
 ({List<RivetColumn<dynamic>> source, List<RivetColumn<dynamic>> target}) _resolveOneMapping(

@@ -33,8 +33,11 @@ void main() {
       );
       expect(database.tables.map((table) => table.definition.runtimeType), [
         schema.PackageUsers,
+        schema.PackageLabels,
+        schema.PackageLabelNotes,
         PackageUsers,
         AppProjects,
+        AppProjectLabels,
       ]);
       expect(appUsers.relations['package']?.targetTable, schema.PackageUsers);
       await database.close();
@@ -74,6 +77,19 @@ void main() {
           )
         ''');
         await fixture.execute('''
+          CREATE TABLE fixture."packageLabels" (code text NOT NULL, name text NOT NULL)
+        ''');
+        await fixture.execute('''
+          CREATE TABLE fixture."packageLabelNotes" (
+            id integer NOT NULL, "labelCode" text NOT NULL, body text NOT NULL
+          )
+        ''');
+        await fixture.execute('''
+          CREATE TABLE fixture."appProjectLabels" (
+            "projectId" integer NOT NULL, "labelCode" text NOT NULL
+          )
+        ''');
+        await fixture.execute('''
           INSERT INTO fixture."packageUsers" (name, access)
           VALUES ('Ada', 'owner-label'), ('Grace', 'viewer')
         ''');
@@ -87,6 +103,16 @@ void main() {
         await fixture.execute('''
           INSERT INTO fixture."appProjects" (id, "ownerName", "packageOwnerName")
           VALUES (1, 'Ada', 'Ada'), (2, 'Ada', 'Grace'), (3, 'Grace', 'Grace')
+        ''');
+        await fixture.execute('''
+          INSERT INTO fixture."packageLabels" VALUES ('a', 'Alpha'), ('b', 'Beta')
+        ''');
+        await fixture.execute('''
+          INSERT INTO fixture."packageLabelNotes" VALUES (1, 'a', 'alpha note'), (2, 'b', 'beta note')
+        ''');
+        await fixture.execute('''
+          INSERT INTO fixture."appProjectLabels" VALUES
+            (2, 'a'), (2, 'b'), (3, 'a'), (3, 'missing')
         ''');
         final statements = <String>[];
         final database = await FixtureAppDatabase().open(
@@ -102,7 +128,15 @@ void main() {
                 include.projects(
                   orderBy: (project) => [project.id.desc()],
                   limit: 1,
-                  include: (include) => [include.owner(), include.packageOwner()],
+                  include: (include) => [
+                    include.owner(),
+                    include.packageOwner(),
+                    include.labels(
+                      orderBy: (label) => [label.code.desc()],
+                      limit: 1,
+                      include: (include) => [include.notes()],
+                    ),
+                  ],
                 ),
               ],
             )
@@ -128,6 +162,15 @@ void main() {
         expect(
           (adaProjects.single.owner as LoadedRelation<PackageUsersRow?>).value?.projects.isLoaded,
           isFalse,
+        );
+        final labels =
+            (adaProjects.single.labels as LoadedRelation<List<schema.PackageLabelsRow>>).value;
+        expect(labels.map((label) => label.code), ['b']);
+        expect(
+          (labels.single.notes as LoadedRelation<List<schema.PackageLabelNotesRow>>).value.map(
+            (note) => note.body,
+          ),
+          ['beta note'],
         );
         expect(statements, hasLength(1));
       },

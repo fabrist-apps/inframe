@@ -197,10 +197,9 @@ abstract class RivetTableDefinition<Self> {
     RivetOneRelation(Target, fields: List.unmodifiable(fields), references: references),
   );
 
-  RivetRelationBuilder<Target, RivetManyRelation<Target>> many<Target>({
+  RivetManyRelationBuilder<Self, Target> many<Target>({
     RivetRelationDescriptor<dynamic> Function(Target table)? relation,
-    Type? through,
-  }) => RivetRelationBuilder(RivetManyRelation(Target, relation: relation, through: through));
+  }) => RivetManyRelationBuilder(RivetManyRelation(Target, relation: relation));
 
   RivetIndexBuilder index(String name) => RivetIndexBuilder(name, unique: false);
   RivetIndexBuilder uniqueIndex(String name) => RivetIndexBuilder(name, unique: true);

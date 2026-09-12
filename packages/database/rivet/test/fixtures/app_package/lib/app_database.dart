@@ -62,10 +62,39 @@ final class AppProjects extends RivetTableDefinition<AppProjects> {
     fields: [packageOwnerName],
     references: (users) => [users.name],
   )();
+  late final labels = many<schema.PackageLabels>().through<AppProjectLabels>(
+    source: (link) => link.project,
+    target: (link) => link.label,
+  )();
 }
 
-const schemaTables = <Type>[schema.PackageUsers];
-const fixtureTables = <Type>[...schemaTables, PackageUsers, AppProjects];
+@RivetTable(schema: 'fixture', name: 'appProjectLabels')
+final class AppProjectLabels extends RivetTableDefinition<AppProjectLabels> {
+  static const db = _$AppProjectLabelsDB();
+
+  late final projectId = integer()();
+  late final labelCode = text()();
+  late final project = one<AppProjects>(
+    fields: [projectId],
+    references: (project) => [project.id],
+  )();
+  late final label = one<schema.PackageLabels>(
+    fields: [labelCode],
+    references: (label) => [label.code],
+  )();
+}
+
+const schemaTables = <Type>[
+  schema.PackageUsers,
+  schema.PackageLabels,
+  schema.PackageLabelNotes,
+];
+const fixtureTables = <Type>[
+  ...schemaTables,
+  PackageUsers,
+  AppProjects,
+  AppProjectLabels,
+];
 
 @RivetDatabase(name: 'fixture_app', tables: fixtureTables)
 final class FixtureAppDatabase extends _$FixtureAppDatabase {}
