@@ -25,6 +25,9 @@ enum OpenAIServiceTier {
   /// Standard processing.
   defaultTier('default'),
 
+  /// Fast processing for supported models.
+  fast('fast'),
+
   /// Scale-tier processing.
   flex('flex'),
 

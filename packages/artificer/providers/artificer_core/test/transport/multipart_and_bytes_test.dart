@@ -137,6 +137,31 @@ void main() {
     ]);
     expect(transport.bodyCancelled, isTrue);
   });
+
+  test('byte response failures stay in the typed error channel', () async {
+    final malformed = ProviderHttpClient(
+      baseUrl: Uri.parse('https://example.test/'),
+      client: _StaticByteClient(statusCode: 502, body: utf8.encode('<html>bad gateway</html>')),
+    );
+    addTearDown(malformed.close);
+    final interrupted = ProviderHttpClient(
+      baseUrl: Uri.parse('https://example.test/'),
+      client: _FailingByteClient(),
+    );
+    addTearDown(interrupted.close);
+
+    final malformedExit = await malformed
+        .sendBytes(ProviderHttpRequest(method: 'GET', path: 'content'))
+        .runCollect()
+        .runFutureExit();
+    final interruptedExit = await interrupted
+        .sendBytes(ProviderHttpRequest(method: 'GET', path: 'content'))
+        .runCollect()
+        .runFutureExit();
+
+    expect(malformedExit, _failedWith<ProtocolError>());
+    expect(interruptedExit, _failedWith<TransportError>());
+  });
 }
 
 Matcher _failedWith<E extends AiError>() => isA<Failed<Object?, AiError>>().having(
@@ -175,4 +200,23 @@ final class _ByteHoldingClient extends http.BaseClient {
     }
     return response.future;
   }
+}
+
+final class _StaticByteClient extends http.BaseClient {
+  _StaticByteClient({required this.statusCode, required this.body});
+
+  final int statusCode;
+  final List<int> body;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async =>
+      http.StreamedResponse(Stream.value(body), statusCode);
+}
+
+final class _FailingByteClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async => http.StreamedResponse(
+    Stream<List<int>>.error(const SocketException('connection reset')),
+    502,
+  );
 }

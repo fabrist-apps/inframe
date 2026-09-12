@@ -101,7 +101,7 @@ final class OpenAILanguageModel implements LanguageModel {
     ModelCapability.tools: CapabilitySupport.unknown,
     ModelCapability.structuredOutput: CapabilitySupport.unknown,
     ModelCapability.imageInput: CapabilitySupport.unknown,
-    ModelCapability.audioInput: CapabilitySupport.unknown,
+    ModelCapability.audioInput: CapabilitySupport.unsupported,
     ModelCapability.videoInput: CapabilitySupport.unsupported,
     ModelCapability.documentInput: CapabilitySupport.unknown,
   });
@@ -147,6 +147,7 @@ final class OpenAILanguageModel implements LanguageModel {
       return const UnsupportedFeatureError('OpenAI Responses does not support stop sequences.');
     }
     final input = <OpenAIResponseInputItem>[];
+    final calls = <String, ApplicationToolCallPart>{};
     for (final message in request.messages) {
       if (message case UserMessage(:final parts)) {
         final content = <OpenAIResponseInputPart>[];
@@ -162,6 +163,9 @@ final class OpenAILanguageModel implements LanguageModel {
           ),
         );
       } else if (message case AssistantMessage(:final parts, :final replay)) {
+        for (final call in parts.whereType<ApplicationToolCallPart>()) {
+          calls[call.id] = call;
+        }
         if (replay != null) {
           input.addAll(
             replay.items
@@ -185,9 +189,13 @@ final class OpenAILanguageModel implements LanguageModel {
         );
       } else if (message case ToolMessage(:final results)) {
         for (final result in results) {
-          input.add(
-            OpenAIFunctionCallOutputItem(callId: result.callId, output: _toolOutput(result)),
-          );
+          final call = calls[result.callId];
+          if (call == null) {
+            return InvalidRequestError('Tool result ${result.callId} references a missing call.');
+          }
+          final encoded = _encodeToolResult(result, call);
+          if (encoded is AiError) return encoded;
+          input.add(encoded as OpenAIResponseInputItem);
         }
       }
     }
@@ -197,6 +205,7 @@ final class OpenAILanguageModel implements LanguageModel {
           functionName: tool.name,
           description: tool.description,
           parameters: tool.inputSchema,
+          strict: false,
         ),
     ];
     final nativeTools = options.resolveTools(callOptions) ?? const <OpenAIToolDefinition>[];
@@ -210,7 +219,10 @@ final class OpenAILanguageModel implements LanguageModel {
       return InvalidRequestError('Native and application tools both declare $collision.');
     }
     final reasoning = options.resolveReasoning(callOptions);
-    final include = options.resolveInclude(callOptions);
+    final include = {
+      OpenAIResponseInclude.reasoningEncryptedContent,
+      ...?options.resolveInclude(callOptions),
+    };
     final serviceTier = options.resolveServiceTier(callOptions);
     final extraBody = JsonObject({
       ...options.extraBody.toDart(),
@@ -233,7 +245,7 @@ final class OpenAILanguageModel implements LanguageModel {
       promptCacheKey: options.resolvePromptCacheKey(callOptions),
       promptCacheRetention: options.resolvePromptCacheRetention(callOptions),
       serviceTier: serviceTier?.wireValue,
-      include: include?.map((value) => value.wireValue),
+      include: include.map((value) => value.wireValue),
       tools: applicationTools.isEmpty && nativeTools.isEmpty
           ? null
           : [...applicationTools, ...nativeTools],
@@ -269,26 +281,14 @@ final class OpenAILanguageModel implements LanguageModel {
           'OpenAI document input requires an explicit OpenAI file ID.',
         ),
       },
-      MediaKind.audio => switch (source) {
-        BytesMediaSource(:final bytes) => _encodeAudio(bytes, mimeType),
-        _ => const UnsupportedFeatureError('OpenAI audio input requires inline bytes.'),
-      },
+      MediaKind.audio => const UnsupportedFeatureError(
+        'Audio input is unavailable in the pinned OpenAI Responses schema.',
+      ),
       MediaKind.video => const UnsupportedFeatureError(
         'Video input is unavailable in the pinned OpenAI Responses schema.',
       ),
     },
   };
-
-  Object _encodeAudio(List<int> bytes, String mimeType) {
-    final format = switch (mimeType) {
-      'audio/wav' || 'audio/x-wav' => 'wav',
-      'audio/mpeg' || 'audio/mp3' => 'mp3',
-      _ => null,
-    };
-    return format == null
-        ? UnsupportedFeatureError('OpenAI does not support common audio MIME type $mimeType.')
-        : OpenAIAudioInputPart(data: base64Encode(bytes), format: format);
-  }
 
   JsonValue _encodeToolChoice(ToolChoice choice) => JsonValue.fromDart(switch (choice) {
     AutoToolChoice() => 'auto',
@@ -311,15 +311,58 @@ final class OpenAILanguageModel implements LanguageModel {
     },
   });
 
-  String _toolOutput(ToolResult result) => switch (result) {
+  Object _encodeToolResult(ToolResult result, ApplicationToolCallPart call) {
+    if (call.arguments case NativeToolArguments()) {
+      if (result is! NativeToolResult) {
+        return UnsupportedFeatureError(
+          'OpenAI native tool call ${call.id} requires a provider-native result.',
+        );
+      }
+      final type = switch (call.name) {
+        'computer' => 'computer_call_output',
+        'shell' => 'shell_call_output',
+        'apply_patch' => 'apply_patch_call_output',
+        _ => null,
+      };
+      if (type == null) {
+        return UnsupportedFeatureError('OpenAI native tool ${call.name} has no output mapping.');
+      }
+      return OpenAIRawResponseInputItem(
+        JsonObject({...result.value.toDart(), 'type': type, 'call_id': result.callId}),
+      );
+    }
+
+    final output = _encodePortableToolOutput(result);
+    if (output is AiError) return output;
+    final type = call.arguments is TextToolArguments
+        ? 'custom_tool_call_output'
+        : 'function_call_output';
+    return OpenAIRawResponseInputItem(
+      JsonObject({'type': type, 'call_id': result.callId, 'output': output}),
+    );
+  }
+
+  Object _encodePortableToolOutput(ToolResult result) => switch (result) {
     JsonToolResult(:final value) => jsonEncode(value.toDart()),
-    TextToolResult(:final content) => jsonEncode(content.map((part) => part.toDart()).toList()),
-    NativeToolResult(:final value) => value.encode(),
+    TextToolResult(:final content) => _encodeToolContent(content),
+    NativeToolResult() => const UnsupportedFeatureError(
+      'A provider-native result requires a provider-native tool call.',
+    ),
     ApplicationErrorToolResult(:final message, :final details) => jsonEncode({
       'error': message,
       if (details != null) 'details': details.toDart(),
     }),
   };
+
+  Object _encodeToolContent(List<InputPart> content) {
+    final encoded = <Map<String, Object?>>[];
+    for (final part in content) {
+      final value = _encodeInputPart(part);
+      if (value is AiError) return value;
+      encoded.add((value as OpenAIResponseInputPart).toDart());
+    }
+    return encoded;
+  }
 }
 
 String _nonEmpty(String value, String name) {

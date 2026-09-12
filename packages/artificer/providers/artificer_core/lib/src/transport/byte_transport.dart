@@ -169,9 +169,24 @@ final class _BytePump {
           ),
         ),
       );
-    } on Object catch (error, stackTrace) {
+    } on FormatException {
       await _terminate(
-        error is AiError ? Expected(_SseExpected(error)) : Defect(error, stackTrace),
+        const Expected(
+          _SseExpected(ProtocolError('The error response was not a JSON object.')),
+        ),
+      );
+    } on Object catch (error) {
+      await _terminate(
+        Expected(
+          _SseExpected(
+            error is AiError
+                ? error
+                : TransportError(
+                    _safeForeignMessage(error),
+                    deliveryState: RequestDeliveryState.responseStarted,
+                  ),
+          ),
+        ),
       );
     }
   }

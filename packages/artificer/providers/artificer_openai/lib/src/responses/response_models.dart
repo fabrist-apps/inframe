@@ -139,26 +139,6 @@ final class OpenAIFileInputPart extends OpenAIResponseInputPart {
   Map<String, Object?> toDart() => {'type': 'input_file', 'file_id': fileId};
 }
 
-/// Inline native audio input.
-final class OpenAIAudioInputPart extends OpenAIResponseInputPart {
-  /// Creates inline base64 audio input.
-  OpenAIAudioInputPart({required String data, required String format})
-    : data = _nonEmpty(data, 'data'),
-      format = _nonEmpty(format, 'format');
-
-  /// Base64 audio bytes.
-  final String data;
-
-  /// Native audio format such as `wav` or `mp3`.
-  final String format;
-
-  @override
-  Map<String, Object?> toDart() => {
-    'type': 'input_audio',
-    'input_audio': {'data': data, 'format': format},
-  };
-}
-
 /// A typed provider tool definition for Responses.
 sealed class OpenAIToolDefinition {
   const OpenAIToolDefinition();

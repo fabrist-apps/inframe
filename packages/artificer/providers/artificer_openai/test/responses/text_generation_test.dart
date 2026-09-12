@@ -72,6 +72,7 @@ void main() {
       'max_output_tokens': 4096,
       'store': false,
       'stream': false,
+      'include': ['reasoning.encrypted_content'],
     });
   });
 

@@ -62,6 +62,7 @@ void main() {
       isA<OpaqueOutputPart>(),
     ]);
     expect((call.arguments as JsonToolArguments).originalText, '{"city":"Paris"}');
+    expect(((bodies.first['tools']! as List<Object?>).single! as Map)['strict'], isFalse);
     expect(first.message.replay!.items.map((item) => item.id), [
       'rs_1',
       'msg_1',
@@ -133,7 +134,10 @@ void main() {
     expect(body['prompt_cache_key'], 'cache-1');
     expect(body['prompt_cache_retention'], '24h');
     expect(body['service_tier'], 'priority');
-    expect(body['include'], ['web_search_call.action.sources']);
+    expect(body['include'], [
+      'reasoning.encrypted_content',
+      'web_search_call.action.sources',
+    ]);
     expect((body['tools']! as List<Object?>).map((tool) => (tool! as Map)['type']), [
       'web_search',
       'file_search',
@@ -196,7 +200,22 @@ void main() {
     expect(parts[1], {'type': 'input_image', 'image_url': 'data:image/png;base64,AQID'});
     expect(parts[2], {'type': 'input_image', 'file_id': 'file_1'});
 
-    final failed = await model
+    final audioFailed = await model
+        .generate(
+          GenerationRequest(
+            messages: [
+              UserMessage([
+                MediaInputPart(
+                  kind: MediaKind.audio,
+                  mimeType: 'audio/wav',
+                  source: BytesMediaSource([1, 2, 3]),
+                ),
+              ]),
+            ],
+          ),
+        )
+        .runFutureExit();
+    final videoFailed = await model
         .generate(
           GenerationRequest(
             messages: [
@@ -211,8 +230,104 @@ void main() {
           ),
         )
         .runFutureExit();
-    expect(failed, _failedWith<UnsupportedFeatureError>());
+    expect(audioFailed, _failedWith<UnsupportedFeatureError>());
+    expect(videoFailed, _failedWith<UnsupportedFeatureError>());
     expect(requests, 1);
+  });
+
+  test('encodes custom and native caller tool results with their matching types', () async {
+    late Map<String, Object?> body;
+    final server = await _server((request, _) async {
+      body = jsonDecode(await utf8.decoder.bind(request).join())! as Map<String, Object?>;
+      return _textResponse;
+    });
+    final provider = _provider(server);
+    addTearDown(provider.close);
+    final assistant = AssistantMessage(
+      [
+        ApplicationToolCallPart(
+          id: 'call_custom',
+          name: 'grammar',
+          arguments: TextToolArguments('plain text'),
+        ),
+        ApplicationToolCallPart(
+          id: 'call_computer',
+          name: 'computer',
+          arguments: NativeToolArguments(
+            providerId: 'openai',
+            api: 'responses',
+            action: JsonObject({
+              'action': {'type': 'click', 'x': 1, 'y': 2},
+            }),
+          ),
+        ),
+      ],
+      replay: ProviderReplay(
+        providerId: 'openai',
+        api: 'responses',
+        modelId: 'gpt-future',
+        items: [
+          ReplayItem(
+            data: JsonObject({
+              'type': 'custom_tool_call',
+              'call_id': 'call_custom',
+              'name': 'grammar',
+              'input': 'plain text',
+            }),
+          ),
+          ReplayItem(
+            data: JsonObject({
+              'type': 'computer_call',
+              'call_id': 'call_computer',
+              'action': {'type': 'click', 'x': 1, 'y': 2},
+            }),
+          ),
+        ],
+      ),
+    );
+
+    await provider
+        .languageModel('gpt-future')
+        .generate(
+          GenerationRequest(
+            messages: [
+              assistant,
+              ToolMessage([
+                TextToolResult(callId: 'call_custom', content: [TextInputPart('accepted')]),
+                NativeToolResult(
+                  callId: 'call_computer',
+                  providerId: 'openai',
+                  api: 'responses',
+                  value: JsonObject({
+                    'output': {
+                      'type': 'computer_screenshot',
+                      'image_url': 'https://example.test/screenshot.png',
+                    },
+                  }),
+                ),
+              ]),
+            ],
+          ),
+        )
+        .runFuture();
+
+    expect((body['input']! as List<Object?>).sublist(2), [
+      {
+        'type': 'custom_tool_call_output',
+        'call_id': 'call_custom',
+        'output': [
+          {'type': 'input_text', 'text': 'accepted'},
+        ],
+      },
+      {
+        'output': {
+          'type': 'computer_screenshot',
+          'image_url': 'https://example.test/screenshot.png',
+        },
+        'type': 'computer_call_output',
+        'call_id': 'call_computer',
+      },
+    ]);
   });
 
   test('keeps refusals, truncation, malformed arguments, and native actions inspectable', () {
