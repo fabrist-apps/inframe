@@ -1,10 +1,12 @@
 import 'package:chronicler/chronicler.dart';
 import 'package:chronicler/src/runtime.dart' show ChroniclerDeliveryFixture;
-import 'package:chrono_id/chrono_id.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/async.dart';
 import 'support/exporter.dart';
+import 'support/records.dart';
+import 'support/runtime.dart';
 
 void main() {
   group('Chronicler flush', () {
@@ -20,7 +22,7 @@ void main() {
         ..info('rejected')
         ..info('exhausted');
       final reportFuture = chronicler.flush();
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       final records = exporter.batches.single.records;
       exporter.attempts.single.completer.complete(
         ExportResult.perRecord([
@@ -63,9 +65,9 @@ void main() {
       ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
       Context().withChronicler(chronicler.recorder).logs.info('uncertain');
       final reportFuture = chronicler.flush();
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       exporter.attempts.single.completer.completeError(Exception('failed'));
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
       exporter.attempts.last.completer.complete(const ExportResult.rejected());
 
       final report = await reportFuture;
@@ -79,7 +81,7 @@ void main() {
       final chronicler = _chronicler(exporter);
       final logs = Context().withChronicler(chronicler.recorder).logs..info('snapshot');
       final reportFuture = chronicler.flush();
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
 
       logs.info('later');
       exporter.attempts.first.completer.complete(const ExportResult.accepted());
@@ -87,7 +89,7 @@ void main() {
 
       expect(report.accepted, 1);
       expect(report.pending, 0);
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
     });
 
     test('keeps independent concurrent snapshots and deadlines', () async {
@@ -95,7 +97,7 @@ void main() {
       final chronicler = _chronicler(exporter);
       final logs = Context().withChronicler(chronicler.recorder).logs..info('first');
       final first = chronicler.flush(timeout: const Duration(milliseconds: 5));
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       logs.info('second');
       final second = chronicler.flush(timeout: const Duration(milliseconds: 100));
 
@@ -103,7 +105,7 @@ void main() {
       expect(firstReport.pending, 1);
       expect(firstReport.timedOut, isTrue);
       exporter.attempts.first.completer.complete(const ExportResult.accepted());
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
       exporter.attempts.last.completer.complete(const ExportResult.accepted());
       final secondReport = await second;
 
@@ -125,7 +127,7 @@ void main() {
       expect(report.timedOut, isTrue);
       _expectCompleteAccounting(report, 1);
       exporter.attempts.single.completer.complete(const ExportResult.accepted());
-      await _settle();
+      await settleAsync();
       expect(report.pending, 1);
       expect(report.accepted, 0);
       expect(ChroniclerDeliveryFixture.activeFlushes(chronicler), 0);
@@ -136,12 +138,12 @@ void main() {
       final chronicler = _chronicler(exporter)
         ..setCollectionEnabled(ChroniclerSignal.metrics, false);
       ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
-        _logRecord('finalized'),
-        _metricRecord(),
+        testLogRecord('finalized'),
+        testMetricRecord(),
       ]);
 
       final reportFuture = chronicler.flush();
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       exporter.attempts.single.completer.complete(const ExportResult.accepted());
       final report = await reportFuture;
 
@@ -149,6 +151,29 @@ void main() {
       expect(report.dropped, {DropReason.collectionDisabled: 1});
       expect(report.pending, 0);
       _expectCompleteAccounting(report, 2);
+    });
+
+    test('includes every internal finalization batch queued for that call', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter, maxBatchRecords: 2);
+      ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
+        testLogRecord('first'),
+      ]);
+      ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
+        testLogRecord('second'),
+      ]);
+
+      final reportFuture = chronicler.flush();
+      await waitForCondition(() => exporter.attempts.isNotEmpty);
+      exporter.attempts.single.completer.complete(const ExportResult.accepted());
+      final report = await reportFuture;
+
+      expect(report.accepted, 2);
+      _expectCompleteAccounting(report, 2);
+      expect(
+        exporter.batches.single.records.cast<LogRecord>().map((record) => record.payload.message),
+        ['first', 'second'],
+      );
     });
 
     test('returns an empty snapshot and rejects non-positive overrides', () async {
@@ -170,49 +195,21 @@ Chronicler _chronicler(
   TestExporter exporter, {
   int maxBatchRecords = 1,
   int maxAttempts = 5,
-}) => Chronicler(
-  appId: 'app',
-  release: 'release',
-  source: ChroniclerSource.server,
-  exporter: exporter,
-  options: ChroniclerOptions(
-    delivery: DeliveryOptions(
-      maxBatchRecords: maxBatchRecords,
-      maxAttempts: maxAttempts,
-      initialRetryDelay: const Duration(microseconds: 1),
+}) => closeAfterTest(
+  Chronicler(
+    appId: 'app',
+    release: 'release',
+    source: ChroniclerSource.server,
+    exporter: exporter,
+    options: ChroniclerOptions(
+      delivery: DeliveryOptions(
+        maxBatchRecords: maxBatchRecords,
+        maxAttempts: maxAttempts,
+        initialRetryDelay: const Duration(microseconds: 1),
+      ),
     ),
   ),
-);
-
-LogRecord _logRecord(String message) => LogRecord(
-  envelope: _envelope(),
-  payload: LogPayload(severity: LogSeverity.info, message: message),
-);
-
-MetricRecord _metricRecord() {
-  final now = DateTime.now().toUtc();
-  return MetricRecord(
-    envelope: _envelope(),
-    payload: MetricPayload(
-      name: 'count',
-      instrument: MetricInstrument.counter,
-      unit: '1',
-      intervalStart: now,
-      intervalEnd: now,
-      durationMicros: 0,
-      observationCount: 1,
-      temporality: MetricTemporality.delta,
-      sum: 1,
-    ),
-  );
-}
-
-RecordEnvelope _envelope() => RecordEnvelope(
-  eventId: ChronoID.generate(prefix: 'evt'),
-  appId: 'app',
-  release: 'release',
-  source: ChroniclerSource.server,
-  timestamp: DateTime.now().toUtc(),
+  exporter,
 );
 
 void _expectCompleteAccounting(DeliveryReport report, int original) {
@@ -226,14 +223,4 @@ void _expectCompleteAccounting(DeliveryReport report, int original) {
     report.uncertainDropped,
     lessThanOrEqualTo(report.dropped.values.fold<int>(0, (a, b) => a + b)),
   );
-}
-
-Future<void> _settle() => Future<void>.delayed(const Duration(milliseconds: 4));
-
-Future<void> _waitFor(bool Function() condition) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 1));
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) fail('Condition was not met before timeout.');
-    await Future<void>.delayed(const Duration(milliseconds: 1));
-  }
 }

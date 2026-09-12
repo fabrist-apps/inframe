@@ -2,11 +2,12 @@ import 'dart:async';
 
 import 'package:chronicler/chronicler.dart';
 import 'package:chronicler/src/runtime.dart' show ChroniclerDeliveryFixture;
-import 'package:chrono_id/chrono_id.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/async.dart';
 import 'support/exporter.dart';
+import 'support/records.dart';
 
 void main() {
   group('Chronicler close', () {
@@ -28,8 +29,8 @@ void main() {
         ..setCollectionEnabled(ChroniclerSignal.metrics, false);
       Context().withChronicler(chronicler.recorder).logs.info('queued');
       ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
-        _logRecord('finalized'),
-        _metricRecord(),
+        testLogRecord('finalized'),
+        testMetricRecord(),
       ]);
 
       final closeFuture = chronicler.close();
@@ -38,7 +39,7 @@ void main() {
         () => chronicler.setPropagationEnabled(false),
         throwsA(isA<ChroniclerConfigurationException>()),
       );
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       expect(exporter.batches.single.records, hasLength(2));
       exporter.attempts.single.completer.complete(const ExportResult.accepted());
       final report = await closeFuture;
@@ -54,11 +55,11 @@ void main() {
       final exporter = TestExporter()..closeCompleter = Completer<void>();
       final chronicler = _chronicler(exporter);
       Context().withChronicler(chronicler.recorder).logs.info('record');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       final closeFuture = chronicler.close();
       exporter.attempts.single.completer.complete(const ExportResult.accepted());
 
-      await _waitFor(() => exporter.closeCount == 1);
+      await waitForCondition(() => exporter.closeCount == 1);
       exporter.closeCompleter!.complete();
       final report = await closeFuture;
 
@@ -75,7 +76,7 @@ void main() {
         cleanupReserve: const Duration(milliseconds: 10),
       );
       Context().withChronicler(chronicler.recorder).logs.info('unresolved');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       final elapsed = Stopwatch()..start();
 
       final report = await chronicler.close();
@@ -90,7 +91,7 @@ void main() {
       expect(report.cleanupIncomplete, isTrue);
       exporter.attempts.single.completer.completeError(Exception('late failure'));
       exporter.closeCompleter!.complete();
-      await _settle();
+      await settleAsync();
       expect(report.dropped, {DropReason.shutdown: 1});
     });
 
@@ -115,7 +116,7 @@ void main() {
         cleanupReserve: const Duration(milliseconds: 5),
       );
       Context().withChronicler(cancelChronicler.recorder).logs.info('cancel');
-      await _waitFor(() => cancelExporter.attempts.length == 1);
+      await waitForCondition(() => cancelExporter.attempts.length == 1);
       cancelExporter.attempts.single.cancelError = Exception('cancel failed');
 
       await cancelChronicler.close();
@@ -134,9 +135,9 @@ void main() {
         cleanupReserve: const Duration(milliseconds: 45),
       );
       Context().withChronicler(chronicler.recorder).logs.info('late accepted');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       final closeFuture = chronicler.close();
-      await _waitFor(() => exporter.attempts.single.cancelCount == 1);
+      await waitForCondition(() => exporter.attempts.single.cancelCount == 1);
 
       exporter.attempts.single.completer.complete(const ExportResult.accepted());
       exporter.closeCompleter!.complete();
@@ -157,7 +158,7 @@ void main() {
       );
       Context().withChronicler(chronicler.recorder).logs.info('flush');
       final flushFuture = chronicler.flush(timeout: const Duration(seconds: 1));
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
 
       final closeFuture = chronicler.close();
       final flushReport = await flushFuture;
@@ -173,7 +174,7 @@ void main() {
       final exporter = TestExporter()..closeCompleter = Completer<void>();
       final chronicler = _chronicler(exporter);
       final closeFuture = chronicler.close();
-      await _waitFor(() => exporter.closeCount == 1);
+      await waitForCondition(() => exporter.closeCount == 1);
 
       final closing = await chronicler.flush();
       expect(closing.runtimeState, ChroniclerRuntimeState.closing);
@@ -212,7 +213,7 @@ void main() {
           .withChronicler(chronicler.recorder)
           .logs
           .info('invalid', attributes: {'bad': Object()});
-      await _settle();
+      await settleAsync();
       expect(notifications, hasLength(1));
       Context()
           .withChronicler(chronicler.recorder)
@@ -220,7 +221,7 @@ void main() {
           .info('invalid again', attributes: {'bad': Object()});
 
       await chronicler.close();
-      await _settle();
+      await settleAsync();
 
       expect(notifications, hasLength(1));
       expect(
@@ -287,44 +288,3 @@ Chronicler _chronicler(
     redaction: redaction,
   ),
 );
-
-LogRecord _logRecord(String message) => LogRecord(
-  envelope: _envelope(),
-  payload: LogPayload(severity: LogSeverity.info, message: message),
-);
-
-MetricRecord _metricRecord() {
-  final now = DateTime.now().toUtc();
-  return MetricRecord(
-    envelope: _envelope(),
-    payload: MetricPayload(
-      name: 'count',
-      instrument: MetricInstrument.counter,
-      unit: '1',
-      intervalStart: now,
-      intervalEnd: now,
-      durationMicros: 0,
-      observationCount: 1,
-      temporality: MetricTemporality.delta,
-      sum: 1,
-    ),
-  );
-}
-
-RecordEnvelope _envelope() => RecordEnvelope(
-  eventId: ChronoID.generate(prefix: 'evt'),
-  appId: 'app',
-  release: 'release',
-  source: ChroniclerSource.server,
-  timestamp: DateTime.now().toUtc(),
-);
-
-Future<void> _settle() => Future<void>.delayed(const Duration(milliseconds: 4));
-
-Future<void> _waitFor(bool Function() condition) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 1));
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) fail('Condition was not met before timeout.');
-    await Future<void>.delayed(const Duration(milliseconds: 1));
-  }
-}

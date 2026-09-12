@@ -38,7 +38,7 @@ void main() {
       expect((decoded as Decoded<ChroniclerRecord>).value, record);
     });
 
-    test('should keep every exported batch within configured bounds', () async {
+    test('should enforce exact encoded record and batch byte bounds', () {
       final records = List.generate(
         3,
         (index) => LogRecord(
@@ -58,9 +58,21 @@ void main() {
       const codec = ChroniclerCodec();
       final batch = ChroniclerBatch(records.take(2));
 
-      expect(batch.records, hasLength(2));
-      expect(codec.encodeBatch(batch).length, lessThan(512 * 1024));
-      expect(codec.encodeRecord(records.first).length, lessThan(64 * 1024));
+      final recordBytes = codec.encodeRecord(records.first).length;
+      final batchBytes = codec.encodeBatch(batch).length;
+      expect(
+        ChroniclerCodec(maxRecordBytes: recordBytes).encodeRecord(records.first),
+        hasLength(recordBytes),
+      );
+      expect(
+        () => ChroniclerCodec(maxRecordBytes: recordBytes - 1).encodeRecord(records.first),
+        throwsA(isA<ChroniclerEncodingException>()),
+      );
+      expect(ChroniclerCodec(maxBatchBytes: batchBytes).encodeBatch(batch), hasLength(batchBytes));
+      expect(
+        () => ChroniclerCodec(maxBatchBytes: batchBytes - 1).encodeBatch(batch),
+        throwsA(isA<ChroniclerEncodingException>()),
+      );
     });
   });
 }

@@ -101,6 +101,151 @@ void main() {
       );
       expect(executor.queries.single.parameters, ['Ada', 'Grace']);
     });
+
+    test('should decode transport values for generated tables without relations', () {
+      final row = MalformedArrays.db.buildSchema().decodeRow(
+        [
+          {
+            'dimensions': 1,
+            'lower': 1,
+            'upper': 2,
+            'elements': [
+              [false, 1],
+              [false, 2],
+            ],
+          },
+        ],
+        [false],
+        transport: true,
+      );
+
+      expect(row.ints, [1, 2]);
+    });
+
+    test('should offset root predicate parameters after a bound score', () async {
+      await RelationalPosts.db
+          .find(where: (post) => post.id.equals(11))
+          .withScore((post) => post.weight.value(1.5))
+          .get(executor);
+
+      expect(executor.queries.single.parameters, [1.5, 11]);
+      expect(executor.queries.single.sql, contains(r'$1::float8 AS "__rivet_score"'));
+      expect(executor.queries.single.sql, contains(r'"id" = $2::int4'));
+    });
+
+    test('should compare a relation aggregate with a root column', () async {
+      await RelationalUsers.db
+          .find(
+            where: (user) => (user.authoredPosts.count() + 1).lessThanExpression(user.id),
+          )
+          .get(executor);
+
+      expect(executor.queries.single.parameters, [1]);
+      expect(executor.queries.single.sql, contains('SELECT count(*)'));
+      expect(executor.queries.single.sql, contains('< "__rivet_t0"."id"'));
+    });
+
+    test('should encode aggregate arithmetic through the aggregate codec', () {
+      final users = UserProfiles.db.buildSchema().definition;
+
+      expect(() => users.posts.count() + 1, returnsNormally);
+    });
+
+    test('should clear relational aliases before reusing a base find', () async {
+      final find = RelationalUsers.db.find(where: (user) => user.id.equals(1));
+
+      await find.withScore((user) => user.authoredPosts.max((post) => post.weight)).get(executor);
+      await find.get(executor);
+
+      expect(executor.queries, hasLength(2));
+      expect(executor.queries.first.sql, contains('AS "__rivet_t0"'));
+      expect(executor.queries.last.sql, isNot(contains('__rivet_t0')));
+    });
+
+    test('should load one relation and preserve missing and duplicate cardinality', () async {
+      executor.rows = [
+        (
+          [
+            'Ada',
+            {
+              'count': 1,
+              'rows': [
+                [
+                  [false, 'Ada'],
+                ],
+              ],
+            },
+          ],
+          [false, false],
+        ),
+      ];
+
+      final row = await Posts.db.find(include: (include) => [include.author()]).getSingle(executor);
+
+      expect((row.author as LoadedRelation<UserProfilesRow?>).value?.displayName, 'Ada');
+      expect(executor.queries.single.sql, contains('jsonb_build_object'));
+      expect(executor.queries.single.sql, contains('LIMIT 2'));
+
+      executor.rows = [
+        (
+          [
+            'Missing',
+            {'count': 0, 'rows': <Object?>[]},
+          ],
+          [false, false],
+        ),
+      ];
+      final missing = await Posts.db
+          .find(include: (include) => [include.author()])
+          .getSingle(executor);
+      expect((missing.author as LoadedRelation<UserProfilesRow?>).value, isNull);
+
+      executor.rows = [
+        (
+          [
+            'Ada',
+            {
+              'count': 2,
+              'rows': [
+                [
+                  [false, 'Ada'],
+                ],
+                [
+                  [false, 'Ada'],
+                ],
+              ],
+            },
+          ],
+          [false, false],
+        ),
+      ];
+      await expectLater(
+        Posts.db.find(include: (include) => [include.author()]).get(executor),
+        throwsA(
+          isA<RivetCardinalityException>().having(
+            (error) => error.relationPath,
+            'relationPath',
+            'author',
+          ),
+        ),
+      );
+    });
+
+    test('should reject duplicate one includes before execution', () {
+      expect(
+        () => Posts.db.find(
+          include: (include) => [include.author(), include.author()],
+        ),
+        throwsA(
+          isA<RivetUnsupportedQueryException>().having(
+            (error) => error.message,
+            'message',
+            contains('author'),
+          ),
+        ),
+      );
+      expect(executor.queries, isEmpty);
+    });
   });
 }
 

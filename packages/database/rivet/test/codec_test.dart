@@ -5,6 +5,23 @@ import 'package:test/test.dart';
 import 'generated_consumer.dart';
 
 void main() {
+  test('should decode relation counts without lossy numeric conversion', () {
+    const codec = RivetCountCodec();
+
+    expect(codec.decode('0', isSqlNull: false), 0);
+    expect(codec.decode('9007199254740991', isSqlNull: false), 9007199254740991);
+    expect(
+      () => codec.decode('9007199254740992', isSqlNull: false),
+      throwsRangeError,
+    );
+    expect(() => codec.decode('-1', isSqlNull: false), throwsRangeError);
+    expect(
+      () => codec.decode(1.0, isSqlNull: false),
+      throwsFormatException,
+    );
+    expect(() => codec.encode(9007199254740992), throwsRangeError);
+  });
+
   group('Rivet scalar codecs', () {
     late ScalarValues table;
 

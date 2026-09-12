@@ -141,6 +141,50 @@ void main() {
     expect(transport.bodyCancelled, isTrue);
   });
 
+  test('bounded byte output pauses a slow consumer upstream', () async {
+    final transport = _ByteHoldingClient();
+    final client = ProviderHttpClient(
+      baseUrl: Uri.parse('https://example.test/'),
+      client: transport,
+    );
+    addTearDown(client.close);
+    final firstDelivered = Completer<void>();
+    final releaseConsumer = Completer<void>();
+    final consumed = client
+        .sendBytes(
+          ProviderHttpRequest(method: 'GET', path: 'content'),
+          decodedChunkCapacity: 1,
+        )
+        .runForEach(
+          (_, _) => Effect.tryFuture<void, AiError>(
+            (_) async {
+              if (!firstDelivered.isCompleted) {
+                firstDelivered.complete();
+                await releaseConsumer.future;
+              }
+            },
+            onError: (error, _, _) => TransportError(
+              '$error',
+              deliveryState: RequestDeliveryState.responseStarted,
+            ),
+          ),
+        )
+        .runFutureExit();
+    await transport.listening.future;
+    transport.body
+      ..add([1])
+      ..add([2])
+      ..add([3]);
+    await firstDelivered.future;
+    await Future<void>.delayed(Duration.zero);
+
+    expect(transport.bodyPauses, greaterThan(0));
+
+    releaseConsumer.complete();
+    await transport.body.close();
+    expect(await consumed, isA<Succeeded<void, AiError>>());
+  });
+
   test('byte response failures stay in the typed error channel', () async {
     final malformed = ProviderHttpClient(
       baseUrl: Uri.parse('https://example.test/'),
@@ -179,12 +223,17 @@ final class _ByteHoldingClient extends http.BaseClient {
   final bool holdHeaders;
   final sent = Completer<void>();
   final listening = Completer<void>();
-  late final StreamController<List<int>> body = StreamController<List<int>>(
-    onListen: listening.complete,
-    onCancel: () => bodyCancelled = true,
-  );
   bool abortSeen = false;
   bool bodyCancelled = false;
+  int bodyPauses = 0;
+  int bodyResumes = 0;
+
+  late final StreamController<List<int>> body = StreamController<List<int>>(
+    onListen: listening.complete,
+    onPause: () => bodyPauses++,
+    onResume: () => bodyResumes++,
+    onCancel: () => bodyCancelled = true,
+  );
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {

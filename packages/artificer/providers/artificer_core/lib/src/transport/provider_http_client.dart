@@ -36,7 +36,7 @@ final class ProviderHttpRequest {
   final Map<String, String> headers;
 
   /// The immutable encoded request body.
-  final JsonObject? body;
+  final JsonValue? body;
 }
 
 /// One native file upload request.
@@ -210,13 +210,31 @@ final class ProviderHttpClient {
     bool allowEmptySuccess = false,
   }) {
     return _execute(
-      (lifetime) => _sendJson(
+      (lifetime) => _sendJsonObject(
         lifetime,
         request,
         providerId: providerId,
         api: api,
         modelId: modelId,
         allowEmptySuccess: allowEmptySuccess,
+      ),
+    );
+  }
+
+  /// Sends and decodes any JSON response root without retry or redirect.
+  Effect<NativeResponse<JsonValue>, AiError> sendJsonValue(
+    ProviderHttpRequest request, {
+    required String providerId,
+    required String api,
+    required String modelId,
+  }) {
+    return _execute(
+      (lifetime) => _sendJsonValue(
+        lifetime,
+        request,
+        providerId: providerId,
+        api: api,
+        modelId: modelId,
       ),
     );
   }
@@ -286,7 +304,7 @@ final class ProviderHttpClient {
   }
 
   /// Streams immutable response byte chunks with bounded backpressure.
-  Flow<List<int>, AiError> sendBytes(
+  Flow<Uint8List, AiError> sendBytes(
     ProviderHttpRequest request, {
     int decodedChunkCapacity = 16,
     int? maxResponseBytes,
@@ -302,7 +320,7 @@ final class ProviderHttpClient {
     if (responseLimit <= 0) {
       throw ArgumentError.value(responseLimit, 'maxResponseBytes', 'must be positive');
     }
-    return Flow.fromStream<List<int>, _SseSignal>(
+    return Flow.fromStream<Uint8List, _SseSignal>(
           (_) => _openByteStream(request, maxResponseBytes: responseLimit),
           onError: (error, stackTrace, _) => switch (error) {
             _SseSignal() => error,
@@ -313,8 +331,8 @@ final class ProviderHttpClient {
         )
         .catchError(
           (signal, _) => switch (signal) {
-            _SseExpected() => Flow.fail<List<int>, _SseSignal>(signal),
-            _SseTerminal(:final cause) => Effect.failCause<List<int>, _SseSignal>(cause).asFlow(),
+            _SseExpected() => Flow.fail<Uint8List, _SseSignal>(signal),
+            _SseTerminal(:final cause) => Effect.failCause<Uint8List, _SseSignal>(cause).asFlow(),
           },
         )
         .mapError(
@@ -402,12 +420,12 @@ final class ProviderHttpClient {
     ).stream;
   }
 
-  Stream<List<int>> _openByteStream(
+  Stream<Uint8List> _openByteStream(
     ProviderHttpRequest request, {
     required int maxResponseBytes,
   }) {
     if (_state != _ClientState.open) {
-      return Stream<List<int>>.error(const ClientClosedError());
+      return Stream<Uint8List>.error(const ClientClosedError());
     }
     final lifetime = _RequestLifetime();
     _active.add(lifetime);
@@ -445,7 +463,36 @@ final class ProviderHttpClient {
     });
   }
 
-  Effect<NativeResponse<JsonObject>, AiError> _sendJson(
+  Effect<NativeResponse<JsonObject>, AiError> _sendJsonObject(
+    _RequestLifetime lifetime,
+    ProviderHttpRequest request, {
+    required String providerId,
+    required String api,
+    required String modelId,
+    bool allowEmptySuccess = false,
+  }) =>
+      _sendJsonValue(
+        lifetime,
+        request,
+        providerId: providerId,
+        api: api,
+        modelId: modelId,
+        allowEmptySuccess: allowEmptySuccess,
+      ).flatMap((response, _) {
+        final value = response.value;
+        if (value is! JsonObject) {
+          return Effect.fail(const ProtocolError('The response was not a JSON object.'));
+        }
+        return Effect.succeed(
+          NativeResponse(
+            value: value,
+            payload: response.payload,
+            metadata: response.metadata,
+          ),
+        );
+      });
+
+  Effect<NativeResponse<JsonValue>, AiError> _sendJsonValue(
     _RequestLifetime lifetime,
     ProviderHttpRequest request, {
     required String providerId,
@@ -523,17 +570,20 @@ final class ProviderHttpClient {
         headers: response.headers,
       );
       final successful = response.statusCode >= 200 && response.statusCode < 300;
-      final JsonObject payload;
+      final JsonValue payload;
       if (successful && allowEmptySuccess && bytes.isEmpty) {
         payload = JsonObject({});
       } else {
         try {
-          payload = JsonObject.parse(utf8.decode(bytes));
+          payload = JsonValue.parse(utf8.decode(bytes));
         } on Object {
-          return $(Effect.fail(const ProtocolError('The response was not a JSON object.')));
+          return $(Effect.fail(const ProtocolError('The response was not valid JSON.')));
         }
       }
       if (!successful) {
+        if (payload is! JsonObject) {
+          return $(Effect.fail(const ProtocolError('The error response was not a JSON object.')));
+        }
         return $(Effect.fail(_providerError(response, payload, requestId)));
       }
       return NativeResponse(
@@ -559,7 +609,7 @@ final class ProviderHttpClient {
   }) {
     return Effect.build(($) async {
       final started = await $(
-        _sendJson(
+        _sendJsonObject(
           lifetime,
           request.startRequest,
           providerId: providerId,

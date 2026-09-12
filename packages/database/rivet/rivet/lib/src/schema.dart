@@ -15,6 +15,15 @@ typedef RivetRowDecoder<Row> = Row Function(
   List<Object?> values,
   List<bool> sqlNulls,
 );
+typedef RivetWhere<Definition> = RivetPredicate Function(Definition table);
+typedef RivetOrderBy<Definition> = List<RivetOrder> Function(Definition table);
+
+typedef RivetRelatedRowDecoder<Row> = Row Function(
+  List<Object?> values,
+  List<bool> sqlNulls,
+  RivetRelationValues relations, {
+  required bool transport,
+});
 
 /// Runtime metadata emitted by a table generator.
 final class RivetTableSchema<Definition, Row> {
@@ -25,6 +34,7 @@ final class RivetTableSchema<Definition, Row> {
     required List<RivetColumn<Object?>> columns,
     required List<String> columnNames,
     required this.decode,
+    this.decodeRelated,
     this.createDefinition,
     this.columnsFor,
     this.renamedFrom,
@@ -80,12 +90,37 @@ final class RivetTableSchema<Definition, Row> {
   final Definition Function()? createDefinition;
   final List<RivetColumn<Object?>> Function(Definition definition)? columnsFor;
   final RivetRowDecoder<Row> decode;
+  final RivetRelatedRowDecoder<Row>? decodeRelated;
   final int formatVersion;
   late final List<RivetIndex> indexes;
   late final List<RivetConstraint> constraints;
   final Map<String, RivetRelationDescriptor<Object?>> relations;
 
   String get qualifiedName => '${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}';
+
+  Row decodeRow(
+    List<Object?> values,
+    List<bool> sqlNulls, {
+    RivetRelationValues relations = const RivetRelationValues(),
+    bool transport = false,
+  }) => (decodeRelated ?? (values, sqlNulls, _, {required transport}) => decode(values, sqlNulls))(
+    values,
+    sqlNulls,
+    relations,
+    transport: transport,
+  );
+
+  void qualify(String qualifier) {
+    for (final column in columns) {
+      column.qualifier = qualifier;
+    }
+  }
+
+  void unqualify() {
+    for (final column in columns) {
+      column.qualifier = null;
+    }
+  }
 
   Definition scopedDefinition(String qualifier) {
     final buildDefinition = createDefinition;
@@ -168,10 +203,9 @@ abstract class RivetTableDefinition<Self> {
     RivetOneRelation(Target, fields: List.unmodifiable(fields), references: references),
   );
 
-  RivetRelationBuilder<Target, RivetManyRelation<Target>> many<Target>({
+  RivetManyRelationBuilder<Self, Target> many<Target>({
     RivetRelationDescriptor<dynamic> Function(Target table)? relation,
-    Type? through,
-  }) => RivetRelationBuilder(RivetManyRelation(Target, relation: relation, through: through));
+  }) => RivetManyRelationBuilder(RivetManyRelation(Target, relation: relation));
 
   RivetIndexBuilder index(String name) => RivetIndexBuilder(name, unique: false);
   RivetIndexBuilder uniqueIndex(String name) => RivetIndexBuilder(name, unique: true);
@@ -274,8 +308,12 @@ abstract class RivetCodec<T> {
   String get cast;
   bool get acceptsNull => false;
   String select(String columnSql) => columnSql;
+  String transportSql(String columnSql) =>
+      'jsonb_build_array($columnSql IS NULL, to_jsonb(${select(columnSql)}))';
   Object? encode(T value);
   T decode(Object? value, {required bool isSqlNull});
+  T decodeTransport(Object? value, {required bool isSqlNull}) =>
+      decode(value, isSqlNull: isSqlNull);
 
   RivetCodec<T> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) => this;
 }
@@ -311,11 +349,18 @@ final class RivetNullableCodec<T> extends RivetCodec<T?> {
   String select(String columnSql) => inner.select(columnSql);
 
   @override
+  String transportSql(String columnSql) => inner.transportSql(columnSql);
+
+  @override
   Object? encode(T? value) => value == null ? null : inner.encode(value);
 
   @override
   T? decode(Object? value, {required bool isSqlNull}) =>
       isSqlNull ? null : inner.decode(value, isSqlNull: false);
+
+  @override
+  T? decodeTransport(Object? value, {required bool isSqlNull}) =>
+      isSqlNull ? null : inner.decodeTransport(value, isSqlNull: false);
 
   @override
   RivetCodec<T?> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) =>
@@ -376,6 +421,39 @@ final class RivetIntegerCodec extends RivetCodec<int> {
   }
 }
 
+final class RivetCountCodec extends RivetCodec<int> {
+  const RivetCountCodec();
+
+  static const max = 9007199254740991;
+
+  @override
+  String get cast => 'bigint';
+
+  @override
+  Object encode(int value) {
+    _validate(value);
+    return value;
+  }
+
+  @override
+  int decode(Object? value, {required bool isSqlNull}) {
+    final decoded = switch (value) {
+      int() => value,
+      String() => int.tryParse(value),
+      _ => null,
+    };
+    if (isSqlNull || decoded == null) {
+      throw const FormatException('expected an exact relation count');
+    }
+    _validate(decoded);
+    return decoded;
+  }
+
+  void _validate(int value) {
+    if (value < 0 || value > max) throw RangeError.range(value, 0, max, 'count');
+  }
+}
+
 final class RivetRealCodec extends RivetCodec<double> {
   @override
   String get cast => 'float8';
@@ -419,6 +497,14 @@ final class RivetDateTimeCodec extends RivetCodec<DateTime> {
       throw const FormatException('expected a PostgreSQL TIMESTAMPTZ');
     }
     return _milliseconds(value);
+  }
+
+  @override
+  DateTime decodeTransport(Object? value, {required bool isSqlNull}) {
+    if (!isSqlNull && value is String) {
+      return decode(DateTime.parse(value), isSqlNull: false);
+    }
+    return decode(value, isSqlNull: isSqlNull);
   }
 
   DateTime _milliseconds(DateTime value) =>
@@ -655,11 +741,18 @@ final class RivetMappedCodec<Domain, Storage> extends RivetCodec<Domain> {
   String select(String columnSql) => storage.select(columnSql);
 
   @override
+  String transportSql(String columnSql) => storage.transportSql(columnSql);
+
+  @override
   Object? encode(Domain value) => storage.encode(converter.toSql(value));
 
   @override
   Domain decode(Object? value, {required bool isSqlNull}) =>
       converter.fromSql(storage.decode(value, isSqlNull: isSqlNull));
+
+  @override
+  Domain decodeTransport(Object? value, {required bool isSqlNull}) =>
+      converter.fromSql(storage.decodeTransport(value, isSqlNull: isSqlNull));
 
   @override
   RivetCodec<Domain> configureEnum<E extends Enum>(RivetEnumCodec<E> enumCodec) =>
@@ -1149,6 +1242,16 @@ abstract interface class RivetExpression<T> {
   String renderParameters({int startAt = 1});
 }
 
+abstract interface class RivetAliasedExpression<T> implements RivetExpression<T> {
+  bool get usesRelations;
+  String renderWith(
+    String Function(int index) placeholder,
+    String Function() nextAlias,
+  );
+}
+
+abstract interface class RivetOrderableExpression<T> implements RivetExpression<T> {}
+
 final class _RivetBoundExpression<T> implements RivetExpression<T> {
   _RivetBoundExpression(this.source, T value) : parameters = [source.encodeValue(value)];
 
@@ -1178,9 +1281,8 @@ final class _RivetBoundExpression<T> implements RivetExpression<T> {
       renderPlaceholders((index) => '\$${startAt + index}');
 }
 
-final class _RivetBinaryExpression<T> implements RivetExpression<T> {
-  _RivetBinaryExpression(this.left, this.operator, T right)
-    : _right = left.columns.first.encodeValue(right);
+final class _RivetBinaryExpression<T> implements RivetAliasedExpression<T> {
+  _RivetBinaryExpression(this.left, this.operator, T right) : _right = left.codec.encode(right);
 
   final RivetExpression<T> left;
   final String operator;
@@ -1199,6 +1301,9 @@ final class _RivetBinaryExpression<T> implements RivetExpression<T> {
   bool get referencesRows => left.referencesRows;
 
   @override
+  bool get usesRelations => _usesRelationAliases(left);
+
+  @override
   String get sql => renderPlaceholders((_) => '@value');
 
   @override
@@ -1209,6 +1314,14 @@ final class _RivetBinaryExpression<T> implements RivetExpression<T> {
   @override
   String renderParameters({int startAt = 1}) =>
       renderPlaceholders((index) => '\$${startAt + index}');
+
+  @override
+  String renderWith(
+    String Function(int index) placeholder,
+    String Function() nextAlias,
+  ) =>
+      '(${_renderPredicateExpression(left, placeholder, nextAlias)} $operator '
+      '${placeholder(left.parameters.length)}::${codec.cast})';
 }
 
 /// A typed SQL expression backed by a table column.
@@ -1226,7 +1339,7 @@ class RivetColumn<T> implements RivetExpression<T> {
   Object? Function()? onUpdateFn;
   late final String dartName;
   late final RivetTableSchema<Object?, Object?> _table;
-  String? _qualifier;
+  String? qualifier;
 
   void attach<Definition, Row>(
     RivetTableSchema<Definition, Row> table, {
@@ -1236,13 +1349,13 @@ class RivetColumn<T> implements RivetExpression<T> {
     this.dartName =
         dartName ?? declaredName ?? (throw StateError('Missing generated column name.'));
     _table = table as RivetTableSchema<Object?, Object?>;
-    _qualifier = qualifier;
+    this.qualifier = qualifier;
   }
 
   String get physicalName => declaredName ?? dartName;
   @override
   String get sql => [
-    if (_qualifier case final qualifier?) quoteIdentifier(qualifier),
+    if (qualifier case final qualifier?) quoteIdentifier(qualifier),
     quoteIdentifier(physicalName),
   ].join('.');
   String get selectionSql => codec.select(sql);
@@ -1268,13 +1381,16 @@ class RivetColumn<T> implements RivetExpression<T> {
   }
 
   RivetPredicate equals(T value) {
-    if (value == null) return RivetPredicate._raw('$sql IS NULL', [this]);
+    if (value == null) return RivetPredicate._raw(() => '$sql IS NULL', [this]);
     final encoded = _convert('encode', () => codec.encode(value));
-    return RivetPredicate._value('$sql = ', '::${codec.cast}', encoded, [this]);
+    return RivetPredicate._value(() => '$sql = ', '::${codec.cast}', encoded, [this]);
   }
 
   T decodeValue(Object? value, {required bool isSqlNull}) =>
       _convert('decode', () => codec.decode(value, isSqlNull: isSqlNull));
+
+  T decodeTransportValue(Object? value, {required bool isSqlNull}) =>
+      _convert('decode', () => codec.decodeTransport(value, isSqlNull: isSqlNull));
 
   Object? encodeValue(Object? value) => _convert(
     'encode',
@@ -1300,9 +1416,11 @@ class RivetColumn<T> implements RivetExpression<T> {
 }
 
 /// A column that supports SQL ordering.
-final class RivetOrderableColumn<T> extends RivetColumn<T> {
+final class RivetOrderableColumn<T> extends RivetColumn<T> implements RivetOrderableExpression<T> {
   RivetOrderableColumn(super.codec, {super.declaredName, super.renamedFrom});
+}
 
+extension RivetOrderableExpressionOrder<T> on RivetOrderableExpression<T> {
   RivetOrder asc({NullsOrder nulls = NullsOrder.last}) =>
       RivetOrder(this, descending: false, nulls: nulls);
   RivetOrder desc({NullsOrder nulls = NullsOrder.last}) =>
@@ -1530,6 +1648,25 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
   }
 
   @override
+  String transportSql(String columnSql) {
+    final element = elementCodec.transportSql('"__rivet_array_element"');
+    return '''
+jsonb_build_array(
+  $columnSql IS NULL,
+  jsonb_build_object(
+    'dimensions', array_ndims($columnSql),
+    'lower', array_lower($columnSql, 1),
+    'upper', array_upper($columnSql, 1),
+    'elements', CASE WHEN $columnSql IS NULL THEN '[]'::jsonb ELSE COALESCE((
+      SELECT jsonb_agg($element ORDER BY "__rivet_array_order")
+      FROM unnest($columnSql) WITH ORDINALITY
+        AS "__rivet_array"("__rivet_array_element", "__rivet_array_order")
+    ), '[]'::jsonb) END
+  )
+)''';
+  }
+
+  @override
   Object encode(List<Element> value) {
     final encoded = [
       for (final element in value)
@@ -1562,6 +1699,37 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
     ];
   }
 
+  @override
+  List<Element> decodeTransport(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull) {
+      throw const FormatException('expected a non-null one-dimensional array');
+    }
+    if (value is! Map<Object?, Object?>) {
+      throw const FormatException('expected an array transport envelope');
+    }
+    final dimensions = value['dimensions'];
+    final lower = value['lower'];
+    final upper = value['upper'];
+    final elements = value['elements'];
+    if (elements is! List<Object?>) {
+      throw const FormatException('expected ordered array transport elements');
+    }
+    final isCanonicalEmpty =
+        dimensions == null && lower == null && upper == null && elements.isEmpty;
+    if (!isCanonicalEmpty && (dimensions != 1 || lower != 1 || upper != elements.length)) {
+      throw const FormatException(
+        'expected a one-dimensional array with canonical lower bound',
+      );
+    }
+    return [
+      for (final encoded in elements)
+        if (encoded case [final bool elementIsSqlNull, final Object? elementValue])
+          elementCodec.decodeTransport(elementValue, isSqlNull: elementIsSqlNull)
+        else
+          throw const FormatException('expected an array element transport cell'),
+    ];
+  }
+
   String _arrayText(List<Object?> values) =>
       '{${values.map((value) => value == null ? 'NULL' : '"${value.toString().replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"').join(',')}}';
 
@@ -1583,9 +1751,10 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
 enum NullsOrder { first, last }
 
 final class RivetOrder {
-  const RivetOrder(this.column, {required this.descending, required this.nulls});
+  const RivetOrder(this.expression, {required this.descending, required this.nulls});
 
-  final RivetOrderableColumn<Object?> column;
+  final RivetOrderableExpression<Object?> expression;
+  RivetOrderableColumn<Object?> get column => expression as RivetOrderableColumn<Object?>;
   final bool descending;
   final NullsOrder nulls;
 }
@@ -1596,69 +1765,136 @@ final class RivetPredicate {
     this._renderSql,
     List<Object?> parameters,
     List<RivetColumn<dynamic>> columns,
+    this.usesRelations,
   ) : parameters = List.unmodifiable(parameters),
       columns = List.unmodifiable(columns);
 
-  RivetPredicate._raw(String sql, List<RivetColumn<dynamic>> columns)
-    : this._((_) => sql, const [], columns);
+  RivetPredicate._raw(String Function() sql, List<RivetColumn<dynamic>> columns)
+    : this._((_, _) => sql(), const [], columns, false);
 
   RivetPredicate._value(
-    String before,
+    String Function() before,
     String after,
     Object? parameter,
     List<RivetColumn<dynamic>> columns,
-  ) : this._((placeholder) => '$before${placeholder(0)}$after', [parameter], columns);
+  ) : this._(
+        (placeholder, _) => '${before()}${placeholder(0)}$after',
+        [parameter],
+        columns,
+        false,
+      );
+
+  RivetPredicate.relation({
+    required String Function(
+      String Function(int index) placeholder,
+      String Function() nextAlias,
+    )
+    renderSql,
+    required List<Object?> parameters,
+    required List<RivetColumn<dynamic>> columns,
+  }) : this._(
+         (placeholder, nextAlias) => renderSql(
+           placeholder,
+           nextAlias ??
+               (throw const RivetUnsupportedQueryException(
+                 'Relation predicates require an aliased query context.',
+               )),
+         ),
+         parameters,
+         columns,
+         true,
+       );
 
   RivetPredicate._comparison(
     RivetExpression<dynamic> left,
     String operator,
     RivetExpression<dynamic> right,
   ) : this._(
-        (placeholder) =>
-            '${left.renderPlaceholders(placeholder)} $operator '
-            '${right.renderPlaceholders((index) => placeholder(left.parameters.length + index))}',
+        (placeholder, nextAlias) =>
+            '${_renderPredicateExpression(left, placeholder, nextAlias)} $operator '
+            '${_renderPredicateExpression(
+              right,
+              (index) => placeholder(left.parameters.length + index),
+              nextAlias,
+            )}',
         [...left.parameters, ...right.parameters],
         [...left.columns, ...right.columns],
+        _usesRelationAliases(left) || _usesRelationAliases(right),
       );
 
-  final String Function(String Function(int index) placeholder) _renderSql;
+  final String Function(
+    String Function(int index) placeholder,
+    String Function()? nextAlias,
+  )
+  _renderSql;
   final List<Object?> parameters;
   final List<RivetColumn<dynamic>> columns;
+  final bool usesRelations;
 
-  String get sql => _render((_) => '@value');
+  String get sql => _render((_) => '@value', null);
 
-  String renderParameters({int startAt = 1}) => _render(
+  String renderParameters({int startAt = 1, String Function()? nextAlias}) => _render(
     (index) => '\$${startAt + index}',
+    nextAlias,
   );
 
   String renderLiterals() => _render(
     (index) => _postgresLiteral(parameters[index]),
+    null,
   );
 
   RivetPredicate operator &(RivetPredicate other) => RivetPredicate._(
-    (placeholder) =>
-        '(${_renderSql(placeholder)}) AND '
-        '(${other._renderSql((index) => placeholder(parameters.length + index))})',
+    (placeholder, nextAlias) =>
+        '(${_renderSql(placeholder, nextAlias)}) AND '
+        '(${other._renderSql((index) => placeholder(parameters.length + index), nextAlias)})',
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
+    usesRelations || other.usesRelations,
   );
 
   RivetPredicate operator |(RivetPredicate other) => RivetPredicate._(
-    (placeholder) =>
-        '(${_renderSql(placeholder)}) OR '
-        '(${other._renderSql((index) => placeholder(parameters.length + index))})',
+    (placeholder, nextAlias) =>
+        '(${_renderSql(placeholder, nextAlias)}) OR '
+        '(${other._renderSql((index) => placeholder(parameters.length + index), nextAlias)})',
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
+    usesRelations || other.usesRelations,
   );
 
   RivetPredicate operator ~() => RivetPredicate._(
-    (placeholder) => 'NOT (${_renderSql(placeholder)})',
+    (placeholder, nextAlias) => 'NOT (${_renderSql(placeholder, nextAlias)})',
     parameters,
     columns,
+    usesRelations,
   );
 
-  String _render(String Function(int index) placeholder) => _renderSql(placeholder);
+  String renderWith(
+    String Function(int index) placeholder,
+    String Function() nextAlias,
+  ) => _renderSql(placeholder, nextAlias);
+
+  String _render(
+    String Function(int index) placeholder,
+    String Function()? nextAlias,
+  ) => _renderSql(placeholder, nextAlias);
 }
+
+bool _usesRelationAliases(RivetExpression<dynamic> expression) =>
+    expression is RivetAliasedExpression<dynamic> && expression.usesRelations;
+
+String _renderPredicateExpression(
+  RivetExpression<dynamic> expression,
+  String Function(int index) placeholder,
+  String Function()? nextAlias,
+) => expression is RivetAliasedExpression<dynamic> && expression.usesRelations
+    ? expression.renderWith(
+        placeholder,
+        nextAlias ??
+            (throw const RivetUnsupportedQueryException(
+              'The expression requires an aliased query context.',
+            )),
+      )
+    : expression.renderPlaceholders(placeholder);
 
 String _postgresLiteral(Object? value) => switch (value) {
   null => 'NULL',

@@ -57,8 +57,25 @@ void main() {
       table.payload.codec.decode(table.payload.codec.encode(nested), isSqlNull: false),
       nested,
     );
-    expect(() => table.payload.codec.decode('{', isSqlNull: false), throwsFormatException);
+    expect(
+      () => table.payload.codec.decode('{', isSqlNull: false),
+      throwsA(
+        isA<FormatException>()
+            .having((error) => error.message, 'message', contains('Unexpected end of input'))
+            .having((error) => error.source, 'source', '{'),
+      ),
+    );
     expect(() => JsonValue.from(double.infinity), throwsFormatException);
+  });
+
+  test('renders embedded Turso parameters with portable casts', () {
+    final predicate = (table.count + 1).lessThanExpression(table.count.value(10));
+
+    expect(
+      predicate.renderParameters(),
+      r'("count" + CAST($1 AS integer)) < CAST($2 AS integer)',
+    );
+    expect(predicate.parameters, [BigInt.one, BigInt.from(10)]);
   });
 
   test('maps domain values and redacts converter failures', () {

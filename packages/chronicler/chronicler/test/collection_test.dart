@@ -1,11 +1,13 @@
 import 'package:chronicler/chronicler.dart';
 import 'package:chronicler/src/runtime.dart'
     show ChroniclerCaptureFixture, ChroniclerDeliveryFixture;
-import 'package:chrono_id/chrono_id.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/async.dart';
 import 'support/exporter.dart';
+import 'support/records.dart';
+import 'support/runtime.dart';
 
 void main() {
   group('Chronicler collection controls', () {
@@ -40,7 +42,7 @@ void main() {
 
       chronicler.setCollectionEnabled(ChroniclerSignal.logs, false);
       ChroniclerCaptureFixture.capture(chronicler, _event('kept-two'));
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
 
       expect(exporter.batches.single.records.map((record) => record.kind), [
         'event',
@@ -70,7 +72,7 @@ void main() {
         ChroniclerSignal.events: _event('event'),
         ChroniclerSignal.traces: _span(),
         ChroniclerSignal.errors: _error(),
-        ChroniclerSignal.metrics: _metric(),
+        ChroniclerSignal.metrics: testMetricRecord(),
       }.entries) {
         final exporter = TestExporter();
         final chronicler = _chronicler(exporter)..setCollectionEnabled(entry.key, false);
@@ -78,6 +80,12 @@ void main() {
         ChroniclerCaptureFixture.capture(chronicler, entry.value);
 
         expect(exporter.batches, isEmpty, reason: entry.key.name);
+        expect(
+          chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled],
+          BigInt.one,
+          reason: entry.key.name,
+        );
+        expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], isNull);
         expect(chronicler.isCollectionEnabled(entry.key), isFalse);
         expect(
           ChroniclerSignal.values
@@ -94,7 +102,7 @@ void main() {
       ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
       Context().withChronicler(chronicler.recorder).logs.info('log');
       ChroniclerCaptureFixture.capture(chronicler, _event('event'));
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       final records = exporter.batches.single.records;
 
       chronicler
@@ -109,7 +117,7 @@ void main() {
             ),
         ]),
       );
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
 
       expect(exporter.batches.last.records.map((record) => record.kind), ['event']);
       expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.one);
@@ -125,17 +133,17 @@ void main() {
         final exporter = TestExporter();
         final chronicler = _chronicler(exporter);
         Context().withChronicler(chronicler.recorder).logs.info('old');
-        await _waitFor(() => exporter.attempts.length == 1);
+        await waitForCondition(() => exporter.attempts.length == 1);
 
         chronicler
           ..setCollectionEnabled(ChroniclerSignal.logs, false)
           ..setCollectionEnabled(ChroniclerSignal.logs, true);
         outcome.value(exporter.attempts.single);
-        await _settle();
+        await settleAsync();
         expect(exporter.batches, hasLength(1));
 
         Context().withChronicler(chronicler.recorder).logs.info('new');
-        await _waitFor(() => exporter.attempts.length == 2);
+        await waitForCondition(() => exporter.attempts.length == 2);
         expect(
           (exporter.batches.last.records.single as LogRecord).payload.message,
           'new',
@@ -150,19 +158,19 @@ void main() {
         attemptTimeout: const Duration(milliseconds: 2),
       );
       Context().withChronicler(chronicler.recorder).logs.info('old');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       chronicler
         ..setCollectionEnabled(ChroniclerSignal.logs, false)
         ..setCollectionEnabled(ChroniclerSignal.logs, true);
-      await _waitFor(() => exporter.attempts.single.cancelCount == 1);
-      await _settle();
+      await waitForCondition(() => exporter.attempts.single.cancelCount == 1);
+      await settleAsync();
       expect(exporter.batches, hasLength(1));
 
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
-      await _settle();
+      await settleAsync();
       expect(exporter.batches, hasLength(1));
       Context().withChronicler(chronicler.recorder).logs.info('new');
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
     });
   });
 }
@@ -172,41 +180,36 @@ Chronicler _chronicler(
   int maxBatchRecords = 1,
   Duration batchInterval = const Duration(seconds: 5),
   Duration attemptTimeout = const Duration(seconds: 1),
-}) => Chronicler(
-  appId: 'app',
-  release: 'release',
-  source: ChroniclerSource.server,
-  exporter: exporter,
-  options: ChroniclerOptions(
-    delivery: DeliveryOptions(
-      maxBatchRecords: maxBatchRecords,
-      batchInterval: batchInterval,
-      attemptTimeout: attemptTimeout,
-      initialRetryDelay: const Duration(microseconds: 1),
+}) => closeAfterTest(
+  Chronicler(
+    appId: 'app',
+    release: 'release',
+    source: ChroniclerSource.server,
+    exporter: exporter,
+    options: ChroniclerOptions(
+      delivery: DeliveryOptions(
+        maxBatchRecords: maxBatchRecords,
+        batchInterval: batchInterval,
+        attemptTimeout: attemptTimeout,
+        initialRetryDelay: const Duration(microseconds: 1),
+      ),
     ),
   ),
-);
-
-RecordEnvelope _envelope() => RecordEnvelope(
-  eventId: ChronoID.generate(prefix: 'evt'),
-  appId: 'app',
-  release: 'release',
-  source: ChroniclerSource.server,
-  timestamp: DateTime.now().toUtc(),
+  exporter,
 );
 
 ProductEventRecord _event(String name) => ProductEventRecord(
-  envelope: _envelope(),
+  envelope: testEnvelope(),
   payload: ProductEventPayload(name: name),
 );
 
 LogRecord _log() => LogRecord(
-  envelope: _envelope(),
+  envelope: testEnvelope(),
   payload: LogPayload(severity: LogSeverity.info, message: 'log'),
 );
 
 SpanRecord _span() => SpanRecord(
-  envelope: _envelope().copyWith(
+  envelope: testEnvelope().copyWith(
     traceId: '0123456789abcdef0123456789abcdef',
     spanId: '0123456789abcdef',
   ),
@@ -219,38 +222,20 @@ SpanRecord _span() => SpanRecord(
 );
 
 ErrorRecord _error() => ErrorRecord(
-  envelope: _envelope(),
+  envelope: testEnvelope(),
   payload: ErrorPayload(
     error: const ErrorDetails(type: 'Exception', message: 'failed'),
     handled: true,
   ),
 );
 
-MetricRecord _metric() {
-  final now = DateTime.now().toUtc();
-  return MetricRecord(
-    envelope: _envelope(),
-    payload: MetricPayload(
-      name: 'count',
-      instrument: MetricInstrument.counter,
-      unit: '1',
-      intervalStart: now,
-      intervalEnd: now,
-      durationMicros: 0,
-      observationCount: 1,
-      temporality: MetricTemporality.delta,
-      sum: 1,
-    ),
-  );
-}
-
 IdentityLinkRecord _identity() => IdentityLinkRecord(
-  envelope: _envelope(),
+  envelope: testEnvelope(),
   payload: const IdentityLinkPayload(anonymousId: 'anonymous', userId: 'user'),
 );
 
 UserPropertiesSetRecord _propertiesSet() => UserPropertiesSetRecord(
-  envelope: _envelope(),
+  envelope: testEnvelope(),
   payload: UserPropertiesSetPayload(
     userId: 'user',
     properties: const {'name': 'A'},
@@ -258,16 +243,6 @@ UserPropertiesSetRecord _propertiesSet() => UserPropertiesSetRecord(
 );
 
 UserPropertiesUnsetRecord _propertiesUnset() => UserPropertiesUnsetRecord(
-  envelope: _envelope(),
+  envelope: testEnvelope(),
   payload: UserPropertiesUnsetPayload(userId: 'user', keys: const ['name']),
 );
-
-Future<void> _settle() => Future<void>.delayed(const Duration(milliseconds: 4));
-
-Future<void> _waitFor(bool Function() condition) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 1));
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) fail('Condition was not met before timeout.');
-    await Future<void>.delayed(const Duration(milliseconds: 1));
-  }
-}

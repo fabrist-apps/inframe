@@ -10,7 +10,7 @@ final class _BytePump {
     required this.maxResponseBytes,
     required this.release,
   }) {
-    controller = StreamController<List<int>>(
+    controller = StreamController<Uint8List>(
       sync: true,
       onListen: _start,
       onPause: () => _body?.pause(),
@@ -26,14 +26,14 @@ final class _BytePump {
   final _RequestLifetime lifetime;
   final int maxResponseBytes;
   final void Function() release;
-  late final StreamController<List<int>> controller;
+  late final StreamController<Uint8List> controller;
   StreamSubscription<List<int>>? _body;
   var _receivedBytes = 0;
   var _cancelled = false;
   var _finishing = false;
   var _released = false;
 
-  Stream<List<int>> get stream => controller.stream;
+  Stream<Uint8List> get stream => controller.stream;
 
   Future<void> _start() async {
     unawaited(

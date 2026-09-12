@@ -69,6 +69,11 @@ final class RecordExportOutcome {
 /// A cancelable export operation.
 abstract interface class ExportAttempt {
   /// Completes only after this attempt's transport work has stopped.
+  ///
+  /// Cancellation must stop the transport and settle this future. Until it
+  /// settles, Chronicler retains the concurrency slot and record capacity to
+  /// prevent overlapping attempts. If the transport cannot stop, capacity stays
+  /// occupied until the runtime's bounded shutdown completes.
   Future<ExportResult> get result;
 
   /// Promptly and idempotently requests cancellation.
@@ -81,5 +86,9 @@ abstract interface class ChroniclerExporter {
   ExportAttempt export(ChroniclerBatch batch);
 
   /// Releases resources owned by the exporter.
+  ///
+  /// Must abort remaining I/O even when cancellation requests have not settled.
+  /// Complete only after resources are released. Chronicler bounds its wait by
+  /// the total shutdown deadline and reports unfinished cleanup separately.
   Future<void> close();
 }

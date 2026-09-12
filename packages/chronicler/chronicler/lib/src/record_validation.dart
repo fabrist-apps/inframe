@@ -35,6 +35,52 @@ final class RecordValidator {
     return _snapshotMap(attributes, 1, activeContainers, budget);
   }
 
+  /// Validates and freezes the scalar dimensions carried by a metric series.
+  Map<String, Object?> snapshotMetricAttributes(
+    Map<String, Object?> attributes, {
+    required int maxAttributes,
+  }) {
+    if (attributes.length > maxAttributes) {
+      throw const RecordValidationException('metric attribute limit exceeded');
+    }
+    final budget = switch (maxSnapshotBytes) {
+      final maximum? => _SnapshotBudget(maximum),
+      null => null,
+    };
+    budget?.add(2);
+    final result = <String, Object?>{};
+    var first = true;
+    for (final MapEntry(:key, :value) in attributes.entries) {
+      if (key.isEmpty) {
+        throw const RecordValidationException('metric keys must be nonempty');
+      }
+      validateString(key, limits.maxKeyBytes, 'metric key');
+      budget?.add((first ? 0 : 1) + _encodedStringBytes(key) + 1);
+      first = false;
+      result[key] = switch (value) {
+        String() => _snapshotString(value, budget),
+        bool() => _countScalar(value, value ? 4 : 5, budget),
+        int() when value >= -_maximumPortableInteger && value <= _maximumPortableInteger =>
+          _countScalar(value, value.toString().length, budget),
+        int() => throw const RecordValidationException('integer is not portable'),
+        double()
+            when value.isFinite &&
+                (value != value.truncateToDouble() || value.abs() <= _maximumPortableInteger) =>
+          _countScalar(
+            value == 0 ? 0.0 : value,
+            jsonEncode(value == 0 ? 0.0 : value).length,
+            budget,
+          ),
+        double() when value.isFinite => throw const RecordValidationException(
+          'integer-valued number is not portable',
+        ),
+        double() => throw const RecordValidationException('number must be finite'),
+        _ => throw const RecordValidationException('metric values must be scalar'),
+      };
+    }
+    return Map.unmodifiable(result);
+  }
+
   Map<String, Object?> _snapshotMap(
     Map<Object?, Object?> value,
     int depth,

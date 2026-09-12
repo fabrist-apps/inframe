@@ -42,11 +42,19 @@ final class RivetConversionException extends RivetException {
 
 /// A single-row terminal observed the wrong number of rows.
 final class RivetCardinalityException extends RivetException {
-  const RivetCardinalityException({required this.expected, required this.actual})
-    : super('Expected $expected row, but received $actual.');
+  const RivetCardinalityException({
+    required this.expected,
+    required this.actual,
+    this.relationPath,
+  }) : super(
+         relationPath == null
+             ? 'Expected $expected row, but received $actual.'
+             : 'Expected $expected row at relation `$relationPath`, but received $actual.',
+       );
 
   final String expected;
   final int actual;
+  final String? relationPath;
 }
 
 /// A query cannot be represented by the supported root-read grammar.

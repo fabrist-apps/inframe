@@ -18,6 +18,7 @@ void main() {
     expect(authors.indexes.single.name, 'authors_name');
     expect(authors.indexes.single.predicate, isNotNull);
     expect(authors.constraints.single.name, 'authors_name_present');
+    expect(authors.constraints.single.expression, '"name" > \'\'');
     final posts = database.tables.singleWhere((table) => table.definition is Posts);
     expect(posts.definitionType, Posts);
     expect(posts.rowType, PostsRow);

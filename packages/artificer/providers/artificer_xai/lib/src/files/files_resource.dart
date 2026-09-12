@@ -143,11 +143,7 @@ final class XaiFilesResource {
           decodedChunkCapacity: decodedChunkCapacity,
           maxResponseBytes: maxResponseBytes,
         )
-        .map(
-          (chunk, _) => chunk is Uint8List
-              ? chunk.asUnmodifiableView()
-              : Uint8List.fromList(chunk).asUnmodifiableView(),
-        );
+        .map((chunk, _) => chunk.asUnmodifiableView());
   }
 
   /// Deletes one remote file only when explicitly executed.

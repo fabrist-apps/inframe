@@ -3,7 +3,9 @@ import 'package:chronicler/src/runtime.dart' show ChroniclerDeliveryFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/async.dart';
 import 'support/exporter.dart';
+import 'support/runtime.dart';
 
 void main() {
   group('Chronicler retries', () {
@@ -28,7 +30,7 @@ void main() {
       final first = exporter.batches.single.records.single;
 
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
-      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await waitForCondition(() => exporter.attempts.length == 2);
 
       expect(exporter.batches, hasLength(2));
       expect(exporter.batches.last.records.single.envelope.eventId, first.envelope.eventId);
@@ -46,7 +48,7 @@ void main() {
         ..info('accepted')
         ..info('retryable')
         ..info('rejected');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       final records = exporter.batches.single.records;
 
       exporter.attempts.single.completer.complete(
@@ -65,12 +67,12 @@ void main() {
           ),
         ]),
       );
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
 
       expect(exporter.batches.last.records, [records[1]]);
       expect(chronicler.diagnosticCounts[DiagnosticReason.exportRejected], BigInt.one);
       exporter.attempts.last.completer.complete(const ExportResult.retryable());
-      await _settle();
+      await settleAsync();
       expect(exporter.batches, hasLength(2));
       expect(chronicler.diagnosticCounts[DiagnosticReason.attemptsExhausted], BigInt.one);
     });
@@ -110,16 +112,16 @@ void main() {
         Context().withChronicler(chronicler.recorder).logs
           ..info('one')
           ..info('two');
-        await _waitFor(() => exporter.attempts.length == 1);
+        await waitForCondition(() => exporter.attempts.length == 1);
         final records = exporter.batches.single.records;
 
         exporter.attempts.single.completer.complete(malformed.value(records));
-        await _waitFor(() => exporter.attempts.length == 2);
+        await waitForCondition(() => exporter.attempts.length == 2);
 
         expect(exporter.batches.last.records, records);
         expect(chronicler.diagnosticCounts[DiagnosticReason.invalidExportResult], BigInt.one);
         exporter.attempts.last.completer.complete(const ExportResult.retryable());
-        await _settle();
+        await settleAsync();
         expect(exporter.batches, hasLength(2));
         expect(
           chronicler.diagnosticCounts[DiagnosticReason.attemptsExhausted],
@@ -134,10 +136,10 @@ void main() {
       Context().withChronicler(chronicler.recorder).logs
         ..info('one')
         ..info('two');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
 
       exporter.attempts.single.completer.complete(const ExportResult.rejected());
-      await _settle();
+      await settleAsync();
 
       expect(exporter.batches, hasLength(1));
       expect(chronicler.diagnosticCounts[DiagnosticReason.exportRejected], BigInt.two);
@@ -147,11 +149,11 @@ void main() {
       final exporter = TestExporter()..failNextExport(Exception('sync failure'));
       final chronicler = _chronicler(exporter, maxAttempts: 3);
       Context().withChronicler(chronicler.recorder).logs.info('failure');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       exporter.attempts.single.completer.completeError(StateError('async failure'));
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
       exporter.attempts.last.completer.complete(const ExportResult.retryable());
-      await _settle();
+      await settleAsync();
 
       expect(exporter.batches, hasLength(3));
       expect(chronicler.diagnosticCounts[DiagnosticReason.exportFailed], BigInt.two);
@@ -177,10 +179,10 @@ void main() {
       Context().withChronicler(chronicler.recorder).logs.info('exhaust');
 
       for (var attempt = 0; attempt < 5; attempt++) {
-        await _waitFor(() => exporter.attempts.length == attempt + 1);
+        await waitForCondition(() => exporter.attempts.length == attempt + 1);
         exporter.attempts[attempt].completer.complete(const ExportResult.retryable());
       }
-      await _settle();
+      await settleAsync();
 
       expect(exporter.batches, hasLength(5));
       expect(ceilings, const [
@@ -207,10 +209,10 @@ void main() {
       Context().withChronicler(chronicler.recorder).logs.info('capped');
 
       for (var attempt = 0; attempt < 5; attempt++) {
-        await _waitFor(() => exporter.attempts.length == attempt + 1);
+        await waitForCondition(() => exporter.attempts.length == attempt + 1);
         exporter.attempts[attempt].completer.complete(const ExportResult.retryable());
       }
-      await _settle();
+      await settleAsync();
 
       expect(ceilings, const [
         Duration(microseconds: 2),
@@ -229,14 +231,14 @@ void main() {
         maxRetryDelay: const Duration(hours: 2),
       );
       Context().withChronicler(chronicler.recorder).logs.info('long delay');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
 
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
-      await _settle();
+      await settleAsync();
 
       expect(exporter.attempts, hasLength(1));
       final closeFuture = chronicler.close();
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
       exporter.attempts.last.completer.complete(const ExportResult.accepted());
       expect((await closeFuture).accepted, 1);
     });
@@ -255,27 +257,27 @@ void main() {
       Context().withChronicler(chronicler.recorder).logs
         ..info('old-one')
         ..info('old-two');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
-      await _settle();
+      await settleAsync();
 
       Context().withChronicler(chronicler.recorder).logs
         ..info('new-one')
         ..info('new-two');
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
       expect(
         exporter.batches[1].records.map((record) => (record as LogRecord).payload.message),
         ['new-one', 'new-two'],
       );
 
       exporter.attempts[1].completer.complete(const ExportResult.accepted());
-      await _waitFor(() => exporter.attempts.length == 3);
+      await waitForCondition(() => exporter.attempts.length == 3);
       final retryMessages = exporter.batches[2].records
           .map((record) => (record as LogRecord).payload.message)
           .toList();
       if (retryMessages.length == 1) {
         exporter.attempts[2].completer.complete(const ExportResult.accepted());
-        await _waitFor(() => exporter.attempts.length == 4);
+        await waitForCondition(() => exporter.attempts.length == 4);
         retryMessages.add(
           (exporter.batches[3].records.first as LogRecord).payload.message,
         );
@@ -293,12 +295,12 @@ void main() {
         ..info('one')
         ..info('two')
         ..info('three');
-      await _waitFor(() => exporter.attempts.length == 2);
-      await _settle();
+      await waitForCondition(() => exporter.attempts.length == 2);
+      await settleAsync();
       expect(exporter.attempts, hasLength(2));
 
       exporter.attempts.first.completer.complete(const ExportResult.retryable());
-      await _waitFor(() => exporter.attempts.length == 3);
+      await waitForCondition(() => exporter.attempts.length == 3);
       expect(exporter.batches[2].records.single, exporter.batches.first.records.single);
     });
 
@@ -311,14 +313,14 @@ void main() {
       Context().withChronicler(chronicler.recorder).logs
         ..info('timed-out')
         ..info('waiting');
-      await _waitFor(() => exporter.attempts.length == 1);
-      await _waitFor(() => exporter.attempts.single.cancelCount == 1);
-      await _settle();
+      await waitForCondition(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.single.cancelCount == 1);
+      await settleAsync();
 
       expect(exporter.batches, hasLength(1));
       expect(chronicler.diagnosticCounts[DiagnosticReason.exportTimedOut], BigInt.one);
       exporter.attempts.single.completer.complete(const ExportResult.accepted());
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
       expect((exporter.batches.last.records.single as LogRecord).payload.message, 'waiting');
     });
 
@@ -338,8 +340,8 @@ void main() {
       );
 
       Context().withChronicler(chronicler.recorder).logs.info('blocked export');
-      await _waitFor(() => exporter.attempt != null);
-      await _settle();
+      await waitForCondition(() => exporter.attempt != null);
+      await settleAsync();
 
       expect(exporter.attempt!.cancelCount, 1);
       expect(chronicler.diagnosticCounts[DiagnosticReason.exportTimedOut], BigInt.one);
@@ -353,11 +355,11 @@ void main() {
         attemptTimeout: const Duration(milliseconds: 2),
       );
       Context().withChronicler(chronicler.recorder).logs.info('late rejection');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       exporter.attempts.single.cancelError = Exception('cancel failed');
-      await _waitFor(() => exporter.attempts.single.cancelCount == 1);
+      await waitForCondition(() => exporter.attempts.single.cancelCount == 1);
       exporter.attempts.single.completer.complete(const ExportResult.rejected());
-      await _settle();
+      await settleAsync();
 
       expect(exporter.batches, hasLength(1));
       expect(
@@ -390,9 +392,9 @@ void main() {
         ),
       );
       Context().withChronicler(chronicler.recorder).logs.info('hook');
-      await _waitFor(() => exporter.attempts.length == 1);
+      await waitForCondition(() => exporter.attempts.length == 1);
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
-      await _waitFor(() => exporter.attempts.length == 2);
+      await waitForCondition(() => exporter.attempts.length == 2);
 
       expect(hookCalls, 1);
     });
@@ -407,24 +409,25 @@ Chronicler _chronicler(
   Duration attemptTimeout = const Duration(seconds: 1),
   Duration initialRetryDelay = const Duration(microseconds: 1),
   Duration maxRetryDelay = const Duration(seconds: 30),
-}) => Chronicler(
-  appId: 'app',
-  release: 'release',
-  source: ChroniclerSource.server,
-  exporter: exporter,
-  options: ChroniclerOptions(
-    delivery: DeliveryOptions(
-      maxBatchRecords: maxBatchRecords,
-      maxAttempts: maxAttempts,
-      maxConcurrentExports: maxConcurrentExports,
-      attemptTimeout: attemptTimeout,
-      initialRetryDelay: initialRetryDelay,
-      maxRetryDelay: maxRetryDelay,
+}) => closeAfterTest(
+  Chronicler(
+    appId: 'app',
+    release: 'release',
+    source: ChroniclerSource.server,
+    exporter: exporter,
+    options: ChroniclerOptions(
+      delivery: DeliveryOptions(
+        maxBatchRecords: maxBatchRecords,
+        maxAttempts: maxAttempts,
+        maxConcurrentExports: maxConcurrentExports,
+        attemptTimeout: attemptTimeout,
+        initialRetryDelay: initialRetryDelay,
+        maxRetryDelay: maxRetryDelay,
+      ),
     ),
   ),
+  exporter,
 );
-
-Future<void> _settle() => Future<void>.delayed(const Duration(milliseconds: 4));
 
 final class _BlockingAcceptedExporter implements ChroniclerExporter {
   _BlockingAcceptedExporter(this.blockFor);
@@ -444,12 +447,4 @@ final class _BlockingAcceptedExporter implements ChroniclerExporter {
 
   @override
   Future<void> close() async {}
-}
-
-Future<void> _waitFor(bool Function() condition) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 1));
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) fail('Condition was not met before timeout.');
-    await Future<void>.delayed(const Duration(milliseconds: 1));
-  }
 }
