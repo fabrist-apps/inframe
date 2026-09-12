@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:postgres/postgres.dart' as pg;
@@ -30,16 +32,20 @@ final class RivetConnection {
 
 /// Options for the pool owned by a [RivetDb].
 final class RivetPoolOptions {
-  const RivetPoolOptions({this.maxConnections = 10});
+  const RivetPoolOptions({
+    this.maxConnections = 10,
+    this.acquireTimeout = const Duration(seconds: 30),
+  });
 
   final int maxConnections;
+  final Duration acquireTimeout;
 }
 
 /// An owned connection pool used by generated Rivet databases.
 final class RivetDb implements RivetExecutor {
   RivetDb._(this._pool, this._connection, this.tables);
 
-  final pg.Pool<void> _pool;
+  final _RivetPool _pool;
   final RivetConnection _connection;
   final List<RivetTableSchema<Object?, Object?>> tables;
   bool _closed = false;
@@ -58,20 +64,17 @@ final class RivetDb implements RivetExecutor {
       throw ArgumentError.value(connection.url, 'url', 'must use postgres or postgresql');
     }
     final credentials = _credentials(uri.userInfo);
-    final driverPool = pg.Pool<void>.withEndpoints(
-      [
-        pg.Endpoint(
-          host: uri.host.isEmpty ? 'localhost' : uri.host,
-          port: uri.hasPort ? uri.port : 5432,
-          database: uri.pathSegments.isEmpty || uri.pathSegments.first.isEmpty
-              ? 'postgres'
-              : uri.pathSegments.first,
-          username: credentials.$1,
-          password: credentials.$2,
-        ),
-      ],
-      settings: pg.PoolSettings(
-        maxConnectionCount: pool.maxConnections,
+    final driverPool = _RivetPool(
+      endpoint: pg.Endpoint(
+        host: uri.host.isEmpty ? 'localhost' : uri.host,
+        port: uri.hasPort ? uri.port : 5432,
+        database: uri.pathSegments.isEmpty || uri.pathSegments.first.isEmpty
+            ? 'postgres'
+            : uri.pathSegments.first,
+        username: credentials.$1,
+        password: credentials.$2,
+      ),
+      settings: pg.ConnectionSettings(
         connectTimeout: connection.connectTimeout,
         sslMode: switch (connection.sslMode) {
           RivetSslMode.verifyFull => pg.SslMode.verifyFull,
@@ -79,7 +82,10 @@ final class RivetDb implements RivetExecutor {
           RivetSslMode.disable => pg.SslMode.disable,
         },
         securityContext: connection.securityContext,
+        queryTimeout: const Duration(days: 3650),
       ),
+      maxConnections: pool.maxConnections,
+      acquireTimeout: pool.acquireTimeout,
     );
     return RivetDb._(driverPool, connection, List.unmodifiable(tables));
   }
@@ -94,9 +100,11 @@ final class RivetDb implements RivetExecutor {
     }
     try {
       _connection.onStatement?.call(query.sql);
-      final result = await _pool.execute(
-        pg.Sql(query.sql, types: List.filled(query.parameters.length, pg.Type.unspecified)),
-        parameters: query.parameters,
+      final result = await _pool.run(
+        (session) => session.execute(
+          pg.Sql(query.sql, types: List.filled(query.parameters.length, pg.Type.unspecified)),
+          parameters: query.parameters,
+        ),
       );
       return [
         for (final row in result)
@@ -116,6 +124,117 @@ final class RivetDb implements RivetExecutor {
     if (_closed) return;
     _closed = true;
     await _pool.close();
+  }
+}
+
+final class _PoolWaiter {
+  final completer = Completer<pg.Connection>();
+}
+
+final class _RivetPool {
+  _RivetPool({
+    required this.endpoint,
+    required this.settings,
+    required this.maxConnections,
+    required this.acquireTimeout,
+  });
+
+  final pg.Endpoint endpoint;
+  final pg.ConnectionSettings settings;
+  final int maxConnections;
+  final Duration acquireTimeout;
+  final Queue<_PoolWaiter> _waiters = Queue();
+  final List<pg.Connection> _idle = [];
+  int _connectionCount = 0;
+  int _borrowed = 0;
+  bool _closing = false;
+  Completer<void>? _closeCompleter;
+
+  Future<T> run<T>(Future<T> Function(pg.Session session) operation) async {
+    final connection = await _acquire();
+    try {
+      return await operation(connection);
+    } finally {
+      await _release(connection);
+    }
+  }
+
+  Future<pg.Connection> _acquire() async {
+    if (_closing) throw const RivetExecutorClosedException('The database is closing or closed.');
+    if (_idle.isNotEmpty) {
+      _borrowed++;
+      return _idle.removeLast();
+    }
+    if (_connectionCount < maxConnections) {
+      _connectionCount++;
+      try {
+        final connection = await pg.Connection.open(endpoint, settings: settings);
+        if (_closing) {
+          await connection.close();
+          _connectionCount--;
+          throw const RivetExecutorClosedException('The database is closing or closed.');
+        }
+        _borrowed++;
+        return connection;
+      } catch (_) {
+        if (_connectionCount > 0 && _borrowed < _connectionCount) _connectionCount--;
+        rethrow;
+      }
+    }
+    final waiter = _PoolWaiter();
+    _waiters.add(waiter);
+    try {
+      return await waiter.completer.future.timeout(acquireTimeout);
+    } on TimeoutException {
+      _waiters.remove(waiter);
+      throw TimeoutException('Timed out waiting for a Rivet pool connection.', acquireTimeout);
+    }
+  }
+
+  Future<void> _release(pg.Connection connection) async {
+    _borrowed--;
+    while (_waiters.isNotEmpty) {
+      final waiter = _waiters.removeFirst();
+      if (!waiter.completer.isCompleted) {
+        _borrowed++;
+        waiter.completer.complete(connection);
+        return;
+      }
+    }
+    if (_closing) {
+      await connection.close();
+      _connectionCount--;
+      _completeCloseIfDrained();
+    } else {
+      _idle.add(connection);
+    }
+  }
+
+  Future<void> close() {
+    if (_closeCompleter != null) return _closeCompleter!.future;
+    _closing = true;
+    _closeCompleter = Completer<void>();
+    for (final waiter in _waiters) {
+      waiter.completer.completeError(
+        const RivetExecutorClosedException('The database is closing or closed.'),
+      );
+    }
+    _waiters.clear();
+    final idle = List<pg.Connection>.of(_idle);
+    _idle.clear();
+    Future.wait(idle.map((connection) => connection.close())).then((_) {
+      _connectionCount -= idle.length;
+      _completeCloseIfDrained();
+    });
+    _completeCloseIfDrained();
+    return _closeCompleter!.future;
+  }
+
+  void _completeCloseIfDrained() {
+    if (_closing && _borrowed == 0 && _connectionCount == 0) {
+      final completer = _closeCompleter;
+      if (completer != null && !completer.isCompleted) completer.complete();
+    }
   }
 }
 
