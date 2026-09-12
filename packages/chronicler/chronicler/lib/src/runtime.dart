@@ -530,30 +530,12 @@ final class ChroniclerRuntime {
         ? SpanStatus.error
         : status;
     final durationMicros = (_elapsedNow - span.startedAt).inMicroseconds;
-    final attribution = span.attribution;
     _finalizeAndEnqueue(
-      SpanRecord(
-        envelope: RecordEnvelope(
-          eventId: span.eventId,
-          appId: appId,
-          release: release,
-          source: source,
-          timestamp: span.timestamp,
-          buildId: buildId,
-          userId: attribution.userId,
-          anonymousId: attribution.anonymousId,
-          sessionId: attribution.sessionId,
-          traceId: span.traceId,
-          spanId: span.spanId,
-          parentSpanId: span.parentSpanId,
-        ),
-        payload: SpanPayload(
-          name: span.name,
-          spanKind: span.kind,
-          status: finalStatus,
-          durationMicros: durationMicros,
-          attributes: span.attributes,
-        ),
+      _spanRecord(
+        span,
+        status: finalStatus,
+        durationMicros: durationMicros,
+        attributes: span.attributes,
       ),
     );
   }
