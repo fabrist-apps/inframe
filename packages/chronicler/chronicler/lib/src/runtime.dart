@@ -8,6 +8,7 @@ import 'package:chronicler/src/diagnostics.dart';
 import 'package:chronicler/src/lifecycle.dart';
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/record_validation.dart';
+import 'package:chronicler/src/trace_propagation.dart';
 import 'package:chronicler/src/transport.dart';
 import 'package:chrono_id/chrono_id.dart';
 
@@ -29,6 +30,8 @@ final class Chronicler {
          buildId: buildId,
          options: options,
        );
+
+  Chronicler._fromRuntime(this._runtime);
 
   /// Default field-name terms replaced before buffering.
   static const Set<String> defaultSensitiveFieldTerms =
@@ -73,6 +76,87 @@ final class ChroniclerRecorder {
 
   final ChroniclerRuntime _runtime;
   final _RecorderAttribution _attribution;
+
+  /// Runs [run] in a new root trace and records its callback lifetime.
+  Future<T> trace<T>(
+    String name, {
+    required FutureOr<T> Function(ChroniclerRecorder recorder) run,
+    RemoteTraceParent? parent,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => _runtime._runSpan(
+    this,
+    name,
+    kind: kind,
+    attributes: attributes,
+    forceRoot: true,
+    remoteParent: parent,
+    run: run,
+  );
+
+  /// Runs [run] synchronously in a new root trace.
+  T traceSync<T>(
+    String name, {
+    required T Function(ChroniclerRecorder recorder) run,
+    RemoteTraceParent? parent,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => _runtime._runSpanSync(
+    this,
+    name,
+    kind: kind,
+    attributes: attributes,
+    forceRoot: true,
+    remoteParent: parent,
+    run: run,
+  );
+
+  /// Runs [run] in a child span, or a new root when no span is active.
+  Future<T> span<T>(
+    String name, {
+    required FutureOr<T> Function(ChroniclerRecorder recorder) run,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => _runtime._runSpan(
+    this,
+    name,
+    kind: kind,
+    attributes: attributes,
+    forceRoot: false,
+    remoteParent: null,
+    run: run,
+  );
+
+  /// Runs [run] synchronously in a child span, or a new root when inactive.
+  T spanSync<T>(
+    String name, {
+    required T Function(ChroniclerRecorder recorder) run,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => _runtime._runSpanSync(
+    this,
+    name,
+    kind: kind,
+    attributes: attributes,
+    forceRoot: false,
+    remoteParent: null,
+    run: run,
+  );
+
+  /// Marks the active callback-managed span as failed.
+  void setSpanError() => _runtime._setSpanError(_attribution.span);
+
+  /// Replaces one attribute on the active callback-managed span.
+  void setSpanAttribute(String key, Object? value) =>
+      _runtime._setSpanAttributes(_attribution.span, {key: value});
+
+  /// Atomically merges [attributes] into the active callback-managed span.
+  void setSpanAttributes(Map<String, Object?> attributes) =>
+      _runtime._setSpanAttributes(_attribution.span, attributes);
+
+  /// Returns a cleaned carrier containing this active span's W3C metadata.
+  Map<String, String> injectTrace(Map<String, String> headers) =>
+      _runtime._injectTrace(_attribution.span, headers);
 
   /// Returns a recorder whose analytics identity is exactly the supplied IDs.
   ///
@@ -147,6 +231,7 @@ final class _RecorderAttribution {
     this.sessionId,
     this.traceId,
     this.spanId,
+    this.span,
   });
 
   final String? userId;
@@ -154,6 +239,7 @@ final class _RecorderAttribution {
   final String? sessionId;
   final String? traceId;
   final String? spanId;
+  final _SpanState? span;
 }
 
 /// Internal owner of queue, delivery, and lifecycle state.
@@ -165,6 +251,7 @@ final class ChroniclerRuntime {
     required this.exporter,
     required this.buildId,
     required this.options,
+    required this._secureRandom,
   }) : validator = RecordValidator(
          options.limits,
          maxSnapshotBytes: options.delivery.maxRecordBytes,
@@ -185,6 +272,7 @@ final class ChroniclerRuntime {
     required ChroniclerExporter exporter,
     required String? buildId,
     required ChroniclerOptions options,
+    Random Function()? secureRandomFactory,
   }) {
     final snapshot = _validateAndSnapshotOptions(options);
     final validator = RecordValidator(snapshot.limits);
@@ -193,6 +281,7 @@ final class ChroniclerRuntime {
     if (buildId != null) {
       _validateConfiguredLabel(validator, buildId, 'buildId', snapshot.limits.maxLabelBytes);
     }
+    final secureRandom = _createSecureRandom(secureRandomFactory);
     return ChroniclerRuntime._(
       appId: appId,
       release: release,
@@ -200,6 +289,7 @@ final class ChroniclerRuntime {
       exporter: exporter,
       buildId: buildId,
       options: snapshot,
+      secureRandom: secureRandom,
     );
   }
 
@@ -229,14 +319,18 @@ final class ChroniclerRuntime {
 
   /// Payload-free runtime diagnostic channel.
   final DiagnosticChannel diagnostics;
+  Random _secureRandom;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
+  final _liveSpans = <_SpanState>{};
   final _flushWaiters = <_FlushWaiter>{};
   final _flushFinalizations = Queue<List<ChroniclerRecord>>();
   final _elapsed = Stopwatch()..start();
+  DateTime Function()? _nowOverride;
+  Duration Function()? _elapsedOverride;
   late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
   late bool _propagationEnabled = options.tracing.propagationEnabled;
-  late final Random _random = Random();
+  Random _random = Random();
   var _insideHook = false;
   var _pendingBytes = 0;
   var _nextSequence = 0;
@@ -252,6 +346,10 @@ final class ChroniclerRuntime {
 
   /// An immutable snapshot of exact diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
+
+  DateTime get _now => (_nowOverride?.call() ?? DateTime.now()).toUtc();
+
+  Duration get _elapsedNow => _elapsedOverride?.call() ?? _elapsed.elapsed;
 
   ChroniclerRecorder _withIdentity(
     ChroniclerRecorder recorder, {
@@ -278,8 +376,299 @@ final class ChroniclerRuntime {
         sessionId: sessionId,
         traceId: recorder._attribution.traceId,
         spanId: recorder._attribution.spanId,
+        span: recorder._attribution.span,
       ),
     );
+  }
+
+  Future<T> _runSpan<T>(
+    ChroniclerRecorder recorder,
+    String name, {
+    required SpanKind kind,
+    required Map<String, Object?> attributes,
+    required bool forceRoot,
+    required RemoteTraceParent? remoteParent,
+    required FutureOr<T> Function(ChroniclerRecorder recorder) run,
+  }) async {
+    final started = _startSpan(
+      recorder,
+      name,
+      kind: kind,
+      attributes: attributes,
+      forceRoot: forceRoot,
+      remoteParent: remoteParent,
+    );
+    try {
+      final result = run(started.recorder);
+      final value = await result;
+      _finishSpan(started.state, SpanStatus.success);
+      return value;
+    } on Object catch (error) {
+      _finishSpan(started.state, _failureStatus(error));
+      rethrow;
+    }
+  }
+
+  T _runSpanSync<T>(
+    ChroniclerRecorder recorder,
+    String name, {
+    required SpanKind kind,
+    required Map<String, Object?> attributes,
+    required bool forceRoot,
+    required RemoteTraceParent? remoteParent,
+    required T Function(ChroniclerRecorder recorder) run,
+  }) {
+    final started = _startSpan(
+      recorder,
+      name,
+      kind: kind,
+      attributes: attributes,
+      forceRoot: forceRoot,
+      remoteParent: remoteParent,
+    );
+    try {
+      final result = run(started.recorder);
+      if (result is Future) {
+        diagnostics.record(DiagnosticReason.syncCallbackReturnedFuture);
+      }
+      _finishSpan(started.state, SpanStatus.success);
+      return result;
+    } on Object catch (error) {
+      _finishSpan(started.state, _failureStatus(error));
+      rethrow;
+    }
+  }
+
+  SpanStatus _failureStatus(Object error) {
+    final classifier = options.tracing.isCancellation;
+    if (classifier == null) return SpanStatus.error;
+    try {
+      return classifier(error) ? SpanStatus.cancelled : SpanStatus.error;
+    } on Object {
+      diagnostics.record(DiagnosticReason.cancellationClassifierFailed);
+      return SpanStatus.error;
+    }
+  }
+
+  _StartedSpan _startSpan(
+    ChroniclerRecorder recorder,
+    String name, {
+    required SpanKind kind,
+    required Map<String, Object?> attributes,
+    required bool forceRoot,
+    required RemoteTraceParent? remoteParent,
+  }) {
+    if (_state != ChroniclerRuntimeState.running) {
+      diagnostics.record(DiagnosticReason.runtimeClosed);
+      return _StartedSpan(null, recorder);
+    }
+    if (_insideHook || diagnostics.insideCallback) {
+      diagnostics.record(DiagnosticReason.reentrantRecording);
+      return _StartedSpan(null, recorder);
+    }
+    final acceptedRemote = forceRoot && _propagationEnabled ? remoteParent : null;
+    final current = recorder._attribution.span;
+    final activeParent = !forceRoot && current != null && !current.ended ? current : null;
+    late final String traceId;
+    late final String spanId;
+    try {
+      traceId = acceptedRemote?.traceId ?? activeParent?.traceId ?? _traceId();
+      spanId = _spanId();
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+      return _StartedSpan(null, recorder);
+    }
+    final collectionEnabled = _enabledSignals.contains(ChroniclerSignal.traces);
+    late final bool sampled;
+    try {
+      sampled = activeParent == null
+          ? _selectBoundarySampling(acceptedRemote, collectionEnabled)
+          : activeParent.lineageRecording && activeParent.sampled;
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+      return _StartedSpan(null, recorder);
+    }
+    final lineageRecording = activeParent?.lineageRecording ?? (collectionEnabled && sampled);
+    _SpanRecordingState? recording;
+    if (lineageRecording) {
+      try {
+        validator.validateString(name, options.limits.maxLabelBytes, 'span name');
+        if (name.isEmpty) {
+          throw const RecordValidationException('span name must be nonempty');
+        }
+        recording = _SpanRecordingState(
+          eventId: ChronoID.generate(prefix: 'evt'),
+          name: name,
+          kind: kind,
+          attributes: _redactMap(validator.snapshotAttributes(attributes)),
+          startedAt: _elapsedNow,
+          timestamp: _now,
+          attribution: recorder._attribution,
+        );
+      } on Object {
+        diagnostics.record(DiagnosticReason.invalidRecord);
+      }
+    }
+    final state = _SpanState(
+      traceId: traceId,
+      spanId: spanId,
+      parentSpanId: acceptedRemote?.parentSpanId ?? activeParent?.spanId,
+      lineageRecording: lineageRecording,
+      sampled: sampled,
+      tracestate: acceptedRemote?.tracestate ?? activeParent?.tracestate ?? const [],
+      recording: recording,
+    );
+    _liveSpans.add(state);
+    return _StartedSpan(
+      state,
+      ChroniclerRecorder._(
+        this,
+        _RecorderAttribution(
+          userId: recorder._attribution.userId,
+          anonymousId: recorder._attribution.anonymousId,
+          sessionId: recorder._attribution.sessionId,
+          traceId: traceId,
+          spanId: spanId,
+          span: state,
+        ),
+      ),
+    );
+  }
+
+  void _finishSpan(_SpanState? span, SpanStatus status) {
+    if (span == null) return;
+    if (span.ended) return;
+    span.ended = true;
+    _liveSpans.remove(span);
+    final recording = span.recording;
+    if (recording == null) return;
+    final finalStatus = status == SpanStatus.success && span.explicitError
+        ? SpanStatus.error
+        : status;
+    final durationMicros = (_elapsedNow - recording.startedAt).inMicroseconds;
+    _finalizeAndEnqueue(
+      _spanRecord(
+        span,
+        recording,
+        status: finalStatus,
+        durationMicros: durationMicros,
+        attributes: recording.attributes,
+      ),
+    );
+  }
+
+  void _setSpanError(_SpanState? span) {
+    if (!_canUpdateSpan(span)) return;
+    span!.explicitError = true;
+  }
+
+  void _setSpanAttributes(_SpanState? span, Map<String, Object?> update) {
+    if (!_canUpdateSpan(span)) return;
+    final recording = span!.recording;
+    if (recording == null) return;
+    try {
+      final proposed = <String, Object?>{...recording.attributes, ...update};
+      final snapshot = _redactMap(validator.snapshotAttributes(proposed));
+      final reserved = _spanRecord(
+        span,
+        recording,
+        status: SpanStatus.cancelled,
+        durationMicros: 9007199254740991,
+        attributes: snapshot,
+      );
+      codec
+        ..validateRecord(reserved)
+        ..encodeRecord(reserved);
+      recording.attributes = snapshot;
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidSpanUpdate);
+    }
+  }
+
+  bool _canUpdateSpan(_SpanState? span) {
+    if (span == null) {
+      diagnostics.record(DiagnosticReason.noActiveSpan);
+      return false;
+    }
+    if (span.ended) {
+      diagnostics.record(DiagnosticReason.invalidSpanUpdate);
+      return false;
+    }
+    return true;
+  }
+
+  SpanRecord _spanRecord(
+    _SpanState span,
+    _SpanRecordingState recording, {
+    required SpanStatus status,
+    required int durationMicros,
+    required Map<String, Object?> attributes,
+  }) {
+    final attribution = recording.attribution;
+    return SpanRecord(
+      envelope: RecordEnvelope(
+        eventId: recording.eventId,
+        appId: appId,
+        release: release,
+        source: source,
+        timestamp: recording.timestamp,
+        buildId: buildId,
+        userId: attribution.userId,
+        anonymousId: attribution.anonymousId,
+        sessionId: attribution.sessionId,
+        traceId: span.traceId,
+        spanId: span.spanId,
+        parentSpanId: span.parentSpanId,
+      ),
+      payload: SpanPayload(
+        name: recording.name,
+        spanKind: recording.kind,
+        status: status,
+        durationMicros: durationMicros,
+        attributes: attributes,
+      ),
+    );
+  }
+
+  String _traceId() => _randomHex(16);
+
+  String _spanId() => _randomHex(8);
+
+  bool _selectLocalTraceSampling() {
+    final rate = options.sampling.traces;
+    final sampled = rate == 1 || rate > 0 && _random.nextDouble() < rate;
+    if (!sampled) diagnostics.record(DiagnosticReason.sampledOut);
+    return sampled;
+  }
+
+  bool _selectBoundarySampling(RemoteTraceParent? parent, bool collectionEnabled) {
+    if (!collectionEnabled) return false;
+    if (parent == null || !options.tracing.honorRemoteSampling) {
+      return _selectLocalTraceSampling();
+    }
+    if (!parent.sampled) diagnostics.record(DiagnosticReason.sampledOut);
+    return parent.sampled;
+  }
+
+  Map<String, String> _injectTrace(_SpanState? span, Map<String, String> headers) {
+    final result = <String, String>{
+      for (final MapEntry(:key, :value) in headers.entries)
+        if (key.toLowerCase() != 'traceparent' && key.toLowerCase() != 'tracestate') key: value,
+    };
+    if (!_propagationEnabled || span == null || span.ended) return result;
+    result['traceparent'] = '00-${span.traceId}-${span.spanId}-${span.sampled ? '01' : '00'}';
+    if (span.tracestate.isNotEmpty) result['tracestate'] = span.tracestate.join(',');
+    return result;
+  }
+
+  String _randomHex(int byteCount) {
+    for (var attempt = 0; attempt < 8; attempt++) {
+      final bytes = List<int>.generate(byteCount, (_) => _secureRandom.nextInt(256));
+      if (bytes.any((byte) => byte != 0)) {
+        return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+      }
+    }
+    throw StateError('Secure randomness produced only zero identifiers');
   }
 
   /// Flushes the current record snapshot within [timeout].
@@ -463,6 +852,13 @@ final class ChroniclerRuntime {
       return;
     }
     _enabledSignals.remove(signal);
+    if (signal == ChroniclerSignal.traces) {
+      for (final span in _liveSpans) {
+        span
+          ..recording = null
+          ..lineageRecording = false;
+      }
+    }
     for (final record in _pending.where((record) => _signalFor(record.record) == signal).toList()) {
       _pending.remove(record);
       _drop(record, DropReason.collectionDisabled);
@@ -1277,6 +1673,105 @@ final class ChroniclerCaptureFixture {
   );
 }
 
+/// Internal fixture bridge for deterministic tracing tests.
+final class ChroniclerTracingFixture {
+  const ChroniclerTracingFixture._();
+
+  /// Creates a runtime using [secureRandom] for startup validation and IDs.
+  static Chronicler create({
+    required String appId,
+    required String release,
+    required ChroniclerSource source,
+    required ChroniclerExporter exporter,
+    required Random Function() secureRandom,
+    ChroniclerOptions options = const ChroniclerOptions(),
+  }) => Chronicler._fromRuntime(
+    ChroniclerRuntime.create(
+      appId: appId,
+      release: release,
+      source: source,
+      exporter: exporter,
+      buildId: null,
+      options: options,
+      secureRandomFactory: secureRandom,
+    ),
+  );
+
+  /// Replaces wall and monotonic clocks for span-lifetime tests.
+  static void overrideClocks(
+    Chronicler chronicler, {
+    required DateTime Function() now,
+    required Duration Function() elapsed,
+  }) {
+    chronicler._runtime
+      .._nowOverride = now
+      .._elapsedOverride = elapsed;
+  }
+
+  /// Replaces the ID source after setup for recording-failure tests.
+  static void overrideSecureRandom(Chronicler chronicler, Random random) {
+    chronicler._runtime._secureRandom = random;
+  }
+
+  /// Replaces the root sampling source for whole-trace tests.
+  static void overrideSamplingRandom(Chronicler chronicler, Random random) {
+    chronicler._runtime._random = random;
+  }
+
+  /// Returns the number of payload attributes retained by [recorder]'s span.
+  static int retainedAttributeCount(ChroniclerRecorder recorder) =>
+      recorder._attribution.span?.recording?.attributes.length ?? 0;
+}
+
+final class _StartedSpan {
+  const _StartedSpan(this.state, this.recorder);
+
+  final _SpanState? state;
+  final ChroniclerRecorder recorder;
+}
+
+final class _SpanState {
+  _SpanState({
+    required this.traceId,
+    required this.spanId,
+    required this.parentSpanId,
+    required this.lineageRecording,
+    required this.sampled,
+    required this.tracestate,
+    required this.recording,
+  });
+
+  final String traceId;
+  final String spanId;
+  final String? parentSpanId;
+  bool lineageRecording;
+  final bool sampled;
+  final List<String> tracestate;
+  _SpanRecordingState? recording;
+  bool ended = false;
+  bool explicitError = false;
+}
+
+final class _SpanRecordingState {
+  _SpanRecordingState({
+    required this.eventId,
+    required this.name,
+    required this.kind,
+    required this.attributes,
+    required this.startedAt,
+    required this.timestamp,
+    required this.attribution,
+  });
+
+  final String eventId;
+  final String name;
+  final SpanKind kind;
+  Map<String, Object?> attributes;
+  final Duration startedAt;
+  final DateTime timestamp;
+  final _RecorderAttribution attribution;
+}
+
 /// Internal fixture bridge for deterministic delivery tests.
 final class ChroniclerDeliveryFixture {
   const ChroniclerDeliveryFixture._();
@@ -1359,6 +1854,15 @@ void _validateConfiguredLabel(
     validator.validateString(value, maxBytes, setting);
   } on RecordValidationException {
     throw ChroniclerConfigurationException(setting, 'is invalid');
+  }
+}
+
+Random _createSecureRandom(Random Function()? factory) {
+  try {
+    final random = (factory?.call() ?? Random.secure())..nextInt(256);
+    return random;
+  } on Object {
+    throw const ChroniclerConfigurationException('secureRandom', 'is unavailable');
   }
 }
 

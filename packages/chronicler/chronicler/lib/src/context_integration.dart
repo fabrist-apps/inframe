@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/runtime.dart';
+import 'package:chronicler/src/trace_propagation.dart';
 import 'package:context/context.dart';
 
 final _chroniclerKey = ContextKey<ChroniclerRecorder>('chronicler');
@@ -39,6 +42,88 @@ extension ChroniclerContextLogs on Context {
 extension ChroniclerContextEvents on Context {
   /// Product events backed by the recorder bound to this context.
   ChroniclerEvents get events => ChroniclerEvents(require(_chroniclerKey));
+}
+
+/// Runs callback-managed tracing operations from a configured [Context].
+extension ChroniclerContextTracing on Context {
+  /// Active-span updates and propagation backed by this Context's recorder.
+  ChroniclerTracing get tracing => ChroniclerTracing(require(_chroniclerKey));
+
+  /// Runs [run] in a new root trace and returns its result asynchronously.
+  Future<T> trace<T>(
+    String name, {
+    required FutureOr<T> Function(Context context) run,
+    RemoteTraceParent? parent,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => require(_chroniclerKey).trace(
+    name,
+    parent: parent,
+    kind: kind,
+    attributes: attributes,
+    run: (recorder) => run(withChronicler(recorder)),
+  );
+
+  /// Runs [run] synchronously in a new root trace.
+  T traceSync<T>(
+    String name, {
+    required T Function(Context context) run,
+    RemoteTraceParent? parent,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => require(_chroniclerKey).traceSync(
+    name,
+    parent: parent,
+    kind: kind,
+    attributes: attributes,
+    run: (recorder) => run(withChronicler(recorder)),
+  );
+
+  /// Runs [run] in a child span, or a new root when no span is active.
+  Future<T> span<T>(
+    String name, {
+    required FutureOr<T> Function(Context context) run,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => require(_chroniclerKey).span(
+    name,
+    kind: kind,
+    attributes: attributes,
+    run: (recorder) => run(withChronicler(recorder)),
+  );
+
+  /// Runs [run] synchronously in a child span, or a root when no span is active.
+  T spanSync<T>(
+    String name, {
+    required T Function(Context context) run,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => require(_chroniclerKey).spanSync(
+    name,
+    kind: kind,
+    attributes: attributes,
+    run: (recorder) => run(withChronicler(recorder)),
+  );
+}
+
+/// Updates the active callback-managed span reached through a [Context].
+final class ChroniclerTracing {
+  /// Creates a tracing view over a borrowed recorder.
+  const ChroniclerTracing(this._recorder);
+
+  final ChroniclerRecorder _recorder;
+
+  /// Marks the active span as failed without changing the callback result.
+  void setError() => _recorder.setSpanError();
+
+  /// Replaces one active-span attribute after atomic validation.
+  void setAttribute(String key, Object? value) => _recorder.setSpanAttribute(key, value);
+
+  /// Atomically merges [attributes] into the active span.
+  void setAttributes(Map<String, Object?> attributes) => _recorder.setSpanAttributes(attributes);
+
+  /// Returns a new carrier with stale tracing headers replaced for this span.
+  Map<String, String> inject(Map<String, String> headers) => _recorder.injectTrace(headers);
 }
 
 /// Records product events without waiting for transport work.

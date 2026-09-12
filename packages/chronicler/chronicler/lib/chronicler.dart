@@ -8,4 +8,5 @@ export 'src/diagnostics.dart';
 export 'src/lifecycle.dart';
 export 'src/models.dart';
 export 'src/runtime.dart' show Chronicler, ChroniclerRecorder;
+export 'src/trace_propagation.dart';
 export 'src/transport.dart';

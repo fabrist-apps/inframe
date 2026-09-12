@@ -24,6 +24,12 @@ request.events.track(
   'purchase_completed',
   properties: {'orderId': 'order_123', 'amountMinor': 1200},
 );
+await request.trace('checkout', run: (trace) async {
+  await trace.span('inventory.reserve', run: (span) async {
+    span.tracing.setAttribute('warehouse', 'east');
+    span.logs.info('Inventory reserved');
+  });
+});
 final report = await chronicler.flush();
 await chronicler.close();
 ```
@@ -79,6 +85,44 @@ signal collection, and tracing behavior during construction.
 The base queue is in memory. Process termination can lose unsent telemetry, so analytics emission is
 not durable application storage. Diagnostics use a payload-free callback and exact counters rather
 than entering the telemetry path recursively.
+
+## Tracing and propagation
+
+`trace` and `traceSync` create explicit trace boundaries. `span` and `spanSync` create a child of
+the active span, or a new root when no span is active. Each wrapper passes a derived Context to its
+callback, records the callback's monotonic duration, and preserves its result or original failure.
+Escaping failures become Error unless `TracingOptions.isCancellation` classifies them as Cancelled.
+Use `context.tracing.setError()` for a handled failure and `setAttribute` or `setAttributes` for
+atomic active-span updates. Chronicler ends spans when callbacks finish; there is no manual span
+lifecycle.
+
+Use W3C Trace Context at a transport boundary without giving headers identity or authorization
+meaning:
+
+```dart
+final parent = TracePropagation.extract(requestHeaders);
+await context.trace(
+  'POST /orders',
+  parent: parent,
+  kind: SpanKind.server,
+  run: (server) => server.span(
+    'payments.create',
+    kind: SpanKind.client,
+    run: (client) => sendPayment(client.tracing.inject(outgoingHeaders)),
+  ),
+);
+```
+
+`inject` returns a mutable copy, removes stale trace headers case-insensitively, and inserts lowercase
+`traceparent` and valid `tracestate` for the active span. The input map is unchanged. Incoming
+sampling is honored by default; set `honorRemoteSampling` to false to use the local trace rate while
+keeping valid remote correlation.
+
+Trace sampling is chosen once at a root and inherited by descendants. Unsampled or collection-
+suppressed traces still run callbacks and keep lightweight IDs for propagation and independently
+captured logs, events, and errors. Disabling trace collection discards queued spans and permanently
+suppresses active lineages, even after re-enablement. New trace boundaries use the current policy.
+Propagation has its own runtime switch and can remain enabled while span collection is disabled.
 
 ## Capture policy and privacy
 
