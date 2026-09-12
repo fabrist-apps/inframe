@@ -222,6 +222,10 @@ final class ChroniclerRuntime {
         onError: (Object _, StackTrace _) {
           _finishOutstandingAtShutdown();
           _state = ChroniclerRuntimeState.closed;
+          _closeDeliveryResolved = null;
+          _closeSnapshot = null;
+          _activeDrained = null;
+          _notifyDispositionWaiters();
           completer.complete(_report(snapshot, timedOut: true, cleanupIncomplete: true));
         },
       ),
@@ -280,7 +284,7 @@ final class ChroniclerRuntime {
     _state = ChroniclerRuntimeState.closed;
     _closeDeliveryResolved = null;
     _closeSnapshot = null;
-    _notifyFlushWaiters();
+    _notifyDispositionWaiters();
     return _report(
       snapshot,
       timedOut: !deliveryCompleted || !cleanupCompleted,
@@ -826,7 +830,7 @@ final class ChroniclerRuntime {
   void _accept(_PendingRecord record) {
     _pendingBytes -= record.encodedBytes;
     record.disposition.accepted = true;
-    _notifyFlushWaiters();
+    _notifyDispositionWaiters();
   }
 
   void _drop(_PendingRecord record, DropReason reason) {
@@ -837,7 +841,7 @@ final class ChroniclerRuntime {
   void _dropDisposition(_RecordDisposition disposition, DropReason reason) {
     disposition.dropReason = reason;
     diagnostics.record(_diagnosticFor(reason));
-    _notifyFlushWaiters();
+    _notifyDispositionWaiters();
   }
 
   DiagnosticReason _diagnosticFor(DropReason reason) => switch (reason) {
@@ -854,7 +858,7 @@ final class ChroniclerRuntime {
     DropReason.runtimeClosed => DiagnosticReason.runtimeClosed,
   };
 
-  void _notifyFlushWaiters() {
+  void _notifyDispositionWaiters() {
     for (final waiter in _flushWaiters.toList()) {
       if (waiter.snapshot.every((state) => state.isTerminal)) {
         _completeFlush(waiter, timedOut: false);

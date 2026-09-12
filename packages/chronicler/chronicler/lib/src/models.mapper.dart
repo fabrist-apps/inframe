@@ -46,7 +46,6 @@ class ChroniclerSourceMapper extends EnumMapper<ChroniclerSource> {
     }
   }
 }
-
 extension ChroniclerSourceMapperExtension on ChroniclerSource {
   String toValue() {
     ChroniclerSourceMapper.ensureInitialized();
@@ -3354,4 +3353,3 @@ class _MetricRecordCopyWithImpl<$R, $Out>
     Then<$Out2, $R2> t,
   ) => _MetricRecordCopyWithImpl<$R2, $Out2>($value, $cast, t);
 }
-
