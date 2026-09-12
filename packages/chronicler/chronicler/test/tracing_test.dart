@@ -365,6 +365,37 @@ void main() {
       expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
     });
 
+    test('should preserve application work when sampling fails', () async {
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          sampling: SamplingOptions(traces: 0.5),
+        ),
+      );
+      ChroniclerTracingFixture.overrideSamplingRandom(
+        chronicler,
+        _ThrowingRandom(),
+      );
+      var calls = 0;
+
+      final result = await chronicler.recorder.span(
+        'sampling failure',
+        run: (_) {
+          calls++;
+          return 11;
+        },
+      );
+
+      expect(result, 11);
+      expect(calls, 1);
+      expect(exporter.batches, isEmpty);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+    });
+
     test('should update active attributes atomically and snapshot values', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter);

@@ -479,9 +479,15 @@ final class ChroniclerRuntime {
       return _StartedSpan(null, recorder);
     }
     final collectionEnabled = _enabledSignals.contains(ChroniclerSignal.traces);
-    final sampled = activeParent == null
-        ? _selectBoundarySampling(acceptedRemote, collectionEnabled)
-        : activeParent.lineageRecording && activeParent.sampled;
+    late final bool sampled;
+    try {
+      sampled = activeParent == null
+          ? _selectBoundarySampling(acceptedRemote, collectionEnabled)
+          : activeParent.lineageRecording && activeParent.sampled;
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+      return _StartedSpan(null, recorder);
+    }
     final lineageRecording = activeParent?.lineageRecording ?? (collectionEnabled && sampled);
     _SpanRecordingState? recording;
     if (lineageRecording) {
