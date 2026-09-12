@@ -5,6 +5,7 @@ import 'package:runnel/src/batch.dart';
 import 'package:runnel/src/blocking.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/command_validation.dart';
+import 'package:runnel/src/connection/connection_attempt.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
 import 'package:runnel/src/errors.dart';
@@ -35,6 +36,8 @@ final class Runnel {
   final RunnelLimits _limits;
   final ReconnectBackoff _backoff = ReconnectBackoff();
   final Set<RedisConnection> _transactionConnections = {};
+  final Set<RedisConnection> _unclaimedConnections = {};
+  final Set<ConnectionAttempt> _openingConnections = {};
   final Set<BlockingSession> _blockingSessions = {};
   final Set<PubSubSession> _pubSubSessions = {};
 
@@ -68,8 +71,11 @@ final class Runnel {
       limits,
     );
     try {
-      client._connection = await client._openPhysicalConnection();
-      client._state = _ClientState.ready;
+      final connection = await client._openPhysicalConnection();
+      client
+        .._unclaimedConnections.remove(connection)
+        .._connection = connection
+        .._state = _ClientState.ready;
       return client;
     } on Object {
       client._state = _ClientState.closed;
@@ -79,6 +85,8 @@ final class Runnel {
 
   Future<RedisConnection> _openPhysicalConnection({Duration? timeout}) async {
     final deadline = _Deadline(timeout ?? _connectTimeout);
+    final attempt = ConnectionAttempt();
+    _openingConnections.add(attempt);
     RedisConnection? connection;
     try {
       connection = await RedisConnection.open(
@@ -89,6 +97,7 @@ final class Runnel {
         limits: _limits,
         timeout: deadline.remaining,
         onTerminated: _connectionTerminated,
+        attempt: attempt,
       );
       await connection.execute(
         RedisCommand<Object?>([
@@ -113,10 +122,14 @@ final class Runnel {
           enforceLimits: false,
         );
       }
+      _unclaimedConnections.add(connection);
       return connection;
     } on Object {
       await connection?.close(commandsAreUncertain: true);
       rethrow;
+    } finally {
+      attempt.finish();
+      _openingConnections.remove(attempt);
     }
   }
 
@@ -146,9 +159,11 @@ final class Runnel {
     try {
       final replacement = await _openPhysicalConnection();
       if (_state != _ClientState.reconnecting) {
+        _unclaimedConnections.remove(replacement);
         await replacement.close(commandsAreUncertain: true);
         return;
       }
+      _unclaimedConnections.remove(replacement);
       _connection = replacement;
       _backoff.reset();
       _state = _ClientState.ready;
@@ -242,16 +257,20 @@ final class Runnel {
   /// Opens a dedicated connection for one blocking operation at a time.
   Future<BlockingSession> blocking() async {
     _readyConnection();
+    late RedisConnection openingConnection;
     final session = await BlockingSession.internal(
-      openConnection: _openPhysicalConnection,
+      openConnection: () async => openingConnection = await _openPhysicalConnection(),
       commandTimeout: _commandTimeout,
       onClosed: _blockingSessions.remove,
+      onCreated: (session) {
+        _unclaimedConnections.remove(openingConnection);
+        _blockingSessions.add(session);
+      },
     );
     if (_state != _ClientState.ready) {
       await session.close();
       throw const RedisClosedException(message: 'The Runnel client is closing.');
     }
-    _blockingSessions.add(session);
     return session;
   }
 
@@ -277,12 +296,12 @@ final class Runnel {
       controlTimeout: controlTimeout,
       limits: limits,
       onClosed: _pubSubSessions.remove,
+      onCreated: _pubSubSessions.add,
     );
     if (_state != _ClientState.ready) {
       await session.close();
       throw const RedisClosedException(message: 'The Runnel client is closing.');
     }
-    _pubSubSessions.add(session);
     return session;
   }
 
@@ -302,9 +321,11 @@ final class Runnel {
     final deadline = _Deadline(timeout);
     final connection = await _openPhysicalConnection(timeout: deadline.remaining);
     if (_state != _ClientState.ready) {
+      _unclaimedConnections.remove(connection);
       await connection.close(commandsAreUncertain: true);
       throw const RedisClosedException(message: 'The Runnel client is closing.');
     }
+    _unclaimedConnections.remove(connection);
     _transactionConnections.add(connection);
     try {
       final wireCommands = <RedisCommand<Object?>>[
@@ -326,7 +347,8 @@ final class Runnel {
       if (execReply is! RespArray || execReply.values.length != commands.length) {
         throw const RedisProtocolException(message: 'EXEC returned an invalid result array.');
       }
-      return List.generate(commands.length, (index) {
+      final results = List.generate(commands.length, (index) {
+        _requireTransactionDeadline(deadline);
         final reply = execReply.values[index];
         if (reply case RespError(:final code, :final message)) {
           return BatchFailure<Object?>(
@@ -335,11 +357,17 @@ final class Runnel {
           );
         }
         try {
-          return BatchSuccess<Object?>(commands[index].decode(reply));
+          _requireTransactionDeadline(deadline);
+          final value = commands[index].decode(reply);
+          _requireTransactionDeadline(deadline);
+          return BatchSuccess<Object?>(value);
         } on Object catch (error, stackTrace) {
+          _requireTransactionDeadline(deadline);
           return BatchFailure<Object?>(error, stackTrace);
         }
       }, growable: false);
+      _requireTransactionDeadline(deadline);
+      return results;
     } finally {
       _transactionConnections.remove(connection);
       await connection.close(commandsAreUncertain: !connection.isIdle);
@@ -370,8 +398,8 @@ final class Runnel {
   Future<void> close() => _closing ??= _close();
 
   Future<void> _close() async {
-    if (_state == _ClientState.closed) return;
     _state = _ClientState.closing;
+    final deadline = _Deadline(_shutdownTimeout);
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     final connection = _connection;
@@ -380,22 +408,43 @@ final class Runnel {
     _transactionConnections.clear();
     final blockingSessions = List<BlockingSession>.of(_blockingSessions);
     _blockingSessions.clear();
-    await Future.wait(blockingSessions.map((session) => session.close()));
     final pubSubSessions = List<PubSubSession>.of(_pubSubSessions);
     _pubSubSessions.clear();
-    await Future.wait(pubSubSessions.map((session) => session.close()));
-    await Future.wait(
-      transactions.map((transaction) => transaction.close(commandsAreUncertain: true)),
+    final unclaimed = List<RedisConnection>.of(_unclaimedConnections);
+    _unclaimedConnections.clear();
+    final opening = List<ConnectionAttempt>.of(_openingConnections);
+    _openingConnections.clear();
+    await _withinShutdown(
+      Future.wait([
+        ...opening.map((attempt) => attempt.cancel()),
+        ...blockingSessions.map((session) => session.close()),
+        ...pubSubSessions.map((session) => session.close()),
+        ...transactions.map(
+          (transaction) => transaction.close(commandsAreUncertain: true),
+        ),
+        ...unclaimed.map(
+          (connection) => connection.close(commandsAreUncertain: true),
+        ),
+      ]),
+      deadline,
     );
     if (connection != null && !connection.isClosed) {
       try {
-        await connection.waitUntilIdle().timeout(_shutdownTimeout);
-        await connection.close();
+        await connection.waitUntilIdle().timeout(deadline.remaining);
+        await connection.close().timeout(deadline.remaining);
       } on TimeoutException {
         await connection.close(commandsAreUncertain: true);
       }
     }
     _state = _ClientState.closed;
+  }
+}
+
+Future<void> _withinShutdown(Future<void> work, _Deadline deadline) async {
+  try {
+    await work.timeout(deadline.remaining);
+  } on TimeoutException {
+    // Every release has started; shutdown must not outlive its deadline.
   }
 }
 
@@ -428,6 +477,18 @@ Object? _requireTransactionSuccess(BatchOutcome<Object?> outcome, String message
       stackTrace,
     ),
   };
+}
+
+void _requireTransactionDeadline(_Deadline deadline) {
+  try {
+    deadline.remaining;
+  } on TimeoutException catch (error) {
+    throw RedisTimeoutException(
+      message: 'The Redis transaction deadline expired during reply decoding.',
+      deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+      cause: error,
+    );
+  }
 }
 
 enum _ClientState { connecting, ready, reconnecting, closing, closed }

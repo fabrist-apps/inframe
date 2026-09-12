@@ -116,6 +116,36 @@ void main() {
       expect(session.lastInterruption?.cause, PubSubInterruptionCause.subscriptionTimeout);
     });
 
+    test('should expire queued controls and release their reservations on time', () async {
+      final peer = await _RecoveryPeer.start()
+        ..holdAcknowledgementsFromConnection = 1;
+      addTearDown(peer.close);
+      final session = await _connect(
+        peer,
+        controlTimeout: const Duration(seconds: 1),
+        connectionLimits: const RunnelLimits(maxPendingCommands: 2),
+      );
+      addTearDown(session.close);
+
+      final first = session.subscribe(['first']);
+      await peer.waitForCommandCount('SUBSCRIBE', 1);
+      final stopwatch = Stopwatch()..start();
+      final queued = session.subscribe(
+        ['expired'],
+        timeout: const Duration(milliseconds: 20),
+      );
+
+      await expectLater(queued, throwsA(isA<RedisTimeoutException>()));
+      expect(stopwatch.elapsed, lessThan(const Duration(milliseconds: 200)));
+      expect(session.desiredChannels, {'first'});
+      peer.releaseAcknowledgements();
+      await first;
+
+      final channels = List.generate(513, (index) => 'channel-$index');
+      await session.subscribe(channels);
+      expect(session.acknowledgedChannels, {'first', ...channels});
+    });
+
     test('should keep removals when unsubscribe is rejected and reset the socket', () async {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
@@ -201,6 +231,47 @@ void main() {
       },
     );
 
+    test('should share one explicit deadline across connection and restoration', () async {
+      final peer = await _RecoveryPeer.start();
+      addTearDown(peer.close);
+      final session = await _connect(peer);
+      addTearDown(session.close);
+      await session.subscribe(['orders']);
+      peer
+        ..delayHelloFromConnection = 2
+        ..helloDelay = const Duration(milliseconds: 60)
+        ..holdAcknowledgementsFromConnection = 2;
+      Timer(const Duration(milliseconds: 100), peer.releaseAcknowledgements);
+
+      await expectLater(
+        session.reconnect(timeout: const Duration(milliseconds: 80)),
+        throwsA(isA<RedisTimeoutException>()),
+      );
+
+      expect(session.state, PubSubState.closed);
+      expect(session.lastInterruption?.cause, PubSubInterruptionCause.explicitReconnect);
+    });
+
+    test('should apply an explicit deadline while automatic recovery is in progress', () async {
+      final peer = await _RecoveryPeer.start()
+        ..holdHelloFromConnection = 2;
+      addTearDown(peer.close);
+      final session = await _connect(peer);
+      addTearDown(session.close);
+      peer.destroyLatest();
+      await peer.waitForConnections(2);
+
+      await expectLater(
+        session.reconnect(timeout: const Duration(milliseconds: 20)),
+        throwsA(isA<RedisTimeoutException>()),
+      );
+
+      expect(session.state, PubSubState.closed);
+      final connectionsAfterTimeout = peer.connectionCount;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(peer.connectionCount, connectionsAfterTimeout);
+    });
+
     test('should close during backoff without opening another socket', () async {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
@@ -215,6 +286,33 @@ void main() {
       expect(session.state, PubSubState.closed);
       expect(peer.connectionCount, connectionsAfterClose);
     });
+
+    test('should terminate malformed and oversized server frames without reconnecting', () async {
+      for (final frame in [ascii.encode('?\r\n'), ascii.encode('\$100\r\n')]) {
+        final peer = await _RecoveryPeer.start();
+        final session = await _connect(
+          peer,
+          connectionLimits: const RunnelLimits(maxFrameBytes: 16),
+        );
+        final events = <PubSubEvent>[];
+        final listener = session.events.listen(events.add);
+
+        peer.sendRaw(frame);
+        await _eventually(() => session.state == PubSubState.closed);
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        expect(peer.connectionCount, 1);
+        expect(
+          events.whereType<PubSubInterrupted>().last,
+          isA<PubSubInterrupted>()
+              .having((event) => event.cause, 'cause', PubSubInterruptionCause.protocolFailure)
+              .having((event) => event.terminal, 'terminal', isTrue),
+        );
+        await listener.cancel();
+        await session.close();
+        await peer.close();
+      }
+    });
   });
 }
 
@@ -224,16 +322,20 @@ int _generationOf(PubSubEvent event) => switch (event) {
   PubSubRestored(:final generation) => generation,
 };
 
-Future<PubSubSession> _connect(_RecoveryPeer peer) => PubSubSession.connect(
+Future<PubSubSession> _connect(
+  _RecoveryPeer peer, {
+  Duration controlTimeout = const Duration(milliseconds: 200),
+  RunnelLimits connectionLimits = const RunnelLimits(),
+}) => PubSubSession.connect(
   PubSubConnectionConfiguration(
     host: InternetAddress.loopbackIPv4.address,
     port: peer.port,
     tls: false,
     protocol: RedisProtocol.resp3,
     connectTimeout: const Duration(milliseconds: 200),
-    connectionLimits: const RunnelLimits(),
+    connectionLimits: connectionLimits,
   ),
-  controlTimeout: const Duration(milliseconds: 200),
+  controlTimeout: controlTimeout,
 );
 
 Future<void> _eventually(bool Function() condition) async {
@@ -255,6 +357,8 @@ final class _RecoveryPeer {
   _PeerConnection? _heldRejectionConnection;
   int? holdAcknowledgementsFromConnection;
   int? holdHelloFromConnection;
+  int? delayHelloFromConnection;
+  Duration helloDelay = Duration.zero;
   int? rejectSubscriptionsFromConnection;
   int? partialAcknowledgementsBeforeRejection;
   bool rejectNextControl = false;
@@ -270,6 +374,8 @@ final class _RecoveryPeer {
   }
 
   void destroyLatest() => _connections.last.socket.destroy();
+
+  void sendRaw(List<int> bytes) => _connections.last.socket.add(bytes);
 
   int commandCount(String name) => commands.where((command) => command.name == name).length;
 
@@ -329,7 +435,9 @@ final class _RecoveryPeer {
     final arguments = rawArguments.skip(1).map(utf8.decode).toList(growable: false);
     commands.add(_PeerCommand(connection.number, name, arguments));
     if (name == 'HELLO') {
-      if (holdHelloFromConnection != connection.number) {
+      if (delayHelloFromConnection == connection.number) {
+        Timer(helloDelay, () => connection.socket.add(ascii.encode('+OK\r\n')));
+      } else if (holdHelloFromConnection != connection.number) {
         connection.socket.add(ascii.encode('+OK\r\n'));
       }
       return;

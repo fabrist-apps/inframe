@@ -42,10 +42,40 @@ void validateOrdinaryCommand(RedisCommand<Object?> command) {
   if (name == 'CLIENT' && arguments.length > 1 && _text(arguments[1]) == 'REPLY') {
     throw ArgumentError.value('CLIENT REPLY', 'command', 'can suppress reply alignment');
   }
-  if ((name == 'XREAD' || name == 'XREADGROUP') &&
-      arguments.skip(1).any((argument) => _text(argument) == 'BLOCK')) {
+  if ((name == 'XREAD' || name == 'XREADGROUP') && _hasBlockingOption(arguments, name)) {
     throw ArgumentError.value(name, 'command', 'blocking forms require a BlockingSession');
   }
 }
 
 String _text(RedisArgument argument) => ascii.decode(argument.bytes).toUpperCase();
+
+bool _hasBlockingOption(List<RedisArgument> arguments, String command) {
+  var index = 1;
+  if (command == 'XREADGROUP' && _option(arguments, index) == 'GROUP') {
+    index += 3;
+  }
+  while (index < arguments.length) {
+    switch (_option(arguments, index)) {
+      case 'BLOCK':
+        return true;
+      case 'COUNT':
+        index += 2;
+      case 'NOACK':
+        index++;
+      case 'STREAMS':
+        return false;
+      default:
+        return false;
+    }
+  }
+  return false;
+}
+
+String? _option(List<RedisArgument> arguments, int index) {
+  if (index >= arguments.length) return null;
+  try {
+    return _text(arguments[index]);
+  } on FormatException {
+    return null;
+  }
+}

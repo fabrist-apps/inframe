@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/connection/connection_attempt.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/resp/resp_parser.dart';
@@ -55,11 +56,25 @@ final class RedisConnection {
     required RunnelLimits limits,
     required Duration timeout,
     required ConnectionTerminated onTerminated,
+    ConnectionAttempt? attempt,
   }) async {
-    final socket = tls
-        ? await SecureSocket.connect(host, port, context: securityContext, timeout: timeout)
-        : await Socket.connect(host, port, timeout: timeout);
-    return RedisConnection._(socket, limits, onTerminated);
+    final socket = await openSocket(
+      host: host,
+      port: port,
+      tls: tls,
+      securityContext: securityContext,
+      timeout: timeout,
+      attempt: attempt,
+    );
+    final connection = RedisConnection._(socket, limits, onTerminated);
+    if (!(attempt?.attachResource(
+          () => connection.close(commandsAreUncertain: true),
+        ) ??
+        true)) {
+      await connection.close(commandsAreUncertain: true);
+      throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+    }
+    return connection;
   }
 
   Future<T> execute<T>(
@@ -100,7 +115,7 @@ final class RedisConnection {
       );
     }
 
-    final pending = _Pending<T>(command, encoded);
+    final pending = _Pending<T>(command, encoded, acceptedAt, timeout);
     _pending.add(pending as _Pending<Object?>);
     _pendingBytes += encoded.length;
     pending.timer = Timer(remaining, () => _timeout(pending as _Pending<Object?>));
@@ -142,7 +157,7 @@ final class RedisConnection {
 
     final accepted = <_Pending<Object?>>[];
     for (var index = 0; index < commands.length; index++) {
-      final pending = _Pending<Object?>(commands[index], encoded[index]);
+      final pending = _Pending<Object?>(commands[index], encoded[index], acceptedAt, timeout);
       _pending.add(pending);
       accepted.add(pending);
       _pendingBytes += encoded[index].length;
@@ -221,14 +236,36 @@ final class RedisConnection {
           return;
         }
         final pending = _pending.first;
-        _remove(pending);
         if (actual case RespError(:final code, :final message)) {
+          if (pending.deadlineExpired) {
+            _terminate(
+              const RedisTimeoutException(
+                message: 'The Redis command deadline expired during reply decoding.',
+                deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+              ),
+              StackTrace.current,
+            );
+            return;
+          }
+          _remove(pending);
           pending.completer.completeError(RedisServerException(code: code, message: message));
           continue;
         }
         try {
           pending.complete(actual);
+          _remove(pending);
+        } on _DecodeDeadlineExpired catch (error, stackTrace) {
+          _terminate(
+            RedisTimeoutException(
+              message: 'The Redis command deadline expired during reply decoding.',
+              deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+              cause: error.cause,
+            ),
+            stackTrace,
+          );
+          return;
         } on Object catch (error, stackTrace) {
+          _remove(pending);
           pending.completer.completeError(error, stackTrace);
         }
       }
@@ -341,13 +378,35 @@ final class RedisConnection {
 }
 
 final class _Pending<T> {
-  _Pending(this.command, this.encoded);
+  _Pending(this.command, this.encoded, this.stopwatch, this.deadline);
 
   final RedisCommand<T> command;
   final Uint8List encoded;
+  final Stopwatch stopwatch;
+  final Duration deadline;
   final Completer<T> completer = Completer<T>();
   Timer? timer;
   bool submitted = false;
 
-  void complete(RespValue reply) => completer.complete(command.decode(reply));
+  bool get deadlineExpired => stopwatch.elapsed >= deadline;
+
+  void complete(RespValue reply) {
+    try {
+      final value = command.decode(reply);
+      if (deadlineExpired) throw const _DecodeDeadlineExpired();
+      completer.complete(value);
+    } on Object catch (error, stackTrace) {
+      if (error is _DecodeDeadlineExpired) rethrow;
+      if (deadlineExpired) {
+        Error.throwWithStackTrace(_DecodeDeadlineExpired(error), stackTrace);
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+}
+
+final class _DecodeDeadlineExpired implements Exception {
+  const _DecodeDeadlineExpired([this.cause]);
+
+  final Object? cause;
 }

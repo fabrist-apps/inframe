@@ -220,6 +220,14 @@ void main() {
       expect(() => entries.single.fields.add(field), throwsUnsupportedError);
     });
 
+    test('should treat Stream keys as opaque after the STREAMS marker', () async {
+      await client.xread({'BLOCK': StreamId(BigInt.zero, BigInt.zero)});
+      await client.xread({'café': StreamId(BigInt.zero, BigInt.zero)});
+
+      expect(peer.commands[1][2], ascii.encode('BLOCK'));
+      expect(peer.commands[2][2], utf8.encode('café'));
+    });
+
     test('should reject empty fields, cursors, and nonpositive count hints', () async {
       expect(() => client.xadd('history', []), throwsArgumentError);
       expect(

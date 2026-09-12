@@ -53,6 +53,27 @@ void main() {
     expect(peer.count('INCR'), 1);
     expect(await client.ping(), isTrue);
   });
+
+  test('transaction result decoding cannot overrun the total deadline', () async {
+    final peer = await _BatchPeer.start()
+      ..returnOneFromExec = true;
+    addTearDown(peer.close);
+    final client = await Runnel.connect(peer.endpoint);
+    addTearDown(client.close);
+    final transaction = client.transaction()
+      ..add(
+        RedisCommand<int>([RedisArgument.text('INCR'), RedisArgument.text('counter')], (reply) {
+          final work = Stopwatch()..start();
+          while (work.elapsed < const Duration(milliseconds: 75)) {}
+          return (reply as RespInteger).value;
+        }),
+      );
+
+    await expectLater(
+      transaction.exec(timeout: const Duration(milliseconds: 50)),
+      throwsA(isA<RedisTimeoutException>()),
+    );
+  });
 }
 
 RedisCommand<bool> _pingCommand() => RedisCommand<bool>(
@@ -69,6 +90,7 @@ final class _BatchPeer {
   final List<Socket> _heldPings = [];
   bool holdPings = false;
   bool dropExec = false;
+  bool returnOneFromExec = false;
 
   String get endpoint => 'redis://127.0.0.1:${_server.port}';
 
@@ -102,7 +124,7 @@ final class _BatchPeer {
           case 'EXEC' when dropExec:
             socket.destroy();
           case 'EXEC':
-            socket.add(ascii.encode('*0\r\n'));
+            socket.add(ascii.encode(returnOneFromExec ? '*1\r\n:1\r\n' : '*0\r\n'));
           case 'PING' when transaction:
           case 'INCR' when transaction:
             socket.add(ascii.encode('+QUEUED\r\n'));

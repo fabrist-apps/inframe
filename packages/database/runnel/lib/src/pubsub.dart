@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/connection/connection_attempt.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
@@ -259,6 +260,7 @@ final class PubSubSession {
     Duration controlTimeout = const Duration(seconds: 5),
     PubSubLimits limits = const PubSubLimits(),
     void Function(PubSubSession session)? onClosed,
+    void Function(PubSubSession session)? onCreated,
   }) async {
     configuration._validate();
     limits._validate();
@@ -267,12 +269,15 @@ final class PubSubSession {
     }
     final session = PubSubSession._(configuration, controlTimeout, limits, onClosed);
     session._events._session = session;
+    onCreated?.call(session);
     try {
       await session._openInitialTransport();
       return session;
     } on Object {
       await session._transport?.close();
-      session._state = PubSubState.closed;
+      session
+        .._state = PubSubState.closed
+        .._notifyClosed();
       rethrow;
     }
   }
@@ -290,6 +295,7 @@ final class PubSubSession {
   final ReconnectBackoff _backoff = ReconnectBackoff();
 
   _PubSubTransport? _transport;
+  ConnectionAttempt? _openingTransport;
   _PubSubEventSubscription? _listener;
   PubSubEvent? _terminalEvent;
   Future<void> _controlTail = Future.value();
@@ -336,31 +342,41 @@ final class PubSubSession {
 
   Future<void> _openTransport(Duration timeout) async {
     final deadline = _Deadline(timeout);
+    final attempt = ConnectionAttempt();
+    _openingTransport = attempt;
     late final _PubSubTransport transport;
-    transport = await _PubSubTransport.open(
-      _configuration,
-      timeout: deadline.remaining,
-      onFrame: (value) {
-        if (identical(_transport, transport)) _onFrame(value);
-      },
-      onTerminated: (error) {
-        if (identical(_transport, transport)) _onTransportTerminated(error);
-      },
-    );
-    if (_state == PubSubState.closing || _state == PubSubState.closed) {
-      await transport.close();
-      throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
-    }
-    _transport = transport;
+    var transportOpened = false;
     try {
+      transport = await _PubSubTransport.open(
+        _configuration,
+        timeout: deadline.remaining,
+        attempt: attempt,
+        onFrame: (value) {
+          if (identical(_transport, transport)) _onFrame(value);
+        },
+        onTerminated: (error) {
+          if (identical(_transport, transport)) _onTransportTerminated(error);
+        },
+      );
+      transportOpened = true;
+      if (_state == PubSubState.closing || _state == PubSubState.closed) {
+        await transport.close();
+        throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
+      }
+      _transport = transport;
       await transport.requestReply(_helloCommand(), timeout: deadline.remaining);
       if (_configuration.database != 0) {
         await transport.requestReply(_selectCommand(), timeout: deadline.remaining);
       }
     } on Object {
-      if (identical(_transport, transport)) _transport = null;
-      await transport.close();
+      if (transportOpened) {
+        if (identical(_transport, transport)) _transport = null;
+        await transport.close();
+      }
       rethrow;
+    } finally {
+      attempt.finish();
+      if (identical(_openingTransport, attempt)) _openingTransport = null;
     }
   }
 
@@ -480,6 +496,7 @@ final class PubSubSession {
     _acknowledgedChannels.clear();
     final transport = _transport;
     _transport = null;
+    await _openingTransport?.cancel();
     await transport?.close();
     final recovery = _recovery;
     if (recovery != null) {
@@ -551,6 +568,9 @@ final class PubSubSession {
 
   Future<void> _enqueueControl(_ControlOperation operation) {
     _controlOperations.add(operation);
+    operation.timer = Timer(operation.deadline - operation.stopwatch.elapsed, () {
+      _expireControl(operation);
+    });
     final predecessor = _controlTail;
     final running = predecessor.then((_) => _runControl(operation));
     _controlTail = running.then<void>((_) {}, onError: (_, _) {});
@@ -568,8 +588,8 @@ final class PubSubSession {
   }
 
   Future<void> _runControl(_ControlOperation operation) async {
-    if (operation.result.isCompleted) return;
     try {
+      if (operation.result.isCompleted) return;
       if (_state == PubSubState.reconnecting) {
         final remaining = operation.deadline - operation.stopwatch.elapsed;
         if (remaining <= Duration.zero) throw TimeoutException('Subscription control timed out.');
@@ -592,6 +612,7 @@ final class PubSubSession {
         final remaining = operation.deadline - operation.stopwatch.elapsed;
         if (remaining <= Duration.zero) throw TimeoutException('Subscription control timed out.');
         final command = _controlCommand(commandName, chunk);
+        operation.submitted = true;
         await _transport!
             .sendControl(
               encodeCommand(command as RedisCommand<Object?>),
@@ -621,12 +642,28 @@ final class PubSubSession {
       _terminateForControlFailure(PubSubInterruptionCause.subscriptionRejection, error);
       Error.throwWithStackTrace(error, stackTrace);
     } finally {
-      _controlOperations.remove(operation);
-      _releaseReservation(operation.reservation);
+      _releaseControl(operation);
       if (_state == PubSubState.subscribing && _controlOperations.isEmpty && _recovery == null) {
         _state = PubSubState.ready;
       }
     }
+  }
+
+  void _expireControl(_ControlOperation operation) {
+    if (operation.result.isCompleted) return;
+    _rollbackAdditions(operation);
+    final failure = RedisTimeoutException(
+      message: 'The Pub/Sub subscription deadline expired.',
+      deliveryStatus: operation.submitted
+          ? RedisDeliveryStatus.outcomeUnknown
+          : RedisDeliveryStatus.notSent,
+    );
+    if (operation.submitted) {
+      _terminateForControlFailure(PubSubInterruptionCause.subscriptionTimeout, failure);
+    } else {
+      operation.result.completeError(failure, StackTrace.current);
+    }
+    _releaseControl(operation);
   }
 
   void _ensureCurrent(_ControlOperation operation) {
@@ -651,6 +688,14 @@ final class PubSubSession {
   void _releaseReservation(_ControlReservation reservation) {
     _reservedControlCommands -= reservation.commands;
     _reservedControlBytes -= reservation.bytes;
+  }
+
+  void _releaseControl(_ControlOperation operation) {
+    if (operation.released) return;
+    operation.released = true;
+    operation.timer?.cancel();
+    _controlOperations.remove(operation);
+    _releaseReservation(operation.reservation);
   }
 
   void _onFrame(RespValue received) {
@@ -707,6 +752,12 @@ final class PubSubSession {
     if (_state == PubSubState.closing || _state == PubSubState.closed) return;
     if (_generation == 0) return;
     _transport = null;
+    if (error is RedisProtocolException ||
+        error is RedisLimitException ||
+        error is FormatException) {
+      _terminateTerminal(PubSubInterruptionCause.protocolFailure, error);
+      return;
+    }
     final failure = RedisTransportException(
       message: 'The Pub/Sub connection was interrupted.',
       deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
@@ -745,8 +796,27 @@ final class PubSubSession {
     unawaited(transport?.close());
   }
 
-  Future<void> _startExplicitReconnect(Duration timeout) {
+  Future<void> _startExplicitReconnect(Duration timeout) async {
+    final deadline = _Deadline(timeout);
     final startingChannels = Set<String>.of(_desiredChannels);
+    final automaticRecovery = _recovery;
+    if (automaticRecovery != null) {
+      _cancelReconnectDelay();
+      try {
+        await automaticRecovery.timeout(deadline.remaining);
+      } on TimeoutException catch (error, stackTrace) {
+        final failure = RedisTimeoutException(
+          message: 'The explicit Pub/Sub reconnect deadline expired.',
+          deliveryStatus: RedisDeliveryStatus.notSent,
+          cause: error,
+        );
+        _terminateTerminal(PubSubInterruptionCause.explicitReconnect, failure);
+        Error.throwWithStackTrace(failure, stackTrace);
+      }
+    }
+    if (_state == PubSubState.closed || _state == PubSubState.closing) {
+      throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
+    }
     _interrupt(
       PubSubInterruptionCause.explicitReconnect,
       const RedisTransportException(
@@ -755,11 +825,11 @@ final class PubSubSession {
       ),
     );
     if (_state == PubSubState.closed) {
-      return Future.error(lastInterruption!.error!);
+      Error.throwWithStackTrace(lastInterruption!.error!, StackTrace.current);
     }
-    return _beginRecovery(
+    await _beginRecovery(
       immediate: true,
-      overallTimeout: timeout,
+      overallTimeout: deadline.remaining,
       restorationTarget: startingChannels,
     );
   }
@@ -843,6 +913,7 @@ final class PubSubSession {
           connectTimeout: remaining,
           controlTimeout: remaining,
           restorationTarget: restorationTarget,
+          overallDeadline: deadline,
         );
         return;
       } on _RestorationRejected catch (rejection, stackTrace) {
@@ -886,15 +957,19 @@ final class PubSubSession {
     required Duration connectTimeout,
     required Duration controlTimeout,
     Set<String>? restorationTarget,
+    _Deadline? overallDeadline,
   }) async {
     final previous = _transport;
     _transport = null;
     await previous?.close();
-    await _openTransport(connectTimeout);
+    await _openTransport(overallDeadline?.remaining ?? connectTimeout);
     _generation++;
     _backoff.reset();
     try {
-      await _restoreDesiredChannels(controlTimeout, restorationTarget: restorationTarget);
+      await _restoreDesiredChannels(
+        overallDeadline?.remaining ?? controlTimeout,
+        restorationTarget: restorationTarget,
+      );
     } on RedisServerException catch (error) {
       throw _RestorationRejected(error);
     }
@@ -911,7 +986,7 @@ final class PubSubSession {
       final target = restorationTarget == null
           ? Set<String>.of(_desiredChannels)
           : restorationTarget.where(_desiredChannels.contains).toSet();
-      final removals = _acknowledgedChannels.difference(target).toList();
+      final removals = _acknowledgedChannels.difference(_desiredChannels).toList();
       final additions = target.difference(_acknowledgedChannels).toList();
       if (removals.isEmpty && additions.isEmpty) return;
       for (final chunk in _chunks(removals)) {
@@ -988,22 +1063,29 @@ final class PubSubSession {
 
   void _emit(PubSubEvent event) {
     if (_state == PubSubState.closed && event is! PubSubInterrupted) return;
+    final bytes = _eventBytes(event);
+    if (bytes > _limits.maxBufferedBytes) {
+      _overflow(limit: _limits.maxBufferedBytes);
+      return;
+    }
     final listener = _listener;
     if (listener != null && !listener.isPaused && _eventQueue.isEmpty) {
       listener._add(event);
       return;
     }
-    final bytes = _eventBytes(event);
-    if (_eventQueue.length == _limits.maxBufferedEvents ||
-        _bufferedBytes + bytes > _limits.maxBufferedBytes) {
-      _overflow();
+    if (_eventQueue.length == _limits.maxBufferedEvents) {
+      _overflow(limit: _limits.maxBufferedEvents);
+      return;
+    }
+    if (_bufferedBytes + bytes > _limits.maxBufferedBytes) {
+      _overflow(limit: _limits.maxBufferedBytes);
       return;
     }
     _eventQueue.add(_BufferedEvent(event, bytes));
     _bufferedBytes += bytes;
   }
 
-  void _overflow() {
+  void _overflow({required int limit}) {
     if (_state == PubSubState.closed) return;
     _state = PubSubState.closed;
     _cancelReconnectDelay();
@@ -1013,7 +1095,7 @@ final class PubSubSession {
     final failure = RedisLimitException(
       message: 'The Pub/Sub event buffer exceeded its configured limit.',
       deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
-      limit: _limits.maxBufferedEvents,
+      limit: limit,
     );
     _failControls(failure);
     final interruption = PubSubInterrupted(
@@ -1045,6 +1127,7 @@ final class PubSubSession {
   void _failControls(Object error) {
     for (final operation in _controlOperations.toList(growable: false)) {
       if (!operation.result.isCompleted) operation.result.completeError(error, StackTrace.current);
+      _releaseControl(operation);
     }
   }
 
@@ -1207,6 +1290,9 @@ final class _ControlOperation {
   final _ControlReservation reservation;
   final Stopwatch stopwatch;
   final Completer<void> result = Completer<void>();
+  Timer? timer;
+  bool submitted = false;
+  bool released = false;
 }
 
 final class _BufferedEvent {
@@ -1260,22 +1346,24 @@ final class _PubSubTransport {
   static Future<_PubSubTransport> open(
     PubSubConnectionConfiguration configuration, {
     required Duration timeout,
+    required ConnectionAttempt attempt,
     required void Function(RespValue value) onFrame,
     required void Function(Object error) onTerminated,
   }) async {
-    final socket = configuration.tls
-        ? await SecureSocket.connect(
-            configuration.host,
-            configuration.port,
-            context: configuration.securityContext,
-            timeout: timeout,
-          )
-        : await Socket.connect(
-            configuration.host,
-            configuration.port,
-            timeout: timeout,
-          );
-    return _PubSubTransport._(socket, configuration, onFrame, onTerminated);
+    final socket = await openSocket(
+      host: configuration.host,
+      port: configuration.port,
+      tls: configuration.tls,
+      securityContext: configuration.securityContext,
+      timeout: timeout,
+      attempt: attempt,
+    );
+    final transport = _PubSubTransport._(socket, configuration, onFrame, onTerminated);
+    if (!attempt.attachResource(transport.close)) {
+      await transport.close();
+      throw const RedisClosedException(message: 'The Pub/Sub connection was cancelled.');
+    }
+    return transport;
   }
 
   Future<RespValue> requestReply(RedisCommand<Object?> command, {required Duration timeout}) {

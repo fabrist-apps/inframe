@@ -28,10 +28,13 @@ final class BlockingSession {
     required BlockingConnectionFactory openConnection,
     Duration commandTimeout = const Duration(seconds: 5),
     void Function(BlockingSession session)? onClosed,
+    void Function(BlockingSession session)? onCreated,
   }) async {
     _requirePositive(commandTimeout, 'commandTimeout');
     final connection = await openConnection();
-    return BlockingSession._(connection, commandTimeout, onClosed);
+    final session = BlockingSession._(connection, commandTimeout, onClosed);
+    onCreated?.call(session);
+    return session;
   }
 
   final RedisConnection _connection;

@@ -99,6 +99,41 @@ void main() {
       expect(peer.commandCount('ECHO'), 0);
     });
 
+    test('should reject a reply whose synchronous decoder exceeds the deadline', () async {
+      final peer = await _LifecyclePeer.start();
+      addTearDown(peer.close);
+      final client = await Runnel.connect(peer.endpoint);
+      addTearDown(client.close);
+
+      final delayedDecode = client.execute(
+        RedisCommand<bool>([RedisArgument.text('PING')], (_) {
+          final work = Stopwatch()..start();
+          while (work.elapsed < const Duration(milliseconds: 75)) {}
+          return true;
+        }),
+        timeout: const Duration(milliseconds: 50),
+      );
+
+      await expectLater(
+        delayedDecode,
+        throwsA(
+          isA<RedisTimeoutException>().having(
+            (error) => error.deliveryStatus,
+            'delivery status',
+            RedisDeliveryStatus.outcomeUnknown,
+          ),
+        ),
+      );
+      await _eventually(() async {
+        try {
+          return await client.ping();
+        } on RedisTransportException {
+          return false;
+        }
+      });
+      expect(peer.commandCount('PING'), 2);
+    });
+
     test('should destroy a submitted generation on timeout without replaying it', () async {
       final peer = await _LifecyclePeer.start()
         ..holdCommands = true;
@@ -321,6 +356,76 @@ void main() {
       expect(peer.connectionCount, connectionsAfterClose);
     });
 
+    test('should close child sessions after a terminal ordinary protocol failure', () async {
+      final peer = await _LifecyclePeer.start();
+      addTearDown(peer.close);
+      final client = await Runnel.connect(
+        peer.endpoint,
+        shutdownTimeout: const Duration(milliseconds: 50),
+      );
+      final blocking = await client.blocking();
+      final pubSub = await client.openPubSub();
+      peer.holdCommands = true;
+
+      final malformed = client.ping();
+      await peer.waitForCommandCount('PING', 1);
+      peer.replyToNextHeld('?\r\n');
+      await expectLater(malformed, throwsA(isA<RedisProtocolException>()));
+      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30));
+      final subscribed = pubSub.subscribe(['orders']);
+      final blockedFailure = expectLater(blocked, throwsA(isA<RedisClosedException>()));
+      final subscribeFailure = expectLater(subscribed, throwsA(isA<RedisClosedException>()));
+      await peer.waitForCommandCount('BLPOP', 1);
+      await peer.waitForCommandCount('SUBSCRIBE', 1);
+
+      await client.close().timeout(const Duration(seconds: 1));
+      await Future.wait([blockedFailure, subscribeFailure]);
+      expect(pubSub.state, PubSubState.closed);
+    });
+
+    test('should cancel child connections whose handshakes are still opening', () async {
+      final peer = await _LifecyclePeer.start();
+      addTearDown(peer.close);
+      final client = await Runnel.connect(
+        peer.endpoint,
+        connectTimeout: const Duration(seconds: 30),
+        shutdownTimeout: const Duration(milliseconds: 50),
+      );
+      peer.holdHandshakes = true;
+
+      final openingBlocking = client.blocking();
+      final openingPubSub = client.openPubSub();
+      final openingTransaction = (client.transaction()..add(_pingCommand())).exec();
+      final blockingFailure = expectLater(openingBlocking, throwsA(anything));
+      final pubSubFailure = expectLater(openingPubSub, throwsA(anything));
+      final transactionFailure = expectLater(openingTransaction, throwsA(anything));
+      await peer.waitForConnections(4);
+
+      await client.close().timeout(const Duration(seconds: 1));
+      await Future.wait([blockingFailure, pubSubFailure, transactionFailure]);
+      await _eventually(() async => peer.activeConnections == 0);
+    });
+
+    test('should cancel an ordinary reconnect handshake during shutdown', () async {
+      final peer = await _LifecyclePeer.start();
+      addTearDown(peer.close);
+      final client = await Runnel.connect(
+        peer.endpoint,
+        connectTimeout: const Duration(seconds: 30),
+        shutdownTimeout: const Duration(milliseconds: 50),
+      );
+      peer
+        ..holdHandshakes = true
+        ..destroyLatest();
+      await peer.waitForConnections(2);
+
+      await client.close().timeout(const Duration(seconds: 1));
+      await _eventually(() async => peer.activeConnections == 0);
+      final connectionsAfterClose = peer.connectionCount;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(peer.connectionCount, connectionsAfterClose);
+    });
+
     test('should classify a server error without closing the connection', () async {
       final peer = await _LifecyclePeer.start()
         ..holdCommands = true;
@@ -419,8 +524,10 @@ final class _LifecyclePeer {
   bool holdCommands = false;
   bool holdHandshakes = false;
   bool rejectHandshakes = false;
+  int _closedConnections = 0;
 
   int get connectionCount => _connections.length;
+  int get activeConnections => connectionCount - _closedConnections;
   String get endpoint => 'redis://127.0.0.1:${_server.port}';
   String get hostnameEndpoint => 'redis://localhost:${_server.port}';
   List<String> get ordinaryCommands =>
@@ -465,6 +572,7 @@ final class _LifecyclePeer {
         }
       },
       onError: (_) {},
+      onDone: () => _closedConnections++,
     );
   }
 

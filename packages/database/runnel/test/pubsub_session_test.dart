@@ -211,6 +211,34 @@ void main() {
       await listener.cancel();
     });
 
+    test('should reject one oversized publication with an active listener', () async {
+      final peer = await _PubSubPeer.start();
+      addTearDown(peer.close);
+      final session = await _connect(
+        peer,
+        limits: const PubSubLimits(maxBufferedBytes: 3),
+      );
+      await session.subscribe(['c']);
+      final events = <PubSubEvent>[];
+      final done = Completer<void>();
+      final listener = session.events.listen(events.add, onDone: done.complete);
+
+      peer.publish('c', [1, 2, 3]);
+      await done.future.timeout(const Duration(seconds: 1));
+
+      expect(events, [
+        isA<PubSubInterrupted>()
+            .having((event) => event.cause, 'cause', PubSubInterruptionCause.bufferOverflow)
+            .having(
+              (event) => (event.error! as RedisLimitException).limit,
+              'limit',
+              3,
+            ),
+      ]);
+      expect(session.state, PubSubState.closed);
+      await listener.cancel();
+    });
+
     test('should reject a second listener and close when the first is cancelled', () async {
       final peer = await _PubSubPeer.start();
       addTearDown(peer.close);
