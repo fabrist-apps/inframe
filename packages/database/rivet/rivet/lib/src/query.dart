@@ -387,8 +387,8 @@ FROM (
   final through = include.throughSchema!;
   final throughAlias = nextAlias();
   through.qualify(throughAlias);
-  final relation = include.relation as RivetManyThroughRelation<dynamic, dynamic, dynamic>;
-  relation.resolveThrough(through.definition);
+  final relation = (include.relation as RivetManyThroughRelation<dynamic, dynamic, dynamic>)
+    ..resolveThrough(through.definition);
   final sourceRelation = relation.sourceRelation!;
   final targetRelation = relation.targetRelation!;
   if (!through.relations.values.contains(sourceRelation) ||

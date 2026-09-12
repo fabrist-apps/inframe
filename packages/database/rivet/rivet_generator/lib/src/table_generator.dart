@@ -556,11 +556,11 @@ $findMethod
         ? _typeReference(type.typeArguments[1], field.library)
         : null;
     return _RelationTypes(
-      targetReference,
-      targetRow,
-      '$prefix${targetName}Include',
-      targetHasRelations,
-      through,
+      target: targetReference,
+      row: targetRow,
+      include: '$prefix${targetName}Include',
+      hasRelations: targetHasRelations,
+      through: through,
     );
   }
 
@@ -571,7 +571,13 @@ $findMethod
 }
 
 final class _RelationTypes {
-  const _RelationTypes(this.target, this.row, this.include, this.hasRelations, this.through);
+  const _RelationTypes({
+    required this.target,
+    required this.row,
+    required this.include,
+    required this.hasRelations,
+    required this.through,
+  });
 
   final String target;
   final String row;

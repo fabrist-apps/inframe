@@ -1336,6 +1336,7 @@ class RivetColumn<T> implements RivetExpression<T> {
     _qualifier = qualifier;
   }
 
+  String? get qualifier => _qualifier;
   set qualifier(String value) => _qualifier = value;
 
   String get physicalName => declaredName ?? dartName;

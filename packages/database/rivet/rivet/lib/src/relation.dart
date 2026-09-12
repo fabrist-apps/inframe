@@ -67,7 +67,11 @@ final class RivetRelationDescriptor<Target> {
   List<RivetColumn<dynamic>> references = const [];
   RivetRelationDescriptor<dynamic>? inverseRelation;
   String? _name;
+  // Nullable until generated schema construction binds this descriptor.
+  // ignore: use_late_for_private_fields_and_variables
   RivetTableSchema<dynamic, dynamic>? _ownerSchema;
+  // Nullable until generated schema construction binds this descriptor.
+  // ignore: use_late_for_private_fields_and_variables
   RivetTableSchema<Target, dynamic> Function()? _targetSchema;
   RivetTableSchema<dynamic, dynamic> Function()? _throughSchema;
 
@@ -272,12 +276,12 @@ RivetPredicate? _aggregateWhere<Target>(
 final class RivetRelationAggregate<T>
     implements RivetAliasedExpression<T>, RivetOrderableExpression<T> {
   const RivetRelationAggregate._({
-    required _RelationTraversal<dynamic> traversal,
+    required this._traversal,
     required this.operation,
     required this.codec,
     this.selected,
     this.where,
-  }) : _traversal = traversal;
+  });
 
   final _RelationTraversal<dynamic> _traversal;
   final String operation;
@@ -395,8 +399,8 @@ final class _RelationTraversal<Target> {
     }
     if (relation is RivetManyRelation<Target>) {
       relation.resolve(target.definition);
-      final inverse = relation.inverseRelation ?? _inferTraversalInverse(relation, owner, target);
-      inverse.resolve(owner.definition);
+      final inverse = (relation.inverseRelation ?? _inferTraversalInverse(relation, owner, target))
+        ..resolve(owner.definition);
       _validateTraversalMapping(path, inverse.references, inverse.fields, owner, target);
       return _RelationTraversal(
         path: path,
@@ -407,8 +411,9 @@ final class _RelationTraversal<Target> {
     }
     final throughRelation = relation as RivetManyThroughRelation<Target, dynamic, dynamic>;
     final through = relation._throughSchema?.call();
-    if (through == null)
+    if (through == null) {
       throw StateError('Through relation $path has no generated junction schema.');
+    }
     throughRelation.resolveThrough(through.definition);
     final sourceRelation = throughRelation.sourceRelation!;
     final targetRelation = throughRelation.targetRelation!;

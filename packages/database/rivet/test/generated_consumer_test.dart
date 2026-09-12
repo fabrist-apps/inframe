@@ -1,3 +1,6 @@
+// Hand-built schemas intentionally rely on inferred declaration DSL types.
+// ignore_for_file: specify_nonobvious_property_types
+
 import 'dart:io';
 import 'dart:typed_data';
 
