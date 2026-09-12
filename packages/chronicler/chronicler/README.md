@@ -140,6 +140,13 @@ Disabling metric collection discards queued metric records and unfinished aggreg
 instrument handles remain valid; re-enabling starts a fresh empty interval and accepts only new
 measurements. A timer superseded by a flush or collection change cannot finalize the old interval.
 
+Active series are bounded separately from finalized delivery records. A series becomes idle after
+five minutes by default, measured from its last accepted observation with monotonic time. Chronicler
+checks for expired series at interval boundaries and before admitting a new series, finalizes any
+pending observation, then releases that aggregation state. Invalid observations and instrument
+lookup do not refresh the deadline. Queue or policy rejection of the final aggregate does not restore
+the expired state, and the registered instrument handle can create fresh state later within capacity.
+
 ## Error occurrences
 
 Capture an error occurrence explicitly when an application boundary handles or observes it:

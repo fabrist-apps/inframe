@@ -240,7 +240,8 @@ final class ChroniclerMetrics {
     }
     series
       ..count = nextCount
-      ..sum = nextSum == 0 ? 0 : nextSum;
+      ..sum = nextSum == 0 ? 0 : nextSum
+      ..lastAccepted = _elapsed();
   }
 
   void _setGauge(
@@ -271,7 +272,8 @@ final class ChroniclerMetrics {
     series
       ..count = nextCount
       ..value = value == 0 ? 0 : value
-      ..observedAt = _now();
+      ..observedAt = _now()
+      ..lastAccepted = _elapsed();
   }
 
   void _recordHistogram(
@@ -313,7 +315,8 @@ final class ChroniclerMetrics {
       ..count = nextCount
       ..sum = nextSum == 0 ? 0 : nextSum
       ..min = series.min == null || value < series.min! ? value : series.min
-      ..max = series.max == null || value > series.max! ? value : series.max;
+      ..max = series.max == null || value > series.max! ? value : series.max
+      ..lastAccepted = _elapsed();
     series.bucketCounts[bucket] = nextBucketCount;
   }
 
@@ -325,12 +328,13 @@ final class ChroniclerMetrics {
     final key = _seriesKey(dimensions);
     final existing = instrument.series[key];
     if (existing != null) return existing as T;
+    _evictExpired(_now(), _elapsed(), finalizePending: true);
     if (_seriesCount >= _options.maxSeries ||
         instrument.series.length >= _options.maxSeriesPerInstrument) {
       _diagnose(DiagnosticReason.seriesLimitReached);
       return null;
     }
-    final series = create(dimensions);
+    final series = create(dimensions)..lastAccepted = _elapsed();
     instrument.series[key] = series;
     _seriesCount++;
     return series;
@@ -398,10 +402,40 @@ final class ChroniclerMetrics {
         series.reset();
       }
     }
+    _evictExpired(intervalEnd, elapsedEnd, finalizePending: false);
     _intervalStart = intervalEnd;
     _intervalElapsed = elapsedEnd;
     if (scheduleNext) _scheduleInterval();
     return records;
+  }
+
+  void _evictExpired(
+    DateTime intervalEnd,
+    Duration elapsedEnd, {
+    required bool finalizePending,
+  }) {
+    for (final instrument in _instruments.values) {
+      final expired = instrument.series.entries
+          .where((entry) => elapsedEnd - entry.value.lastAccepted >= _options.idleTimeout)
+          .toList();
+      for (final entry in expired) {
+        final series = entry.value;
+        if (finalizePending && series.count > 0) {
+          _finalize(
+            _createRecord(
+              instrument.payload(
+                series,
+                intervalStart: _intervalStart,
+                intervalEnd: intervalEnd,
+                durationMicros: (elapsedEnd - _intervalElapsed).inMicroseconds,
+              ),
+            ),
+          );
+        }
+        instrument.series.remove(entry.key);
+        _seriesCount--;
+      }
+    }
   }
 
   /// Discards unfinished aggregates and pauses interval scheduling.
@@ -691,6 +725,7 @@ sealed class _MetricSeries {
 
   final Map<String, Object?> attributes;
   int count = 0;
+  Duration lastAccepted = Duration.zero;
 
   void reset();
 }
