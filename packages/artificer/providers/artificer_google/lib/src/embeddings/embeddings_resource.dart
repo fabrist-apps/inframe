@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/transport.dart';
@@ -200,12 +198,6 @@ final class GoogleEmbeddingModel implements EmbeddingModel {
           feature: 'taskType',
         );
       }
-      if (!profile.supportsTasks && title != null) {
-        return UnsupportedFeatureError(
-          '$modelId does not support embedding titles.',
-          feature: 'title',
-        );
-      }
       if (!profile.supportsDimensions && dimensions != null) {
         return UnsupportedFeatureError(
           '$modelId does not support output dimensions.',
@@ -286,10 +278,8 @@ final class GoogleEmbeddingModel implements EmbeddingModel {
       );
     }
     return switch (part.source) {
-      BytesMediaSource(:final bytes) => GooglePart.fromJson(
-        JsonObject({
-          'inlineData': {'mimeType': part.mimeType, 'data': base64Encode(bytes)},
-        }),
+      BytesMediaSource(:final bytes) => GooglePart.inlineData(
+        GoogleInlineData(mimeType: part.mimeType, bytes: bytes),
       ),
       UrlMediaSource() => const UnsupportedFeatureError(
         'Google embeddings cannot forward an HTTP(S) media URL; use bytes or a Google file.',
@@ -302,10 +292,8 @@ final class GoogleEmbeddingModel implements EmbeddingModel {
         mimeType: final sourceMimeType,
       ) =>
         switch ((providerId, api, sourceMimeType == part.mimeType)) {
-          ('google', 'files', true) => GooglePart.fromJson(
-            JsonObject({
-              'fileData': {'mimeType': part.mimeType, 'fileUri': reference},
-            }),
+          ('google', 'files', true) => GooglePart.fileData(
+            GoogleFileData(mimeType: part.mimeType, fileUri: reference),
           ),
           (_, _, false) => const InvalidRequestError(
             'The media and provider-file MIME types must match.',

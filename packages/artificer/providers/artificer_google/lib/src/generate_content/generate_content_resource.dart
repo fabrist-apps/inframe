@@ -32,7 +32,12 @@ final class GoogleGenerateContentResource {
           api: _api,
           modelId: modelId,
         )
-        .flatMap(_decodeResponse);
+        .flatMap(
+          (response) => _decodeTyped(
+            response,
+            GoogleGenerateContentResponse.fromJson,
+          ),
+        );
   }
 
   /// Counts tokens in one explicit native request.
@@ -280,25 +285,6 @@ List<Citation> _citations(JsonObject extensions) {
     );
   }
   return List.unmodifiable(citations);
-}
-
-Effect<NativeResponse<GoogleGenerateContentResponse>, AiError> _decodeResponse(
-  NativeResponse<JsonObject> response,
-) {
-  try {
-    _throwServiceError(response.value, response.metadata);
-    return Effect.succeed(
-      NativeResponse(
-        value: GoogleGenerateContentResponse.fromJson(response.value),
-        payload: response.payload,
-        metadata: response.metadata,
-      ),
-    );
-  } on AiError catch (error) {
-    return Effect.fail(error);
-  } on FormatException catch (error) {
-    return Effect.fail(ProtocolError(error.message));
-  }
 }
 
 Effect<NativeResponse<T>, AiError> _decodeTyped<T>(

@@ -1,13 +1,18 @@
 # Artificer Google
 
 `artificer_google` is a standalone server-side Dart SDK for the Gemini Developer API. It provides
-common `LanguageModel` generation and streaming plus typed native model discovery and
-GenerateContent operations. It depends only on `artificer_core`, Conflux, and `package:http`.
+common language and embedding models plus typed GenerateContent, Models, Files, CachedContent, and
+Interactions resources. It depends only on `artificer_core`, Conflux, and `package:http`.
 
 The native types and deterministic fixtures are pinned to the official
 [GenerateContent](https://ai.google.dev/api/generate-content) and
-[Models](https://ai.google.dev/api/models) references as retrieved on 2026-09-12. Fields outside
-the typed snapshot remain available through `raw` and `extensions` values.
+[Models](https://ai.google.dev/api/models), [Embeddings](https://ai.google.dev/api/embeddings),
+[Files](https://ai.google.dev/api/files), [context caching](https://ai.google.dev/api/caching), and
+[stable Interactions v1](https://ai.google.dev/static/api/interactions-v1.openapi.json) references
+as retrieved on 2026-09-12. Fields outside the typed snapshot remain available through `raw` and
+`extensions` values.
+
+## Generate content
 
 ```dart
 import 'package:artificer_core/artificer_core.dart';
@@ -79,7 +84,11 @@ provider-tagged native arguments and results.
 assistant messages carry signed replay metadata. Serialize and restore the complete message before
 appending tool results so thought signatures and native part ordering are retained. See
 [`example/content_and_tools.dart`](example/content_and_tools.dart) for one multimodal, structured
-application-tool round trip.
+application-tool round trip and
+[`example/streamed_tools_and_replay.dart`](example/streamed_tools_and_replay.dart) for its streaming
+form.
+
+## Models and token counting
 
 Native calls keep authoritative resource names:
 
@@ -112,6 +121,43 @@ final tokenCount = await provider.models
 ```
 
 `models.list` fetches exactly one page. Native multi-candidate responses require an explicit
-`candidateIndex` when normalized. The provider performs no retries, redirects, polling, automatic
-pagination, or hidden model turns. A supplied `http.Client` is borrowed; `close()` interrupts only
-this provider's active operations and never closes the borrowed client.
+`candidateIndex` when normalized.
+
+## Embeddings
+
+`embeddingModel` accepts a bare model ID. One common input uses `:embedContent`; several inputs use
+one synchronous `:batchEmbedContents` request and retain input order. Multiple parts in one input
+produce one vector. `gemini-embedding-2` accepts text, image, audio, video, and document parts but
+rejects task-type options. Known older embedding models accept text and their supported task/title
+options without rewriting input text. See
+[`example/multimodal_embeddings.dart`](example/multimodal_embeddings.dart).
+
+## Files and cached content
+
+`provider.files` exposes resumable upload plus one-page list, retrieve, and delete operations on
+`v1beta`. Upload completion returns the native processing, active, failed, or unknown state; it does
+not wait for model readiness. A returned active file can create a `ProviderFileSource` for common
+generation or embeddings. See [`example/files.dart`](example/files.dart).
+
+`provider.cachedContents` exposes explicit create, one-page list, retrieve, expiration update, and
+delete operations. Updates accept exactly one `ttl` or `expireTime` and send the matching update
+mask. To change cached content, create another cache. Pass an existing `cachedContents/{id}` through
+`GoogleModelOptions`; generation never creates or refreshes it. See
+[`example/cached_contents.dart`](example/cached_contents.dart).
+
+## Native Interactions
+
+`provider.interactions` uses the stable `/v1/interactions` routes for explicit create, retrieve,
+cancel, delete, create-stream, and retrieve-stream operations. Common `LanguageModel` calls continue
+to use explicit-history GenerateContent. The Interactions client stores no last interaction or
+resume cursor and never polls or reconnects. To continue, pass `previousInteractionId`; to resume a
+stream, call `streamRetrieve` with the interaction ID and last event ID. Streaming succeeds only
+after a terminal native status and the documented `[DONE]` sentinel. See
+[`example/interactions.dart`](example/interactions.dart) and
+[`example/interaction_streaming.dart`](example/interaction_streaming.dart).
+
+## Lifetime and side effects
+
+The provider performs no retries, redirects, polling, automatic pagination, hidden model turns, or
+implicit remote cleanup. A supplied `http.Client` is borrowed. `close()` interrupts this provider's
+active local work and never closes the borrowed client or deletes files, caches, or interactions.
