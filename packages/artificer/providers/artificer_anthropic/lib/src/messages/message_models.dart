@@ -303,16 +303,16 @@ final class AnthropicToolResultBlock extends AnthropicContentBlock {
   /// Creates a result with native string or ordered content.
   factory AnthropicToolResultBlock({
     required String toolUseId,
-    required Object content,
+    Object? content,
     bool isError = false,
   }) {
-    final validatedContent = _validateToolResultContent(content);
+    final validatedContent = content == null ? null : _validateToolResultContent(content);
     return AnthropicToolResultBlock._(
       content: validatedContent,
       raw: JsonObject({
         'type': 'tool_result',
         'tool_use_id': _nonEmpty(toolUseId, 'toolUseId'),
-        'content': _toolResultContentToDart(validatedContent),
+        if (validatedContent != null) 'content': _toolResultContentToDart(validatedContent),
         if (isError) 'is_error': true,
       }),
     );
@@ -322,15 +322,15 @@ final class AnthropicToolResultBlock extends AnthropicContentBlock {
     final value = raw.toDart();
     _string(value, 'tool_use_id');
     return AnthropicToolResultBlock._(
-      content: _decodeToolResultContent(value['content']),
+      content: value.containsKey('content') ? _decodeToolResultContent(value['content']) : null,
       raw: raw,
     );
   }
 
   AnthropicToolResultBlock._({required this.content, required this.raw});
 
-  /// A native string or immutable ordered Anthropic content blocks.
-  final Object content;
+  /// A native string or immutable ordered Anthropic content blocks, when supplied.
+  final Object? content;
 
   @override
   String get type => 'tool_result';

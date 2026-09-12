@@ -95,6 +95,29 @@ void main() {
             ),
           )
           .runFuture();
+      final omittedContent = await model
+          .generate(
+            GenerationRequest(
+              messages: [
+                ...request.messages,
+                first.message,
+                ToolMessage([
+                  NativeToolResult(
+                    callId: computer.id,
+                    providerId: 'anthropic',
+                    api: 'messages',
+                    value: JsonObject({
+                      'type': 'tool_result',
+                      'tool_use_id': computer.id,
+                      'is_error': true,
+                    }),
+                  ),
+                ]),
+              ],
+              tools: request.tools,
+            ),
+          )
+          .runFuture();
 
       expect(first.finishReason, FinishReason.paused);
       expect(first.nativeFinishReason, 'pause_turn');
@@ -117,6 +140,7 @@ void main() {
         Message.fromJson(first.message.toJson()).toJson().toDart(),
       );
       expect(second.text, 'Done.');
+      expect(omittedContent.text, 'Done.');
 
       expect(
         requests.first.headers.value('anthropic-beta'),
@@ -150,6 +174,9 @@ void main() {
       expect(replay, _pausedMessage['content']);
       expect(((bodies[1]['messages']! as List)[2] as Map)['content'], [
         {'type': 'tool_result', 'tool_use_id': 'computer_1', 'content': 'Clicked.'},
+      ]);
+      expect(((bodies[2]['messages']! as List)[2] as Map)['content'], [
+        {'type': 'tool_result', 'tool_use_id': 'computer_1', 'is_error': true},
       ]);
     });
 
@@ -316,7 +343,7 @@ void main() {
         'is_error': true,
       });
       expect(
-        () => (block.content as List<AnthropicContentBlock>).add(
+        () => (block.content! as List<AnthropicContentBlock>).add(
           AnthropicTextBlock('Mutation.'),
         ),
         throwsUnsupportedError,
@@ -332,7 +359,20 @@ void main() {
         }),
       ) as AnthropicToolResultBlock;
       expect(decoded.content, isA<List<AnthropicContentBlock>>());
-      expect((decoded.content as List<AnthropicContentBlock>).single, isA<AnthropicTextBlock>());
+      expect((decoded.content! as List<AnthropicContentBlock>).single, isA<AnthropicTextBlock>());
+      final omitted = AnthropicContentBlock.fromJson(
+        JsonObject({
+          'type': 'tool_result',
+          'tool_use_id': 'tool_omitted',
+          'is_error': true,
+        }),
+      ) as AnthropicToolResultBlock;
+      expect(omitted.content, isNull);
+      expect(omitted.toDart(), {
+        'type': 'tool_result',
+        'tool_use_id': 'tool_omitted',
+        'is_error': true,
+      });
 
       for (final invalid in <Object>[
         1,
@@ -352,6 +392,16 @@ void main() {
             'type': 'tool_result',
             'tool_use_id': 'tool_4',
             'content': {'status': 'done'},
+          }),
+        ),
+        throwsFormatException,
+      );
+      expect(
+        () => AnthropicContentBlock.fromJson(
+          JsonObject({
+            'type': 'tool_result',
+            'tool_use_id': 'tool_null',
+            'content': null,
           }),
         ),
         throwsFormatException,
