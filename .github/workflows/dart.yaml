@@ -111,7 +111,7 @@ jobs:
           docker exec inframe-rivet-test psql \
             --username postgres --dbname inframe_test \
             --tuples-only --command 'SELECT 1'
-          dart test packages/database/rivet/test/*_test.dart --concurrency=1 --chain-stack-traces
+          (cd packages/database/rivet && dart test test/*_test.dart --chain-stack-traces)
 
       - name: Run ClickHouse integration tests
         env:

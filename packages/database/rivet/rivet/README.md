@@ -23,7 +23,7 @@ await db.close();
 
 Consumers add `rivet_generator` and `build_runner` as development dependencies, add a `part '<library>.rivet.dart';` directive, then run `dart run build_runner build`.
 
-`RivetConnection.url` defaults to certificate and hostname verification. Use a Dart `SecurityContext` for a private CA. Choose `RivetSslMode.require` only when TLS without certificate verification is intentional, or `RivetSslMode.disable` for an explicitly unencrypted disposable fixture.
+`RivetConnection.url` defaults to certificate and hostname verification and a 30-second query timeout. Use a Dart `SecurityContext` for a private CA. Choose `RivetSslMode.require` only when TLS without certificate verification is intentional, or `RivetSslMode.disable` for an explicitly unencrypted disposable fixture. Set `queryTimeout` when an operation needs a different upper bound.
 
 Query plans do not retain a database connection. Supply either the root database or a transaction at the terminal:
 

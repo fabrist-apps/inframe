@@ -64,7 +64,7 @@ final class RivetTableGenerator extends GeneratorForAnnotation<RivetTable> {
       ...columns.map(
         (field) =>
             '  /// Value read from `${field.displayName}`.\n'
-            '  final ${columnValueType(field.type)} ${field.displayName};',
+            '  final ${columnValueType(field.type, field.library)} ${field.displayName};',
       ),
       ...relations.map(
         (field) =>
@@ -155,10 +155,10 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
         if (visitor.enumType case final enumType?) return enumType;
       }
     }
-    return _enumTypeFromColumn(field.type);
+    return _enumTypeFromColumn(field.type, field.library);
   }
 
-  String? _enumTypeFromColumn(DartType type) {
+  String? _enumTypeFromColumn(DartType type, LibraryElement library) {
     if (type is! InterfaceType) return null;
     for (final argument in type.typeArguments) {
       if (argument.element case final element?
@@ -166,9 +166,9 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
             RivetEnum,
             inPackage: 'rivet',
           ).hasAnnotationOf(element)) {
-        return argument.getDisplayString().replaceAll('?', '');
+        return referenceTo(element, library);
       }
-      if (_enumTypeFromColumn(argument) case final nested?) return nested;
+      if (_enumTypeFromColumn(argument, library) case final nested?) return nested;
     }
     return null;
   }
@@ -183,14 +183,21 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     }
     final target = type.typeArguments.first;
     final targetElement = target.element;
-    var targetRow = '${target.getDisplayString()}Row';
+    var targetReference = target.getDisplayString();
+    if (targetElement != null) {
+      targetReference = referenceTo(targetElement, field.library);
+    }
+    final separator = targetReference.lastIndexOf('.');
+    final prefix = separator < 0 ? '' : targetReference.substring(0, separator + 1);
+    final defaultRowName = '${targetElement?.displayName ?? targetReference}Row';
+    var targetRow = '$prefix$defaultRowName';
     if (targetElement != null) {
       final value = const TypeChecker.typeNamed(
         RivetTable,
         inPackage: 'rivet',
       ).firstAnnotationOf(targetElement);
       if (value != null) {
-        targetRow = readString(ConstantReader(value), 'rowName', targetRow);
+        targetRow = '$prefix${readString(ConstantReader(value), 'rowName', defaultRowName)}';
       }
     }
     return const TypeChecker.typeNamed(

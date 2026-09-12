@@ -1,18 +1,19 @@
 import 'package:rivet/rivet.dart';
 import 'package:rivet_fixture_app/app_database.dart';
-import 'package:rivet_fixture_schema/package_users.dart';
+import 'package:rivet_fixture_schema/package_users.dart' as schema;
 import 'package:test/test.dart';
 
 void main() {
   test('composes generated package-owned schemas in an application database', () async {
-    final schema = PackageUsers.db.buildSchema();
+    final packageUsers = schema.PackageUsers.db.buildSchema();
 
-    expect(schema.schemaName, 'fixture');
-    expect(schema.tableName, 'packageUsers');
-    expect(schema.definition.access.codec, isA<RivetEnumCodec<AccessLevel>>());
-    expect(AccessLevelRivetEnum.codec.renamedFrom, 'role');
-    expect(AccessLevelRivetEnum.codec.renamedLabels, {'owner-label': 'admin-label'});
-    expect(AppUsers.db.buildSchema().definition.access.codec, isA<RivetEnumCodec<AccessLevel>>());
+    expect(packageUsers.schemaName, 'fixture');
+    expect(packageUsers.tableName, 'packageUsers');
+    expect(packageUsers.definition.access.codec, isA<RivetEnumCodec<schema.AccessLevel>>());
+    expect(schema.AccessLevelRivetEnum.codec.renamedFrom, 'role');
+    expect(schema.AccessLevelRivetEnum.codec.renamedLabels, {'owner-label': 'admin-label'});
+    final appUsers = AppUsers.db.buildSchema();
+    expect(appUsers.definition.access.codec, isA<RivetEnumCodec<schema.AccessLevel>>());
 
     final database = await FixtureAppDatabase().open(
       connection: RivetConnection.url(
@@ -20,7 +21,11 @@ void main() {
         sslMode: RivetSslMode.disable,
       ),
     );
-    expect(database.tables.map((table) => table.definition.runtimeType), [PackageUsers, AppUsers]);
+    expect(database.tables.map((table) => table.definition.runtimeType), [
+      schema.PackageUsers,
+      AppUsers,
+    ]);
+    expect(appUsers.relations['package']?.targetTable, schema.PackageUsers);
     await database.close();
   });
 }

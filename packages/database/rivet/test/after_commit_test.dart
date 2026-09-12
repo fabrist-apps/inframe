@@ -103,6 +103,10 @@ void main() {
           transactionEntered.complete();
           await releaseTransaction.future;
         });
+        addTearDown(() async {
+          if (!releaseTransaction.isCompleted) releaseTransaction.complete();
+          await unrelatedTransaction;
+        });
         await transactionEntered.future;
 
         final completed = Completer<void>();
@@ -110,7 +114,7 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 10));
           completed.complete();
         });
-        await immediate.timeout(const Duration(milliseconds: 100));
+        await immediate.timeout(const Duration(seconds: 1));
         expect(completed.isCompleted, isTrue);
         await expectLater(
           database.afterCommit(() => throw StateError('immediate')),

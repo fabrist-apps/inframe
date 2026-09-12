@@ -67,7 +67,10 @@ import 'second.dart' as second;
 
 part 'prefixed_database.rivet.dart';
 
-@RivetDatabase(name: 'prefixed', tables: [first.Users, second.Users])
+const firstTables = <Type>[first.Users];
+const tables = <Type>[...firstTables, second.Users];
+
+@RivetDatabase(name: 'prefixed', tables: tables)
 final class PrefixedDatabase extends _$PrefixedDatabase {}
 ''',
         },

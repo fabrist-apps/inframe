@@ -9,7 +9,7 @@ import 'generated_consumer.dart';
 
 void main() {
   group('Rivet connection configuration', () {
-    test('should apply secure defaults and explicit SSL precedence', () {
+    test('should apply secure defaults and explicit SSL precedence', () async {
       expect(RivetConnection.url('postgresql://localhost/db').sslMode, RivetSslMode.verifyFull);
       expect(
         RivetConnection.url('postgresql://localhost/db?sslmode=require').sslMode,
@@ -41,8 +41,28 @@ void main() {
         RivetConnection.url('postgresql://localhost/db').connectTimeout,
         const Duration(seconds: 10),
       );
+      expect(
+        RivetConnection.url('postgresql://localhost/db').queryTimeout,
+        const Duration(seconds: 30),
+      );
+      expect(
+        RivetConnection.url(
+          'postgresql://localhost/db',
+          queryTimeout: const Duration(seconds: 2),
+        ).queryTimeout,
+        const Duration(seconds: 2),
+      );
       expect(const RivetPoolOptions().maxConnections, 10);
       expect(const RivetPoolOptions().acquireTimeout, const Duration(seconds: 30));
+      await expectLater(
+        RivetTestDatabase().open(
+          connection: RivetConnection.url(
+            'postgresql://localhost/unused',
+            queryTimeout: Duration.zero,
+          ),
+        ),
+        throwsArgumentError,
+      );
     });
   });
 
@@ -131,6 +151,7 @@ void main() {
       'should replace a connection closed during a transaction',
       () async {
         final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        final role = 'rivet_timeout_$pid';
         await fixture.execute('CREATE SCHEMA IF NOT EXISTS fbr116');
         await fixture.execute('''
           CREATE TABLE IF NOT EXISTS fbr116."userProfiles" (
@@ -139,17 +160,22 @@ void main() {
         ''');
         await fixture.execute('TRUNCATE fbr116."userProfiles"');
         await fixture.execute("INSERT INTO fbr116.\"userProfiles\" VALUES ('Ada')");
+        await fixture.execute("CREATE ROLE \"$role\" LOGIN PASSWORD 'test-password'");
         await fixture.execute(
-          "ALTER ROLE CURRENT_USER SET idle_in_transaction_session_timeout = '100ms'",
+          "ALTER ROLE \"$role\" SET idle_in_transaction_session_timeout = '100ms'",
         );
+        await fixture.execute('GRANT USAGE ON SCHEMA fbr116 TO "$role"');
+        await fixture.execute('GRANT SELECT ON TABLE fbr116."userProfiles" TO "$role"');
         addTearDown(() async {
-          await fixture.execute(
-            'ALTER ROLE CURRENT_USER RESET idle_in_transaction_session_timeout',
-          );
+          await fixture.execute('DROP OWNED BY "$role"');
+          await fixture.execute('DROP ROLE IF EXISTS "$role"');
           await fixture.close();
         });
+        final roleDatabaseUrl = Uri.parse(
+          databaseUrl,
+        ).replace(userInfo: '$role:test-password').toString();
         final database = await RivetTestDatabase().open(
-          connection: RivetConnection.url(databaseUrl),
+          connection: RivetConnection.url(roleDatabaseUrl),
           pool: const RivetPoolOptions(maxConnections: 1),
         );
         addTearDown(database.close);
