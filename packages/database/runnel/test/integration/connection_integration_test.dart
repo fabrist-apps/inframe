@@ -213,6 +213,8 @@ void main() {
             final reads = await client.xread({stream: firstStreamId});
             expect(reads.single.key, stream);
             expect(reads.single.entries.single.id, secondStreamId);
+            expect(await client.xread({stream: secondStreamId}), isEmpty);
+            expect(await client.ping(), isTrue);
             expect(await client.xtrim(stream, StreamTrim.maxLength(1)), 1);
             expect(
               await client.xtrim(stream, StreamTrim.minId(secondStreamId)),
