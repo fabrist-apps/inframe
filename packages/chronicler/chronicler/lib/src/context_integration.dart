@@ -44,6 +44,12 @@ extension ChroniclerContextEvents on Context {
   ChroniclerEvents get events => ChroniclerEvents(require(_chroniclerKey));
 }
 
+/// Exposes error-occurrence capture from a configured [Context].
+extension ChroniclerContextErrors on Context {
+  /// Error occurrences backed by the recorder bound to this context.
+  ChroniclerErrors get errors => ChroniclerErrors(require(_chroniclerKey));
+}
+
 /// Runs callback-managed tracing operations from a configured [Context].
 extension ChroniclerContextTracing on Context {
   /// Active-span updates and propagation backed by this Context's recorder.
@@ -163,6 +169,29 @@ final class ChroniclerEvents {
     required String userId,
     required List<String> keys,
   }) => _recorder.unsetUserProperties(userId: userId, keys: keys);
+}
+
+/// Captures explicit error occurrences without waiting for transport work.
+final class ChroniclerErrors {
+  /// Creates an error-capture view over a borrowed recorder.
+  const ChroniclerErrors(this._recorder);
+
+  final ChroniclerRecorder _recorder;
+
+  /// Captures one handled or unhandled error occurrence.
+  void capture(
+    Object error, {
+    StackTrace? stackTrace,
+    bool handled = true,
+    List<ChroniclerCause> causes = const [],
+    Map<String, Object?> attributes = const {},
+  }) => _recorder.recordError(
+    error,
+    stackTrace: stackTrace,
+    handled: handled,
+    causes: causes,
+    attributes: attributes,
+  );
 }
 
 /// Records structured logs without waiting for transport work.

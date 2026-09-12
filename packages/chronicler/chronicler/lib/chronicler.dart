@@ -7,6 +7,6 @@ export 'src/context_integration.dart';
 export 'src/diagnostics.dart';
 export 'src/lifecycle.dart';
 export 'src/models.dart';
-export 'src/runtime.dart' show Chronicler, ChroniclerRecorder;
+export 'src/runtime.dart' show Chronicler, ChroniclerCause, ChroniclerRecorder;
 export 'src/trace_propagation.dart';
 export 'src/transport.dart';
