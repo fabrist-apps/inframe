@@ -80,6 +80,87 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
   }
 }
 
+final class ScalarValuesRow {
+  const ScalarValuesRow({
+    required this.id,
+    required this.count,
+    required this.score,
+    required this.active,
+    required this.createdAt,
+    required this.payload,
+    required this.code,
+    required this.optionalCode,
+  });
+
+  final String id;
+  final int count;
+  final double score;
+  final bool active;
+  final DateTime createdAt;
+  final JsonValue payload;
+  final UserCode code;
+  final UserCode? optionalCode;
+}
+
+final class _$ScalarValuesDB extends RivetTableAccessor<ScalarValues, ScalarValuesRow> {
+  const _$ScalarValuesDB();
+
+  @override
+  RivetTableSchema<ScalarValues, ScalarValuesRow> buildSchema() {
+    final definition = ScalarValues();
+    return RivetTableSchema<ScalarValues, ScalarValuesRow>(
+      schemaName: 'fbr119',
+      tableName: 'scalarValues',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.count as RivetColumn<Object?>,
+        definition.score as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+        definition.createdAt as RivetColumn<Object?>,
+        definition.payload as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+        definition.optionalCode as RivetColumn<Object?>,
+      ],
+      columnNames: [
+        'id',
+        'count',
+        'score',
+        'active',
+        'createdAt',
+        'payload',
+        'code',
+        'optionalCode',
+      ],
+      decode: (values, sqlNulls) => ScalarValuesRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        count: definition.count.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+        score: definition.score.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+        active: definition.active.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
+        ),
+        createdAt: definition.createdAt.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+        payload: definition.payload.decodeValue(
+          values[5],
+          isSqlNull: sqlNulls[5],
+        ),
+        code: definition.code.decodeValue(values[6], isSqlNull: sqlNulls[6]),
+        optionalCode: definition.optionalCode.decodeValue(
+          values[7],
+          isSqlNull: sqlNulls[7],
+        ),
+      ),
+      indexes: const <RivetIndex>[],
+      constraints: const <RivetConstraint>[],
+      relations: {},
+    );
+  }
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -94,6 +175,7 @@ abstract class _$RivetTestDatabase {
     tables: [
       UserProfiles.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       Posts.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      ScalarValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }

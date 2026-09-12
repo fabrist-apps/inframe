@@ -25,5 +25,35 @@ final class Posts extends RivetTableDefinition<Posts> {
   )();
 }
 
-@RivetDatabase(name: 'rivet_test', tables: [UserProfiles, Posts])
+final class UserCode {
+  const UserCode(this.value);
+
+  final String value;
+}
+
+final class UserCodeConverter implements RivetTypeConverter<UserCode, String> {
+  const UserCodeConverter();
+
+  @override
+  UserCode fromSql(String value) => UserCode(value);
+
+  @override
+  String toSql(UserCode value) => value.value;
+}
+
+@RivetTable(schema: 'fbr119')
+final class ScalarValues extends RivetTableDefinition<ScalarValues> {
+  static const db = _$ScalarValuesDB();
+
+  late final id = chronoID(prefix: 'usr')();
+  late final count = integer()();
+  late final score = real()();
+  late final active = boolean()();
+  late final createdAt = dateTime()();
+  late final payload = json()();
+  late final code = text().map(const UserCodeConverter())();
+  late final optionalCode = text().map(const UserCodeConverter()).nullable()();
+}
+
+@RivetDatabase(name: 'rivet_test', tables: [UserProfiles, Posts, ScalarValues])
 final class RivetTestDatabase extends _$RivetTestDatabase {}

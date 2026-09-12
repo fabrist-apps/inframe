@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:chrono_id/chrono_id.dart';
+
 import 'errors.dart';
 import 'relation.dart';
 
@@ -49,6 +53,32 @@ final class RivetTableSchema<Definition, Row> {
 abstract class RivetTableDefinition<Self> {
   RivetOrderableColumnBuilder<String> text({String? name, String? renamedFrom}) =>
       RivetOrderableColumnBuilder(RivetTextCodec(), name: name, renamedFrom: renamedFrom);
+
+  RivetOrderableColumnBuilder<String> chronoID({
+    String? prefix,
+    int size = 24,
+    String? name,
+    String? renamedFrom,
+  }) => RivetOrderableColumnBuilder(
+    RivetChronoIdCodec(prefix: prefix, size: size),
+    name: name,
+    renamedFrom: renamedFrom,
+  )..defaultValue(() => ChronoID.generate(prefix: prefix, size: size));
+
+  RivetOrderableColumnBuilder<int> integer({String? name, String? renamedFrom}) =>
+      RivetOrderableColumnBuilder(RivetIntegerCodec(), name: name, renamedFrom: renamedFrom);
+
+  RivetOrderableColumnBuilder<double> real({String? name, String? renamedFrom}) =>
+      RivetOrderableColumnBuilder(RivetRealCodec(), name: name, renamedFrom: renamedFrom);
+
+  RivetOrderableColumnBuilder<bool> boolean({String? name, String? renamedFrom}) =>
+      RivetOrderableColumnBuilder(RivetBooleanCodec(), name: name, renamedFrom: renamedFrom);
+
+  RivetOrderableColumnBuilder<DateTime> dateTime({String? name, String? renamedFrom}) =>
+      RivetOrderableColumnBuilder(RivetDateTimeCodec(), name: name, renamedFrom: renamedFrom);
+
+  RivetColumnBuilder<JsonValue> json({String? name, String? renamedFrom}) =>
+      RivetColumnBuilder(RivetJsonCodec(), name: name, renamedFrom: renamedFrom);
 
   RivetRelationBuilder<Target, RivetOneRelation<Target>> one<Target>({
     required List<RivetColumn<dynamic>> fields,
@@ -161,6 +191,327 @@ final class RivetTextCodec implements RivetCodec<String> {
   }
 }
 
+final class RivetNullableCodec<T> implements RivetCodec<T?> {
+  const RivetNullableCodec(this.inner);
+
+  final RivetCodec<T> inner;
+
+  @override
+  String get cast => inner.cast;
+
+  @override
+  Object? encode(T? value) => value == null ? null : inner.encode(value);
+
+  @override
+  T? decode(Object? value, {required bool isSqlNull}) =>
+      isSqlNull ? null : inner.decode(value, isSqlNull: false);
+}
+
+final class RivetChronoIdCodec implements RivetCodec<String> {
+  const RivetChronoIdCodec({this.prefix, this.size = 24});
+
+  final String? prefix;
+  final int size;
+
+  @override
+  String get cast => 'text';
+
+  @override
+  Object encode(String value) {
+    _validate(value);
+    return value;
+  }
+
+  @override
+  String decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull || value is! String) throw const FormatException('expected a Chrono ID string');
+    _validate(value);
+    return value;
+  }
+
+  void _validate(String value) {
+    if (!ChronoID.isValid(value, prefix: prefix, size: size)) {
+      throw const FormatException('invalid Chrono ID');
+    }
+  }
+}
+
+final class RivetIntegerCodec implements RivetCodec<int> {
+  static const min = -2147483648;
+  static const max = 2147483647;
+
+  @override
+  String get cast => 'int4';
+
+  @override
+  Object encode(int value) {
+    _validate(value);
+    return value;
+  }
+
+  @override
+  int decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull || value is! int) throw const FormatException('expected a PostgreSQL INTEGER');
+    _validate(value);
+    return value;
+  }
+
+  void _validate(int value) {
+    if (value < min || value > max) throw RangeError.range(value, min, max, 'integer');
+  }
+}
+
+final class RivetRealCodec implements RivetCodec<double> {
+  @override
+  String get cast => 'float8';
+
+  @override
+  Object encode(double value) => value;
+
+  @override
+  double decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull || value is! num)
+      throw const FormatException('expected a PostgreSQL DOUBLE PRECISION');
+    return value.toDouble();
+  }
+}
+
+final class RivetBooleanCodec implements RivetCodec<bool> {
+  @override
+  String get cast => 'bool';
+
+  @override
+  Object encode(bool value) => value;
+
+  @override
+  bool decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull || value is! bool) throw const FormatException('expected a PostgreSQL BOOLEAN');
+    return value;
+  }
+}
+
+final class RivetDateTimeCodec implements RivetCodec<DateTime> {
+  @override
+  String get cast => 'timestamptz';
+
+  @override
+  Object encode(DateTime value) => _milliseconds(value);
+
+  @override
+  DateTime decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull || value is! DateTime)
+      throw const FormatException('expected a PostgreSQL TIMESTAMPTZ');
+    return _milliseconds(value);
+  }
+
+  DateTime _milliseconds(DateTime value) =>
+      DateTime.fromMillisecondsSinceEpoch(value.toUtc().millisecondsSinceEpoch, isUtc: true);
+}
+
+sealed class JsonValue {
+  const JsonValue();
+
+  factory JsonValue.from(Object? value) => value == null ? const JsonNull() : JsonData(value);
+
+  Object? toDart();
+}
+
+final class JsonNull extends JsonValue {
+  const JsonNull();
+
+  @override
+  Object? toDart() => null;
+
+  @override
+  bool operator ==(Object other) => other is JsonNull;
+
+  @override
+  int get hashCode => 0;
+}
+
+final class JsonData extends JsonValue {
+  JsonData(Object value) : value = _validatedJson(value);
+
+  final Object value;
+
+  @override
+  Object toDart() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other is JsonData && jsonEncode(other.value) == jsonEncode(value);
+
+  @override
+  int get hashCode => jsonEncode(value).hashCode;
+}
+
+final class RivetJsonCodec implements RivetCodec<JsonValue> {
+  @override
+  String get cast => 'jsonb';
+
+  @override
+  Object? encode(JsonValue value) => value.toDart();
+
+  @override
+  JsonValue decode(Object? value, {required bool isSqlNull}) {
+    if (isSqlNull) throw const FormatException('expected non-null PostgreSQL JSONB');
+    return JsonValue.from(value);
+  }
+}
+
+Object _validatedJson(Object value) {
+  void validate(Object? item) {
+    switch (item) {
+      case null || bool() || String():
+        return;
+      case final num number:
+        if (!number.isFinite) throw const FormatException('JSON numbers must be finite');
+      case final List<Object?> list:
+        for (final child in list) validate(child);
+      case final Map<Object?, Object?> map:
+        for (final entry in map.entries) {
+          if (entry.key is! String) throw const FormatException('JSON object keys must be strings');
+          validate(entry.value);
+        }
+      default:
+        throw const FormatException('value is not valid JSON');
+    }
+  }
+
+  validate(value);
+  return value;
+}
+
+abstract interface class RivetTypeConverter<Domain, Storage> {
+  Domain fromSql(Storage value);
+  Storage toSql(Domain value);
+}
+
+final class RivetMappedCodec<Domain, Storage> implements RivetCodec<Domain> {
+  const RivetMappedCodec(this.storage, this.converter);
+
+  final RivetCodec<Storage> storage;
+  final RivetTypeConverter<Domain, Storage> converter;
+
+  @override
+  String get cast => storage.cast;
+
+  @override
+  Object? encode(Domain value) => storage.encode(converter.toSql(value));
+
+  @override
+  Domain decode(Object? value, {required bool isSqlNull}) =>
+      converter.fromSql(storage.decode(value, isSqlNull: isSqlNull));
+}
+
+class RivetColumnBuilder<T> {
+  RivetColumnBuilder(this.codec, {this.name, this.renamedFrom});
+
+  final RivetCodec<T> codec;
+  final String? name;
+  final String? renamedFrom;
+
+  RivetColumn<T> call() => RivetColumn(codec, declaredName: name, renamedFrom: renamedFrom);
+
+  RivetColumnBuilder<T?> nullable() =>
+      RivetColumnBuilder(RivetNullableCodec(codec), name: name, renamedFrom: renamedFrom);
+
+  RivetMappedColumnBuilder<Domain, T> map<Domain>(
+    RivetTypeConverter<Domain, T> converter,
+  ) => RivetMappedColumnBuilder(codec, converter, name: name, renamedFrom: renamedFrom);
+}
+
+class RivetMappedColumn<Domain, Storage> extends RivetColumn<Domain> {
+  RivetMappedColumn(
+    RivetCodec<Domain> codec,
+    this.storage, {
+    super.declaredName,
+    super.renamedFrom,
+  }) : super(codec);
+
+  final RivetColumn<Storage> storage;
+
+  @override
+  void attach<Definition, Row>(RivetTableSchema<Definition, Row> table, {String? dartName}) {
+    super.attach(table, dartName: dartName);
+    storage.attach(table, dartName: dartName);
+  }
+}
+
+final class RivetOrderableMappedColumn<Domain, Storage> extends RivetMappedColumn<Domain, Storage> {
+  RivetOrderableMappedColumn(
+    super.codec,
+    RivetOrderableColumn<Storage> super.storage, {
+    super.declaredName,
+    super.renamedFrom,
+  });
+
+  @override
+  RivetOrderableColumn<Storage> get storage => super.storage as RivetOrderableColumn<Storage>;
+}
+
+class RivetMappedColumnBuilder<Domain, Storage> {
+  RivetMappedColumnBuilder(this.storageCodec, this.converter, {this.name, this.renamedFrom});
+
+  final RivetCodec<Storage> storageCodec;
+  final RivetTypeConverter<Domain, Storage> converter;
+  final String? name;
+  final String? renamedFrom;
+
+  RivetMappedColumnBuilder<Domain?, Storage?> nullable() => RivetMappedColumnBuilder(
+    RivetNullableCodec(storageCodec),
+    _NullableConverter(converter),
+    name: name,
+    renamedFrom: renamedFrom,
+  );
+
+  RivetMappedColumn<Domain, Storage> call() => RivetMappedColumn(
+    RivetMappedCodec(storageCodec, converter),
+    RivetColumn(storageCodec, declaredName: name, renamedFrom: renamedFrom),
+    declaredName: name,
+    renamedFrom: renamedFrom,
+  );
+}
+
+final class RivetOrderableMappedColumnBuilder<Domain, Storage>
+    extends RivetMappedColumnBuilder<Domain, Storage> {
+  RivetOrderableMappedColumnBuilder(
+    super.storageCodec,
+    super.converter, {
+    super.name,
+    super.renamedFrom,
+  });
+
+  @override
+  RivetOrderableMappedColumn<Domain, Storage> call() => RivetOrderableMappedColumn(
+    RivetMappedCodec(storageCodec, converter),
+    RivetOrderableColumn(storageCodec, declaredName: name, renamedFrom: renamedFrom),
+    declaredName: name,
+    renamedFrom: renamedFrom,
+  );
+
+  @override
+  RivetOrderableMappedColumnBuilder<Domain?, Storage?> nullable() =>
+      RivetOrderableMappedColumnBuilder(
+        RivetNullableCodec(storageCodec),
+        _NullableConverter(converter),
+        name: name,
+        renamedFrom: renamedFrom,
+      );
+}
+
+final class _NullableConverter<Domain, Storage> implements RivetTypeConverter<Domain?, Storage?> {
+  const _NullableConverter(this.inner);
+
+  final RivetTypeConverter<Domain, Storage> inner;
+
+  @override
+  Domain? fromSql(Storage? value) => value == null ? null : inner.fromSql(value);
+
+  @override
+  Storage? toSql(Domain? value) => value == null ? null : inner.toSql(value);
+}
+
 /// A typed SQL expression backed by a table column.
 class RivetColumn<T> {
   RivetColumn(this.codec, {this.declaredName, this.renamedFrom});
@@ -234,6 +585,21 @@ class RivetOrderableColumnBuilder<T> {
   String? _sqlDefault;
   T Function()? _defaultFn;
   T Function()? _onUpdateFn;
+
+  RivetOrderableColumnBuilder<T?> nullable() => RivetOrderableColumnBuilder(
+    RivetNullableCodec(codec),
+    name: name,
+    renamedFrom: renamedFrom,
+  );
+
+  RivetOrderableMappedColumnBuilder<Domain, T> map<Domain>(
+    RivetTypeConverter<Domain, T> converter,
+  ) => RivetOrderableMappedColumnBuilder(
+    codec,
+    converter,
+    name: name,
+    renamedFrom: renamedFrom,
+  );
 
   RivetOrderableColumnBuilder<T> primaryKey() {
     _primaryKey = true;
