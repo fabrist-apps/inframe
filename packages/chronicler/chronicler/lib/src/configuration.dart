@@ -136,7 +136,7 @@ final class SamplingOptions {
   /// Probability that an eligible product event is retained.
   final double events;
 
-  /// Probability that an eligible span is retained.
+  /// Probability reserved for whole-trace sampling by the tracing integration.
   final double traces;
 }
 
@@ -362,7 +362,7 @@ enum DiagnosticReason {
   /// An exporter cancellation request threw.
   exportCancellationFailed,
 
-  /// Exporter cleanup threw or remained unfinished.
+  /// Exporter cleanup threw synchronously or asynchronously.
   exportCleanupFailed,
 
   /// A tracing operation required an active span.

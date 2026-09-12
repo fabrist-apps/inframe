@@ -348,7 +348,7 @@ final class MetricPayload with MetricPayloadMappable {
   /// Sum aggregation temporality, when applicable.
   final MetricTemporality? temporality;
 
-  /// Aggregated sum for counter instruments.
+  /// Aggregated sum for counter, up/down counter, and histogram instruments.
   final double? sum;
 
   /// Ordered upper bounds for histogram buckets.
