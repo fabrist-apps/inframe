@@ -234,6 +234,7 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
       RivetMappedColumn,
       inPackage: 'rivet',
     ).isAssignableFromType(type);
+    if (isMapped) _validateMappedHookOrder(field);
     final storage = isMapped && type.typeArguments.length > 1 ? type.typeArguments[1] : domain;
     final defaults = _columnDefaults(field);
     return _MutationField(
@@ -252,7 +253,7 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     if (declaration is! VariableDeclaration || declaration.initializer == null) {
       return const _ColumnDefaults();
     }
-    final methods = <String>{};
+    final methods = <String>[];
     _collectColumnMethods(declaration.initializer!, methods);
     return _ColumnDefaults(
       hasDefaultFn: methods.contains('defaultValue') || methods.contains('chronoID'),
@@ -261,11 +262,33 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
     );
   }
 
-  void _collectColumnMethods(Expression expression, Set<String> methods) {
+  void _validateMappedHookOrder(FieldElement field) {
+    final parsed = field.library.session.getParsedLibraryByElement(field.library);
+    if (parsed is! ParsedLibraryResult) return;
+    final declaration = parsed.getFragmentDeclaration(field.firstFragment)?.node;
+    if (declaration is! VariableDeclaration || declaration.initializer == null) return;
+    final methods = <String>[];
+    _collectColumnMethods(declaration.initializer!, methods);
+    final mapIndex = methods.indexOf('map');
+    if (mapIndex < 0) return;
+    final storageHook = methods
+        .take(mapIndex)
+        .any(
+          (method) => method == 'defaultValue' || method == 'onUpdate',
+        );
+    if (storageHook) {
+      throw InvalidGenerationSourceError(
+        'Mapped runtime hooks must be declared after map() so they return the domain type.',
+        element: field,
+      );
+    }
+  }
+
+  void _collectColumnMethods(Expression expression, List<String> methods) {
     switch (expression) {
       case MethodInvocation(:final methodName, :final target):
-        methods.add(methodName.name);
         if (target != null) _collectColumnMethods(target, methods);
+        methods.add(methodName.name);
       case FunctionExpressionInvocation(:final function):
         _collectColumnMethods(function, methods);
       case ParenthesizedExpression(:final expression):

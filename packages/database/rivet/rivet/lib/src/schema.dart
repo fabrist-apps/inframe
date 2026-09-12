@@ -831,8 +831,9 @@ class RivetMappedColumnBuilder<Domain, Storage> {
     ),
   );
 
-  RivetArrayColumnBuilder<Domain> array() => RivetArrayColumnBuilder(
-    RivetMappedCodec(storageCodec, converter),
+  RivetMappedArrayColumnBuilder<Domain, Storage> array() => RivetMappedArrayColumnBuilder(
+    storageCodec,
+    converter,
     name: name,
     renamedFrom: renamedFrom,
     metadata: _metadata.copy(),
@@ -947,6 +948,161 @@ final class _NullableConverter<Domain, Storage> implements RivetTypeConverter<Do
 
   @override
   Storage? toSql(Domain? value) => value == null ? null : inner.toSql(value);
+}
+
+final class _ListConverter<Domain, Storage>
+    implements RivetTypeConverter<List<Domain>, List<Storage>> {
+  const _ListConverter(this.inner);
+
+  final RivetTypeConverter<Domain, Storage> inner;
+
+  @override
+  List<Domain> fromSql(List<Storage> value) => [
+    for (final element in value) inner.fromSql(element),
+  ];
+
+  @override
+  List<Storage> toSql(List<Domain> value) => [
+    for (final element in value) inner.toSql(element),
+  ];
+}
+
+final class RivetMappedArrayColumnBuilder<Domain, Storage> {
+  RivetMappedArrayColumnBuilder(
+    this.elementStorageCodec,
+    this.elementConverter, {
+    this.name,
+    this.renamedFrom,
+    _RivetColumnMetadata? metadata,
+  }) : _metadata = metadata ?? _RivetColumnMetadata();
+
+  final RivetCodec<Storage> elementStorageCodec;
+  final RivetTypeConverter<Domain, Storage> elementConverter;
+  final String? name;
+  final String? renamedFrom;
+  final _RivetColumnMetadata _metadata;
+
+  RivetMappedColumn<List<Domain>, List<Storage>> call() {
+    final storageCodec = RivetArrayCodec(elementStorageCodec);
+    return _metadata.apply(
+      RivetMappedColumn(
+        RivetMappedCodec(storageCodec, _ListConverter(elementConverter)),
+        RivetColumn(storageCodec, declaredName: name, renamedFrom: renamedFrom),
+        declaredName: name,
+        renamedFrom: renamedFrom,
+      ),
+    );
+  }
+
+  RivetNullableMappedArrayColumnBuilder<Domain, Storage> nullable() =>
+      RivetNullableMappedArrayColumnBuilder(
+        elementStorageCodec,
+        elementConverter,
+        name: name,
+        renamedFrom: renamedFrom,
+        metadata: _metadata.copy(),
+      );
+
+  RivetMappedArrayColumnBuilder<Domain, Storage> primaryKey() {
+    _metadata.isPrimaryKey = true;
+    return this;
+  }
+
+  RivetMappedArrayColumnBuilder<Domain, Storage> references<Target>(
+    RivetColumn<dynamic> Function(Target table) reference, {
+    RivetReferentialAction onDelete = RivetReferentialAction.noAction,
+    RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
+  }) {
+    _metadata.foreignKey = _foreignKey(reference, onDelete, onUpdate);
+    return this;
+  }
+
+  RivetMappedArrayColumnBuilder<Domain, Storage> defaultSql(String sql) {
+    _metadata.sqlDefault = sql;
+    return this;
+  }
+
+  RivetMappedArrayColumnBuilder<Domain, Storage> defaultValue(
+    List<Domain> Function() value,
+  ) {
+    _metadata.defaultFn = value;
+    return this;
+  }
+
+  RivetMappedArrayColumnBuilder<Domain, Storage> onUpdate(
+    List<Domain> Function() value,
+  ) {
+    _metadata.onUpdateFn = value;
+    return this;
+  }
+}
+
+final class RivetNullableMappedArrayColumnBuilder<Domain, Storage> {
+  RivetNullableMappedArrayColumnBuilder(
+    this.elementStorageCodec,
+    this.elementConverter, {
+    this.name,
+    this.renamedFrom,
+    _RivetColumnMetadata? metadata,
+  }) : _metadata = metadata ?? _RivetColumnMetadata();
+
+  final RivetCodec<Storage> elementStorageCodec;
+  final RivetTypeConverter<Domain, Storage> elementConverter;
+  final String? name;
+  final String? renamedFrom;
+  final _RivetColumnMetadata _metadata;
+
+  RivetMappedColumn<List<Domain>?, List<Storage>?> call() {
+    final storageCodec = RivetArrayCodec(elementStorageCodec);
+    return _metadata.apply(
+      RivetMappedColumn(
+        RivetMappedCodec(
+          RivetNullableCodec(storageCodec),
+          _NullableConverter(_ListConverter(elementConverter)),
+        ),
+        RivetColumn(
+          RivetNullableCodec(storageCodec),
+          declaredName: name,
+          renamedFrom: renamedFrom,
+        ),
+        declaredName: name,
+        renamedFrom: renamedFrom,
+      ),
+    );
+  }
+
+  RivetNullableMappedArrayColumnBuilder<Domain, Storage> primaryKey() {
+    _metadata.isPrimaryKey = true;
+    return this;
+  }
+
+  RivetNullableMappedArrayColumnBuilder<Domain, Storage> references<Target>(
+    RivetColumn<dynamic> Function(Target table) reference, {
+    RivetReferentialAction onDelete = RivetReferentialAction.noAction,
+    RivetReferentialAction onUpdate = RivetReferentialAction.noAction,
+  }) {
+    _metadata.foreignKey = _foreignKey(reference, onDelete, onUpdate);
+    return this;
+  }
+
+  RivetNullableMappedArrayColumnBuilder<Domain, Storage> defaultSql(String sql) {
+    _metadata.sqlDefault = sql;
+    return this;
+  }
+
+  RivetNullableMappedArrayColumnBuilder<Domain, Storage> defaultValue(
+    List<Domain>? Function() value,
+  ) {
+    _metadata.defaultFn = value;
+    return this;
+  }
+
+  RivetNullableMappedArrayColumnBuilder<Domain, Storage> onUpdate(
+    List<Domain>? Function() value,
+  ) {
+    _metadata.onUpdateFn = value;
+    return this;
+  }
 }
 
 /// A typed SQL expression that can be rendered with bound PostgreSQL values.
@@ -1329,10 +1485,7 @@ final class RivetArrayCodec<Element> extends RivetCodec<List<Element>> {
     if (elementCodec.cast == 'jsonb') {
       return pg.TypedValue(pg.Type.jsonbArray, encoded);
     }
-    if (elementCodec.select('"e"') != '"e"') {
-      return _arrayText(encoded);
-    }
-    return encoded;
+    return _arrayText(encoded);
   }
 
   @override

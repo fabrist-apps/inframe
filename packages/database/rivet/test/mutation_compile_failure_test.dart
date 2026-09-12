@@ -40,6 +40,12 @@ void invalidInsertCalls() {
   );
   MutationUsers().integer().defaultValue(() async => 1);
   MutationUsers().integer().onUpdate(() => MutationUsers().id.value(1));
+  MetadataColumnsCompanion.insert(
+    code: const RivetValue.present('storage'),
+  );
+  MetadataColumnsCompanion.insert(
+    code: RivetValue.expression((values) => values.code.value(const UserCode('domain'))),
+  );
 }
 ''');
 

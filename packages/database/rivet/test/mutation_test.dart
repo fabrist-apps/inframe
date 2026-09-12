@@ -1,3 +1,4 @@
+import 'package:postgres/postgres.dart' as pg;
 import 'package:rivet/rivet.dart';
 import 'package:test/test.dart';
 
@@ -130,6 +131,28 @@ void main() {
       expect(rows.single.nullableDefault, isNull);
       expect(rows.single.serverValue, 42);
       expect(executor.queries.single.sql, contains(' RETURNING '));
+    });
+
+    test('should encode mapped domain values and bypass converters for expressions', () async {
+      await ScalarValues.db
+          .insert(
+            ScalarValuesCompanion.insert(
+              id: const RivetValue.present('usr_000000000000000000000000'),
+              count: const RivetValue.present(1),
+              score: const RivetValue.present(1.5),
+              active: const RivetValue.present(true),
+              createdAt: RivetValue.present(DateTime.utc(2026)),
+              payload: RivetValue.present(JsonValue.from(const {'ok': true})),
+              preferences: const RivetValue.present(Preferences(darkMode: true)),
+              code: RivetValue.expression((values) => values.code.storage.value('stored')),
+            ),
+          )
+          .execute(executor);
+
+      final parameters = executor.queries.single.parameters;
+      expect(parameters[6], isA<pg.TypedValue<Object>>());
+      expect((parameters[6]! as pg.TypedValue<Object>).value, {'darkMode': true});
+      expect(parameters[7], 'stored');
     });
   });
 }

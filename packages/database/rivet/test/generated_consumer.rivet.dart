@@ -642,7 +642,7 @@ final class ArrayValuesCompanion implements RivetCompanion<ArrayValues> {
     vectors,
     required RivetValue<ArrayValues, List<WorkStatus>, List<WorkStatus>>
     statuses,
-    required RivetValue<ArrayValues, List<UserCode?>, List<UserCode?>> codes,
+    required RivetValue<ArrayValues, List<UserCode?>, List<String?>> codes,
     RivetValue<ArrayValues, List<int>?, List<int>?> optionalInts =
         const RivetValue.absent(),
     RivetValue<ArrayValues, List<int?>?, List<int?>?> optionalNullableInts =
@@ -680,7 +680,7 @@ final class ArrayValuesCompanion implements RivetCompanion<ArrayValues> {
   final RivetValue<ArrayValues, List<WorkStatus>, List<WorkStatus>> statuses;
 
   /// Mutation value for `codes`.
-  final RivetValue<ArrayValues, List<UserCode?>, List<UserCode?>> codes;
+  final RivetValue<ArrayValues, List<UserCode?>, List<String?>> codes;
 
   /// The generated column assignments in declaration order.
   @override
@@ -1113,6 +1113,403 @@ final class _$ParameterNamesDB
   ) => RivetInsert(buildSchema(), companion);
 }
 
+/// Generated row returned by reads from 'fbr139.mutationCatalog'.
+final class MutationCatalogRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationCatalogRow({
+    required this.id,
+    required this.textValue,
+    required this.count,
+    required this.score,
+    required this.active,
+    required this.createdAt,
+    required this.payload,
+    required this.nullablePayload,
+    required this.preferences,
+    required this.code,
+    required this.optionalCode,
+    required this.status,
+    required this.statuses,
+    required this.timestamps,
+    required this.nullableInts,
+    required this.optionalInts,
+    required this.jsonValues,
+    required this.mappedCodes,
+    required this.embedding,
+    required this.embeddings,
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `textValue`.
+  final String textValue;
+
+  /// Value read from `count`.
+  final int count;
+
+  /// Value read from `score`.
+  final double score;
+
+  /// Value read from `active`.
+  final bool active;
+
+  /// Value read from `createdAt`.
+  final DateTime createdAt;
+
+  /// Value read from `payload`.
+  final JsonValue payload;
+
+  /// Value read from `nullablePayload`.
+  final JsonValue? nullablePayload;
+
+  /// Value read from `preferences`.
+  final Preferences preferences;
+
+  /// Value read from `code`.
+  final MutationCode code;
+
+  /// Value read from `optionalCode`.
+  final MutationCode? optionalCode;
+
+  /// Value read from `status`.
+  final MutationStatus status;
+
+  /// Value read from `statuses`.
+  final List<MutationStatus> statuses;
+
+  /// Value read from `timestamps`.
+  final List<DateTime> timestamps;
+
+  /// Value read from `nullableInts`.
+  final List<int?> nullableInts;
+
+  /// Value read from `optionalInts`.
+  final List<int>? optionalInts;
+
+  /// Value read from `jsonValues`.
+  final List<JsonValue?> jsonValues;
+
+  /// Value read from `mappedCodes`.
+  final List<MutationCode?> mappedCodes;
+
+  /// Value read from `embedding`.
+  final Float32List embedding;
+
+  /// Value read from `embeddings`.
+  final List<Float32List> embeddings;
+}
+
+/// Generated values accepted by mutations of 'fbr139.mutationCatalog'.
+final class MutationCatalogCompanion
+    implements RivetCompanion<MutationCatalog> {
+  const MutationCatalogCompanion._({
+    required this.id,
+    required this.textValue,
+    required this.count,
+    required this.score,
+    required this.active,
+    required this.createdAt,
+    required this.payload,
+    required this.nullablePayload,
+    required this.preferences,
+    required this.code,
+    required this.optionalCode,
+    required this.status,
+    required this.statuses,
+    required this.timestamps,
+    required this.nullableInts,
+    required this.optionalInts,
+    required this.jsonValues,
+    required this.mappedCodes,
+    required this.embedding,
+    required this.embeddings,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationCatalogCompanion.insert({
+    required RivetValue<MutationCatalog, int, int> id,
+    required RivetValue<MutationCatalog, String, String> textValue,
+    required RivetValue<MutationCatalog, int, int> count,
+    required RivetValue<MutationCatalog, double, double> score,
+    required RivetValue<MutationCatalog, bool, bool> active,
+    required RivetValue<MutationCatalog, JsonValue, JsonValue> payload,
+    required RivetValue<MutationCatalog, Preferences, JsonValue> preferences,
+    required RivetValue<MutationCatalog, List<DateTime>, List<DateTime>>
+    timestamps,
+    required RivetValue<MutationCatalog, List<int?>, List<int?>> nullableInts,
+    required RivetValue<MutationCatalog, List<JsonValue?>, List<JsonValue?>>
+    jsonValues,
+    required RivetValue<MutationCatalog, Float32List, Float32List> embedding,
+    required RivetValue<MutationCatalog, List<Float32List>, List<Float32List>>
+    embeddings,
+    RivetValue<MutationCatalog, DateTime, DateTime> createdAt =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, JsonValue?, JsonValue?> nullablePayload =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, MutationCode, String> code =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, MutationCode?, String?> optionalCode =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, MutationStatus, MutationStatus> status =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<MutationStatus>, List<MutationStatus>>
+        statuses =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<int>?, List<int>?> optionalInts =
+        const RivetValue.absent(),
+    RivetValue<MutationCatalog, List<MutationCode?>, List<String?>>
+        mappedCodes =
+        const RivetValue.absent(),
+  }) => MutationCatalogCompanion._(
+    id: id,
+    textValue: textValue,
+    count: count,
+    score: score,
+    active: active,
+    createdAt: createdAt,
+    payload: payload,
+    nullablePayload: nullablePayload,
+    preferences: preferences,
+    code: code,
+    optionalCode: optionalCode,
+    status: status,
+    statuses: statuses,
+    timestamps: timestamps,
+    nullableInts: nullableInts,
+    optionalInts: optionalInts,
+    jsonValues: jsonValues,
+    mappedCodes: mappedCodes,
+    embedding: embedding,
+    embeddings: embeddings,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationCatalog, int, int> id;
+
+  /// Mutation value for `textValue`.
+  final RivetValue<MutationCatalog, String, String> textValue;
+
+  /// Mutation value for `count`.
+  final RivetValue<MutationCatalog, int, int> count;
+
+  /// Mutation value for `score`.
+  final RivetValue<MutationCatalog, double, double> score;
+
+  /// Mutation value for `active`.
+  final RivetValue<MutationCatalog, bool, bool> active;
+
+  /// Mutation value for `createdAt`.
+  final RivetValue<MutationCatalog, DateTime, DateTime> createdAt;
+
+  /// Mutation value for `payload`.
+  final RivetValue<MutationCatalog, JsonValue, JsonValue> payload;
+
+  /// Mutation value for `nullablePayload`.
+  final RivetValue<MutationCatalog, JsonValue?, JsonValue?> nullablePayload;
+
+  /// Mutation value for `preferences`.
+  final RivetValue<MutationCatalog, Preferences, JsonValue> preferences;
+
+  /// Mutation value for `code`.
+  final RivetValue<MutationCatalog, MutationCode, String> code;
+
+  /// Mutation value for `optionalCode`.
+  final RivetValue<MutationCatalog, MutationCode?, String?> optionalCode;
+
+  /// Mutation value for `status`.
+  final RivetValue<MutationCatalog, MutationStatus, MutationStatus> status;
+
+  /// Mutation value for `statuses`.
+  final RivetValue<MutationCatalog, List<MutationStatus>, List<MutationStatus>>
+  statuses;
+
+  /// Mutation value for `timestamps`.
+  final RivetValue<MutationCatalog, List<DateTime>, List<DateTime>> timestamps;
+
+  /// Mutation value for `nullableInts`.
+  final RivetValue<MutationCatalog, List<int?>, List<int?>> nullableInts;
+
+  /// Mutation value for `optionalInts`.
+  final RivetValue<MutationCatalog, List<int>?, List<int>?> optionalInts;
+
+  /// Mutation value for `jsonValues`.
+  final RivetValue<MutationCatalog, List<JsonValue?>, List<JsonValue?>>
+  jsonValues;
+
+  /// Mutation value for `mappedCodes`.
+  final RivetValue<MutationCatalog, List<MutationCode?>, List<String?>>
+  mappedCodes;
+
+  /// Mutation value for `embedding`.
+  final RivetValue<MutationCatalog, Float32List, Float32List> embedding;
+
+  /// Mutation value for `embeddings`.
+  final RivetValue<MutationCatalog, List<Float32List>, List<Float32List>>
+  embeddings;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationCatalog>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('textValue', textValue),
+    RivetAssignment('count', count),
+    RivetAssignment('score', score),
+    RivetAssignment('active', active),
+    RivetAssignment('createdAt', createdAt),
+    RivetAssignment('payload', payload),
+    RivetAssignment('nullablePayload', nullablePayload),
+    RivetAssignment('preferences', preferences),
+    RivetAssignment('code', code),
+    RivetAssignment('optionalCode', optionalCode),
+    RivetAssignment('status', status),
+    RivetAssignment('statuses', statuses),
+    RivetAssignment('timestamps', timestamps),
+    RivetAssignment('nullableInts', nullableInts),
+    RivetAssignment('optionalInts', optionalInts),
+    RivetAssignment('jsonValues', jsonValues),
+    RivetAssignment('mappedCodes', mappedCodes),
+    RivetAssignment('embedding', embedding),
+    RivetAssignment('embeddings', embeddings),
+  ];
+}
+
+final class _$MutationCatalogDB
+    extends RivetTableAccessor<MutationCatalog, MutationCatalogRow> {
+  const _$MutationCatalogDB();
+
+  @override
+  RivetTableSchema<MutationCatalog, MutationCatalogRow> buildSchema() {
+    final definition = MutationCatalog();
+    definition.status.configureEnum(MutationStatusRivetEnum.codec);
+    definition.statuses.configureEnum(MutationStatusRivetEnum.codec);
+    return RivetTableSchema<MutationCatalog, MutationCatalogRow>(
+      schemaName: 'fbr139',
+      tableName: 'mutationCatalog',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.textValue as RivetColumn<Object?>,
+        definition.count as RivetColumn<Object?>,
+        definition.score as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+        definition.createdAt as RivetColumn<Object?>,
+        definition.payload as RivetColumn<Object?>,
+        definition.nullablePayload as RivetColumn<Object?>,
+        definition.preferences as RivetColumn<Object?>,
+        definition.code as RivetColumn<Object?>,
+        definition.optionalCode as RivetColumn<Object?>,
+        definition.status as RivetColumn<Object?>,
+        definition.statuses as RivetColumn<Object?>,
+        definition.timestamps as RivetColumn<Object?>,
+        definition.nullableInts as RivetColumn<Object?>,
+        definition.optionalInts as RivetColumn<Object?>,
+        definition.jsonValues as RivetColumn<Object?>,
+        definition.mappedCodes as RivetColumn<Object?>,
+        definition.embedding as RivetColumn<Object?>,
+        definition.embeddings as RivetColumn<Object?>,
+      ],
+      columnNames: [
+        'id',
+        'textValue',
+        'count',
+        'score',
+        'active',
+        'createdAt',
+        'payload',
+        'nullablePayload',
+        'preferences',
+        'code',
+        'optionalCode',
+        'status',
+        'statuses',
+        'timestamps',
+        'nullableInts',
+        'optionalInts',
+        'jsonValues',
+        'mappedCodes',
+        'embedding',
+        'embeddings',
+      ],
+      decode: (values, sqlNulls) => MutationCatalogRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        textValue: definition.textValue.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+        count: definition.count.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+        score: definition.score.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+        active: definition.active.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+        createdAt: definition.createdAt.decodeValue(
+          values[5],
+          isSqlNull: sqlNulls[5],
+        ),
+        payload: definition.payload.decodeValue(
+          values[6],
+          isSqlNull: sqlNulls[6],
+        ),
+        nullablePayload: definition.nullablePayload.decodeValue(
+          values[7],
+          isSqlNull: sqlNulls[7],
+        ),
+        preferences: definition.preferences.decodeValue(
+          values[8],
+          isSqlNull: sqlNulls[8],
+        ),
+        code: definition.code.decodeValue(values[9], isSqlNull: sqlNulls[9]),
+        optionalCode: definition.optionalCode.decodeValue(
+          values[10],
+          isSqlNull: sqlNulls[10],
+        ),
+        status: definition.status.decodeValue(
+          values[11],
+          isSqlNull: sqlNulls[11],
+        ),
+        statuses: definition.statuses.decodeValue(
+          values[12],
+          isSqlNull: sqlNulls[12],
+        ),
+        timestamps: definition.timestamps.decodeValue(
+          values[13],
+          isSqlNull: sqlNulls[13],
+        ),
+        nullableInts: definition.nullableInts.decodeValue(
+          values[14],
+          isSqlNull: sqlNulls[14],
+        ),
+        optionalInts: definition.optionalInts.decodeValue(
+          values[15],
+          isSqlNull: sqlNulls[15],
+        ),
+        jsonValues: definition.jsonValues.decodeValue(
+          values[16],
+          isSqlNull: sqlNulls[16],
+        ),
+        mappedCodes: definition.mappedCodes.decodeValue(
+          values[17],
+          isSqlNull: sqlNulls[17],
+        ),
+        embedding: definition.embedding.decodeValue(
+          values[18],
+          isSqlNull: sqlNulls[18],
+        ),
+        embeddings: definition.embeddings.decodeValue(
+          values[19],
+          isSqlNull: sqlNulls[19],
+        ),
+      ),
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationCatalog, MutationCatalogRow> insert(
+    MutationCatalogCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
+}
+
 /// Generated row returned by reads from 'fbr138.mutationUsers'.
 final class MutationUsersRow {
   /// Creates a row from decoded column and relation values.
@@ -1462,6 +1859,7 @@ abstract class _$RivetTestDatabase {
       MutationUsers.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       MutationParents.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       MutationChildren.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      MutationCatalog.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }
@@ -1479,5 +1877,17 @@ abstract final class WorkStatusRivetEnum {
 
     values: [WorkStatus.queued, WorkStatus.complete],
     labels: ['zeta', 'alpha'],
+  );
+}
+
+/// Generated PostgreSQL metadata and codec for [MutationStatus].
+abstract final class MutationStatusRivetEnum {
+  /// Converts [MutationStatus] values to and from their stored labels.
+  static const codec = RivetEnumCodec<MutationStatus>(
+    schemaName: 'fbr139',
+    typeName: 'mutationStatus',
+
+    values: [MutationStatus.queued, MutationStatus.complete],
+    labels: ['waiting', 'finished'],
   );
 }

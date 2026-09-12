@@ -99,6 +99,86 @@ final class Users extends RivetTableDefinition<Users> {
       );
     });
 
+    test('should preserve mapped array domain and storage mutation types', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      const source = r'''
+import 'package:rivet/rivet.dart';
+
+part 'mapped_mutations.rivet.dart';
+
+final class Code {}
+
+final class CodeConverter implements RivetTypeConverter<Code, String> {
+  const CodeConverter();
+  @override
+  Code fromSql(String value) => Code();
+  @override
+  String toSql(Code value) => 'code';
+}
+
+@RivetTable()
+final class Values extends RivetTableDefinition<Values> {
+  static const db = _$ValuesDB();
+  late final codes = text().map(const CodeConverter()).nullable().array()();
+}
+''';
+
+      await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {'rivet_generator|lib/mapped_mutations.dart': source},
+        readerWriter: readerWriter,
+        outputs: {
+          'rivet_generator|lib/mapped_mutations.rivet.dart': decodedMatches(
+            contains(
+              'required RivetValue<Values, List<Code?>, List<String?>> codes,',
+            ),
+          ),
+        },
+      );
+    });
+
+    test('should reject mapped hooks declared with the storage type', () async {
+      final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
+      await readerWriter.testing.loadIsolateSources();
+      final result = await testBuilder(
+        rivetBuilder(BuilderOptions.empty),
+        {
+          'rivet_generator|lib/invalid_mapped_hook.dart': r'''
+import 'package:rivet/rivet.dart';
+
+part 'invalid_mapped_hook.rivet.dart';
+
+final class Code {
+  const Code(this.value);
+  final String value;
+}
+
+final class CodeConverter implements RivetTypeConverter<Code, String> {
+  const CodeConverter();
+  @override
+  Code fromSql(String value) => Code(value);
+  @override
+  String toSql(Code value) => value.value;
+}
+
+@RivetTable()
+final class Values extends RivetTableDefinition<Values> {
+  static const db = _$ValuesDB();
+  late final code = text().defaultValue(() => 'storage').map(const CodeConverter())();
+}
+''',
+        },
+        readerWriter: readerWriter,
+      );
+
+      expect(result.succeeded, isFalse);
+      expect(
+        result.errors.single,
+        contains('Mapped runtime hooks must be declared after map'),
+      );
+    });
+
     test('should preserve prefixes for tables with the same class name', () async {
       final readerWriter = TestReaderWriter(rootPackage: 'rivet_generator');
       await readerWriter.testing.loadIsolateSources();

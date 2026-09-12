@@ -209,6 +209,96 @@ String? mutationNullableDefault() {
   return null;
 }
 
+final class MutationCode {
+  const MutationCode(this.value);
+
+  final String value;
+}
+
+final class MutationCodeConverter implements RivetTypeConverter<MutationCode, String> {
+  const MutationCodeConverter();
+
+  @override
+  MutationCode fromSql(String value) {
+    if (!value.startsWith('code:')) {
+      throw const FormatException('expected a code-prefixed value');
+    }
+    return MutationCode(value.substring(5));
+  }
+
+  @override
+  String toSql(MutationCode value) {
+    mutationCodeEncodeCalls++;
+    return 'code:${value.value}';
+  }
+}
+
+@RivetEnum(schema: 'fbr139', name: 'mutationStatus')
+enum MutationStatus {
+  @RivetEnumValue(name: 'waiting')
+  queued,
+  @RivetEnumValue(name: 'finished')
+  complete,
+}
+
+int mappedCodeDefaultCalls = 0;
+int mutationCodeEncodeCalls = 0;
+int enumDefaultCalls = 0;
+int timestampDefaultCalls = 0;
+int mappedArrayDefaultCalls = 0;
+
+MutationCode mappedCodeDefault() {
+  mappedCodeDefaultCalls++;
+  return const MutationCode('default');
+}
+
+MutationStatus enumDefault() {
+  enumDefaultCalls++;
+  return MutationStatus.complete;
+}
+
+DateTime timestampDefault() {
+  timestampDefaultCalls++;
+  return DateTime.utc(1969, 12, 31, 23, 59, 59, 999, 999);
+}
+
+List<MutationCode?> mappedArrayDefault() {
+  mappedArrayDefaultCalls++;
+  return const [MutationCode('array-default'), null];
+}
+
+@RivetTable(schema: 'fbr139')
+final class MutationCatalog extends RivetTableDefinition<MutationCatalog> {
+  static const db = _$MutationCatalogDB();
+
+  late final id = integer().primaryKey()();
+  late final textValue = text()();
+  late final count = integer()();
+  late final score = real()();
+  late final active = boolean()();
+  late final createdAt = dateTime().defaultValue(timestampDefault)();
+  late final payload = json()();
+  late final nullablePayload = json().nullable()();
+  late final preferences = json().map(const PreferencesConverter())();
+  late final code = text().map(const MutationCodeConverter()).defaultValue(mappedCodeDefault)();
+  late final optionalCode = text().map(const MutationCodeConverter()).nullable()();
+  late final status = enumText<MutationStatus>().defaultValue(enumDefault)();
+  late final statuses = enumText<MutationStatus>().array().defaultValue(
+    () => [MutationStatus.queued, MutationStatus.complete],
+  )();
+  late final timestamps = dateTime().array()();
+  late final nullableInts = integer().nullable().array()();
+  late final optionalInts = integer().array().nullable()();
+  late final jsonValues = json().nullable().array()();
+  late final mappedCodes = text()
+      .map(const MutationCodeConverter())
+      .nullable()
+      .array()
+      .defaultValue(mappedArrayDefault)();
+  late final embedding = vector(dimensions: 3)();
+  late final embeddings = vector(dimensions: 3).array()();
+}
+
 @RivetTable(schema: 'fbr138')
 final class MutationUsers extends RivetTableDefinition<MutationUsers> {
   static const db = _$MutationUsersDB();
@@ -261,6 +351,7 @@ final class MutationChildren extends RivetTableDefinition<MutationChildren> {
     MutationUsers,
     MutationParents,
     MutationChildren,
+    MutationCatalog,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}
