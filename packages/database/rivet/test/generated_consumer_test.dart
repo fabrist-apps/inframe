@@ -195,6 +195,31 @@ void main() {
       expect(child.columns.every((column) => column.foreignKey == null), isTrue);
     });
 
+    test('should compile composite collection inverses in mapping order', () async {
+      final parent = _compositeParentSchema();
+      final child = _compositeChildSchema();
+      final executor = _CaptureExecutor();
+      final include = RivetInclude<Object?, Object?>(
+        name: 'children',
+        path: 'children',
+        relation: parent.relations['children']!,
+        targetSchema: child,
+      );
+
+      await RivetFind<Object?, Object?>(parent, includes: [include]).get(executor);
+
+      expect(executor.query.sql, contains('"__rivet_t1"."second" = "__rivet_t0"."second"'));
+      expect(executor.query.sql, contains('"__rivet_t1"."first" = "__rivet_t0"."first"'));
+      expect(
+        executor.query.sql.indexOf('"__rivet_t1"."second" = "__rivet_t0"."second"'),
+        lessThan(
+          executor.query.sql.indexOf('"__rivet_t1"."first" = "__rivet_t0"."first"'),
+        ),
+      );
+      expect(parent.columns.every((column) => column.foreignKey == null), isTrue);
+      expect(child.columns.every((column) => column.foreignKey == null), isTrue);
+    });
+
     test('should reject duplicate and missing schema registrations before connecting', () async {
       final connection = RivetConnection.url(
         'postgresql://localhost/unused',
@@ -304,6 +329,7 @@ void main() {
 final class _CompositeParent extends RivetTableDefinition<_CompositeParent> {
   late final first = integer()();
   late final second = integer()();
+  late final children = many<_CompositeChild>(relation: (child) => child.parent)();
 }
 
 final class _CompositeChild extends RivetTableDefinition<_CompositeChild> {
@@ -324,6 +350,9 @@ RivetTableSchema<Object?, Object?> _compositeParentSchema() {
     columns: [definition.first, definition.second],
     columnNames: const ['first', 'second'],
     decode: (_, _) => Object(),
+    relations: {
+      'children': definition.children as RivetRelationDescriptor<Object?>,
+    },
   ) as RivetTableSchema<Object?, Object?>;
 }
 
@@ -340,4 +369,23 @@ RivetTableSchema<Object?, Object?> _compositeChildSchema() {
       'parent': definition.parent as RivetRelationDescriptor<Object?>,
     },
   ) as RivetTableSchema<Object?, Object?>;
+}
+
+final class _CaptureExecutor implements RivetExecutor {
+  late RivetCompiledQuery query;
+
+  @override
+  Future<List<Row>> execute<Row>(
+    RivetCompiledQuery query,
+    RivetRowDecoder<Row> decode,
+  ) async {
+    this.query = query;
+    return [];
+  }
+
+  @override
+  Future<int> executeAffected(RivetCompiledQuery query) async {
+    this.query = query;
+    return 0;
+  }
 }

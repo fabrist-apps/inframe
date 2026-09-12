@@ -169,13 +169,13 @@ final class RivetInclude<Definition, Row> {
         relationPath: path,
       );
     }
-    final decoded = [for (final row in rows) _decodeRow(row)];
+    final decoded = <Row>[for (final row in rows) _decodeRow(row)];
     return relation.kind == RivetRelationKind.one
-        ? Relation<dynamic>.loaded(decoded.firstOrNull)
-        : Relation<dynamic>.loaded(List<Object?>.unmodifiable(decoded));
+        ? Relation<Row?>.loaded(decoded.firstOrNull)
+        : Relation<List<Row>>.loaded(List<Row>.unmodifiable(decoded));
   }
 
-  Object? _decodeRow(Object? encoded) {
+  Row _decodeRow(Object? encoded) {
     if (encoded is! List<Object?> ||
         encoded.length != targetSchema.columns.length + includes.length) {
       throw FormatException('Relation $path returned an invalid row transport.');

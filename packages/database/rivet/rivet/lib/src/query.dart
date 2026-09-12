@@ -218,25 +218,28 @@ String _compileInclude(
   final target = include.targetSchema;
   final alias = nextAlias();
   target.qualify(alias);
-  final relation = include.relation..resolve(target.definition);
-  if (relation.kind != RivetRelationKind.one) {
+  final relation = include.relation;
+  if (relation.kind == RivetRelationKind.manyThrough) {
     throw RivetUnsupportedQueryException(
-      'Collection relation `${include.path}` is implemented by its dependent slice.',
+      'Through relation `${include.path}` is implemented by its dependent slice.',
     );
   }
-  if (relation.fields.isEmpty || relation.fields.length != relation.references.length) {
+  final mapping = relation.kind == RivetRelationKind.one
+      ? _resolveOneMapping(relation, source, target)
+      : _resolveManyMapping(include, source, target);
+  if (mapping.source.isEmpty || mapping.source.length != mapping.target.length) {
     throw ArgumentError(
       'Relation ${include.path} must map the same non-zero number of columns.',
     );
   }
-  if (relation.fields.any((column) => !source.columns.contains(column)) ||
-      relation.references.any((column) => !target.columns.contains(column))) {
+  if (mapping.source.any((column) => !source.columns.contains(column)) ||
+      mapping.target.any((column) => !target.columns.contains(column))) {
     throw ArgumentError(
       'Relation ${include.path} maps columns outside its source or target table.',
     );
   }
-  for (var index = 0; index < relation.fields.length; index++) {
-    if (relation.fields[index].codec.cast != relation.references[index].codec.cast) {
+  for (var index = 0; index < mapping.source.length; index++) {
+    if (mapping.source[index].codec.cast != mapping.target[index].codec.cast) {
       throw ArgumentError('Relation ${include.path} maps incompatible column storage types.');
     }
   }
@@ -249,27 +252,82 @@ String _compileInclude(
     ...nestedSelections,
   ];
   final predicates = [
-    for (var index = 0; index < relation.fields.length; index++)
-      '${relation.references[index].sql} = ${relation.fields[index].sql}',
+    for (var index = 0; index < mapping.source.length; index++)
+      '${mapping.target[index].sql} = ${mapping.source[index].sql}',
   ];
   if (include.predicate case final predicate?) {
     predicates.add(predicate.renderParameters(startAt: parameters.length + 1));
     parameters.addAll(predicate.parameters);
   }
   final orderSql = include.orders.isEmpty ? '' : ' ORDER BY ${_renderOrders(include.orders)}';
+  final aggregateOrder = include.orders.isEmpty ? '' : ' ORDER BY "__rivet_ordinal"';
+  final ordinal = include.orders.isEmpty
+      ? ''
+      : ', row_number() OVER (ORDER BY ${_renderOrders(include.orders)}) AS "__rivet_ordinal"';
+  final limit = relation.kind == RivetRelationKind.one ? 2 : include.limit;
+  final limitSql = limit == null ? '' : '\n  LIMIT $limit';
   return '''
 (
 SELECT jsonb_build_object(
   'count', count(*),
-  'rows', COALESCE(jsonb_agg("__rivet_row"), '[]'::jsonb)
+  'rows', COALESCE(jsonb_agg("__rivet_row"$aggregateOrder), '[]'::jsonb)
 )
 FROM (
-  SELECT jsonb_build_array(${cells.join(', ')}) AS "__rivet_row"
+  SELECT jsonb_build_array(${cells.join(', ')}) AS "__rivet_row"$ordinal
   FROM ${target.qualifiedName} AS ${quoteIdentifier(alias)}
-  WHERE ${predicates.join(' AND ')}$orderSql
-  LIMIT 2
+  WHERE ${predicates.join(' AND ')}$orderSql$limitSql
 ) AS "__rivet_relation"
 )''';
+}
+
+({List<RivetColumn<dynamic>> source, List<RivetColumn<dynamic>> target}) _resolveOneMapping(
+  RivetRelationDescriptor<dynamic> relation,
+  RivetTableSchema<dynamic, dynamic> source,
+  RivetTableSchema<dynamic, dynamic> target,
+) {
+  relation.resolve(target.definition);
+  return (source: relation.fields, target: relation.references);
+}
+
+({List<RivetColumn<dynamic>> source, List<RivetColumn<dynamic>> target}) _resolveManyMapping(
+  RivetInclude<dynamic, dynamic> include,
+  RivetTableSchema<dynamic, dynamic> source,
+  RivetTableSchema<dynamic, dynamic> target,
+) {
+  final relation = include.relation..resolve(target.definition);
+  final inverse = relation.inverseRelation ?? _inferInverse(include, source, target);
+  if (!target.relations.values.contains(inverse)) {
+    throw ArgumentError('Relation ${include.path} selects an inverse outside its target table.');
+  }
+  if (inverse.kind != RivetRelationKind.one ||
+      inverse.targetTable != source.definition.runtimeType) {
+    throw ArgumentError(
+      'Relation ${include.path} must resolve to a one-relation back to its source.',
+    );
+  }
+  inverse.resolve(source.definition);
+  return (source: inverse.references, target: inverse.fields);
+}
+
+RivetRelationDescriptor<dynamic> _inferInverse(
+  RivetInclude<dynamic, dynamic> include,
+  RivetTableSchema<dynamic, dynamic> source,
+  RivetTableSchema<dynamic, dynamic> target,
+) {
+  final candidates = target.relations.values
+      .where(
+        (relation) =>
+            relation.kind == RivetRelationKind.one &&
+            relation.targetTable == source.definition.runtimeType,
+      )
+      .toList(growable: false);
+  if (candidates.length != 1) {
+    throw ArgumentError(
+      'Relation ${include.path} requires an explicit inverse because its target has '
+      '${candidates.length} matching one-relations.',
+    );
+  }
+  return candidates.single;
 }
 
 String _renderOrders(List<RivetOrder> orders) => orders

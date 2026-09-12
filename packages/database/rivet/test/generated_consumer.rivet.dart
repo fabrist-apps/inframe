@@ -350,6 +350,766 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
       RivetDelete(buildSchema(), where: where);
 }
 
+/// Typed relation include scope for [RelationalUsers].
+final class RelationalUsersInclude {
+  /// Creates the generated include scope.
+  const RelationalUsersInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<RelationalUsers, RelationalUsersRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [authoredPosts] relation.
+  RivetInclude<RelationalPosts, RelationalPostsRow> authoredPosts({
+    RivetWhere<RelationalPosts>? where,
+    RivetOrderBy<RelationalPosts>? orderBy,
+    int? limit,
+
+    RivetIncludes<RelationalPostsInclude>? include,
+  }) {
+    final target = RelationalPosts.db.buildSchema();
+    final relationPath = path.isEmpty ? 'authoredPosts' : '$path.authoredPosts';
+    return RivetInclude<RelationalPosts, RelationalPostsRow>(
+      name: 'authoredPosts',
+      path: relationPath,
+      relation: _schema.relations['authoredPosts']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(RelationalPostsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [reviewedPosts] relation.
+  RivetInclude<RelationalPosts, RelationalPostsRow> reviewedPosts({
+    RivetWhere<RelationalPosts>? where,
+    RivetOrderBy<RelationalPosts>? orderBy,
+    int? limit,
+
+    RivetIncludes<RelationalPostsInclude>? include,
+  }) {
+    final target = RelationalPosts.db.buildSchema();
+    final relationPath = path.isEmpty ? 'reviewedPosts' : '$path.reviewedPosts';
+    return RivetInclude<RelationalPosts, RelationalPostsRow>(
+      name: 'reviewedPosts',
+      path: relationPath,
+      relation: _schema.relations['reviewedPosts']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(RelationalPostsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr146.relationalUsers'.
+final class RelationalUsersRow {
+  /// Creates a row from decoded column and relation values.
+  const RelationalUsersRow({
+    required this.id,
+    required this.name,
+    this.authoredPosts = const Relation.unloaded(),
+    this.reviewedPosts = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `name`.
+  final String name;
+
+  /// Loaded or unloaded `authoredPosts` relation.
+  final Relation<List<RelationalPostsRow>> authoredPosts;
+
+  /// Loaded or unloaded `reviewedPosts` relation.
+  final Relation<List<RelationalPostsRow>> reviewedPosts;
+}
+
+/// Generated values accepted by mutations of 'fbr146.relationalUsers'.
+final class RelationalUsersCompanion
+    implements RivetCompanion<RelationalUsers> {
+  const RelationalUsersCompanion._({required this.id, required this.name});
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory RelationalUsersCompanion.insert({
+    required RivetValue<RelationalUsers, int, int> id,
+    required RivetValue<RelationalUsers, String, String> name,
+  }) => RelationalUsersCompanion._(id: id, name: name);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory RelationalUsersCompanion.update({
+    RivetValue<RelationalUsers, int, int> id = const RivetValue.absent(),
+    RivetValue<RelationalUsers, String, String> name =
+        const RivetValue.absent(),
+  }) => RelationalUsersCompanion._(id: id, name: name);
+
+  /// Mutation value for `id`.
+  final RivetValue<RelationalUsers, int, int> id;
+
+  /// Mutation value for `name`.
+  final RivetValue<RelationalUsers, String, String> name;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<RelationalUsers>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+    RivetAssignment('name', name),
+  ];
+}
+
+final class _$RelationalUsersDB
+    extends RivetTableAccessor<RelationalUsers, RelationalUsersRow> {
+  const _$RelationalUsersDB();
+
+  @override
+  RivetTableSchema<RelationalUsers, RelationalUsersRow> buildSchema() {
+    RelationalUsers createDefinition() {
+      final definition = RelationalUsers();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    RelationalUsersRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => RelationalUsersRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      authoredPosts: relations.read('authoredPosts'),
+      reviewedPosts: relations.read('reviewedPosts'),
+    );
+
+    return RivetTableSchema<RelationalUsers, RelationalUsersRow>(
+      schemaName: 'fbr146',
+      tableName: 'relationalUsers',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'name'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'authoredPosts':
+            definition.authoredPosts as RivetRelationDescriptor<Object?>,
+        'reviewedPosts':
+            definition.reviewedPosts as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<RelationalUsers, RelationalUsersRow> find({
+    RivetWhere<RelationalUsers>? where,
+    RivetOrderBy<RelationalUsers>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<RelationalUsersInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(RelationalUsersInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<RelationalUsers, RelationalUsersRow> insert(
+    RelationalUsersCompanion companion, {
+    RivetOnConflict<RelationalUsers>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<RelationalUsers, RelationalUsersRow> insertMany(
+    Iterable<RelationalUsersCompanion> companions, {
+    RivetOnConflict<RelationalUsers>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<RelationalUsers, RelationalUsersRow> update(
+    RelationalUsersCompanion companion, {
+    RivetWhere<RelationalUsers>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<RelationalUsers, RelationalUsersRow> delete({
+    RivetWhere<RelationalUsers>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [RelationalPosts].
+final class RelationalPostsInclude {
+  /// Creates the generated include scope.
+  const RelationalPostsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<RelationalPosts, RelationalPostsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [author] relation.
+  RivetInclude<RelationalUsers, RelationalUsersRow> author({
+    RivetWhere<RelationalUsers>? where,
+
+    RivetIncludes<RelationalUsersInclude>? include,
+  }) {
+    final target = RelationalUsers.db.buildSchema();
+    final relationPath = path.isEmpty ? 'author' : '$path.author';
+    return RivetInclude<RelationalUsers, RelationalUsersRow>(
+      name: 'author',
+      path: relationPath,
+      relation: _schema.relations['author']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(RelationalUsersInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [reviewer] relation.
+  RivetInclude<RelationalUsers, RelationalUsersRow> reviewer({
+    RivetWhere<RelationalUsers>? where,
+
+    RivetIncludes<RelationalUsersInclude>? include,
+  }) {
+    final target = RelationalUsers.db.buildSchema();
+    final relationPath = path.isEmpty ? 'reviewer' : '$path.reviewer';
+    return RivetInclude<RelationalUsers, RelationalUsersRow>(
+      name: 'reviewer',
+      path: relationPath,
+      relation: _schema.relations['reviewer']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(RelationalUsersInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [comments] relation.
+  RivetInclude<RelationalComments, RelationalCommentsRow> comments({
+    RivetWhere<RelationalComments>? where,
+    RivetOrderBy<RelationalComments>? orderBy,
+    int? limit,
+
+    RivetIncludes<RelationalCommentsInclude>? include,
+  }) {
+    final target = RelationalComments.db.buildSchema();
+    final relationPath = path.isEmpty ? 'comments' : '$path.comments';
+    return RivetInclude<RelationalComments, RelationalCommentsRow>(
+      name: 'comments',
+      path: relationPath,
+      relation: _schema.relations['comments']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(
+            RelationalCommentsInclude(target, path: relationPath),
+          ) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr146.relationalPosts'.
+final class RelationalPostsRow {
+  /// Creates a row from decoded column and relation values.
+  const RelationalPostsRow({
+    required this.id,
+    required this.authorId,
+    required this.reviewerId,
+    required this.title,
+    required this.rank,
+    this.author = const Relation.unloaded(),
+    this.reviewer = const Relation.unloaded(),
+    this.comments = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `authorId`.
+  final int authorId;
+
+  /// Value read from `reviewerId`.
+  final int? reviewerId;
+
+  /// Value read from `title`.
+  final String title;
+
+  /// Value read from `rank`.
+  final int rank;
+
+  /// Loaded or unloaded `author` relation.
+  final Relation<RelationalUsersRow?> author;
+
+  /// Loaded or unloaded `reviewer` relation.
+  final Relation<RelationalUsersRow?> reviewer;
+
+  /// Loaded or unloaded `comments` relation.
+  final Relation<List<RelationalCommentsRow>> comments;
+}
+
+/// Generated values accepted by mutations of 'fbr146.relationalPosts'.
+final class RelationalPostsCompanion
+    implements RivetCompanion<RelationalPosts> {
+  const RelationalPostsCompanion._({
+    required this.id,
+    required this.authorId,
+    required this.reviewerId,
+    required this.title,
+    required this.rank,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory RelationalPostsCompanion.insert({
+    required RivetValue<RelationalPosts, int, int> id,
+    required RivetValue<RelationalPosts, int, int> authorId,
+    required RivetValue<RelationalPosts, String, String> title,
+    required RivetValue<RelationalPosts, int, int> rank,
+    RivetValue<RelationalPosts, int?, int?> reviewerId =
+        const RivetValue.absent(),
+  }) => RelationalPostsCompanion._(
+    id: id,
+    authorId: authorId,
+    reviewerId: reviewerId,
+    title: title,
+    rank: rank,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory RelationalPostsCompanion.update({
+    RivetValue<RelationalPosts, int, int> id = const RivetValue.absent(),
+    RivetValue<RelationalPosts, int, int> authorId = const RivetValue.absent(),
+    RivetValue<RelationalPosts, int?, int?> reviewerId =
+        const RivetValue.absent(),
+    RivetValue<RelationalPosts, String, String> title =
+        const RivetValue.absent(),
+    RivetValue<RelationalPosts, int, int> rank = const RivetValue.absent(),
+  }) => RelationalPostsCompanion._(
+    id: id,
+    authorId: authorId,
+    reviewerId: reviewerId,
+    title: title,
+    rank: rank,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<RelationalPosts, int, int> id;
+
+  /// Mutation value for `authorId`.
+  final RivetValue<RelationalPosts, int, int> authorId;
+
+  /// Mutation value for `reviewerId`.
+  final RivetValue<RelationalPosts, int?, int?> reviewerId;
+
+  /// Mutation value for `title`.
+  final RivetValue<RelationalPosts, String, String> title;
+
+  /// Mutation value for `rank`.
+  final RivetValue<RelationalPosts, int, int> rank;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<RelationalPosts>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+    RivetAssignment('authorId', authorId),
+    RivetAssignment('reviewerId', reviewerId),
+    RivetAssignment('title', title),
+    RivetAssignment('rank', rank),
+  ];
+}
+
+final class _$RelationalPostsDB
+    extends RivetTableAccessor<RelationalPosts, RelationalPostsRow> {
+  const _$RelationalPostsDB();
+
+  @override
+  RivetTableSchema<RelationalPosts, RelationalPostsRow> buildSchema() {
+    RelationalPosts createDefinition() {
+      final definition = RelationalPosts();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    RelationalPostsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => RelationalPostsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      authorId: transport
+          ? definition.authorId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.authorId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      reviewerId: transport
+          ? definition.reviewerId.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.reviewerId.decodeValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            ),
+      title: transport
+          ? definition.title.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.title.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      rank: transport
+          ? definition.rank.decodeTransportValue(
+              values[4],
+              isSqlNull: sqlNulls[4],
+            )
+          : definition.rank.decodeValue(values[4], isSqlNull: sqlNulls[4]),
+      author: relations.read('author'),
+      reviewer: relations.read('reviewer'),
+      comments: relations.read('comments'),
+    );
+
+    return RivetTableSchema<RelationalPosts, RelationalPostsRow>(
+      schemaName: 'fbr146',
+      tableName: 'relationalPosts',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.authorId as RivetColumn<Object?>,
+        definition.reviewerId as RivetColumn<Object?>,
+        definition.title as RivetColumn<Object?>,
+        definition.rank as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'authorId', 'reviewerId', 'title', 'rank'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.authorId as RivetColumn<Object?>,
+        definition.reviewerId as RivetColumn<Object?>,
+        definition.title as RivetColumn<Object?>,
+        definition.rank as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'author': definition.author as RivetRelationDescriptor<Object?>,
+        'reviewer': definition.reviewer as RivetRelationDescriptor<Object?>,
+        'comments': definition.comments as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<RelationalPosts, RelationalPostsRow> find({
+    RivetWhere<RelationalPosts>? where,
+    RivetOrderBy<RelationalPosts>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<RelationalPostsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(RelationalPostsInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<RelationalPosts, RelationalPostsRow> insert(
+    RelationalPostsCompanion companion, {
+    RivetOnConflict<RelationalPosts>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<RelationalPosts, RelationalPostsRow> insertMany(
+    Iterable<RelationalPostsCompanion> companions, {
+    RivetOnConflict<RelationalPosts>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<RelationalPosts, RelationalPostsRow> update(
+    RelationalPostsCompanion companion, {
+    RivetWhere<RelationalPosts>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<RelationalPosts, RelationalPostsRow> delete({
+    RivetWhere<RelationalPosts>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [RelationalComments].
+final class RelationalCommentsInclude {
+  /// Creates the generated include scope.
+  const RelationalCommentsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<RelationalComments, RelationalCommentsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [post] relation.
+  RivetInclude<RelationalPosts, RelationalPostsRow> post({
+    RivetWhere<RelationalPosts>? where,
+
+    RivetIncludes<RelationalPostsInclude>? include,
+  }) {
+    final target = RelationalPosts.db.buildSchema();
+    final relationPath = path.isEmpty ? 'post' : '$path.post';
+    return RivetInclude<RelationalPosts, RelationalPostsRow>(
+      name: 'post',
+      path: relationPath,
+      relation: _schema.relations['post']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(RelationalPostsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr146.relationalComments'.
+final class RelationalCommentsRow {
+  /// Creates a row from decoded column and relation values.
+  const RelationalCommentsRow({
+    required this.id,
+    required this.postId,
+    required this.body,
+    this.post = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `postId`.
+  final int postId;
+
+  /// Value read from `body`.
+  final String body;
+
+  /// Loaded or unloaded `post` relation.
+  final Relation<RelationalPostsRow?> post;
+}
+
+/// Generated values accepted by mutations of 'fbr146.relationalComments'.
+final class RelationalCommentsCompanion
+    implements RivetCompanion<RelationalComments> {
+  const RelationalCommentsCompanion._({
+    required this.id,
+    required this.postId,
+    required this.body,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory RelationalCommentsCompanion.insert({
+    required RivetValue<RelationalComments, int, int> id,
+    required RivetValue<RelationalComments, int, int> postId,
+    required RivetValue<RelationalComments, String, String> body,
+  }) => RelationalCommentsCompanion._(id: id, postId: postId, body: body);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory RelationalCommentsCompanion.update({
+    RivetValue<RelationalComments, int, int> id = const RivetValue.absent(),
+    RivetValue<RelationalComments, int, int> postId = const RivetValue.absent(),
+    RivetValue<RelationalComments, String, String> body =
+        const RivetValue.absent(),
+  }) => RelationalCommentsCompanion._(id: id, postId: postId, body: body);
+
+  /// Mutation value for `id`.
+  final RivetValue<RelationalComments, int, int> id;
+
+  /// Mutation value for `postId`.
+  final RivetValue<RelationalComments, int, int> postId;
+
+  /// Mutation value for `body`.
+  final RivetValue<RelationalComments, String, String> body;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<RelationalComments>> operator [](
+    RivetCompanionKey key,
+  ) => [
+    RivetAssignment('id', id),
+    RivetAssignment('postId', postId),
+    RivetAssignment('body', body),
+  ];
+}
+
+final class _$RelationalCommentsDB
+    extends RivetTableAccessor<RelationalComments, RelationalCommentsRow> {
+  const _$RelationalCommentsDB();
+
+  @override
+  RivetTableSchema<RelationalComments, RelationalCommentsRow> buildSchema() {
+    RelationalComments createDefinition() {
+      final definition = RelationalComments();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    RelationalCommentsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => RelationalCommentsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      postId: transport
+          ? definition.postId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.postId.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      body: transport
+          ? definition.body.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.body.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      post: relations.read('post'),
+    );
+
+    return RivetTableSchema<RelationalComments, RelationalCommentsRow>(
+      schemaName: 'fbr146',
+      tableName: 'relationalComments',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.postId as RivetColumn<Object?>,
+        definition.body as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'postId', 'body'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.postId as RivetColumn<Object?>,
+        definition.body as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {'post': definition.post as RivetRelationDescriptor<Object?>},
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<RelationalComments, RelationalCommentsRow> find({
+    RivetWhere<RelationalComments>? where,
+    RivetOrderBy<RelationalComments>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<RelationalCommentsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(RelationalCommentsInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<RelationalComments, RelationalCommentsRow> insert(
+    RelationalCommentsCompanion companion, {
+    RivetOnConflict<RelationalComments>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<RelationalComments, RelationalCommentsRow> insertMany(
+    Iterable<RelationalCommentsCompanion> companions, {
+    RivetOnConflict<RelationalComments>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<RelationalComments, RelationalCommentsRow> update(
+    RelationalCommentsCompanion companion, {
+    RivetWhere<RelationalComments>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<RelationalComments, RelationalCommentsRow> delete({
+    RivetWhere<RelationalComments>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
 /// Generated row returned by reads from 'fbr119.scalarValues'.
 final class ScalarValuesRow {
   /// Creates a row from decoded column and relation values.
@@ -5587,6 +6347,9 @@ abstract class _$RivetTestDatabase {
     tables: [
       UserProfiles.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       Posts.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      RelationalUsers.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      RelationalPosts.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      RelationalComments.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       ScalarValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       EnumValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       VectorValues.db.buildSchema() as RivetTableSchema<Object?, Object?>,

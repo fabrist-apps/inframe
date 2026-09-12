@@ -31,6 +31,31 @@ final class PackageUsersInclude {
       where: where,
     );
   }
+
+  /// Includes the [projects] relation.
+  RivetInclude<AppProjects, AppProjectsRow> projects({
+    RivetWhere<AppProjects>? where,
+    RivetOrderBy<AppProjects>? orderBy,
+    int? limit,
+
+    RivetIncludes<AppProjectsInclude>? include,
+  }) {
+    final target = AppProjects.db.buildSchema();
+    final relationPath = path.isEmpty ? 'projects' : '$path.projects';
+    return RivetInclude<AppProjects, AppProjectsRow>(
+      name: 'projects',
+      path: relationPath,
+      relation: _schema.relations['projects']!,
+      targetSchema: target,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(AppProjectsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
 }
 
 /// Generated row returned by reads from 'fixture.appUsers'.
@@ -43,6 +68,7 @@ final class PackageUsersRow {
     required this.accessCallback,
     required this.packageAccess,
     this.package = const Relation.unloaded(),
+    this.projects = const Relation.unloaded(),
   });
 
   /// Value read from `packageName`.
@@ -62,6 +88,9 @@ final class PackageUsersRow {
 
   /// Loaded or unloaded `package` relation.
   final Relation<schema.PackageUsersRow?> package;
+
+  /// Loaded or unloaded `projects` relation.
+  final Relation<List<AppProjectsRow>> projects;
 }
 
 /// Generated values accepted by mutations of 'fixture.appUsers'.
@@ -239,6 +268,7 @@ final class _$PackageUsersDB
               isSqlNull: sqlNulls[4],
             ),
       package: relations.read('package'),
+      projects: relations.read('projects'),
     );
 
     return RivetTableSchema<PackageUsers, PackageUsersRow>(
@@ -277,6 +307,7 @@ final class _$PackageUsersDB
 
       relations: {
         'package': definition.package as RivetRelationDescriptor<Object?>,
+        'projects': definition.projects as RivetRelationDescriptor<Object?>,
       },
     );
   }
@@ -324,6 +355,249 @@ final class _$PackageUsersDB
   }) => RivetDelete(buildSchema(), where: where);
 }
 
+/// Typed relation include scope for [AppProjects].
+final class AppProjectsInclude {
+  /// Creates the generated include scope.
+  const AppProjectsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<AppProjects, AppProjectsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [owner] relation.
+  RivetInclude<PackageUsers, PackageUsersRow> owner({
+    RivetWhere<PackageUsers>? where,
+
+    RivetIncludes<PackageUsersInclude>? include,
+  }) {
+    final target = PackageUsers.db.buildSchema();
+    final relationPath = path.isEmpty ? 'owner' : '$path.owner';
+    return RivetInclude<PackageUsers, PackageUsersRow>(
+      name: 'owner',
+      path: relationPath,
+      relation: _schema.relations['owner']!,
+      targetSchema: target,
+      where: where,
+
+      includes:
+          include?.call(PackageUsersInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+
+  /// Includes the [packageOwner] relation.
+  RivetInclude<schema.PackageUsers, schema.PackageUsersRow> packageOwner({
+    RivetWhere<schema.PackageUsers>? where,
+  }) {
+    final target = schema.PackageUsers.db.buildSchema();
+    final relationPath = path.isEmpty ? 'packageOwner' : '$path.packageOwner';
+    return RivetInclude<schema.PackageUsers, schema.PackageUsersRow>(
+      name: 'packageOwner',
+      path: relationPath,
+      relation: _schema.relations['packageOwner']!,
+      targetSchema: target,
+      where: where,
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fixture.appProjects'.
+final class AppProjectsRow {
+  /// Creates a row from decoded column and relation values.
+  const AppProjectsRow({
+    required this.id,
+    required this.ownerName,
+    required this.packageOwnerName,
+    this.owner = const Relation.unloaded(),
+    this.packageOwner = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `ownerName`.
+  final String ownerName;
+
+  /// Value read from `packageOwnerName`.
+  final String packageOwnerName;
+
+  /// Loaded or unloaded `owner` relation.
+  final Relation<PackageUsersRow?> owner;
+
+  /// Loaded or unloaded `packageOwner` relation.
+  final Relation<schema.PackageUsersRow?> packageOwner;
+}
+
+/// Generated values accepted by mutations of 'fixture.appProjects'.
+final class AppProjectsCompanion implements RivetCompanion<AppProjects> {
+  const AppProjectsCompanion._({
+    required this.id,
+    required this.ownerName,
+    required this.packageOwnerName,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory AppProjectsCompanion.insert({
+    required RivetValue<AppProjects, int, int> id,
+    required RivetValue<AppProjects, String, String> ownerName,
+    required RivetValue<AppProjects, String, String> packageOwnerName,
+  }) => AppProjectsCompanion._(
+    id: id,
+    ownerName: ownerName,
+    packageOwnerName: packageOwnerName,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory AppProjectsCompanion.update({
+    RivetValue<AppProjects, int, int> id = const RivetValue.absent(),
+    RivetValue<AppProjects, String, String> ownerName =
+        const RivetValue.absent(),
+    RivetValue<AppProjects, String, String> packageOwnerName =
+        const RivetValue.absent(),
+  }) => AppProjectsCompanion._(
+    id: id,
+    ownerName: ownerName,
+    packageOwnerName: packageOwnerName,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<AppProjects, int, int> id;
+
+  /// Mutation value for `ownerName`.
+  final RivetValue<AppProjects, String, String> ownerName;
+
+  /// Mutation value for `packageOwnerName`.
+  final RivetValue<AppProjects, String, String> packageOwnerName;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<AppProjects>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+    RivetAssignment('ownerName', ownerName),
+    RivetAssignment('packageOwnerName', packageOwnerName),
+  ];
+}
+
+final class _$AppProjectsDB
+    extends RivetTableAccessor<AppProjects, AppProjectsRow> {
+  const _$AppProjectsDB();
+
+  @override
+  RivetTableSchema<AppProjects, AppProjectsRow> buildSchema() {
+    AppProjects createDefinition() {
+      final definition = AppProjects();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    AppProjectsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => AppProjectsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      ownerName: transport
+          ? definition.ownerName.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.ownerName.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      packageOwnerName: transport
+          ? definition.packageOwnerName.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.packageOwnerName.decodeValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            ),
+      owner: relations.read('owner'),
+      packageOwner: relations.read('packageOwner'),
+    );
+
+    return RivetTableSchema<AppProjects, AppProjectsRow>(
+      schemaName: 'fixture',
+      tableName: 'appProjects',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.ownerName as RivetColumn<Object?>,
+        definition.packageOwnerName as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'ownerName', 'packageOwnerName'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.ownerName as RivetColumn<Object?>,
+        definition.packageOwnerName as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'owner': definition.owner as RivetRelationDescriptor<Object?>,
+        'packageOwner':
+            definition.packageOwner as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<AppProjects, AppProjectsRow> find({
+    RivetWhere<AppProjects>? where,
+    RivetOrderBy<AppProjects>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<AppProjectsInclude>? include,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(AppProjectsInclude(schema)) ?? const [],
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<AppProjects, AppProjectsRow> insert(
+    AppProjectsCompanion companion, {
+    RivetOnConflict<AppProjects>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<AppProjects, AppProjectsRow> insertMany(
+    Iterable<AppProjectsCompanion> companions, {
+    RivetOnConflict<AppProjects>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<AppProjects, AppProjectsRow> update(
+    AppProjectsCompanion companion, {
+    RivetWhere<AppProjects>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<AppProjects, AppProjectsRow> delete({
+    RivetWhere<AppProjects>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -340,6 +614,7 @@ abstract class _$FixtureAppDatabase {
       schema.PackageUsers.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
       PackageUsers.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+      AppProjects.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
 }

@@ -30,6 +30,49 @@ final class Posts extends RivetTableDefinition<Posts> {
   )();
 }
 
+@RivetTable(schema: 'fbr146')
+final class RelationalUsers extends RivetTableDefinition<RelationalUsers> {
+  static const db = _$RelationalUsersDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final authoredPosts = many<RelationalPosts>(relation: (post) => post.author)();
+  late final reviewedPosts = many<RelationalPosts>(relation: (post) => post.reviewer)();
+}
+
+@RivetTable(schema: 'fbr146')
+final class RelationalPosts extends RivetTableDefinition<RelationalPosts> {
+  static const db = _$RelationalPostsDB();
+
+  late final id = integer().primaryKey()();
+  late final authorId = integer()();
+  late final reviewerId = integer().nullable()();
+  late final title = text()();
+  late final rank = integer()();
+  late final author = one<RelationalUsers>(
+    fields: [authorId],
+    references: (user) => [user.id],
+  )();
+  late final reviewer = one<RelationalUsers>(
+    fields: [reviewerId],
+    references: (user) => [user.id],
+  )();
+  late final comments = many<RelationalComments>()();
+}
+
+@RivetTable(schema: 'fbr146')
+final class RelationalComments extends RivetTableDefinition<RelationalComments> {
+  static const db = _$RelationalCommentsDB();
+
+  late final id = integer().primaryKey()();
+  late final postId = integer()();
+  late final body = text()();
+  late final post = one<RelationalPosts>(
+    fields: [postId],
+    references: (post) => [post.id],
+  )();
+}
+
 final class UserCode {
   const UserCode(this.value);
 
@@ -582,6 +625,9 @@ final class MutationAssignmentNames extends RivetTableDefinition<MutationAssignm
   tables: [
     UserProfiles,
     Posts,
+    RelationalUsers,
+    RelationalPosts,
+    RelationalComments,
     ScalarValues,
     EnumValues,
     VectorValues,
