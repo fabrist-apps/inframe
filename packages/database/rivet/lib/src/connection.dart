@@ -52,6 +52,7 @@ final class RivetDb implements RivetExecutor {
     if (pool.maxConnections <= 0) {
       throw ArgumentError.value(pool.maxConnections, 'maxConnections', 'must be positive');
     }
+    _validateSchemas(tables);
     final uri = Uri.parse(connection.url);
     if (uri.scheme != 'postgres' && uri.scheme != 'postgresql') {
       throw ArgumentError.value(connection.url, 'url', 'must use postgres or postgresql');
@@ -115,6 +116,26 @@ final class RivetDb implements RivetExecutor {
     if (_closed) return;
     _closed = true;
     await _pool.close();
+  }
+}
+
+void _validateSchemas(List<RivetTableSchema<Object?, Object?>> tables) {
+  final physicalNames = <String>{};
+  final registeredTypes = tables.map((table) => table.definition.runtimeType).toSet();
+  for (final table in tables) {
+    if (!physicalNames.add('${table.schemaName}.${table.tableName}')) {
+      throw ArgumentError(
+        'Duplicate Rivet table registration: ${table.schemaName}.${table.tableName}.',
+      );
+    }
+    for (final relation in table.relations.entries) {
+      if (!registeredTypes.contains(relation.value.targetTable)) {
+        throw ArgumentError(
+          'Relation ${table.schemaName}.${table.tableName}.${relation.key} targets '
+          '${relation.value.targetTable}, which is not registered among $registeredTypes.',
+        );
+      }
+    }
   }
 }
 

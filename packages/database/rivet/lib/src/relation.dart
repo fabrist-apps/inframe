@@ -28,19 +28,28 @@ enum RivetRelationKind { one, many, manyThrough }
 
 /// Runtime metadata for a relation declaration. It never creates a foreign key.
 final class RivetRelationDescriptor<Target> {
-  const RivetRelationDescriptor({required this.kind, this.through});
+  const RivetRelationDescriptor({
+    required this.kind,
+    required this.targetTable,
+    this.through,
+  });
 
   final RivetRelationKind kind;
   final Type? through;
+  final Type targetTable;
 }
 
 final class RivetOneRelation<Target> extends RivetRelationDescriptor<Target> {
-  const RivetOneRelation() : super(kind: RivetRelationKind.one);
+  const RivetOneRelation(Type targetTable)
+    : super(kind: RivetRelationKind.one, targetTable: targetTable);
 }
 
 final class RivetManyRelation<Target> extends RivetRelationDescriptor<Target> {
-  const RivetManyRelation({super.through})
-    : super(kind: through == null ? RivetRelationKind.many : RivetRelationKind.manyThrough);
+  const RivetManyRelation(Type targetTable, {super.through})
+    : super(
+        kind: through == null ? RivetRelationKind.many : RivetRelationKind.manyThrough,
+        targetTable: targetTable,
+      );
 }
 
 final class RivetRelationBuilder<Target, RelationType extends RivetRelationDescriptor<Target>> {

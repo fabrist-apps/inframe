@@ -26,6 +26,10 @@ final class RivetTableSchema<Definition, Row> {
     for (var index = 0; index < columns.length; index++) {
       columns[index].attach(this, dartName: columnNames[index]);
     }
+    final physicalNames = columns.map((column) => column.physicalName).toSet();
+    if (physicalNames.length != columns.length) {
+      throw ArgumentError('Table $schemaName.$tableName has duplicate physical column names.');
+    }
   }
 
   final String schemaName;
@@ -49,12 +53,12 @@ abstract class RivetTableDefinition<Self> {
   RivetRelationBuilder<Target, RivetOneRelation<Target>> one<Target>({
     required List<RivetColumn<dynamic>> fields,
     required List<RivetColumn<dynamic>> Function(Target table) references,
-  }) => RivetRelationBuilder(const RivetOneRelation());
+  }) => RivetRelationBuilder(RivetOneRelation(Target));
 
   RivetRelationBuilder<Target, RivetManyRelation<Target>> many<Target>({
     Object? Function(Target table)? relation,
     Type? through,
-  }) => RivetRelationBuilder(RivetManyRelation(through: through));
+  }) => RivetRelationBuilder(RivetManyRelation(Target, through: through));
 
   RivetIndexBuilder index(String name) => RivetIndexBuilder(name, unique: false);
   RivetIndexBuilder uniqueIndex(String name) => RivetIndexBuilder(name, unique: true);
@@ -285,6 +289,14 @@ final class RivetPredicate {
 
   final String sql;
   final List<Object?> parameters;
+
+  RivetPredicate operator &(RivetPredicate other) =>
+      RivetPredicate('($sql) AND (${other.sql})', [...parameters, ...other.parameters]);
+
+  RivetPredicate operator |(RivetPredicate other) =>
+      RivetPredicate('($sql) OR (${other.sql})', [...parameters, ...other.parameters]);
+
+  RivetPredicate operator ~() => RivetPredicate('NOT ($sql)', parameters);
 }
 
 String quoteIdentifier(String identifier) {
