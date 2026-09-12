@@ -15,6 +15,7 @@ workspace:
   - packages/database/runnel
   - packages/database/turso
   - packages/database/rivet
+  - packages/database/voxel
   - packages/json_patch
   - packages/chrono_id
   - packages/conflux
