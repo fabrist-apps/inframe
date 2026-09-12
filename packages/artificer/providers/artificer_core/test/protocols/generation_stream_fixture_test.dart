@@ -81,7 +81,7 @@ void main() {
     final error =
         (exit as Failed<List<GenerationEvent>, AiError>).cause.expectedErrors.single
             as ProviderError;
-    expect((error.partialOutput as AssistantMessage).text, 'partial');
+    expect((error.partialOutput! as AssistantMessage).text, 'partial');
   });
 
   test('malformed streamed JSON fails with a protocol error and no final event', () async {
@@ -120,7 +120,7 @@ final class _FixtureGenerationProtocol implements SseProtocol<GenerationEvent> {
   final GenerationStreamAssembler assembler;
   final Map<int, StringBuffer> _text = {};
   final List<ReplayItem> _replay = [];
-  ResponseMetadata? _metadata;
+  late final ResponseMetadata _metadata;
   var _started = false;
   var _terminal = false;
   var _candidateFinished = false;
@@ -153,50 +153,50 @@ final class _FixtureGenerationProtocol implements SseProtocol<GenerationEvent> {
       'usage' => [
         assembler.updateUsage(
           Usage(
-            inputTokens: value['input'] as int,
-            outputTokens: value['output'] as int,
-            totalTokens: value['total'] as int,
+            inputTokens: value['input']! as int,
+            outputTokens: value['output']! as int,
+            totalTokens: value['total']! as int,
           ),
         ),
       ],
       'future.record' => _unknown(json),
       'error' => throw ProviderError(
-        value['message'] as String,
-        code: value['code'] as String,
+        value['message']! as String,
+        code: value['code']! as String,
         details: json,
         partialOutput: assembler.partialMessage,
       ),
       'finish' => _finishRecord(value),
-      _ => [assembler.providerEvent(value['type'] as String, json)],
+      _ => [assembler.providerEvent(value['type']! as String, json)],
     };
   }
 
   Iterable<GenerationEvent> _start(Map<String, Object?> value) {
     _started = true;
-    return [assembler.start(_metadata!, responseId: value['id'] as String)];
+    return [assembler.start(_metadata, responseId: value['id']! as String)];
   }
 
   Iterable<GenerationEvent> _startPart(Map<String, Object?> value) {
-    final index = value['index'] as int;
+    final index = value['index']! as int;
     _text[index] = StringBuffer();
     return [assembler.startPart(index: index, kind: GenerationPartKind.text)];
   }
 
   Iterable<GenerationEvent> _delta(Map<String, Object?> value) {
-    final index = value['index'] as int;
-    final text = value['text'] as String;
+    final index = value['index']! as int;
+    final text = value['text']! as String;
     _text[index]!.write(text);
     return [assembler.appendText(index, text)];
   }
 
   Iterable<GenerationEvent> _finishPart(Map<String, Object?> value) {
-    final index = value['index'] as int;
+    final index = value['index']! as int;
     return [
       assembler.finishPart(
         index,
         TextOutputPart(
           _text[index].toString(),
-          citations: [Citation(uri: Uri.parse(value['citation'] as String))],
+          citations: [Citation(uri: Uri.parse(value['citation']! as String))],
         ),
       ),
     ];

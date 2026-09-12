@@ -80,21 +80,22 @@ void main() {
   });
 
   test('attaches an immutable partial message when the assembled limit is exceeded', () {
-    final assembler = GenerationStreamAssembler(
-      providerId: 'fixture',
-      api: 'responses',
-      modelId: 'model-1',
-      maxAssembledBytes: 4,
-    );
-    assembler.start(ResponseMetadata(statusCode: 200));
-    assembler.startPart(index: 0, kind: GenerationPartKind.text);
-    assembler.appendText(0, 'four');
+    final assembler =
+        GenerationStreamAssembler(
+            providerId: 'fixture',
+            api: 'responses',
+            modelId: 'model-1',
+            maxAssembledBytes: 4,
+          )
+          ..start(ResponseMetadata(statusCode: 200))
+          ..startPart(index: 0, kind: GenerationPartKind.text)
+          ..appendText(0, 'four');
 
     expect(
       () => assembler.appendText(0, '!'),
       throwsA(
         isA<ResponseLimitError>().having(
-          (error) => (error.partialOutput as AssistantMessage).text,
+          (error) => (error.partialOutput! as AssistantMessage).text,
           'partial text',
           'four',
         ),
@@ -103,13 +104,14 @@ void main() {
   });
 
   test('rejects a usage snapshot that is not cumulative', () {
-    final assembler = GenerationStreamAssembler(
-      providerId: 'fixture',
-      api: 'responses',
-      modelId: 'model-1',
-    );
-    assembler.start(ResponseMetadata(statusCode: 200));
-    assembler.updateUsage(const Usage(totalTokens: 8));
+    final assembler =
+        GenerationStreamAssembler(
+            providerId: 'fixture',
+            api: 'responses',
+            modelId: 'model-1',
+          )
+          ..start(ResponseMetadata(statusCode: 200))
+          ..updateUsage(const Usage(totalTokens: 8));
 
     expect(
       () => assembler.updateUsage(const Usage(totalTokens: 7)),

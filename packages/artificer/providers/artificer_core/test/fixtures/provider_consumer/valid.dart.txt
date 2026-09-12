@@ -31,6 +31,18 @@ Future<void> main() async {
     throw StateError('Unexpected stream result.');
   }
 
+  final compatible = OpenAiCompatibleChatCodec(_ConsumerDialect());
+  final encoded = compatible.encode(
+    GenerationRequest(messages: [UserMessage.text('hello')]),
+    modelId: 'compatible-model',
+    options: const _ConsumerOptions(priority: true),
+  );
+  if (encoded is! Success<OpenAiCompatibleChatRequest, AiError> ||
+      encoded.value.body.toDart()['priority'] != true ||
+      encoded.value.body.toDart()['n'] != 1) {
+    throw StateError('Unexpected compatible request.');
+  }
+
   final embeddingModel = FixtureEmbeddingModel('future-embedding-model');
   final EmbeddingModel commonEmbedding = embeddingModel;
   final embedding = await commonEmbedding.embed(
@@ -98,6 +110,28 @@ final class FixtureOptions {
   const FixtureOptions({this.prefix});
 
   final String? prefix;
+}
+
+final class _ConsumerOptions {
+  const _ConsumerOptions({required this.priority});
+
+  final bool priority;
+}
+
+final class _ConsumerDialect implements OpenAiCompatibleChatDialect<_ConsumerOptions> {
+  @override
+  String get providerId => 'consumer';
+
+  @override
+  String get api => 'chat.completions';
+
+  @override
+  AiError? validate(GenerationRequest request, _ConsumerOptions options) => null;
+
+  @override
+  JsonObject requestFields(_ConsumerOptions options) => JsonObject({
+    'priority': options.priority,
+  });
 }
 
 final class FixtureModel implements LanguageModel {

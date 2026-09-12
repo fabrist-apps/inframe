@@ -37,7 +37,7 @@ void main() {
     test('should round-trip generation outcome and replay metadata', () {
       final result = GenerationResult(
         message: AssistantMessage(
-          [RefusalPart('Cannot comply')],
+          [const RefusalPart('Cannot comply')],
           replay: ProviderReplay(
             providerId: 'provider',
             api: 'responses',

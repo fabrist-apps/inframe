@@ -1,13 +1,35 @@
-import '../errors.dart';
-import '../json/json_value.dart';
-import '../messages/messages.dart';
-import '../native.dart';
+import 'package:artificer_core/src/errors.dart';
+import 'package:artificer_core/src/json/json_value.dart';
+import 'package:artificer_core/src/messages/messages.dart';
+import 'package:artificer_core/src/native.dart';
 
 /// A normalized reason that generation stopped.
-enum FinishReason { stop, toolCalls, outputLimit, refusal, contentFilter, paused, other }
+enum FinishReason {
+  /// The model completed normally.
+  stop,
+
+  /// The model requested one or more application tools.
+  toolCalls,
+
+  /// The configured or provider output limit ended generation.
+  outputLimit,
+
+  /// The provider refused the request.
+  refusal,
+
+  /// A provider content filter ended generation.
+  contentFilter,
+
+  /// Provider-hosted work paused and may be continued explicitly.
+  paused,
+
+  /// The native reason has no common equivalent.
+  other,
+}
 
 /// Common generation settings.
 final class GenerationOptions {
+  /// Creates a [GenerationOptions].
   GenerationOptions({
     this.maxOutputTokens = 4096,
     this.temperature,
@@ -24,19 +46,8 @@ final class GenerationOptions {
     }
   }
 
-  final int maxOutputTokens;
-  final double? temperature;
-  final double? topP;
-  final List<String> stopSequences;
-
-  Map<String, Object?> toDart() => {
-    'maxOutputTokens': maxOutputTokens,
-    if (temperature case final value?) 'temperature': value,
-    if (topP case final value?) 'topP': value,
-    'stopSequences': stopSequences,
-  };
-
-  static GenerationOptions fromDart(Object? value) {
+  /// Creates a validated immutable value from Dart data.
+  factory GenerationOptions.fromDart(Object? value) {
     if (value is! Map<String, Object?>) {
       throw const FormatException('options must be an object.');
     }
@@ -45,16 +56,37 @@ final class GenerationOptions {
       throw const FormatException('stopSequences must contain strings.');
     }
     return GenerationOptions(
-      maxOutputTokens: value['maxOutputTokens'] as int,
+      maxOutputTokens: value['maxOutputTokens']! as int,
       temperature: (value['temperature'] as num?)?.toDouble(),
       topP: (value['topP'] as num?)?.toDouble(),
       stopSequences: stops.cast<String>(),
     );
   }
+
+  /// The maximum generated token count.
+  final int maxOutputTokens;
+
+  /// The sampling temperature, when explicitly supplied.
+  final double? temperature;
+
+  /// The nucleus sampling threshold, when explicitly supplied.
+  final double? topP;
+
+  /// The immutable stop sequences.
+  final List<String> stopSequences;
+
+  /// Returns a detached Dart representation.
+  Map<String, Object?> toDart() => {
+    'maxOutputTokens': maxOutputTokens,
+    'temperature': ?temperature,
+    'topP': ?topP,
+    'stopSequences': stopSequences,
+  };
 }
 
 /// A request for one foreground generation candidate.
 final class GenerationRequest {
+  /// Creates a [GenerationRequest].
   GenerationRequest({
     required Iterable<Message> messages,
     this.instructions,
@@ -78,13 +110,40 @@ final class GenerationRequest {
     _validateHistory(this.messages);
   }
 
+  /// Deserializes and validates a schema-versioned value.
+  factory GenerationRequest.fromJson(JsonObject json) {
+    final value = _versioned(json);
+    return GenerationRequest(
+      instructions: value['instructions'] as String?,
+      messages: _list(value, 'messages').map(
+        (message) => Message.fromJson(JsonObject.fromDart(message)),
+      ),
+      options: GenerationOptions.fromDart(value['options']),
+      tools: _list(value, 'tools').map(FunctionTool.fromDart),
+      toolChoice: ToolChoice.fromDart(value['toolChoice']),
+      output: OutputFormat.fromDart(value['output']),
+    );
+  }
+
+  /// Instructions supplied separately from the conversation.
   final String? instructions;
+
+  /// The ordered conversation messages.
   final List<Message> messages;
+
+  /// The common request options.
   final GenerationOptions options;
+
+  /// The application tool declarations available to the model.
   final List<FunctionTool> tools;
+
+  /// The rule controlling whether the model may call a tool.
   final ToolChoice toolChoice;
+
+  /// The requested output format.
   final OutputFormat output;
 
+  /// Rejects replay data owned by a different provider, API, or model.
   InvalidRequestError? validateReplayTarget({
     required String providerId,
     required String api,
@@ -102,47 +161,26 @@ final class GenerationRequest {
     return null;
   }
 
+  /// Serializes this value using schema version 1.
   JsonObject toJson() => JsonObject({
     'schemaVersion': 1,
-    if (instructions case final value?) 'instructions': value,
+    'instructions': ?instructions,
     'messages': messages.map((message) => message.toJson().toDart()).toList(),
     'options': options.toDart(),
     'tools': tools.map((tool) => tool.toDart()).toList(),
     'toolChoice': toolChoice.toDart(),
     'output': output.toDart(),
   });
-
-  static GenerationRequest fromJson(JsonObject json) {
-    final value = _versioned(json);
-    return GenerationRequest(
-      instructions: value['instructions'] as String?,
-      messages: _list(value, 'messages').map(
-        (message) => Message.fromJson(JsonObject.fromDart(message)),
-      ),
-      options: GenerationOptions.fromDart(value['options']),
-      tools: _list(value, 'tools').map(FunctionTool.fromDart),
-      toolChoice: ToolChoice.fromDart(value['toolChoice']),
-      output: OutputFormat.fromDart(value['output']),
-    );
-  }
 }
 
 /// An application-owned function declaration without an execution callback.
 final class FunctionTool {
-  FunctionTool({required String name, this.description, required this.inputSchema})
+  /// Creates a [FunctionTool].
+  FunctionTool({required String name, required this.inputSchema, this.description})
     : name = _nonEmpty(name, 'name');
 
-  final String name;
-  final String? description;
-  final JsonObject inputSchema;
-
-  Map<String, Object?> toDart() => {
-    'name': name,
-    if (description case final value?) 'description': value,
-    'inputSchema': inputSchema.toDart(),
-  };
-
-  static FunctionTool fromDart(Object? value) {
+  /// Creates a validated immutable value from Dart data.
+  factory FunctionTool.fromDart(Object? value) {
     final map = _object(value, 'function tool');
     return FunctionTool(
       name: _string(map, 'name'),
@@ -150,14 +188,32 @@ final class FunctionTool {
       inputSchema: JsonObject.fromDart(map['inputSchema']),
     );
   }
+
+  /// The declared name.
+  final String name;
+
+  /// The optional human-readable description.
+  final String? description;
+
+  /// The immutable JSON input schema.
+  final JsonObject inputSchema;
+
+  /// Returns a detached Dart representation.
+  Map<String, Object?> toDart() => {
+    'name': name,
+    'description': ?description,
+    'inputSchema': inputSchema.toDart(),
+  };
 }
 
 /// Common application-tool selection.
 sealed class ToolChoice {
   const ToolChoice();
 
+  /// Returns a detached Dart representation.
   Map<String, Object?> toDart();
 
+  /// Creates a validated immutable value from Dart data.
   static ToolChoice fromDart(Object? value) {
     final map = _object(value, 'tool choice');
     return switch (_string(map, 'type')) {
@@ -170,30 +226,39 @@ sealed class ToolChoice {
   }
 }
 
+/// The auto tool choice.
 final class AutoToolChoice extends ToolChoice {
+  /// Creates an [AutoToolChoice].
   const AutoToolChoice();
 
   @override
   Map<String, Object?> toDart() => {'type': 'auto'};
 }
 
+/// Disables application tool calls.
 final class NoToolChoice extends ToolChoice {
+  /// Creates a [NoToolChoice].
   const NoToolChoice();
 
   @override
   Map<String, Object?> toDart() => {'type': 'none'};
 }
 
+/// Requires the model to call an application tool.
 final class RequiredToolChoice extends ToolChoice {
+  /// Creates a [RequiredToolChoice].
   const RequiredToolChoice();
 
   @override
   Map<String, Object?> toDart() => {'type': 'required'};
 }
 
+/// The function tool choice.
 final class FunctionToolChoice extends ToolChoice {
+  /// Creates a [FunctionToolChoice].
   FunctionToolChoice(String name) : name = _nonEmpty(name, 'name');
 
+  /// The declared name.
   final String name;
 
   @override
@@ -204,8 +269,10 @@ final class FunctionToolChoice extends ToolChoice {
 sealed class OutputFormat {
   const OutputFormat();
 
+  /// Returns a detached Dart representation.
   Map<String, Object?> toDart();
 
+  /// Creates a validated immutable value from Dart data.
   static OutputFormat fromDart(Object? value) {
     final map = _object(value, 'output format');
     return switch (_string(map, 'type')) {
@@ -221,52 +288,55 @@ sealed class OutputFormat {
   }
 }
 
+/// The text output format.
 final class TextOutputFormat extends OutputFormat {
+  /// Creates a [TextOutputFormat].
   const TextOutputFormat();
 
   @override
   Map<String, Object?> toDart() => {'type': 'text'};
 }
 
+/// Requests a JSON object without an application schema.
 final class JsonObjectOutputFormat extends OutputFormat {
+  /// Creates a [JsonObjectOutputFormat].
   const JsonObjectOutputFormat();
 
   @override
   Map<String, Object?> toDart() => {'type': 'jsonObject'};
 }
 
+/// Requests output matching the supplied JSON Schema.
 final class JsonSchemaOutputFormat extends OutputFormat {
-  JsonSchemaOutputFormat({required String name, this.description, required this.schema})
+  /// Creates a [JsonSchemaOutputFormat].
+  JsonSchemaOutputFormat({required String name, required this.schema, this.description})
     : name = _nonEmpty(name, 'name');
 
+  /// The declared name.
   final String name;
+
+  /// The optional human-readable description.
   final String? description;
+
+  /// The immutable JSON Schema.
   final JsonObject schema;
 
   @override
   Map<String, Object?> toDart() => {
     'type': 'jsonSchema',
     'name': name,
-    if (description case final value?) 'description': value,
+    'description': ?description,
     'schema': schema.toDart(),
   };
 }
 
 /// Token accounting reported by a provider.
 final class Usage {
+  /// Creates a [Usage].
   const Usage({this.inputTokens, this.outputTokens, this.totalTokens});
 
-  final int? inputTokens;
-  final int? outputTokens;
-  final int? totalTokens;
-
-  Map<String, Object?> toDart() => {
-    if (inputTokens case final value?) 'inputTokens': value,
-    if (outputTokens case final value?) 'outputTokens': value,
-    if (totalTokens case final value?) 'totalTokens': value,
-  };
-
-  static Usage fromDart(Object? value) {
+  /// Creates a validated immutable value from Dart data.
+  factory Usage.fromDart(Object? value) {
     final map = _object(value, 'usage');
     return Usage(
       inputTokens: map['inputTokens'] as int?,
@@ -274,10 +344,27 @@ final class Usage {
       totalTokens: map['totalTokens'] as int?,
     );
   }
+
+  /// The input token count, when reported.
+  final int? inputTokens;
+
+  /// The output token count, when reported.
+  final int? outputTokens;
+
+  /// The total token count, when reported.
+  final int? totalTokens;
+
+  /// Returns a detached Dart representation.
+  Map<String, Object?> toDart() => {
+    'inputTokens': ?inputTokens,
+    'outputTokens': ?outputTokens,
+    'totalTokens': ?totalTokens,
+  };
 }
 
 /// A normalized generation outcome.
 final class GenerationResult {
+  /// Creates a [GenerationResult].
   GenerationResult({
     required this.message,
     required this.finishReason,
@@ -289,30 +376,8 @@ final class GenerationResult {
     this.requestId,
   });
 
-  final AssistantMessage message;
-  final FinishReason finishReason;
-  final String? nativeFinishReason;
-  final Usage? usage;
-  final String? responseId;
-  final String? requestId;
-  final NativePayload nativePayload;
-  final ResponseMetadata metadata;
-
-  String get text => message.text;
-
-  JsonObject toJson() => JsonObject({
-    'schemaVersion': 1,
-    'message': message.toJson().toDart(),
-    'finishReason': finishReason.name,
-    if (nativeFinishReason case final value?) 'nativeFinishReason': value,
-    if (usage case final value?) 'usage': value.toDart(),
-    if (responseId case final value?) 'responseId': value,
-    if (requestId case final value?) 'requestId': value,
-    'nativePayload': nativePayload.toJson().toDart(),
-    'metadata': metadata.toJson().toDart(),
-  });
-
-  static GenerationResult fromJson(JsonObject json) {
+  /// Deserializes and validates a schema-versioned value.
+  factory GenerationResult.fromJson(JsonObject json) {
     final value = _versioned(json);
     final finishName = _string(value, 'finishReason');
     final finishReason = FinishReason.values
@@ -328,7 +393,7 @@ final class GenerationResult {
       finishReason: finishReason,
       nativeFinishReason: value['nativeFinishReason'] as String?,
       usage: switch (value['usage']) {
-        Map<String, Object?> usage => Usage.fromDart(usage),
+        final Map<String, Object?> usage => Usage.fromDart(usage),
         _ => null,
       },
       responseId: value['responseId'] as String?,
@@ -337,6 +402,46 @@ final class GenerationResult {
       metadata: ResponseMetadata.fromJson(JsonObject.fromDart(value['metadata'])),
     );
   }
+
+  /// The human-readable failure or result message.
+  final AssistantMessage message;
+
+  /// The normalized reason generation ended.
+  final FinishReason finishReason;
+
+  /// The original provider finish reason, when available.
+  final String? nativeFinishReason;
+
+  /// The available token usage.
+  final Usage? usage;
+
+  /// The provider response identifier, when available.
+  final String? responseId;
+
+  /// The provider request identifier, when available.
+  final String? requestId;
+
+  /// The complete retained provider response payload.
+  final NativePayload nativePayload;
+
+  /// The HTTP response metadata.
+  final ResponseMetadata metadata;
+
+  /// The text content.
+  String get text => message.text;
+
+  /// Serializes this value using schema version 1.
+  JsonObject toJson() => JsonObject({
+    'schemaVersion': 1,
+    'message': message.toJson().toDart(),
+    'finishReason': finishReason.name,
+    'nativeFinishReason': ?nativeFinishReason,
+    if (usage case final value?) 'usage': value.toDart(),
+    'responseId': ?responseId,
+    'requestId': ?requestId,
+    'nativePayload': nativePayload.toJson().toDart(),
+    'metadata': metadata.toJson().toDart(),
+  });
 }
 
 /// One event emitted by a generation stream.
@@ -345,21 +450,50 @@ sealed class GenerationEvent {
 }
 
 /// The kind of output represented by a streaming part.
-enum GenerationPartKind { text, reasoning, refusal, applicationToolCall, providerTool, opaque }
+enum GenerationPartKind {
+  /// User-visible generated text.
+  text,
+
+  /// A provider-supplied reasoning summary.
+  reasoning,
+
+  /// A provider refusal.
+  refusal,
+
+  /// A tool call that the application may execute.
+  applicationToolCall,
+
+  /// A provider-owned tool record.
+  providerTool,
+
+  /// Provider content without a common representation.
+  opaque,
+}
 
 /// The component responsible for acting on a streaming part.
-enum GenerationPartOwner { application, provider }
+enum GenerationPartOwner {
+  /// The application owns execution of the part.
+  application,
+
+  /// The provider owns execution of the part.
+  provider,
+}
 
 /// The first event in one generation consumption.
 final class GenerationStarted extends GenerationEvent {
-  const GenerationStarted({this.responseId, required this.metadata});
+  /// Creates a [GenerationStarted].
+  const GenerationStarted({required this.metadata, this.responseId});
 
+  /// The provider response identifier, when available.
   final String? responseId;
+
+  /// The HTTP response metadata.
   final ResponseMetadata metadata;
 }
 
 /// Declares the stable local identity of one output part.
 final class PartStarted extends GenerationEvent {
+  /// Creates a [PartStarted].
   const PartStarted({
     required this.partId,
     required this.index,
@@ -367,9 +501,16 @@ final class PartStarted extends GenerationEvent {
     required this.owner,
   });
 
+  /// The stable provider-independent part identifier.
   final String partId;
+
+  /// The provider or local order index.
   final int index;
+
+  /// The media or part kind.
   final GenerationPartKind kind;
+
+  /// The component responsible for executing the tool.
   final GenerationPartOwner owner;
 }
 
@@ -377,63 +518,85 @@ final class PartStarted extends GenerationEvent {
 sealed class PartDelta extends GenerationEvent {
   const PartDelta({required this.partId, required this.index});
 
+  /// The stable provider-independent part identifier.
   final String partId;
+
+  /// The provider or local order index.
   final int index;
 }
 
 /// Incremental visible text.
 final class TextPartDelta extends PartDelta {
+  /// Creates a [TextPartDelta].
   const TextPartDelta({required super.partId, required super.index, required this.text});
 
+  /// The text content.
   final String text;
 }
 
 /// Incremental provider-supplied reasoning summary.
 final class ReasoningPartDelta extends PartDelta {
+  /// Creates a [ReasoningPartDelta].
   const ReasoningPartDelta({required super.partId, required super.index, required this.text});
 
+  /// The text content.
   final String text;
 }
 
 /// Incremental provider-supplied refusal text.
 final class RefusalPartDelta extends PartDelta {
+  /// Creates a [RefusalPartDelta].
   const RefusalPartDelta({required super.partId, required super.index, required this.text});
 
+  /// The text content.
   final String text;
 }
 
 /// Incremental application-tool arguments in their native text form.
 final class ToolArgumentsPartDelta extends PartDelta {
+  /// Creates a [ToolArgumentsPartDelta].
   const ToolArgumentsPartDelta({required super.partId, required super.index, required this.text});
 
+  /// The text content.
   final String text;
 }
 
 /// Incremental native data that has no common representation.
 final class OpaquePartDelta extends PartDelta {
+  /// Creates an [OpaquePartDelta].
   const OpaquePartDelta({required super.partId, required super.index, required this.data});
 
+  /// The immutable native replay data.
   final JsonObject data;
 }
 
 /// Completes one part without changing its local stream identity.
 final class PartFinished extends GenerationEvent {
+  /// Creates a [PartFinished].
   const PartFinished({required this.partId, required this.index, required this.part});
 
+  /// The stable provider-independent part identifier.
   final String partId;
+
+  /// The provider or local order index.
   final int index;
+
+  /// The part.
   final OutputPart part;
 }
 
 /// A cumulative usage snapshot from the provider.
 final class UsageUpdated extends GenerationEvent {
+  /// Creates a [UsageUpdated].
   const UsageUpdated(this.usage);
 
+  /// The available token usage.
   final Usage usage;
 }
 
 /// A native event retained because the common protocol does not interpret it.
 final class ProviderEvent extends GenerationEvent {
+  /// Creates a [ProviderEvent].
   ProviderEvent({
     required this.providerId,
     required this.api,
@@ -441,16 +604,25 @@ final class ProviderEvent extends GenerationEvent {
     required this.data,
   }) : name = _nonEmpty(name, 'name');
 
+  /// The stable provider identifier used in diagnostics and replay data.
   final String providerId;
+
+  /// The native API or dialect identifier.
   final String api;
+
+  /// The declared name.
   final String name;
+
+  /// The immutable native replay data.
   final JsonObject data;
 }
 
 /// The successful terminal event for a generation stream.
 final class GenerationFinished extends GenerationEvent {
+  /// Creates a [GenerationFinished].
   const GenerationFinished(this.result);
 
+  /// The tool result.
   final GenerationResult result;
 }
 

@@ -124,7 +124,7 @@ final class _LoopbackEmbeddingModel implements EmbeddingModel {
                       if (part is TextInputPart) part.text,
                   ],
               ],
-              if (request.dimensions case final dimensions?) 'dimensions': dimensions,
+              'dimensions': ?request.dimensions,
             }),
           ),
           providerId: providerId,

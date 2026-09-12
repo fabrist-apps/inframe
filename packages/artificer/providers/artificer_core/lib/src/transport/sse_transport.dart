@@ -62,12 +62,12 @@ final class _SsePump<A> {
         ..body = body.encode();
     }
     final acquisition = client.send(nativeRequest);
-    lifetime.trackAcquisition(acquisition);
+    lifetime._acquisition = acquisition;
     try {
       final acquired = await lifetime.waitFor(acquisition);
       if (_cancelled || acquired is _WaitClosed<http.StreamedResponse>) return;
       final response = (acquired as _WaitValue<http.StreamedResponse>).value;
-      lifetime.trackResponse(response);
+      lifetime._response = response;
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await _failHttp(response);
         return;
@@ -117,7 +117,7 @@ final class _SsePump<A> {
       onDone: () => unawaited(_completeBody()),
       cancelOnError: false,
     );
-    lifetime.trackBody(_body!);
+    lifetime._bodySubscription = _body;
     if (paused) _body!.pause();
   }
 

@@ -6,11 +6,13 @@ sealed class Setting<T> {
   const factory Setting.set(T value) = SetSetting<T>;
   const factory Setting.clear() = ClearSetting<T>;
 
+  /// Resolve.
   T? resolve(T? inherited);
 }
 
 /// Keep the model-level value.
 final class InheritSetting<T> extends Setting<T> {
+  /// Creates an [InheritSetting].
   const InheritSetting();
 
   @override
@@ -19,8 +21,10 @@ final class InheritSetting<T> extends Setting<T> {
 
 /// Replace the model-level value.
 final class SetSetting<T> extends Setting<T> {
+  /// Creates a [SetSetting].
   const SetSetting(this.value);
 
+  /// The typed value.
   final T value;
 
   @override
@@ -29,6 +33,7 @@ final class SetSetting<T> extends Setting<T> {
 
 /// Remove the provider field unless its native schema requires null.
 final class ClearSetting<T> extends Setting<T> {
+  /// Creates a [ClearSetting].
   const ClearSetting();
 
   @override

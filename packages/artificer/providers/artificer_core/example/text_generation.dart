@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:artificer_core/protocols.dart';
@@ -8,7 +10,7 @@ Future<void> main() async {
   final result = await model
       .generate(GenerationRequest(messages: [UserMessage.text('Hello')]))
       .runFuture();
-  print(result.text);
+  stdout.writeln(result.text);
 }
 
 final class EchoModel implements LanguageModel {

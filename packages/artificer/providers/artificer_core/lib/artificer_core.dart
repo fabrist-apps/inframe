@@ -1,8 +1,8 @@
 /// Shared immutable model and value contracts for Artificer providers.
 library;
 
-export 'src/embeddings/embeddings.dart';
 export 'src/capabilities.dart';
+export 'src/embeddings/embeddings.dart';
 export 'src/errors.dart';
 export 'src/generation/generation.dart';
 export 'src/messages/messages.dart';

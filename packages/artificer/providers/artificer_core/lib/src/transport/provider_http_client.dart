@@ -2,20 +2,20 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:artificer_core/src/errors.dart';
+import 'package:artificer_core/src/json/json_value.dart';
+import 'package:artificer_core/src/native.dart';
+import 'package:artificer_core/src/protocols/sse.dart';
+import 'package:artificer_core/src/transport/upload_source.dart';
 import 'package:conflux/conflux.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
-
-import '../errors.dart';
-import '../json/json_value.dart';
-import '../native.dart';
-import '../protocols/sse.dart';
-import 'upload_source.dart';
 
 part 'sse_transport.dart';
 
 /// One immutable HTTP request issued by a provider operation.
 final class ProviderHttpRequest {
+  /// Creates a [ProviderHttpRequest].
   ProviderHttpRequest({
     required this.method,
     required this.path,
@@ -23,14 +23,22 @@ final class ProviderHttpRequest {
     this.body,
   }) : headers = Map.unmodifiable(headers);
 
+  /// The HTTP method.
   final String method;
+
+  /// The path resolved against the provider base URI.
   final String path;
+
+  /// The immutable response headers.
   final Map<String, String> headers;
+
+  /// The immutable encoded request body.
   final JsonObject? body;
 }
 
 /// One native file upload request.
 final class ProviderUploadRequest {
+  /// Creates a [ProviderUploadRequest].
   ProviderUploadRequest({
     required this.path,
     this.method = 'POST',
@@ -38,9 +46,16 @@ final class ProviderUploadRequest {
     this.remoteResourceId,
   }) : headers = Map.unmodifiable(headers);
 
+  /// The path resolved against the provider base URI.
   final String path;
+
+  /// The HTTP method.
   final String method;
+
+  /// The immutable response headers.
   final Map<String, String> headers;
+
+  /// The remote resource allocated before the failure, when known.
   final String? remoteResourceId;
 }
 
@@ -48,6 +63,7 @@ enum _ClientState { open, closing, closed }
 
 /// A one-attempt HTTP client shared by one provider's models and endpoints.
 final class ProviderHttpClient {
+  /// Creates a [ProviderHttpClient].
   ProviderHttpClient({
     required this.baseUrl,
     Map<String, String> headers = const {},
@@ -68,8 +84,13 @@ final class ProviderHttpClient {
     }
   }
 
+  /// The base url.
   final Uri baseUrl;
+
+  /// The immutable response headers.
   final Map<String, String> headers;
+
+  /// The maximum byte size accumulated for one response.
   final int maxResponseBytes;
   final http.Client _client;
   final bool _ownsClient;
@@ -228,7 +249,7 @@ final class ProviderHttpClient {
 
       deliveryState = RequestDeliveryState.mayHaveReachedProvider;
       final acquisition = _client.send(nativeRequest);
-      lifetime.trackAcquisition(acquisition);
+      lifetime._acquisition = acquisition;
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
           () => lifetime.waitFor(acquisition),
@@ -240,10 +261,10 @@ final class ProviderHttpClient {
         ),
       );
       if (acquired case _WaitClosed<http.StreamedResponse>(:final reason)) {
-        return await $(Effect.failCause(Interrupted(reason)));
+        return $(Effect.failCause(Interrupted(reason)));
       }
       final response = (acquired as _WaitValue<http.StreamedResponse>).value;
-      lifetime.trackResponse(response);
+      lifetime._response = response;
       deliveryState = RequestDeliveryState.responseStarted;
 
       final read = _readBody(response, lifetime, maxResponseBytes);
@@ -265,7 +286,7 @@ final class ProviderHttpClient {
         ),
       );
       if (body case _WaitClosed<List<int>>(:final reason)) {
-        return await $(Effect.failCause(Interrupted(reason)));
+        return $(Effect.failCause(Interrupted(reason)));
       }
       final bytes = (body as _WaitValue<List<int>>).value;
 
@@ -273,7 +294,7 @@ final class ProviderHttpClient {
       try {
         payload = JsonObject.parse(utf8.decode(bytes));
       } on Object {
-        return await $(Effect.fail(const ProtocolError('The response was not a JSON object.')));
+        return $(Effect.fail(const ProtocolError('The response was not a JSON object.')));
       }
       final requestId = response.headers['x-request-id'] ?? response.headers['request-id'];
       final metadata = ResponseMetadata(
@@ -282,7 +303,7 @@ final class ProviderHttpClient {
         headers: response.headers,
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        return await $(Effect.fail(_providerError(response, payload, requestId)));
+        return $(Effect.fail(_providerError(response, payload, requestId)));
       }
       return NativeResponse(
         value: payload,
@@ -343,7 +364,7 @@ final class ProviderHttpClient {
 
       deliveryState = RequestDeliveryState.mayHaveReachedProvider;
       final acquisition = _client.send(nativeRequest);
-      lifetime.trackAcquisition(acquisition);
+      lifetime._acquisition = acquisition;
       final acquired = await $(
         Effect.tryFuture<_WaitResult<http.StreamedResponse>, AiError>(
           () => lifetime.waitFor(acquisition),
@@ -362,10 +383,10 @@ final class ProviderHttpClient {
         ),
       );
       if (acquired case _WaitClosed<http.StreamedResponse>(:final reason)) {
-        return await $(Effect.failCause(Interrupted(reason)));
+        return $(Effect.failCause(Interrupted(reason)));
       }
       final response = (acquired as _WaitValue<http.StreamedResponse>).value;
-      lifetime.trackResponse(response);
+      lifetime._response = response;
       deliveryState = RequestDeliveryState.responseStarted;
       final body = await $(
         Effect.tryFuture<_WaitResult<List<int>>, AiError>(
@@ -387,14 +408,14 @@ final class ProviderHttpClient {
         ),
       );
       if (body case _WaitClosed<List<int>>(:final reason)) {
-        return await $(Effect.failCause(Interrupted(reason)));
+        return $(Effect.failCause(Interrupted(reason)));
       }
       final bytes = (body as _WaitValue<List<int>>).value;
       final JsonObject payload;
       try {
         payload = JsonObject.parse(utf8.decode(bytes));
       } on Object {
-        return await $(
+        return $(
           Effect.fail(
             ProtocolError(
               'The response was not a JSON object.',
@@ -410,7 +431,7 @@ final class ProviderHttpClient {
         headers: response.headers,
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        return await $(
+        return $(
           Effect.fail(
             _providerError(
               response,
@@ -484,18 +505,6 @@ final class _RequestLifetime {
       future.then<_WaitResult<T>>(_WaitValue.new),
       _cancelled.future.then<_WaitResult<T>>(_WaitClosed.new),
     ]);
-  }
-
-  void trackAcquisition(Future<http.StreamedResponse> acquisition) {
-    _acquisition = acquisition;
-  }
-
-  void trackResponse(http.StreamedResponse response) {
-    _response = response;
-  }
-
-  void trackBody(StreamSubscription<List<int>> subscription) {
-    _bodySubscription = subscription;
   }
 
   void trackUpload(Future<void> Function() cleanup) {
@@ -609,7 +618,7 @@ Future<List<int>> _readBody(
     },
     cancelOnError: false,
   );
-  lifetime.trackBody(subscription);
+  lifetime._bodySubscription = subscription;
   return completion.future;
 }
 

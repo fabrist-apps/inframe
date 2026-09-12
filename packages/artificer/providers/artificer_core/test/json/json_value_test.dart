@@ -16,7 +16,7 @@ void main() {
       expect(value.toDart(), {
         'nested': [1, true],
       });
-      expect(() => (value.toDart() as Map<String, Object?>)['x'] = 1, throwsUnsupportedError);
+      expect(() => (value.toDart()! as Map<String, Object?>)['x'] = 1, throwsUnsupportedError);
     });
 
     test('should parse and encode every JSON kind', () {

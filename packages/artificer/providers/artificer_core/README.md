@@ -52,3 +52,15 @@ terminal semantics and transport cleanup. Unknown native events can be emitted a
 stored selectively in replay data. Premature EOF and partial service failures end the `Flow` with an
 `AiError`; early `take`, `runFirst`, subscription cancellation, and parent interruption close the owned
 response body without closing a shared client.
+
+`OpenAiCompatibleChatCodec` covers the shared JSON and SSE shape of the xAI and Baseten Chat
+Completions endpoints. Provider packages implement `OpenAiCompatibleChatDialect<O>` to validate typed
+options and add vendor fields. The codec always requests one candidate, requires an explicit index when
+normalizing a native multi-choice response, retains unknown native extensions, and rejects `extraBody`
+collisions before I/O. It does not claim that every OpenAI-shaped service or vendor feature is
+compatible; Anthropic and Google keep their own protocol adapters.
+
+The compatible fixtures are pinned on 2026-09-12 to the published
+[xAI Chat Completions reference](https://docs.x.ai/developers/rest-api-reference/inference/chat-completions)
+and [Baseten Chat Completions reference](https://docs.baseten.co/reference/inference-api/chat-completions).
+Provider packages should update their own fixtures and dialect hooks when a vendor contract changes.

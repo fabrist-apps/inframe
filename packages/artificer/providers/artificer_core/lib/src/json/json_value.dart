@@ -28,6 +28,7 @@ sealed class JsonValue {
 
 /// JSON null.
 final class JsonNull extends JsonValue {
+  /// Creates a [JsonNull].
   const JsonNull();
 
   @override
@@ -36,8 +37,10 @@ final class JsonNull extends JsonValue {
 
 /// A JSON boolean.
 final class JsonBoolean extends JsonValue {
-  const JsonBoolean(this.value);
+  /// Creates a [JsonBoolean].
+  const JsonBoolean({required this.value});
 
+  /// The typed value.
   final bool value;
 
   @override
@@ -46,12 +49,14 @@ final class JsonBoolean extends JsonValue {
 
 /// A finite JSON number.
 final class JsonNumber extends JsonValue {
+  /// Creates a [JsonNumber].
   JsonNumber(this.value) {
     if (!value.isFinite) {
       throw ArgumentError.value(value, 'value', 'must be finite');
     }
   }
 
+  /// The typed value.
   final num value;
 
   @override
@@ -60,8 +65,10 @@ final class JsonNumber extends JsonValue {
 
 /// A JSON string.
 final class JsonString extends JsonValue {
+  /// Creates a [JsonString].
   const JsonString(this.value);
 
+  /// The typed value.
   final String value;
 
   @override
@@ -70,11 +77,13 @@ final class JsonString extends JsonValue {
 
 /// An immutable JSON array.
 final class JsonArray extends JsonValue {
+  /// Creates a [JsonArray].
   JsonArray(Iterable<Object?> values)
     : this._(_JsonConverter().convertArray(values.toList(growable: false)));
 
   JsonArray._(List<JsonValue> values) : values = List.unmodifiable(values);
 
+  /// The immutable JSON object members.
   final List<JsonValue> values;
 
   @override
@@ -83,6 +92,7 @@ final class JsonArray extends JsonValue {
 
 /// An immutable JSON object.
 final class JsonObject extends JsonValue {
+  /// Creates a [JsonObject].
   factory JsonObject(Map<String, Object?> values) =>
       _JsonConverter().convertObject(values.cast<Object?, Object?>());
 
@@ -106,8 +116,10 @@ final class JsonObject extends JsonValue {
     return converted;
   }
 
+  /// The immutable JSON array elements.
   final Map<String, JsonValue> values;
 
+  /// Returns the JSON member for [key], or null when it is absent.
   JsonValue? operator [](String key) => values[key];
 
   @override
@@ -121,7 +133,7 @@ final class _JsonConverter {
 
   JsonValue convert(Object? value) => switch (value) {
     null => const JsonNull(),
-    bool() => JsonBoolean(value),
+    bool() => JsonBoolean(value: value),
     num() => JsonNumber(value),
     String() => JsonString(value),
     List<Object?>() => JsonArray._(convertArray(value)),

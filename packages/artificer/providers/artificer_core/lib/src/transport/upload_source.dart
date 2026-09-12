@@ -25,15 +25,22 @@ sealed class UploadSource {
     required String mimeType,
   }) = StreamUploadSource;
 
+  /// The source filename sent to the provider.
   final String filename;
+
+  /// The media MIME type.
   final String mimeType;
+
+  /// The declared upload byte length.
   final int length;
 
+  /// Opens a fresh byte stream for one upload execution.
   Stream<List<int>> openRead();
 }
 
 /// A copied in-memory upload body.
 final class BytesUploadSource extends UploadSource {
+  /// Creates a [BytesUploadSource].
   factory BytesUploadSource(
     Iterable<int> bytes, {
     required String filename,
@@ -49,6 +56,7 @@ final class BytesUploadSource extends UploadSource {
     required super.mimeType,
   }) : super(length: bytes.length);
 
+  /// An immutable copy of the source bytes.
   final List<int> bytes;
 
   @override
@@ -57,6 +65,7 @@ final class BytesUploadSource extends UploadSource {
 
 /// A repeatable stream factory with declared upload metadata.
 final class StreamUploadSource extends UploadSource {
+  /// Creates a [StreamUploadSource].
   StreamUploadSource(
     this._openRead, {
     required super.length,
@@ -100,20 +109,26 @@ Stream<List<int>> _validateLength(Stream<List<int>> source, int expected) {
 sealed class UploadSourceError implements Exception {
   const UploadSourceError(this.message);
 
+  /// The human-readable failure or result message.
   final String message;
 }
 
 /// A source emitted an integer outside the byte range.
 final class UploadInvalidByte extends UploadSourceError {
+  /// Creates an [UploadInvalidByte].
   const UploadInvalidByte() : super('Upload chunks must contain bytes from 0 through 255.');
 }
 
 /// The opened source emitted a different byte count than declared.
 final class UploadLengthMismatch extends UploadSourceError {
+  /// Creates an [UploadLengthMismatch].
   UploadLengthMismatch({required this.expected, required this.actual})
     : super('Expected $expected upload bytes, received $actual.');
 
+  /// The expected.
   final int expected;
+
+  /// The observed byte count.
   final int actual;
 }
 

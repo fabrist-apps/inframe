@@ -1,13 +1,14 @@
 import 'dart:convert';
 
-import '../errors.dart';
-import '../generation/generation.dart';
-import '../json/json_value.dart';
-import '../messages/messages.dart';
-import '../native.dart';
+import 'package:artificer_core/src/errors.dart';
+import 'package:artificer_core/src/generation/generation.dart';
+import 'package:artificer_core/src/json/json_value.dart';
+import 'package:artificer_core/src/messages/messages.dart';
+import 'package:artificer_core/src/native.dart';
 
 /// Builds common events and the final result from provider stream records.
 final class GenerationStreamAssembler {
+  /// Creates a [GenerationStreamAssembler].
   GenerationStreamAssembler({
     required String providerId,
     required String api,
@@ -21,9 +22,16 @@ final class GenerationStreamAssembler {
     }
   }
 
+  /// The stable provider identifier used in diagnostics and replay data.
   final String providerId;
+
+  /// The native API or dialect identifier.
   final String api;
+
+  /// The provider-local model identifier.
   final String modelId;
+
+  /// The maximum byte size retained while assembling output.
   final int maxAssembledBytes;
   final Map<int, _PartState> _parts = {};
   ResponseMetadata? _metadata;
@@ -44,6 +52,20 @@ final class GenerationStreamAssembler {
     _metadata = metadata;
     _responseId = responseId;
     return GenerationStarted(responseId: responseId, metadata: metadata);
+  }
+
+  /// Retains a response ID that arrived after [GenerationStarted].
+  void setResponseId(String responseId) {
+    _requireStarted();
+    if (responseId.isEmpty) throw ArgumentError.value(responseId, 'responseId');
+    final current = _responseId;
+    if (current != null && current != responseId) {
+      throw ProtocolError(
+        'The response ID changed during streaming.',
+        partialOutput: partialMessage,
+      );
+    }
+    _responseId = responseId;
   }
 
   /// Starts one indexed part and assigns a stable provider-independent ID.
@@ -112,9 +134,9 @@ final class GenerationStreamAssembler {
 
   /// Completes a part; native IDs, citations, signatures, and metadata may arrive here.
   PartFinished finishPart(int index, OutputPart part) {
-    final state = _openPart(index);
-    state.finished = part;
-    return PartFinished(partId: state.partId, index: index, part: part);
+    final state = _openPart(index)..finished = part;
+    final partId = state.partId;
+    return PartFinished(partId: partId, index: index, part: part);
   }
 
   /// Records and emits a cumulative provider usage snapshot.

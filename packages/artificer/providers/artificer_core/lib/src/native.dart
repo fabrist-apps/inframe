@@ -1,7 +1,8 @@
-import 'json/json_value.dart';
+import 'package:artificer_core/src/json/json_value.dart';
 
 /// Complete native JSON retained beside a normalized result.
 final class NativePayload {
+  /// Creates a [NativePayload].
   NativePayload({
     required String providerId,
     required String api,
@@ -11,20 +12,8 @@ final class NativePayload {
        api = _nonEmpty(api, 'api'),
        modelId = _nonEmpty(modelId, 'modelId');
 
-  final String providerId;
-  final String api;
-  final String modelId;
-  final JsonObject json;
-
-  JsonObject toJson() => JsonObject({
-    'schemaVersion': 1,
-    'providerId': providerId,
-    'api': api,
-    'modelId': modelId,
-    'json': json.toDart(),
-  });
-
-  static NativePayload fromJson(JsonObject json) {
+  /// Deserializes and validates a schema-versioned value.
+  factory NativePayload.fromJson(JsonObject json) {
     final value = json.toDart();
     _requireVersion(value);
     return NativePayload(
@@ -34,28 +23,40 @@ final class NativePayload {
       json: JsonObject.fromDart(value['json']),
     );
   }
+
+  /// The stable provider identifier used in diagnostics and replay data.
+  final String providerId;
+
+  /// The native API or dialect identifier.
+  final String api;
+
+  /// The provider-local model identifier.
+  final String modelId;
+
+  /// The immutable native JSON object.
+  final JsonObject json;
+
+  /// Serializes this value using schema version 1.
+  JsonObject toJson() => JsonObject({
+    'schemaVersion': 1,
+    'providerId': providerId,
+    'api': api,
+    'modelId': modelId,
+    'json': json.toDart(),
+  });
 }
 
 /// HTTP metadata safe for explicit inspection.
 final class ResponseMetadata {
+  /// Creates a [ResponseMetadata].
   ResponseMetadata({
     required this.statusCode,
     this.requestId,
     Map<String, String> headers = const {},
   }) : headers = Map.unmodifiable(headers);
 
-  final int statusCode;
-  final String? requestId;
-  final Map<String, String> headers;
-
-  JsonObject toJson() => JsonObject({
-    'schemaVersion': 1,
-    'statusCode': statusCode,
-    if (requestId case final requestId?) 'requestId': requestId,
-    'headers': headers,
-  });
-
-  static ResponseMetadata fromJson(JsonObject json) {
+  /// Deserializes and validates a schema-versioned value.
+  factory ResponseMetadata.fromJson(JsonObject json) {
     final value = json.toDart();
     _requireVersion(value);
     final headers = value['headers'];
@@ -63,7 +64,7 @@ final class ResponseMetadata {
       throw const FormatException('headers must be an object.');
     }
     return ResponseMetadata(
-      statusCode: value['statusCode'] as int,
+      statusCode: value['statusCode']! as int,
       requestId: value['requestId'] as String?,
       headers: headers.map((key, value) {
         if (value is! String) throw const FormatException('header values must be strings.');
@@ -72,20 +73,43 @@ final class ResponseMetadata {
     );
   }
 
+  /// The HTTP status code, when available.
+  final int statusCode;
+
+  /// The provider request identifier, when available.
+  final String? requestId;
+
+  /// The immutable response headers.
+  final Map<String, String> headers;
+
+  /// Serializes this value using schema version 1.
+  JsonObject toJson() => JsonObject({
+    'schemaVersion': 1,
+    'statusCode': statusCode,
+    'requestId': ?requestId,
+    'headers': headers,
+  });
+
   @override
   String toString() => 'ResponseMetadata(statusCode: $statusCode, requestId: $requestId)';
 }
 
 /// A decoded native value together with its raw payload and HTTP metadata.
 final class NativeResponse<T> {
+  /// Creates a [NativeResponse].
   const NativeResponse({
     required this.value,
     required this.payload,
     required this.metadata,
   });
 
+  /// The typed value.
   final T value;
+
+  /// The retained native JSON payload.
   final NativePayload payload;
+
+  /// The HTTP response metadata.
   final ResponseMetadata metadata;
 }
 

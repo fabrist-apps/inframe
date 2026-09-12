@@ -198,8 +198,9 @@ void main() {
       await borrowed.secondSent.future;
 
       final interrupted = first.interrupt('caller');
-      borrowed.completeFirstLate();
-      borrowed.completeSecond();
+      borrowed
+        ..completeFirstLate()
+        ..completeSecond();
       final exits = await Future.wait([interrupted, second.join()]);
 
       expect((exits[0] as Failed<Object?, AiError>).cause, isA<Interrupted<AiError>>());
