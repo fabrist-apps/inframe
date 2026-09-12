@@ -7,6 +7,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show ScopeAccess;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:context/context.dart';
 
 /// Opens runtime-clock Flow timing operators with bounded staging.
 abstract final class FlowSchedulingSource {
@@ -51,8 +52,10 @@ abstract final class FlowSchedulingSource {
     required FlowOverflowPolicy overflow,
     required E Function(FlowBufferOverflow overflow)? onOverflow,
   }) => EffectAccess.create((execution) async {
-    final input = FlowMailbox<_Stamped<A>, E>(capacity, overflow, onOverflow);
-    final output = FlowMailbox<A, E>(capacity, overflow, onOverflow);
+    E mapOverflow(FlowBufferOverflow event, Context _) => onOverflow!(event);
+    final callback = onOverflow == null ? null : mapOverflow;
+    final input = FlowMailbox<_Stamped<A>, E>(capacity, overflow, callback);
+    final output = FlowMailbox<A, E>(capacity, overflow, callback);
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
       Effect.sync((_) {

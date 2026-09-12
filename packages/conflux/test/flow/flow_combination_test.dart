@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -99,6 +100,9 @@ void main() {
     });
 
     test('should emit withLatestFrom only on ready primary triggers', () async {
+      final request = ContextKey<String>('request');
+      final owner = Context().withBinding(request.bind('owner'));
+      final contexts = <String>[];
       final primaryListening = Completer<void>();
       final secondaryListening = Completer<void>();
       final secondaryCancelled = Completer<void>();
@@ -125,8 +129,12 @@ void main() {
                     if (value == 11) secondLatestObserved.complete();
                   }).mapError<String>((value, _) => _widenNever(value! as Never)),
                 ),
-                (trigger, latest) => trigger + latest,
+                (trigger, latest, context) {
+                  contexts.add(context.require(request));
+                  return trigger + latest;
+                },
               )
+              .withContext(owner)
               .runCollect()
               .runFuture();
 
@@ -140,6 +148,7 @@ void main() {
       await primary.close();
 
       expect(await result, [13]);
+      expect(contexts, ['owner']);
       expect(secondaryCancelled.isCompleted, isTrue);
     });
 
@@ -167,10 +176,10 @@ void main() {
                     (_) => secondary.stream,
                     onError: (error, stackTrace, _) => '$error',
                   ),
-                  (trigger, latest) => trigger + latest,
+                  (trigger, latest, _) => trigger + latest,
                   capacity: 1,
                   overflow: overflow,
-                  onOverflow: (_) => 'overflow',
+                  onOverflow: (_, _) => 'overflow',
                 )
                 .subscribe((value, _) {
                   values.add(value);

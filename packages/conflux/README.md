@@ -306,6 +306,9 @@ selection, recovery, observation, and terminal consumers receive their current
 consumption `Context`. Stream errors and overflow retain the `Context` captured
 when that subscription opened. The named `context` arguments on `subscribe`
 and `toStream` still select the root execution context.
+Concurrent flattening mappers and `withLatestFrom` combiners receive the
+operator's execution `Context`. Delayed overflow callbacks for merge and
+combination buffers retain that same owning region.
 
 `Flow.fromQueue(queue)` creates competing consumers: one consumer receives each
 accepted item. `Flow.fromPubSub(pubsub)` acquires an independent subscription

@@ -114,7 +114,7 @@ final class Flow<A, E> {
     Iterable<Flow<A, E>> sources, {
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     validateFlowBuffer(capacity, overflow, onOverflow);
     return Flow._(
@@ -145,7 +145,7 @@ final class Flow<A, E> {
     Iterable<Flow<A, E>> sources, {
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     validateFlowBuffer(capacity, overflow, onOverflow);
     return Flow._(
@@ -304,11 +304,11 @@ final class Flow<A, E> {
   /// At most [concurrency] inners are active. [capacity] bounds their shared
   /// output buffer, whose overflow behavior matches [fromStream].
   Flow<B, E> mergeMap<B>(
-    Flow<B, E> Function(A value) transform, {
+    Flow<B, E> Function(A value, Context context) transform, {
     required int concurrency,
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     if (concurrency <= 0) {
       throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
@@ -317,7 +317,7 @@ final class Flow<A, E> {
     return Flow._(
       () => ConcurrentFlowSource.openMergeMap(
         open,
-        (value) => transform(value).open,
+        (value, context) => transform(value, context).open,
         concurrency: concurrency,
         capacity: capacity,
         overflow: overflow,
@@ -331,16 +331,16 @@ final class Flow<A, E> {
   /// Values from a replaced inner are suppressed immediately. If outer values
   /// arrive during cleanup, only the latest pending value is mapped afterward.
   Flow<B, E> switchMap<B>(
-    Flow<B, E> Function(A value) transform, {
+    Flow<B, E> Function(A value, Context context) transform, {
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     validateFlowBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => ConcurrentFlowSource.openSwitchMap(
         open,
-        (value) => transform(value).open,
+        (value, context) => transform(value, context).open,
         capacity: capacity,
         overflow: overflow,
         onOverflow: onOverflow,
@@ -350,16 +350,16 @@ final class Flow<A, E> {
 
   /// Ignores outer values without mapping them while an inner Flow is active.
   Flow<B, E> exhaustMap<B>(
-    Flow<B, E> Function(A value) transform, {
+    Flow<B, E> Function(A value, Context context) transform, {
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     validateFlowBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => ConcurrentFlowSource.openExhaustMap(
         open,
-        (value) => transform(value).open,
+        (value, context) => transform(value, context).open,
         capacity: capacity,
         overflow: overflow,
         onOverflow: onOverflow,
@@ -373,10 +373,10 @@ final class Flow<A, E> {
   /// first secondary value are ignored, and primary completion ends both.
   Flow<C, E> withLatestFrom<B, C>(
     Flow<B, E> secondary,
-    C Function(A primary, B latest) combine, {
+    C Function(A primary, B latest, Context context) combine, {
     int capacity = 16,
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
-    E Function(FlowBufferOverflow overflow)? onOverflow,
+    E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     validateFlowBuffer(capacity, overflow, onOverflow);
     return Flow._(

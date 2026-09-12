@@ -49,6 +49,17 @@ Future<void> main() async {
     (length, value, context) => length + value.length + context.hashCode,
   );
   await Runtime().run(folded);
+  final concurrent = Flow.fromIterable([1, 2])
+      .widenError<_BaseError>()
+      .mergeMap(
+        (value, context) => Flow.succeed('$value:$context'),
+        concurrency: 2,
+      );
+  final combined = concurrent.withLatestFrom(
+    Flow.succeed<String, _BaseError>('latest'),
+    (primary, latest, context) => '$primary:$latest:$context',
+  );
+  await Runtime().run(combined.runDrain());
 
   final cron = (Cron.fromFields(
     location: tz.UTC,

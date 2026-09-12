@@ -71,7 +71,11 @@ final class _SharedFlowState<A, E> {
     }
 
     final subscriber = _SharedSubscriber<A, E>(
-      FlowMailbox(capacity, overflow, _onOverflow),
+      FlowMailbox(
+        capacity,
+        overflow,
+        _onOverflow == null ? null : (event, _) => _onOverflow(event),
+      ),
     );
     var connection = _connection;
     var shouldStart = false;

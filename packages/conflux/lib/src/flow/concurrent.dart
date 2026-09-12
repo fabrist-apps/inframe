@@ -9,6 +9,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show EffectExecution, ScopeAccess;
 import 'package:conflux/src/flow/flow_buffer.dart';
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:context/context.dart';
 
 /// Opens cursors for concurrent Flow composition.
 abstract final class ConcurrentFlowSource {
@@ -17,7 +18,7 @@ abstract final class ConcurrentFlowSource {
     Iterable<OpenFlowCursor<A, E>> sources, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<A, E>(capacity, overflow, onOverflow);
     final coordinator = _MergeCoordinator<A, E>(mailbox, execution);
@@ -31,11 +32,11 @@ abstract final class ConcurrentFlowSource {
   /// Maps outer values to at most [concurrency] active inner cursors.
   static Effect<FlowSourceCursor<B, E>, E> openMergeMap<A, B, E>(
     OpenFlowCursor<A, E> upstream,
-    OpenFlowCursor<B, E> Function(A value) transform, {
+    OpenFlowCursor<B, E> Function(A value, Context context) transform, {
     required int concurrency,
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<B, E>(capacity, overflow, onOverflow);
     final coordinator = _MergeCoordinator<B, E>(mailbox, execution);
@@ -50,10 +51,10 @@ abstract final class ConcurrentFlowSource {
   /// Replaces an active inner cursor after its cleanup completes.
   static Effect<FlowSourceCursor<B, E>, E> openSwitchMap<A, B, E>(
     OpenFlowCursor<A, E> upstream,
-    OpenFlowCursor<B, E> Function(A value) transform, {
+    OpenFlowCursor<B, E> Function(A value, Context context) transform, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<_GenerationValue<B>, E>(
       capacity,
@@ -87,10 +88,10 @@ abstract final class ConcurrentFlowSource {
   /// Ignores outer values while one inner cursor remains active.
   static Effect<FlowSourceCursor<B, E>, E> openExhaustMap<A, B, E>(
     OpenFlowCursor<A, E> upstream,
-    OpenFlowCursor<B, E> Function(A value) transform, {
+    OpenFlowCursor<B, E> Function(A value, Context context) transform, {
     required int capacity,
     required FlowOverflowPolicy overflow,
-    required E Function(FlowBufferOverflow overflow)? onOverflow,
+    required E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) => EffectAccess.create((execution) async {
     final mailbox = FlowMailbox<B, E>(capacity, overflow, onOverflow);
     final coordinator = _ExhaustCoordinator<A, B, E>(
@@ -170,26 +171,27 @@ final class _MergeCoordinator<A, E> {
 
   void startMappedSource<B>(
     OpenFlowCursor<B, E> upstream,
-    OpenFlowCursor<A, E> Function(B value) transform,
+    OpenFlowCursor<A, E> Function(B value, Context context) transform,
     _ConcurrencyGate gate,
   ) {
     _gate = gate;
     _startPump(
       upstream,
-      (value) => gate.acquire().mapError<E>((value, _) => _widenNever(value! as Never)).tap((_, _) {
-        return Effect.sync((_) {
-          if (_closed || _terminalizing) {
-            gate.release();
-            return;
-          }
-          _activeInners += 1;
-          _startPump(
-            () => Effect.defer((_) => transform(value)()),
-            _mailbox.offer,
-            _PumpKind.inner,
-          );
-        }).mapError<E>((value, _) => _widenNever(value! as Never));
-      }),
+      (value) =>
+          gate.acquire().mapError<E>((value, _) => _widenNever(value! as Never)).tap((_, context) {
+            return Effect.sync((_) {
+              if (_closed || _terminalizing) {
+                gate.release();
+                return;
+              }
+              _activeInners += 1;
+              _startPump(
+                () => Effect.defer((_) => transform(value, context)()),
+                _mailbox.offer,
+                _PumpKind.inner,
+              );
+            }).mapError<E>((value, _) => _widenNever(value! as Never));
+          }),
       _PumpKind.outer,
     );
   }
@@ -266,7 +268,7 @@ final class _SwitchCoordinator<Outer, A, E> {
   );
 
   final OpenFlowCursor<Outer, E> _upstream;
-  final OpenFlowCursor<A, E> Function(Outer value) _transform;
+  final OpenFlowCursor<A, E> Function(Outer value, Context context) _transform;
   final FlowMailbox<_GenerationValue<A>, E> _mailbox;
   final EffectExecution _execution;
   final _LatestSlot<Outer> _slot = _LatestSlot();
@@ -343,7 +345,7 @@ final class _SwitchCoordinator<Outer, A, E> {
     final inner = ScopeAccess.fork(
       _execution.scope,
       pumpFlow(
-        () => Effect.defer((_) => _transform(value)()),
+        () => Effect.defer((context) => _transform(value, context)()),
         (value) => _mailbox.offer(_GenerationValue(value, generation)),
       ),
       _execution,
@@ -449,7 +451,7 @@ final class _ExhaustCoordinator<Outer, A, E> {
   );
 
   final OpenFlowCursor<Outer, E> _upstream;
-  final OpenFlowCursor<A, E> Function(Outer value) _transform;
+  final OpenFlowCursor<A, E> Function(Outer value, Context context) _transform;
   final FlowMailbox<A, E> _mailbox;
   final EffectExecution _execution;
   Fiber<void, E>? _outer;
@@ -473,7 +475,7 @@ final class _ExhaustCoordinator<Outer, A, E> {
     final inner = ScopeAccess.fork(
       _execution.scope,
       pumpFlow(
-        () => Effect.defer((_) => _transform(value)()),
+        () => Effect.defer((context) => _transform(value, context)()),
         _mailbox.offer,
       ),
       _execution,

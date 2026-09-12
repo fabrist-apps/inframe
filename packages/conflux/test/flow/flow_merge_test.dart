@@ -2,17 +2,80 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('Flow concurrent merge', () {
+    test('should preserve mapper and overflow Context regions', () async {
+      final request = ContextKey<String>('request');
+      final caller = Context().withBinding(request.bind('caller'));
+      final owner = caller.withBinding(request.bind('owner'));
+      final release = Completer<void>();
+      final overflowed = Completer<void>();
+      final seen = <String>[];
+      var blocked = false;
+      final flow = Flow.fromIterable([1, 2, 3])
+          .widenError<String>()
+          .mergeMap(
+            (value, context) {
+              seen.add('map:$value:${context.require(request)}');
+              return Flow.defer((innerContext) {
+                seen.add('inner:$value:${innerContext.require(request)}');
+                return Flow.succeed(value);
+              });
+            },
+            concurrency: 3,
+            capacity: 1,
+            overflow: FlowOverflowPolicy.fail,
+            onOverflow: (event, context) {
+              seen.add('overflow:${context.require(request)}');
+              if (!overflowed.isCompleted) overflowed.complete();
+              return 'capacity ${event.capacity}';
+            },
+          )
+          .withContext(owner)
+          .mapEffect((value, context) {
+            seen.add('consumer:$value:${context.require(request)}');
+            if (blocked) return Effect.succeed(value);
+            blocked = true;
+            return Effect.tryFuture(
+              (_) async {
+                await release.future;
+                return value;
+              },
+              onError: (error, stackTrace, _) => '$error',
+            );
+          });
+      final runtime = Runtime(context: caller);
+      addTearDown(runtime.close);
+
+      final exit = runtime.run(flow.runDrain());
+      await overflowed.future;
+      release.complete();
+
+      expect(await exit, isA<Failed<void, String>>());
+      expect(seen, contains('overflow:owner'));
+      expect(seen.where((entry) => entry.startsWith('map:')), isNotEmpty);
+      expect(
+        seen.where((entry) => entry.startsWith('map:')).every((entry) => entry.endsWith(':owner')),
+        isTrue,
+      );
+      expect(
+        seen
+            .where((entry) => entry.startsWith('inner:'))
+            .every((entry) => entry.endsWith(':owner')),
+        isTrue,
+      );
+    });
+
     test('should merge inner values by availability within its concurrency limit', () async {
       final started = List.generate(3, (_) => Completer<void>());
       final releases = List.generate(3, (_) => Completer<int>());
       final runtime = Runtime();
       addTearDown(runtime.close);
       final flow = Flow.fromIterable([0, 1, 2]).widenError<String>().mergeMap(
-        (value) => Effect.tryFuture<int, String>(
+        (value, _) => Effect.tryFuture<int, String>(
           (_) {
             started[value].complete();
             return releases[value].future;
@@ -136,7 +199,7 @@ void main() {
         ],
         capacity: 1,
         overflow: FlowOverflowPolicy.fail,
-        onOverflow: (overflow) => 'capacity ${overflow.capacity}',
+        onOverflow: (overflow, _) => 'capacity ${overflow.capacity}',
       );
       final fiber = runtime.fork(
         flow.runForEach((value, _) {
@@ -200,7 +263,7 @@ void main() {
       final source = Flow.succeed<int, String>(1);
 
       expect(
-        () => source.mergeMap(Flow.succeed, concurrency: 0),
+        () => source.mergeMap((value, _) => Flow.succeed(value), concurrency: 0),
         throwsArgumentError,
       );
       expect(
@@ -224,7 +287,7 @@ void main() {
       final runtime = Runtime();
       addTearDown(runtime.close);
       final flow = Flow.fromIterable([0, 1]).widenError<String>().mergeMap(
-        (value) => Effect.tryFuture<int, String>(
+        (value, _) => Effect.tryFuture<int, String>(
           (_) {
             started[value].complete();
             return value == 0 ? first.future : never.future;

@@ -24,7 +24,11 @@ abstract final class BatchingFlowSource {
     required FlowOverflowPolicy overflow,
     required E Function(FlowBufferOverflow overflow)? onOverflow,
   }) => EffectAccess.create((execution) async {
-    final mailbox = FlowMailbox<_TimedValue<A>, E>(capacity, overflow, onOverflow);
+    final mailbox = FlowMailbox<_TimedValue<A>, E>(
+      capacity,
+      overflow,
+      onOverflow == null ? null : (event, _) => onOverflow(event),
+    );
     if (!mailbox.registerClose(execution)) {
       mailbox.close();
       return const Failed(Interrupted(ScopeClosed()));

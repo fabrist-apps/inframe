@@ -2,10 +2,38 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('Flow switching', () {
+    test('should evaluate switch and exhaust mappers in their owning Context', () async {
+      final request = ContextKey<String>('request');
+      final caller = Context().withBinding(request.bind('caller'));
+      final owner = caller.withBinding(request.bind('owner'));
+      final seen = <String>[];
+      final source = Flow.succeed<int, Never>(1);
+      final switched = source
+          .switchMap((value, context) {
+            seen.add('switch:${context.require(request)}');
+            return Flow.succeed(value);
+          })
+          .withContext(owner);
+      final exhausted = source
+          .exhaustMap((value, context) {
+            seen.add('exhaust:${context.require(request)}');
+            return Flow.succeed(value);
+          })
+          .withContext(owner);
+      final runtime = Runtime(context: caller);
+      addTearDown(runtime.close);
+
+      await runtime.run(switched.runDrain());
+      await runtime.run(exhausted.runDrain());
+
+      expect(seen, ['switch:owner', 'exhaust:owner']);
+    });
+
     test('should await old cleanup and keep only the latest pending switch', () async {
       final listening = Completer<void>();
       final outer = StreamController<int>(sync: true)..onListen = listening.complete;
@@ -19,7 +47,7 @@ void main() {
           Flow.fromStream<int, String>(
             (_) => outer.stream,
             onError: (error, stackTrace, _) => '$error',
-          ).switchMap((value) {
+          ).switchMap((value, _) {
             mapped.add(value);
             if (value == 0) {
               return Effect.tryFuture<int, String>(
@@ -66,7 +94,7 @@ void main() {
                 onError: (error, stackTrace, _) => '$error',
               )
               .switchMap(
-                (value) {
+                (value, _) {
                   if (value == 0) return Flow.fromIterable([0, 1, 2]).widenError();
                   replacementStarted.complete();
                   return Flow.succeed(value * 10);
@@ -110,7 +138,7 @@ void main() {
                 (_) => outer.stream,
                 onError: (error, stackTrace, _) => '$error',
               )
-              .switchMap((value) {
+              .switchMap((value, _) {
                 if (value > 0) return Flow.succeed(value);
                 return Effect.tryFuture<int, String>(
                   (_) {
@@ -161,7 +189,7 @@ void main() {
                 onError: (error, stackTrace, _) => '$error',
               )
               .switchMap(
-                (_) => Effect.tryFuture<int, String>(
+                (_, _) => Effect.tryFuture<int, String>(
                   (_) {
                     innerStarted.complete();
                     return pending.future;
@@ -193,7 +221,7 @@ void main() {
           Flow.fromStream<int, String>(
             (_) => outer.stream,
             onError: (error, stackTrace, _) => '$error',
-          ).exhaustMap((value) {
+          ).exhaustMap((value, _) {
             mapped.add(value);
             if (value == 1) {
               return Effect.tryFuture<int, String>(
@@ -241,7 +269,7 @@ void main() {
       final result = Flow.fromStream<int, String>(
         (_) => outer.stream,
         onError: (error, stackTrace, _) => '$error',
-      ).exhaustMap((_) => Flow.fail<int, String>('inner failed')).runDrain().runFutureExit();
+      ).exhaustMap((_, _) => Flow.fail<int, String>('inner failed')).runDrain().runFutureExit();
 
       await listening.future;
       outer.add(1);
