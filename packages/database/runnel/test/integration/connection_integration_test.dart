@@ -1,6 +1,7 @@
 @Tags(['integration'])
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -396,6 +397,36 @@ void main() {
             expect(await client.get('$blockingList:ordinary'), 'ready');
             expect(await client.rpush(blockingList, ['release']), 1);
             expect(await isolatedWait, (key: blockingList, value: 'release'));
+
+            final pubSub = await client.openPubSub();
+            addTearDown(pubSub.close);
+            final channelOne = 'runnel:integration:channel-one:$suffix';
+            final channelTwo = 'runnel:integration:channel-two:$suffix';
+            final publications = <PubSubMessage>[];
+            final received = Completer<void>();
+            final listener = pubSub.events.listen((event) {
+              if (event is PubSubMessage) {
+                publications.add(event);
+                if (publications.length == 2 && !received.isCompleted) received.complete();
+              }
+            });
+            addTearDown(listener.cancel);
+            await pubSub.subscribe([channelOne, channelTwo, channelOne]);
+            expect(pubSub.generation, 1);
+            expect(pubSub.desiredChannels, {channelOne, channelTwo});
+            expect(await client.publish(channelOne, 'hello'), 1);
+            expect(
+              await client.publishBytes(channelTwo, Uint8List.fromList([0, 255])),
+              1,
+            );
+            await received.future.timeout(const Duration(seconds: 2));
+            expect(publications[0].channel, channelOne);
+            expect(publications[0].text, 'hello');
+            expect(publications[1].channel, channelTwo);
+            expect(publications[1].payload, [0, 255]);
+            await pubSub.unsubscribe([channelOne]);
+            expect(await client.publish(channelOne, 'suppressed'), 0);
+            expect(pubSub.desiredChannels, {channelTwo});
           },
         );
       }

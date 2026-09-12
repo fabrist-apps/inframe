@@ -10,6 +10,7 @@ import 'package:runnel/src/connection/redis_connection.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/protocol.dart';
+import 'package:runnel/src/pubsub.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 import 'package:runnel/src/scripts.dart';
 
@@ -35,6 +36,7 @@ final class Runnel {
   final ReconnectBackoff _backoff = ReconnectBackoff();
   final Set<RedisConnection> _transactionConnections = {};
   final Set<BlockingSession> _blockingSessions = {};
+  final Set<PubSubSession> _pubSubSessions = {};
 
   RedisConnection? _connection;
   Timer? _reconnectTimer;
@@ -253,6 +255,37 @@ final class Runnel {
     return session;
   }
 
+  /// Opens a bounded, dynamically subscribed Pub/Sub session on a dedicated socket.
+  Future<PubSubSession> openPubSub({
+    Duration controlTimeout = const Duration(seconds: 5),
+    PubSubLimits limits = const PubSubLimits(),
+  }) async {
+    _readyConnection();
+    final session = await PubSubSession.connect(
+      PubSubConnectionConfiguration(
+        host: _endpoint.host,
+        port: _endpoint.port,
+        tls: _endpoint.tls,
+        protocol: _protocol,
+        connectTimeout: _connectTimeout,
+        connectionLimits: _limits,
+        securityContext: _securityContext,
+        database: _endpoint.database,
+        username: _endpoint.username,
+        password: _endpoint.password,
+      ),
+      controlTimeout: controlTimeout,
+      limits: limits,
+      onClosed: _pubSubSessions.remove,
+    );
+    if (_state != _ClientState.ready) {
+      await session.close();
+      throw const RedisClosedException(message: 'The Runnel client is closing.');
+    }
+    _pubSubSessions.add(session);
+    return session;
+  }
+
   Future<List<BatchOutcome<Object?>>> _executePipeline(
     List<RedisCommand<Object?>> commands,
     Duration timeout,
@@ -348,6 +381,9 @@ final class Runnel {
     final blockingSessions = List<BlockingSession>.of(_blockingSessions);
     _blockingSessions.clear();
     await Future.wait(blockingSessions.map((session) => session.close()));
+    final pubSubSessions = List<PubSubSession>.of(_pubSubSessions);
+    _pubSubSessions.clear();
+    await Future.wait(pubSubSessions.map((session) => session.close()));
     await Future.wait(
       transactions.map((transaction) => transaction.close(commandsAreUncertain: true)),
     );
