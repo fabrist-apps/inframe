@@ -44,7 +44,7 @@ void main() {
         )
         .runFuture();
 
-    expect(authorization, 'Api-Key secret');
+    expect(authorization, 'Bearer secret');
     expect(body, containsPair('stream', false));
     expect(response.value.content.single.toDart()['type'], 'text');
     expect(response.value.extensions.toDart()['future'], {'keep': true});
@@ -104,6 +104,10 @@ void main() {
         request.response
           ..headers.contentType = ContentType.json
           ..write(jsonEncode({'type': 'message', 'content': <Object?>[]}));
+      } else if (requests == 2) {
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write(jsonEncode({..._message, 'stop_reason': 42}));
       } else {
         request.response.headers.contentType = ContentType('text', 'event-stream');
         request.response.write(
@@ -127,6 +131,19 @@ void main() {
     );
 
     expect(await provider.messages.create(request).runFutureExit(), _failedWith<ProtocolError>());
+    final malformedStop = await provider.messages.create(request).runFutureExit();
+    expect(
+      malformedStop,
+      isA<Failed<Object?, AiError>>().having(
+        (failure) => (failure.cause as Expected<AiError>).error,
+        'error',
+        isA<ProtocolError>().having(
+          (error) => error.partialOutput,
+          'partialOutput',
+          isA<JsonObject>(),
+        ),
+      ),
+    );
     expect(
       await provider.messages.stream(request).runCollect().runFutureExit(),
       _failedWith<ProviderError>(),

@@ -5,6 +5,8 @@ import 'package:artificer_baseten/artificer_baseten.dart';
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/json.dart';
 import 'package:conflux/conflux.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -131,5 +133,27 @@ void main() {
         isA<Defect<AiError>>(),
       ),
     );
+  });
+
+  test('prediction URLs with double-slash paths preserve their authority', () async {
+    late Uri sentUrl;
+    final transport = MockClient((request) async {
+      sentUrl = request.url;
+      return http.Response('[1]', HttpStatus.ok, headers: {'content-type': 'application/json'});
+    });
+    final provider = BasetenProvider(apiKey: 'secret', httpClient: transport);
+    addTearDown(provider.close);
+    final configured = Uri.parse('https://example.test//other.test/predict?trace=on');
+
+    await provider
+        .predictionEndpoint<int, int>(
+          endpoint: configured,
+          encode: JsonNumber.new,
+          decode: (value) => (value as JsonArray).values.length,
+        )
+        .predict(1)
+        .runFuture();
+
+    expect(sentUrl, configured);
   });
 }

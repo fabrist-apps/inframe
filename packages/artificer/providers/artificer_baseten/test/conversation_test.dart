@@ -128,6 +128,14 @@ void main() {
     );
 
     expect(
+      () => BasetenModelOptions(extraBody: JsonObject({'top_k': 42})),
+      throwsArgumentError,
+    );
+    expect(
+      () => BasetenModelOptions(extraBody: JsonObject({'repetition_penalty': 1.2})),
+      throwsArgumentError,
+    );
+    expect(
       await provider.languageModel('model').generate(unsupported).runFutureExit(),
       isA<Failed<GenerationResult, AiError>>(),
     );

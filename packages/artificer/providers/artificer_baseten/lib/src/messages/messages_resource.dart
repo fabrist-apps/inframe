@@ -62,7 +62,9 @@ final class BasetenMessagesResource {
         ),
       );
     } on FormatException catch (error) {
-      return Effect.fail(ProtocolError(error.message));
+      return Effect.fail(
+        ProtocolError(error.message, partialOutput: response.value),
+      );
     }
   }
 }

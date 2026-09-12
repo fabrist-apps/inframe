@@ -85,7 +85,7 @@ one text part per common input. It does not combine items, split batches, normal
 or infer a model name from the deployment URL. Native calls retain response extensions and HTTP
 metadata, and `BasetenEmbeddingsResource.normalize` can map an already-decoded result without I/O.
 
-`provider.messages` exposes Baseten's beta native Messages API. It uses `Authorization: Api-Key`
+`provider.messages` exposes Baseten's beta native Messages API. It uses `Authorization: Bearer`
 and Baseten's endpoint schema rather than Anthropic SDK defaults:
 
 ```dart

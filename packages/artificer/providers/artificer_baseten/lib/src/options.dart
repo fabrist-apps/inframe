@@ -11,6 +11,10 @@ final class BasetenModelOptions {
   }) : topK = _normalizeSetting(topK),
        repetitionPenalty = _normalizeSetting(repetitionPenalty),
        extraBody = extraBody ?? JsonObject({}) {
+    final collision = this.extraBody.values.keys.where(_typedFields.contains).firstOrNull;
+    if (collision != null) {
+      throw ArgumentError.value(this.extraBody, 'extraBody', 'field "$collision" is typed');
+    }
     if (this.topK case SetSetting<int>(:final value) when value <= 0) {
       throw ArgumentError.value(value, 'topK', 'must be positive');
     }
@@ -50,6 +54,8 @@ final class BasetenModelOptions {
     );
   }
 }
+
+const _typedFields = {'top_k', 'repetition_penalty'};
 
 Setting<T> _normalizeSetting<T>(Setting<T> setting) => switch (setting) {
   InheritSetting<T>() => Setting<T>.inherit(),

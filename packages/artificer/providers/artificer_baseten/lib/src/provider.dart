@@ -31,12 +31,7 @@ final class BasetenProvider {
     );
     _clients.add(client);
     chatCompletions = BasetenChatCompletionsResource(client);
-    final messagesClient = _newClient(
-      catalogBaseUrl ?? Uri.parse('https://inference.baseten.co/v1'),
-      authorization: 'Api-Key $_apiKey',
-    );
-    _clients.add(messagesClient);
-    messages = BasetenMessagesResource(messagesClient);
+    messages = BasetenMessagesResource(client);
   }
 
   final String _apiKey;
@@ -135,10 +130,9 @@ final class BasetenProvider {
   if (endpoint.hasFragment) {
     throw ArgumentError.value(endpoint, 'endpoint', 'must not contain a fragment');
   }
-  final path = endpoint.hasQuery ? '${endpoint.path}?${endpoint.query}' : endpoint.path;
   return (
     baseUrl: endpoint.replace(path: '/', queryParameters: const {}),
-    path: path,
+    path: endpoint.toString(),
   );
 }
 

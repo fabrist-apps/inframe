@@ -122,14 +122,16 @@ final class BasetenMessageResponse {
   /// Decodes a beta Messages response while retaining unknown fields.
   factory BasetenMessageResponse.fromJson(JsonObject raw) {
     final value = raw.toDart();
-    final content = _list(value, 'content').map(JsonObject.fromDart);
+    final content = _list(value, 'content').map(
+      (block) => _object(block, 'content item'),
+    );
     return BasetenMessageResponse._(
       id: _string(value, 'id'),
       model: _string(value, 'model'),
       role: _role(value['role']),
       content: content,
-      stopReason: value['stop_reason'] as String?,
-      usage: value['usage'] == null ? null : JsonObject.fromDart(value['usage']),
+      stopReason: _optionalString(value, 'stop_reason'),
+      usage: value['usage'] == null ? null : _object(value['usage'], 'usage'),
       raw: raw,
       extensions: JsonObject(
         _without(value, {
@@ -219,10 +221,25 @@ String _string(Map<String, Object?> value, String key) {
   return field;
 }
 
+String? _optionalString(Map<String, Object?> value, String key) {
+  final field = value[key];
+  if (field != null && field is! String) {
+    throw FormatException('$key must be a string or null.');
+  }
+  return field as String?;
+}
+
 List<Object?> _list(Map<String, Object?> value, String key) {
   final field = value[key];
   if (field is! List<Object?>) throw FormatException('$key must be an array.');
   return field;
+}
+
+JsonObject _object(Object? value, String name) {
+  if (value is! Map<String, Object?>) {
+    throw FormatException('$name must be an object.');
+  }
+  return JsonObject(value);
 }
 
 Map<String, Object?> _without(Map<String, Object?> value, Set<String> keys) =>
