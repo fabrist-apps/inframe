@@ -152,6 +152,38 @@ void main() {
       expect(error.payload.attributes, {'accessToken': '[REDACTED]'});
     });
 
+    test('should reject hook-modified causes that exceed the chain limit', () async {
+      final exporter = TestExporter();
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: ChroniclerOptions(
+          delivery: const DeliveryOptions(maxBatchRecords: 1),
+          redaction: RedactionOptions(
+            beforeRecord: (record) {
+              final error = record as ErrorRecord;
+              return error.copyWith(
+                payload: error.payload.copyWith(
+                  causes: List.filled(
+                    5,
+                    const ErrorDetails(type: 'Cause', message: 'invalid'),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      Context().withChronicler(chronicler.recorder).errors.capture('root');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(exporter.batches, isEmpty);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+    });
+
     test('should keep error occurrences separate from error logs and failed spans', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter, maxBatchRecords: 3);
@@ -230,6 +262,30 @@ void main() {
       expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.two);
     });
 
+    test('should obey error collection and closed-runtime transitions', () async {
+      final exporter = TestExporter(acceptImmediately: true);
+      final chronicler = _chronicler(exporter);
+      final errors = Context().withChronicler(chronicler.recorder).errors;
+
+      chronicler.setCollectionEnabled(ChroniclerSignal.errors, false);
+      errors.capture('disabled');
+      await Future<void>.delayed(Duration.zero);
+      expect(exporter.batches, isEmpty);
+      expect(
+        chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled],
+        BigInt.one,
+      );
+
+      chronicler.setCollectionEnabled(ChroniclerSignal.errors, true);
+      errors.capture('enabled');
+      await Future<void>.delayed(Duration.zero);
+      expect(exporter.batches, hasLength(1));
+
+      await chronicler.close();
+      errors.capture('closed');
+      expect(chronicler.diagnosticCounts[DiagnosticReason.runtimeClosed], BigInt.one);
+    });
+
     test('should throw MissingContextValue when setup is absent', () {
       expect(() => Context().errors, throwsA(isA<MissingContextValue>()));
     });
@@ -259,6 +315,34 @@ void main() {
         'Bad state: repeated',
       ]);
       expect(error.payload.causes.first.stackTrace, 'nearest');
+    });
+
+    test('should preserve root and cause line endings through the codec', () async {
+      final exporter = TestExporter();
+      final chronicler = _chronicler(exporter);
+
+      Context()
+          .withChronicler(chronicler.recorder)
+          .errors
+          .capture(
+            'root',
+            stackTrace: StackTrace.fromString('root-a\r\nroot-b\n'),
+            causes: [
+              ChroniclerCause(
+                'cause',
+                stackTrace: StackTrace.fromString('cause-a\ncause-b\r\n'),
+              ),
+            ],
+          );
+      await Future<void>.delayed(Duration.zero);
+      final captured = exporter.batches.single.records.single as ErrorRecord;
+      const codec = ChroniclerCodec();
+
+      final decoded = codec.decodeRecord(codec.encodeRecord(captured));
+      expect(decoded, isA<Decoded<ChroniclerRecord>>());
+      final error = (decoded as Decoded<ChroniclerRecord>).value as ErrorRecord;
+      expect(error.payload.error.stackTrace, 'root-a\r\nroot-b\n');
+      expect(error.payload.causes.single.stackTrace, 'cause-a\ncause-b\r\n');
     });
 
     test('should contain conversion failures for each explicit cause', () async {
