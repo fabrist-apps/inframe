@@ -195,6 +195,20 @@ final class ChroniclerRecorder {
     Map<String, Object?> properties = const {},
   }) => _runtime._recordEvent(_attribution, name, properties: properties);
 
+  /// Records an explicit error occurrence without waiting for transport.
+  void recordError(
+    Object error, {
+    StackTrace? stackTrace,
+    bool handled = true,
+    Map<String, Object?> attributes = const {},
+  }) => _runtime._recordError(
+    _attribution,
+    error,
+    stackTrace: stackTrace,
+    handled: handled,
+    attributes: attributes,
+  );
+
   /// Records an explicit anonymous-to-user association.
   void identify({required String anonymousId, required String userId}) =>
       _runtime._recordIdentityLink(
@@ -929,6 +943,31 @@ final class ChroniclerRuntime {
           attributes: snapshot,
           error: details,
           stackTrace: standaloneStack,
+        ),
+      );
+      _finalizeAndEnqueue(record);
+    } on RecordValidationException {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    } on Object {
+      diagnostics.record(DiagnosticReason.invalidRecord);
+    }
+  }
+
+  void _recordError(
+    _RecorderAttribution attribution,
+    Object error, {
+    StackTrace? stackTrace,
+    bool handled = true,
+    Map<String, Object?> attributes = const {},
+  }) {
+    if (!_canRecord(ChroniclerSignal.errors, null)) return;
+    try {
+      final record = ErrorRecord(
+        envelope: _envelope(attribution),
+        payload: ErrorPayload(
+          error: _convertError(error, stackTrace),
+          handled: handled,
+          attributes: validator.snapshotAttributes(attributes),
         ),
       );
       _finalizeAndEnqueue(record);

@@ -86,6 +86,39 @@ The base queue is in memory. Process termination can lose unsent telemetry, so a
 not durable application storage. Diagnostics use a payload-free callback and exact counters rather
 than entering the telemetry path recursively.
 
+## Error occurrences
+
+Capture an error occurrence explicitly when an application boundary handles or observes it:
+
+```dart
+try {
+  await reserveInventory();
+} catch (error, stackTrace) {
+  context.errors.capture(
+    error,
+    stackTrace: stackTrace,
+    attributes: {'feature': 'checkout'},
+  );
+}
+
+context.errors.capture(
+  unhandledError,
+  stackTrace: unhandledStackTrace,
+  handled: false,
+);
+```
+
+Capture accepts any Dart `Object` and converts its type, message, and optional supplied stack before
+returning. It does not inspect object fields, discover causes, generate a missing stack, or retain the
+original error object. The raw stack text is preserved with configured release, optional build ID,
+identity, session, and trace correlation. Error occurrences are distinct from error-level logs and
+failed spans; neither creates an occurrence automatically.
+
+Errors bypass random sampling but still obey collection, validation, redaction, queue, and delivery
+limits. A capture call creates a new occurrence ID, while retries preserve its ID, timestamp, and
+payload. The base SDK does not group or deduplicate occurrences, upload source maps, or install
+platform error hooks.
+
 ## Tracing and propagation
 
 `trace` and `traceSync` create explicit trace boundaries. `span` and `spanSync` create a child of
