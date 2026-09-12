@@ -74,6 +74,8 @@ jobs:
           dart test packages/artificer/providers/artificer_anthropic/test --chain-stack-traces
           dart run packages/artificer/providers/artificer_anthropic/example/text_generation.dart
           dart run packages/artificer/providers/artificer_anthropic/example/tool_turn.dart
+          dart run packages/artificer/providers/artificer_anthropic/example/models_and_tokens.dart
+          dart run packages/artificer/providers/artificer_anthropic/example/files.dart
 
       - name: Run Chrono ID tests
         run: |

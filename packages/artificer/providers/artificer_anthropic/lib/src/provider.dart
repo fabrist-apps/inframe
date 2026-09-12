@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:artificer_anthropic/src/files/files_resource.dart';
 import 'package:artificer_anthropic/src/messages/message_models.dart';
 import 'package:artificer_anthropic/src/messages/messages_resource.dart';
 import 'package:artificer_anthropic/src/models/models_resource.dart';
@@ -23,6 +24,7 @@ final class AnthropicProvider {
     AnthropicApiVersion apiVersion = AnthropicApiVersion.v20230601,
     Iterable<AnthropicBeta> betaFeatures = const [],
     String? userProfileId,
+    String? workspaceId,
   }) : _client = ProviderHttpClient(
          baseUrl: _directoryBaseUrl(
            baseUrl ?? Uri.parse('https://api.anthropic.com/v1'),
@@ -37,13 +39,18 @@ final class AnthropicProvider {
                  .join(','),
            if (userProfileId != null)
              'anthropic-user-profile-id': _nonEmpty(userProfileId, 'userProfileId'),
+           if (workspaceId != null) 'anthropic-workspace-id': _nonEmpty(workspaceId, 'workspaceId'),
          },
        ) {
+    files = AnthropicFilesResource(_client);
     messages = AnthropicMessagesResource(_client);
     models = AnthropicModelsResource(_client);
   }
 
   final ProviderHttpClient _client;
+
+  /// Explicit caller-managed Files operations.
+  late final AnthropicFilesResource files;
 
   /// Typed native Messages operations.
   late final AnthropicMessagesResource messages;

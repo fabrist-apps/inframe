@@ -7,6 +7,10 @@ The native model snapshot follows `anthropics/anthropic-sdk-typescript` commit
 `135f71e9297683e14614d4307081c0273ed0a09c`, inspected on 2026-09-12. Requests default to the
 stable `2023-06-01` API version and always send it explicitly.
 
+Pass `workspaceId` when a credential can act on more than one Anthropic Workspace. Pass
+`userProfileId` when using Anthropic's user-profile feature. Both values are explicit provider
+headers; the SDK never reads credential or workspace state from the environment.
+
 ```dart
 final provider = AnthropicProvider(apiKey: credential);
 try {
@@ -107,3 +111,11 @@ returns its native cursors; it does not follow them. `provider.models.retrieve(i
 model ID. Model discovery does not gate `languageModel`, so callers can use future model IDs without
 an extra request. All three operations are lazy, use the provider's shared headers and lifecycle,
 and retain native response fields and HTTP metadata.
+
+`provider.files` exposes explicit upload, one-page list, metadata, bounded byte download, and delete
+operations. The pinned stable Files API needs no beta opt-in; any provider-level beta header is still
+preserved. Uploads open the supplied `UploadSource` only when executed and never retry or delete a
+remote file automatically. A returned `AnthropicFileMetadata.asMessageSource()` creates a local
+Messages reference without reading or uploading bytes. Page cursors, downloads, and deletes each
+require a separate caller action. Closing the provider releases local transports and leaves remote
+files untouched.

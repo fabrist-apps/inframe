@@ -30,7 +30,7 @@ void main() {
     final provider = AnthropicProvider(
       apiKey: 'secret',
       baseUrl: Uri.parse('http://${server.address.address}:${server.port}/v1'),
-      betaFeatures: const [AnthropicBeta('token-counting-2024-11-01')],
+      betaFeatures: const [AnthropicBeta.tokenCounting20241101],
       userProfileId: 'profile-1',
     );
     addTearDown(provider.close);

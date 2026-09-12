@@ -39,6 +39,12 @@ final class AnthropicBeta {
     'interleaved-thinking-2025-05-14',
   );
 
+  /// Legacy Files beta selector, retained for callers targeting beta deployments.
+  static const filesApi20250414 = AnthropicBeta('files-api-2025-04-14');
+
+  /// Legacy token-counting beta selector.
+  static const tokenCounting20241101 = AnthropicBeta('token-counting-2024-11-01');
+
   /// Value sent in the `anthropic-beta` header.
   final String headerValue;
 }
