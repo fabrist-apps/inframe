@@ -24,7 +24,7 @@ void main() {
       context.metrics.counter('orders.completed', unit: 'orders')
         ..add(2, attributes: {'channel': 'mobile'})
         ..add(3, attributes: {'channel': 'mobile'});
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await _waitFor(() => exporter.batches.isNotEmpty);
 
       final record = exporter.batches.single.records.single as MetricRecord;
       expect(record.envelope.userId, isNull);
@@ -280,4 +280,11 @@ final class _MetricClock {
   void rewindWall(Duration duration) {
     now = now.subtract(duration);
   }
+}
+
+Future<void> _waitFor(bool Function() condition) async {
+  for (var attempt = 0; attempt < 200 && !condition(); attempt++) {
+    await Future<void>.delayed(const Duration(milliseconds: 2));
+  }
+  expect(condition(), isTrue);
 }

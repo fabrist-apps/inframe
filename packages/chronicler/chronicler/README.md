@@ -86,7 +86,7 @@ The base queue is in memory. Process termination can lose unsent telemetry, so a
 not durable application storage. Diagnostics use a payload-free callback and exact counters rather
 than entering the telemetry path recursively.
 
-## Metric counters
+## Metric instruments
 
 Metric instruments are shared by the Chronicler runtime, so request Contexts contribute to the same
 bounded interval aggregates without adding request identity as a dimension. Repeating a compatible
@@ -95,6 +95,11 @@ lookup returns the registered instrument:
 ```dart
 final completed = context.metrics.counter('orders.completed', unit: 'orders');
 completed.add(1, attributes: {'channel': 'mobile'});
+final active = context.metrics.upDownCounter('connections.active');
+active.add(1);
+active.add(-1);
+final depth = context.metrics.gauge('queue.depth');
+depth.set(42);
 ```
 
 Counters export nonnegative changes measured during each interval rather than lifetime totals. The
@@ -108,6 +113,12 @@ zero select the same series. Chronicler validates and redacts dimensions before 
 different sensitive values replaced by `[REDACTED]` therefore intentionally share a series. The
 configured total and per-instrument series limits reject new dimensions while existing series remain
 usable.
+
+Up/down counters accept signed changes and export their interval net change, including an observed
+zero when changes cancel. They do not represent an absolute current count. Setter gauges do: each
+series exports its latest accepted value and observation time for the interval. A gauge value is not
+repeated in later intervals, so applications call `set` periodically when regular observations are
+needed. Callback and automatically polled gauges are not part of the base SDK.
 
 `flush()` closes the current partial metric interval before taking its delivery snapshot. New
 measurements immediately enter a fresh full interval and cannot extend that flush. `close()` seals

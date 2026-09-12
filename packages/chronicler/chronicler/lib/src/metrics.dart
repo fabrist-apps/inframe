@@ -39,7 +39,7 @@ final class ChroniclerMetrics {
   final void Function(MetricRecord record) _finalize;
   final DateTime Function() _now;
   final Duration Function() _elapsed;
-  final _instruments = <String, _CounterInstrument>{};
+  final _instruments = <String, _MetricInstrument>{};
   late DateTime _intervalStart;
   late Duration _intervalElapsed;
   Timer? _timer;
@@ -51,13 +51,8 @@ final class ChroniclerMetrics {
     _validateDefinition(name, unit);
     final existing = _instruments[name];
     if (existing != null) {
-      if (existing.unit != unit) {
-        throw const ChroniclerConfigurationException(
-          'metric instrument',
-          'name is already registered with a different definition',
-        );
-      }
-      return existing.handle;
+      _requireCompatible(existing, MetricInstrument.counter, unit);
+      return (existing as _CounterInstrument).handle;
     }
     if (_instruments.length >= _options.maxInstruments) {
       throw const ChroniclerConfigurationException(
@@ -67,11 +62,69 @@ final class ChroniclerMetrics {
     }
     late final _CounterInstrument instrument;
     final handle = ChroniclerCounter.internal(
-      (value, attributes) => _add(instrument, value, attributes),
+      (value, attributes) => _addSum(instrument, value, attributes, nonnegative: true),
     );
     instrument = _CounterInstrument(name: name, unit: unit, handle: handle);
     _instruments[name] = instrument;
     return handle;
+  }
+
+  /// Returns an up/down counter that records signed interval changes.
+  ChroniclerUpDownCounter upDownCounter(String name, {String unit = '1'}) {
+    _validateDefinition(name, unit);
+    final existing = _instruments[name];
+    if (existing != null) {
+      _requireCompatible(existing, MetricInstrument.upDownCounter, unit);
+      return (existing as _UpDownCounterInstrument).handle;
+    }
+    _requireInstrumentCapacity();
+    late final _UpDownCounterInstrument instrument;
+    final handle = ChroniclerUpDownCounter.internal(
+      (value, attributes) => _addSum(instrument, value, attributes, nonnegative: false),
+    );
+    instrument = _UpDownCounterInstrument(name: name, unit: unit, handle: handle);
+    _instruments[name] = instrument;
+    return handle;
+  }
+
+  /// Returns a setter gauge that records the latest interval observation.
+  ChroniclerGauge gauge(String name, {String unit = '1'}) {
+    _validateDefinition(name, unit);
+    final existing = _instruments[name];
+    if (existing != null) {
+      _requireCompatible(existing, MetricInstrument.gauge, unit);
+      return (existing as _GaugeInstrument).handle;
+    }
+    _requireInstrumentCapacity();
+    late final _GaugeInstrument instrument;
+    final handle = ChroniclerGauge.internal(
+      (value, attributes) => _setGauge(instrument, value, attributes),
+    );
+    instrument = _GaugeInstrument(name: name, unit: unit, handle: handle);
+    _instruments[name] = instrument;
+    return handle;
+  }
+
+  void _requireCompatible(
+    _MetricInstrument existing,
+    MetricInstrument instrument,
+    String unit,
+  ) {
+    if (existing.instrument != instrument || existing.unit != unit) {
+      throw const ChroniclerConfigurationException(
+        'metric instrument',
+        'name is already registered with a different definition',
+      );
+    }
+  }
+
+  void _requireInstrumentCapacity() {
+    if (_instruments.length >= _options.maxInstruments) {
+      throw const ChroniclerConfigurationException(
+        'maxInstruments',
+        'metric instrument limit reached',
+      );
+    }
   }
 
   void _validateDefinition(String name, String unit) {
@@ -92,14 +145,15 @@ final class ChroniclerMetrics {
     }
   }
 
-  void _add(
-    _CounterInstrument instrument,
+  void _addSum(
+    _SumInstrument instrument,
     num input,
-    Map<String, Object?> attributes,
-  ) {
+    Map<String, Object?> attributes, {
+    required bool nonnegative,
+  }) {
     if (!_canRecord()) return;
     final value = input.toDouble();
-    if (!value.isFinite || value < 0) {
+    if (!value.isFinite || nonnegative && value < 0) {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
@@ -110,18 +164,8 @@ final class ChroniclerMetrics {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    final key = _seriesKey(dimensions);
-    var series = instrument.series[key];
-    if (series == null) {
-      if (_seriesCount >= _options.maxSeries ||
-          instrument.series.length >= _options.maxSeriesPerInstrument) {
-        _diagnose(DiagnosticReason.seriesLimitReached);
-        return;
-      }
-      series = _CounterSeries(dimensions);
-      instrument.series[key] = series;
-      _seriesCount++;
-    }
+    final series = _series(instrument, dimensions, _SumSeries.new);
+    if (series == null) return;
     final nextCount = series.count + 1;
     final nextSum = series.sum + value;
     if (nextCount > _maximumPortableInteger || !nextSum.isFinite) {
@@ -131,6 +175,56 @@ final class ChroniclerMetrics {
     series
       ..count = nextCount
       ..sum = nextSum == 0 ? 0 : nextSum;
+  }
+
+  void _setGauge(
+    _GaugeInstrument instrument,
+    num input,
+    Map<String, Object?> attributes,
+  ) {
+    if (!_canRecord()) return;
+    final value = input.toDouble();
+    if (!value.isFinite) {
+      _diagnose(DiagnosticReason.invalidMeasurement);
+      return;
+    }
+    late final Map<String, Object?> dimensions;
+    try {
+      dimensions = _redact(_snapshotDimensions(attributes));
+    } on Object {
+      _diagnose(DiagnosticReason.invalidMeasurement);
+      return;
+    }
+    final series = _series(instrument, dimensions, _GaugeSeries.new);
+    if (series == null) return;
+    final nextCount = series.count + 1;
+    if (nextCount > _maximumPortableInteger) {
+      _diagnose(DiagnosticReason.invalidMeasurement);
+      return;
+    }
+    series
+      ..count = nextCount
+      ..value = value == 0 ? 0 : value
+      ..observedAt = _now();
+  }
+
+  T? _series<T extends _MetricSeries>(
+    _MetricInstrument instrument,
+    Map<String, Object?> dimensions,
+    T Function(Map<String, Object?> attributes) create,
+  ) {
+    final key = _seriesKey(dimensions);
+    final existing = instrument.series[key];
+    if (existing != null) return existing as T;
+    if (_seriesCount >= _options.maxSeries ||
+        instrument.series.length >= _options.maxSeriesPerInstrument) {
+      _diagnose(DiagnosticReason.seriesLimitReached);
+      return null;
+    }
+    final series = create(dimensions);
+    instrument.series[key] = series;
+    _seriesCount++;
+    return series;
   }
 
   Map<String, Object?> _snapshotDimensions(Map<String, Object?> attributes) {
@@ -184,23 +278,15 @@ final class ChroniclerMetrics {
         if (series.count == 0) continue;
         records.add(
           _createRecord(
-            MetricPayload(
-              name: instrument.name,
-              instrument: MetricInstrument.counter,
-              unit: instrument.unit,
-              attributes: series.attributes,
+            instrument.payload(
+              series,
               intervalStart: _intervalStart,
               intervalEnd: intervalEnd,
               durationMicros: durationMicros < 0 ? 0 : durationMicros,
-              observationCount: series.count,
-              temporality: MetricTemporality.delta,
-              sum: series.sum,
             ),
           ),
         );
-        series
-          ..count = 0
-          ..sum = 0;
+        series.reset();
       }
     }
     _intervalStart = intervalEnd;
@@ -250,10 +336,23 @@ final class ChroniclerMetrics {
     final instrument = _instruments[name];
     final dimensions = _redact(_snapshotDimensions(attributes));
     final series = instrument?.series[_seriesKey(dimensions)];
-    if (series == null) throw StateError('counter series does not exist');
+    if (series is! _SumSeries) throw StateError('counter series does not exist');
     series
       ..count = count
       ..sum = sum;
+  }
+
+  /// Replaces an existing series count for portable-boundary tests.
+  void setSeriesCountForTesting({
+    required String name,
+    required Map<String, Object?> attributes,
+    required int count,
+  }) {
+    final instrument = _instruments[name];
+    final dimensions = _redact(_snapshotDimensions(attributes));
+    final series = instrument?.series[_seriesKey(dimensions)];
+    if (series == null) throw StateError('metric series does not exist');
+    series.count = count;
   }
 }
 
@@ -275,21 +374,164 @@ final class ChroniclerCounter {
   }) => _add(value, attributes);
 }
 
-final class _CounterInstrument {
-  _CounterInstrument({required this.name, required this.unit, required this.handle});
+/// Records signed changes into bounded interval aggregates.
+final class ChroniclerUpDownCounter {
+  /// Creates a runtime-owned up/down counter handle.
+  ChroniclerUpDownCounter.internal(this._add);
+
+  final void Function(num value, Map<String, Object?> attributes) _add;
+
+  /// Adds [value] to the current interval for [attributes].
+  ///
+  /// The exported sum is the signed net change during the interval. Use a
+  /// gauge for an absolute current value.
+  void add(
+    num value, {
+    Map<String, Object?> attributes = const {},
+  }) => _add(value, attributes);
+}
+
+/// Records the latest current value observed during each interval.
+final class ChroniclerGauge {
+  /// Creates a runtime-owned setter gauge handle.
+  ChroniclerGauge.internal(this._set);
+
+  final void Function(num value, Map<String, Object?> attributes) _set;
+
+  /// Sets the latest [value] for [attributes] in the current interval.
+  ///
+  /// Call this method again in every interval that should emit a value.
+  void set(
+    num value, {
+    Map<String, Object?> attributes = const {},
+  }) => _set(value, attributes);
+}
+
+sealed class _MetricInstrument {
+  _MetricInstrument({required this.name, required this.unit});
 
   final String name;
   final String unit;
-  final ChroniclerCounter handle;
-  final series = <String, _CounterSeries>{};
+  final series = <String, _MetricSeries>{};
+
+  MetricInstrument get instrument;
+
+  MetricPayload payload(
+    _MetricSeries series, {
+    required DateTime intervalStart,
+    required DateTime intervalEnd,
+    required int durationMicros,
+  });
 }
 
-final class _CounterSeries {
-  _CounterSeries(this.attributes);
+sealed class _SumInstrument extends _MetricInstrument {
+  _SumInstrument({required super.name, required super.unit});
+
+  @override
+  MetricPayload payload(
+    _MetricSeries series, {
+    required DateTime intervalStart,
+    required DateTime intervalEnd,
+    required int durationMicros,
+  }) {
+    final sum = series as _SumSeries;
+    return MetricPayload(
+      name: name,
+      instrument: instrument,
+      unit: unit,
+      attributes: sum.attributes,
+      intervalStart: intervalStart,
+      intervalEnd: intervalEnd,
+      durationMicros: durationMicros,
+      observationCount: sum.count,
+      temporality: MetricTemporality.delta,
+      sum: sum.sum,
+    );
+  }
+}
+
+final class _CounterInstrument extends _SumInstrument {
+  _CounterInstrument({required super.name, required super.unit, required this.handle});
+
+  final ChroniclerCounter handle;
+
+  @override
+  MetricInstrument get instrument => MetricInstrument.counter;
+}
+
+final class _UpDownCounterInstrument extends _SumInstrument {
+  _UpDownCounterInstrument({required super.name, required super.unit, required this.handle});
+
+  final ChroniclerUpDownCounter handle;
+
+  @override
+  MetricInstrument get instrument => MetricInstrument.upDownCounter;
+}
+
+final class _GaugeInstrument extends _MetricInstrument {
+  _GaugeInstrument({required super.name, required super.unit, required this.handle});
+
+  final ChroniclerGauge handle;
+
+  @override
+  MetricInstrument get instrument => MetricInstrument.gauge;
+
+  @override
+  MetricPayload payload(
+    _MetricSeries series, {
+    required DateTime intervalStart,
+    required DateTime intervalEnd,
+    required int durationMicros,
+  }) {
+    final gauge = series as _GaugeSeries;
+    return MetricPayload(
+      name: name,
+      instrument: instrument,
+      unit: unit,
+      attributes: gauge.attributes,
+      intervalStart: intervalStart,
+      intervalEnd: intervalEnd,
+      durationMicros: durationMicros,
+      observationCount: gauge.count,
+      value: gauge.value,
+      observedAt: gauge.observedAt,
+    );
+  }
+}
+
+sealed class _MetricSeries {
+  _MetricSeries(this.attributes);
 
   final Map<String, Object?> attributes;
   int count = 0;
+
+  void reset();
+}
+
+final class _SumSeries extends _MetricSeries {
+  _SumSeries(super.attributes);
+
   double sum = 0;
+
+  @override
+  void reset() {
+    count = 0;
+    sum = 0;
+  }
+}
+
+final class _GaugeSeries extends _MetricSeries {
+  _GaugeSeries(super.attributes);
+
+  double value = 0;
+  DateTime? observedAt;
+
+  @override
+  void reset() {
+    count = 0;
+    value = 0;
+    observedAt = null;
+  }
 }
 
 String _seriesKey(Map<String, Object?> attributes) => jsonEncode([

@@ -1933,6 +1933,20 @@ final class ChroniclerMetricFixture {
       sum: sum,
     );
   }
+
+  /// Places an existing series at the portable observation-count boundary.
+  static void setSeriesCount(
+    Chronicler chronicler, {
+    required int count,
+    required String name,
+    Map<String, Object?> attributes = const {},
+  }) {
+    chronicler._runtime.metrics.setSeriesCountForTesting(
+      name: name,
+      attributes: attributes,
+      count: count,
+    );
+  }
 }
 
 final class _PendingRecord {
