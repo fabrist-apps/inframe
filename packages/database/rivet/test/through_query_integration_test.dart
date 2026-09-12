@@ -204,5 +204,27 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should filter through roots by count and nullable extrema',
+      () async {
+        final books = await ThroughBooks.db
+            .find(
+              where: (book) => book.tags.count().greaterThan(1),
+              orderBy: (book) => [book.tags.max((tag) => tag.code).desc()],
+            )
+            .get(database);
+        expect(books.map((book) => book.title), ['First']);
+
+        final empty = await ThroughBooks.db
+            .find(
+              where: (book) => book.tags.min((tag) => tag.code).equals(null),
+            )
+            .getSingle(database);
+        expect(empty.title, 'Empty');
+        expect(statements, hasLength(2));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }

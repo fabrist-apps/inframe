@@ -116,6 +116,19 @@ final class RivetManyRelation<Target> extends RivetRelationDescriptor<Target> {
   RivetPredicate any(RivetWhere<Target> where) => _relationPredicate(this, where);
 
   RivetPredicate none(RivetWhere<Target> where) => _relationPredicate(this, where, negate: true);
+
+  RivetRelationAggregate<int> count({RivetWhere<Target>? where}) =>
+      _relationAggregate(this, 'count', const RivetCountCodec(), where: where);
+
+  RivetRelationAggregate<Value?> min<Value>(
+    RivetOrderableExpression<Value> Function(Target target) selector, {
+    RivetWhere<Target>? where,
+  }) => _relationMinMax(this, 'min', selector, where: where);
+
+  RivetRelationAggregate<Value?> max<Value>(
+    RivetOrderableExpression<Value> Function(Target target) selector, {
+    RivetWhere<Target>? where,
+  }) => _relationMinMax(this, 'max', selector, where: where);
 }
 
 final class RivetManyThroughRelation<Target, Junction, Source>
@@ -140,6 +153,19 @@ final class RivetManyThroughRelation<Target, Junction, Source>
   RivetPredicate any(RivetWhere<Target> where) => _relationPredicate(this, where);
 
   RivetPredicate none(RivetWhere<Target> where) => _relationPredicate(this, where, negate: true);
+
+  RivetRelationAggregate<int> count({RivetWhere<Target>? where}) =>
+      _relationAggregate(this, 'count', const RivetCountCodec(), where: where);
+
+  RivetRelationAggregate<Value?> min<Value>(
+    RivetOrderableExpression<Value> Function(Target target) selector, {
+    RivetWhere<Target>? where,
+  }) => _relationMinMax(this, 'min', selector, where: where);
+
+  RivetRelationAggregate<Value?> max<Value>(
+    RivetOrderableExpression<Value> Function(Target target) selector, {
+    RivetWhere<Target>? where,
+  }) => _relationMinMax(this, 'max', selector, where: where);
 }
 
 final class RivetRelationBuilder<Target, RelationType extends RivetRelationDescriptor<Target>> {
@@ -180,35 +206,162 @@ RivetPredicate _relationPredicate<Target>(
   }
   return RivetPredicate.relation(
     renderSql: (placeholder, nextAlias) {
-      final targetAlias = nextAlias();
-      traversal.target.qualify(targetAlias);
-      var fromSql = '${traversal.target.qualifiedName} AS ${quoteIdentifier(targetAlias)}';
-      final predicates = <String>[];
-      if (traversal.through case final through?) {
-        final throughAlias = nextAlias();
-        through.qualify(throughAlias);
-        final targetJoin = [
-          for (var index = 0; index < traversal.targetJoinLeft.length; index++)
-            '${traversal.targetJoinLeft[index].sql} = '
-                '${traversal.targetJoinRight[index].sql}',
-        ].join(' AND ');
-        fromSql =
-            '$fromSql JOIN ${through.qualifiedName} AS '
-            '${quoteIdentifier(throughAlias)} ON $targetJoin';
-      }
-      for (var index = 0; index < traversal.correlationLeft.length; index++) {
-        predicates.add(
-          '${traversal.correlationLeft[index].sql} = '
-          '${traversal.correlationRight[index].sql}',
-        );
-      }
-      predicates.add('(${predicate.renderWith(placeholder, nextAlias)}) IS TRUE');
-      final exists = 'EXISTS (SELECT 1 FROM $fromSql WHERE ${predicates.join(' AND ')})';
+      final rendered = traversal.render(nextAlias);
+      final predicates = [
+        ...rendered.predicates,
+        '(${predicate.renderWith(placeholder, nextAlias)}) IS TRUE',
+      ];
+      final exists = 'EXISTS (SELECT 1 FROM ${rendered.fromSql} WHERE ${predicates.join(' AND ')})';
       return negate ? 'NOT $exists' : exists;
     },
     parameters: predicate.parameters,
     columns: traversal.correlationRight,
   );
+}
+
+RivetRelationAggregate<int> _relationAggregate<Target>(
+  RivetRelationDescriptor<Target> relation,
+  String operation,
+  RivetCodec<int> codec, {
+  RivetWhere<Target>? where,
+}) {
+  final traversal = _RelationTraversal.create(relation);
+  return RivetRelationAggregate._(
+    traversal: traversal,
+    operation: operation,
+    codec: codec,
+    where: _aggregateWhere(traversal, where),
+  );
+}
+
+RivetRelationAggregate<Value?> _relationMinMax<Target, Value>(
+  RivetRelationDescriptor<Target> relation,
+  String operation,
+  RivetOrderableExpression<Value> Function(Target target) selector, {
+  RivetWhere<Target>? where,
+}) {
+  final traversal = _RelationTraversal.create(relation);
+  final selected = selector(traversal.target.definition);
+  if (selected.columns.any((column) => !column.belongsTo(traversal.target))) {
+    throw RivetUnsupportedQueryException(
+      'Relation aggregate ${traversal.path} can only select its related table.',
+    );
+  }
+  return RivetRelationAggregate._(
+    traversal: traversal,
+    operation: operation,
+    codec: RivetNullableCodec(selected.codec),
+    selected: selected,
+    where: _aggregateWhere(traversal, where),
+  );
+}
+
+RivetPredicate? _aggregateWhere<Target>(
+  _RelationTraversal<Target> traversal,
+  RivetWhere<Target>? where,
+) {
+  final predicate = where?.call(traversal.target.definition);
+  if (predicate?.columns.any((column) => !column.belongsTo(traversal.target)) ?? false) {
+    throw RivetUnsupportedQueryException(
+      'Relation aggregate ${traversal.path} can only filter its related table.',
+    );
+  }
+  return predicate;
+}
+
+final class RivetRelationAggregate<T>
+    implements RivetAliasedExpression<T>, RivetOrderableExpression<T> {
+  const RivetRelationAggregate._({
+    required _RelationTraversal<dynamic> traversal,
+    required this.operation,
+    required this.codec,
+    this.selected,
+    this.where,
+  }) : _traversal = traversal;
+
+  final _RelationTraversal<dynamic> _traversal;
+  final String operation;
+  final RivetOrderableExpression<dynamic>? selected;
+  final RivetPredicate? where;
+
+  @override
+  final RivetCodec<T> codec;
+
+  @override
+  bool get usesRelations => true;
+
+  @override
+  bool get referencesRows => true;
+
+  @override
+  List<RivetColumn<dynamic>> get columns => _traversal.correlationRight;
+
+  @override
+  List<Object?> get parameters => [...?selected?.parameters, ...?where?.parameters];
+
+  @override
+  String get sql => throw const RivetUnsupportedQueryException(
+    'Relation aggregates require an aliased query context.',
+  );
+
+  @override
+  String renderParameters({int startAt = 1}) => sql;
+
+  @override
+  String renderPlaceholders(String Function(int index) placeholder) => sql;
+
+  @override
+  String renderWith(
+    String Function(int index) placeholder,
+    String Function() nextAlias,
+  ) {
+    final rendered = _traversal.render(nextAlias);
+    final selectedSql = switch (selected) {
+      null => '*',
+      final RivetAliasedExpression<dynamic> expression => expression.renderWith(
+        placeholder,
+        nextAlias,
+      ),
+      final expression => expression.renderPlaceholders(placeholder),
+    };
+    final predicates = [...rendered.predicates];
+    if (where case final predicate?) {
+      final renderedWhere = predicate.renderWith(
+        (index) => placeholder((selected?.parameters.length ?? 0) + index),
+        nextAlias,
+      );
+      predicates.add('($renderedWhere) IS TRUE');
+    }
+    final whereSql = predicates.isEmpty ? '' : ' WHERE ${predicates.join(' AND ')}';
+    return '(SELECT $operation($selectedSql) FROM ${rendered.fromSql}$whereSql)';
+  }
+
+  RivetPredicate equals(T value) => _compare('=', value);
+  RivetPredicate lessThan(T value) => _compare('<', value);
+  RivetPredicate greaterThan(T value) => _compare('>', value);
+
+  RivetPredicate _compare(String operator, T value) {
+    if (value == null) {
+      return RivetPredicate.relation(
+        renderSql: (placeholder, nextAlias) => '${renderWith(placeholder, nextAlias)} IS NULL',
+        parameters: parameters,
+        columns: columns,
+      );
+    }
+    final encoded = codec.encode(value);
+    return RivetPredicate.relation(
+      renderSql: (placeholder, nextAlias) =>
+          '${renderWith(placeholder, nextAlias)} $operator '
+          '${placeholder(parameters.length)}::${codec.cast}',
+      parameters: [...parameters, encoded],
+      columns: columns,
+    );
+  }
+
+  RivetOrder asc({NullsOrder nulls = NullsOrder.last}) =>
+      RivetOrder(this, descending: false, nulls: nulls);
+  RivetOrder desc({NullsOrder nulls = NullsOrder.last}) =>
+      RivetOrder(this, descending: true, nulls: nulls);
 }
 
 final class _RelationTraversal<Target> {
@@ -301,6 +454,30 @@ final class _RelationTraversal<Target> {
   final List<RivetColumn<dynamic>> correlationRight;
   final List<RivetColumn<dynamic>> targetJoinLeft;
   final List<RivetColumn<dynamic>> targetJoinRight;
+
+  ({String fromSql, List<String> predicates}) render(String Function() nextAlias) {
+    final targetAlias = nextAlias();
+    target.qualify(targetAlias);
+    var fromSql = '${target.qualifiedName} AS ${quoteIdentifier(targetAlias)}';
+    if (through case final junction?) {
+      final throughAlias = nextAlias();
+      junction.qualify(throughAlias);
+      final targetJoin = [
+        for (var index = 0; index < targetJoinLeft.length; index++)
+          '${targetJoinLeft[index].sql} = ${targetJoinRight[index].sql}',
+      ].join(' AND ');
+      fromSql =
+          '$fromSql JOIN ${junction.qualifiedName} AS '
+          '${quoteIdentifier(throughAlias)} ON $targetJoin';
+    }
+    return (
+      fromSql: fromSql,
+      predicates: [
+        for (var index = 0; index < correlationLeft.length; index++)
+          '${correlationLeft[index].sql} = ${correlationRight[index].sql}',
+      ],
+    );
+  }
 }
 
 RivetRelationDescriptor<dynamic> _inferTraversalInverse(
@@ -375,7 +552,9 @@ final class RivetInclude<Definition, Row> {
         'Include predicate $path can only reference its related table.',
       );
     }
-    if (orders.any((order) => !order.column.belongsTo(targetSchema))) {
+    if (orders.any(
+      (order) => order.expression.columns.any((column) => !column.belongsTo(targetSchema)),
+    )) {
       throw RivetUnsupportedQueryException(
         'Include ordering $path can only reference its related table.',
       );

@@ -78,7 +78,9 @@ final class RivetFind<Definition, Row> {
         'A root predicate can only reference columns from its root table.',
       );
     }
-    if (_orders.any((order) => !order.column.belongsTo(_schema))) {
+    if (_orders.any(
+      (order) => order.expression.columns.any((column) => !column.belongsTo(_schema)),
+    )) {
       throw const RivetUnsupportedQueryException(
         'Root ordering can only reference columns from its root table.',
       );
@@ -129,7 +131,13 @@ final class RivetFind<Definition, Row> {
   }
 
   RivetCompiledQuery _compile({int? terminalLimit}) {
-    if (_includes.isNotEmpty || (_predicate?.usesRelations ?? false)) {
+    if (_includes.isNotEmpty ||
+        (_predicate?.usesRelations ?? false) ||
+        _orders.any(
+          (order) =>
+              order.expression is RivetAliasedExpression<dynamic> &&
+              (order.expression as RivetAliasedExpression<dynamic>).usesRelations,
+        )) {
       return _compileRelational(terminalLimit: terminalLimit);
     }
     final columns = _schema.columns.indexed
@@ -142,17 +150,7 @@ final class RivetFind<Definition, Row> {
       sql.write(' WHERE ${predicate.renderParameters()}');
     }
     if (_orders.isNotEmpty) {
-      sql
-        ..write(' ORDER BY ')
-        ..write(
-          _orders
-              .map((order) {
-                final direction = order.descending ? 'DESC' : 'ASC';
-                final nulls = order.nulls == NullsOrder.first ? 'FIRST' : 'LAST';
-                return '${order.column.sql} $direction NULLS $nulls';
-              })
-              .join(', '),
-        );
+      sql.write(' ORDER BY ${_renderOrders(_orders, parameters)}');
     }
     final effectiveLimit = switch ((_limit, terminalLimit)) {
       (final int requested, final int terminal) => requested < terminal ? requested : terminal,
@@ -202,7 +200,9 @@ final class RivetFind<Definition, Row> {
       parameters.addAll(predicate.parameters);
     }
     if (_orders.isNotEmpty) {
-      sql.write(' ORDER BY ${_renderOrders(_orders)}');
+      sql.write(
+        ' ORDER BY ${_renderOrders(_orders, parameters, nextAlias: nextAlias)}',
+      );
     }
     final effectiveLimit = switch ((_limit, terminalLimit)) {
       (final int requested, final int terminal) => requested < terminal ? requested : terminal,
@@ -246,11 +246,14 @@ String _compileInclude(
     );
     parameters.addAll(predicate.parameters);
   }
-  final orderSql = include.orders.isEmpty ? '' : ' ORDER BY ${_renderOrders(include.orders)}';
+  final renderedOrder = include.orders.isEmpty
+      ? ''
+      : _renderOrders(include.orders, parameters, nextAlias: nextAlias);
+  final orderSql = renderedOrder.isEmpty ? '' : ' ORDER BY $renderedOrder';
   final aggregateOrder = include.orders.isEmpty ? '' : ' ORDER BY "__rivet_ordinal"';
   final ordinal = include.orders.isEmpty
       ? ''
-      : ', row_number() OVER (ORDER BY ${_renderOrders(include.orders)}) AS "__rivet_ordinal"';
+      : ', row_number() OVER (ORDER BY $renderedOrder) AS "__rivet_ordinal"';
   final limit = relation.kind == RivetRelationKind.one ? 2 : include.limit;
   final limitSql = limit == null ? '' : '\n  LIMIT $limit';
   return '''
@@ -406,11 +409,26 @@ RivetRelationDescriptor<dynamic> _inferInverse(
   return candidates.single;
 }
 
-String _renderOrders(List<RivetOrder> orders) => orders
+String _renderOrders(
+  List<RivetOrder> orders,
+  List<Object?> parameters, {
+  String Function()? nextAlias,
+}) => orders
     .map((order) {
+      final expression = order.expression;
+      final rendered = expression is RivetAliasedExpression<dynamic>
+          ? (expression as RivetAliasedExpression<dynamic>).renderWith(
+              (int index) => '\$${parameters.length + index + 1}',
+              nextAlias ??
+                  (throw const RivetUnsupportedQueryException(
+                    'Relation aggregate ordering requires an aliased query context.',
+                  )),
+            )
+          : expression.renderParameters(startAt: parameters.length + 1);
+      parameters.addAll(expression.parameters);
       final direction = order.descending ? 'DESC' : 'ASC';
       final nulls = order.nulls == NullsOrder.first ? 'FIRST' : 'LAST';
-      return '${order.column.sql} $direction NULLS $nulls';
+      return '$rendered $direction NULLS $nulls';
     })
     .join(', ');
 

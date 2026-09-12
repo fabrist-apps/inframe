@@ -443,5 +443,49 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should filter and order roots by collection aggregates',
+      () async {
+        final prolific = await RelationalUsers.db
+            .find(
+              where: (user) => user.authoredPosts.count().greaterThan(1),
+            )
+            .getSingle(database);
+        expect(prolific.name, 'Ada');
+
+        final ordered = await RelationalUsers.db
+            .find(
+              orderBy: (user) => [
+                user.authoredPosts.count().desc(),
+                user.id.asc(),
+              ],
+            )
+            .get(database);
+        expect(ordered.map((user) => user.name), ['Ada', 'Grace', 'Linus']);
+
+        final maximum = await RelationalUsers.db
+            .find(
+              where: (user) => user.authoredPosts.max((post) => post.rank).greaterThan(2),
+              orderBy: (user) => [
+                user.authoredPosts.min((post) => post.rank).asc(),
+              ],
+            )
+            .get(database);
+        expect(maximum.map((user) => user.name), ['Ada', 'Grace']);
+
+        final filteredCount = await RelationalUsers.db
+            .find(
+              where: (user) => user.authoredPosts
+                  .count(where: (post) => post.title.equals('Ada second'))
+                  .equals(1),
+            )
+            .getSingle(database);
+        expect(filteredCount.name, 'Ada');
+        expect(ordered.every((user) => !user.authoredPosts.isLoaded), isTrue);
+        expect(statements, hasLength(4));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }

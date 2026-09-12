@@ -155,7 +155,22 @@ void main() {
         expect(returned.single.jsonValues, direct.jsonValues);
         expect(returned.single.nullableInts, direct.nullableInts);
         expect(returned.single.owner.isLoaded, isFalse);
-        expect(statements, hasLength(3));
+
+        final enumAggregate = await CodecParents.db
+            .find(
+              where: (parent) => parent.values
+                  .min(
+                    (value) => value.status,
+                    where: (value) => value.id.equals(10),
+                  )
+                  .equals(WorkStatus.queued),
+              orderBy: (parent) => [
+                parent.values.max((value) => value.status).asc(),
+              ],
+            )
+            .getSingle(database);
+        expect(enumAggregate.id, 1);
+        expect(statements, hasLength(4));
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

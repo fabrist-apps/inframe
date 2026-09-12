@@ -415,6 +415,39 @@ final class RivetIntegerCodec extends RivetCodec<int> {
   }
 }
 
+final class RivetCountCodec extends RivetCodec<int> {
+  const RivetCountCodec();
+
+  static const max = 9007199254740991;
+
+  @override
+  String get cast => 'bigint';
+
+  @override
+  Object encode(int value) {
+    _validate(value);
+    return value;
+  }
+
+  @override
+  int decode(Object? value, {required bool isSqlNull}) {
+    final decoded = switch (value) {
+      int() => value,
+      String() => int.tryParse(value),
+      _ => null,
+    };
+    if (isSqlNull || decoded == null) {
+      throw const FormatException('expected an exact relation count');
+    }
+    _validate(decoded);
+    return decoded;
+  }
+
+  void _validate(int value) {
+    if (value < 0 || value > max) throw RangeError.range(value, 0, max, 'count');
+  }
+}
+
 final class RivetRealCodec extends RivetCodec<double> {
   @override
   String get cast => 'float8';
@@ -1203,6 +1236,16 @@ abstract interface class RivetExpression<T> {
   String renderParameters({int startAt = 1});
 }
 
+abstract interface class RivetAliasedExpression<T> implements RivetExpression<T> {
+  bool get usesRelations;
+  String renderWith(
+    String Function(int index) placeholder,
+    String Function() nextAlias,
+  );
+}
+
+abstract interface class RivetOrderableExpression<T> implements RivetExpression<T> {}
+
 final class _RivetBoundExpression<T> implements RivetExpression<T> {
   _RivetBoundExpression(this.source, T value) : parameters = [source.encodeValue(value)];
 
@@ -1359,9 +1402,11 @@ class RivetColumn<T> implements RivetExpression<T> {
 }
 
 /// A column that supports SQL ordering.
-final class RivetOrderableColumn<T> extends RivetColumn<T> {
+final class RivetOrderableColumn<T> extends RivetColumn<T> implements RivetOrderableExpression<T> {
   RivetOrderableColumn(super.codec, {super.declaredName, super.renamedFrom});
+}
 
+extension RivetOrderableExpressionOrder<T> on RivetOrderableExpression<T> {
   RivetOrder asc({NullsOrder nulls = NullsOrder.last}) =>
       RivetOrder(this, descending: false, nulls: nulls);
   RivetOrder desc({NullsOrder nulls = NullsOrder.last}) =>
@@ -1692,9 +1737,10 @@ jsonb_build_array(
 enum NullsOrder { first, last }
 
 final class RivetOrder {
-  const RivetOrder(this.column, {required this.descending, required this.nulls});
+  const RivetOrder(this.expression, {required this.descending, required this.nulls});
 
-  final RivetOrderableColumn<Object?> column;
+  final RivetOrderableExpression<Object?> expression;
+  RivetOrderableColumn<Object?> get column => expression as RivetOrderableColumn<Object?>;
   final bool descending;
   final NullsOrder nulls;
 }
