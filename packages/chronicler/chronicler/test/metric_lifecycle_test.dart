@@ -169,6 +169,25 @@ void main() {
       expect(exporter.batches, isEmpty);
       await chronicler.close();
     });
+
+    test('should contain record construction failures and start a fresh interval', () async {
+      final exporter = TestExporter(acceptImmediately: true);
+      final chronicler = _chronicler(exporter);
+      final counter = Context().withChronicler(chronicler.recorder).metrics.counter('requests')
+        ..add(1);
+      ChroniclerMetricFixture.failNextRecordCreation(chronicler);
+
+      final failed = await chronicler.flush();
+      counter.add(2);
+      final recovered = await chronicler.flush();
+
+      expect(failed.accepted, 0);
+      expect(failed.dropped, isEmpty);
+      expect(recovered.accepted, 1);
+      expect(_sums(exporter), [2]);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+      await chronicler.close();
+    });
   });
 }
 

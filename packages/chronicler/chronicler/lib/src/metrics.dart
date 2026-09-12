@@ -54,12 +54,7 @@ final class ChroniclerMetrics {
       _requireCompatible(existing, MetricInstrument.counter, unit);
       return (existing as _CounterInstrument).handle;
     }
-    if (_instruments.length >= _options.maxInstruments) {
-      throw const ChroniclerConfigurationException(
-        'maxInstruments',
-        'metric instrument limit reached',
-      );
-    }
+    _requireInstrumentCapacity();
     late final _CounterInstrument instrument;
     final handle = ChroniclerCounter.internal(
       (value, attributes) => _addSum(instrument, value, attributes, nonnegative: true),
@@ -378,6 +373,15 @@ final class ChroniclerMetrics {
     seal().forEach(_finalize);
   }
 
+  MetricRecord? _tryCreateRecord(MetricPayload payload) {
+    try {
+      return _createRecord(payload);
+    } on Object {
+      _diagnose(DiagnosticReason.invalidRecord);
+      return null;
+    }
+  }
+
   /// Seals the current partial interval and begins a fresh interval.
   List<MetricRecord> seal({bool scheduleNext = true}) {
     _timer?.cancel();
@@ -389,17 +393,16 @@ final class ChroniclerMetrics {
     for (final instrument in _instruments.values) {
       for (final series in instrument.series.values) {
         if (series.count == 0) continue;
-        records.add(
-          _createRecord(
-            instrument.payload(
-              series,
-              intervalStart: _intervalStart,
-              intervalEnd: intervalEnd,
-              durationMicros: durationMicros < 0 ? 0 : durationMicros,
-            ),
+        final record = _tryCreateRecord(
+          instrument.payload(
+            series,
+            intervalStart: _intervalStart,
+            intervalEnd: intervalEnd,
+            durationMicros: durationMicros < 0 ? 0 : durationMicros,
           ),
         );
         series.reset();
+        if (record != null) records.add(record);
       }
     }
     _evictExpired(intervalEnd, elapsedEnd, finalizePending: false);
@@ -421,16 +424,15 @@ final class ChroniclerMetrics {
       for (final entry in expired) {
         final series = entry.value;
         if (finalizePending && series.count > 0) {
-          _finalize(
-            _createRecord(
-              instrument.payload(
-                series,
-                intervalStart: _intervalStart,
-                intervalEnd: intervalEnd,
-                durationMicros: (elapsedEnd - _intervalElapsed).inMicroseconds,
-              ),
+          final record = _tryCreateRecord(
+            instrument.payload(
+              series,
+              intervalStart: _intervalStart,
+              intervalEnd: intervalEnd,
+              durationMicros: (elapsedEnd - _intervalElapsed).inMicroseconds,
             ),
           );
+          if (record != null) _finalize(record);
         }
         instrument.series.remove(entry.key);
         _seriesCount--;

@@ -382,6 +382,7 @@ final class ChroniclerRuntime {
   var _pumpScheduled = false;
   Timer? _wakeTimer;
   Duration Function(int attempt, Duration ceiling)? _retryDelayOverride;
+  MetricRecord Function(MetricPayload payload)? _metricRecordOverride;
   ChroniclerRuntimeState _state = ChroniclerRuntimeState.running;
   bool _deliveryOpen = true;
   Future<DeliveryReport>? _closeFuture;
@@ -1150,17 +1151,19 @@ final class ChroniclerRuntime {
     spanId: attribution.spanId,
   );
 
-  MetricRecord _metricRecord(MetricPayload payload) => MetricRecord(
-    envelope: RecordEnvelope(
-      eventId: ChronoID.generate(prefix: 'evt'),
-      appId: appId,
-      release: release,
-      source: source,
-      timestamp: payload.intervalEnd,
-      buildId: buildId,
-    ),
-    payload: payload,
-  );
+  MetricRecord _metricRecord(MetricPayload payload) =>
+      _metricRecordOverride?.call(payload) ??
+      MetricRecord(
+        envelope: RecordEnvelope(
+          eventId: ChronoID.generate(prefix: 'evt'),
+          appId: appId,
+          release: release,
+          source: source,
+          timestamp: payload.intervalEnd,
+          buildId: buildId,
+        ),
+        payload: payload,
+      );
 
   bool _allowsCapture(ChroniclerSignal signal, double? sampleRate) {
     if (!_enabledSignals.contains(signal)) {
@@ -1916,6 +1919,14 @@ final class ChroniclerMetricFixture {
   /// Rotates the current interval synchronously and stops its next timer.
   static void rotate(Chronicler chronicler) {
     chronicler._runtime.metrics.rotateForTesting();
+  }
+
+  /// Makes the next metric record construction fail.
+  static void failNextRecordCreation(Chronicler chronicler) {
+    chronicler._runtime._metricRecordOverride = (payload) {
+      chronicler._runtime._metricRecordOverride = null;
+      throw StateError('metric record construction failed');
+    };
   }
 
   /// Places an existing counter series at an arithmetic boundary.
