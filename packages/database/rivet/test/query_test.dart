@@ -1,0 +1,119 @@
+import 'package:rivet/rivet.dart';
+import 'package:test/test.dart';
+
+import 'generated_consumer.dart';
+
+void main() {
+  group('RivetFind', () {
+    late _RecordingExecutor executor;
+
+    setUp(() => executor = _RecordingExecutor());
+
+    test('should compile bound filters and nulls-last ordering', () async {
+      executor.rows = [
+        (['Ada'], [false]),
+      ];
+      final row = await UserProfiles.db
+          .find(
+            where: (users) => users.displayName.equals('Ada'),
+            orderBy: (users) => [users.displayName.desc()],
+          )
+          .getFirstOrNull(executor);
+
+      expect(row?.displayName, 'Ada');
+      expect(executor.queries.single.sql, contains('ORDER BY "displayName" DESC NULLS LAST'));
+      expect(executor.queries.single.sql, endsWith('LIMIT 1'));
+      expect(executor.queries.single.parameters, ['Ada']);
+      expect(executor.queries.single.sql, contains(r'"displayName" = $1::text'));
+    });
+
+    test('should honor explicit null placement', () async {
+      await UserProfiles.db
+          .find(orderBy: (users) => [users.displayName.asc(nulls: NullsOrder.first)])
+          .get(executor);
+
+      expect(executor.queries.single.sql, contains('ASC NULLS FIRST'));
+    });
+
+    test('should compile nullable equality and reject columns from another root', () async {
+      await ScalarValues.db.find(where: (values) => values.optionalCode.equals(null)).get(executor);
+      expect(executor.queries.single.sql, contains('"optionalCode" IS NULL'));
+      expect(executor.queries.single.parameters, isEmpty);
+
+      final other = Posts.db.buildSchema().definition;
+      expect(
+        () => UserProfiles.db.find(where: (_) => other.authorName.equals('Ada')),
+        throwsA(isA<RivetUnsupportedQueryException>()),
+      );
+      expect(
+        () => UserProfiles.db.find(orderBy: (_) => [other.authorName.asc()]),
+        throwsA(isA<RivetUnsupportedQueryException>()),
+      );
+    });
+
+    test('should enforce exact and optional-single cardinality in one statement', () async {
+      executor.rows = [
+        (['Ada'], [false]),
+        (['Grace'], [false]),
+      ];
+      final plan = UserProfiles.db.find();
+
+      await expectLater(plan.getSingle(executor), throwsA(isA<RivetCardinalityException>()));
+      await expectLater(plan.getSingleOrNull(executor), throwsA(isA<RivetCardinalityException>()));
+
+      expect(executor.queries, hasLength(2));
+      expect(executor.queries.every((query) => query.sql.endsWith('LIMIT 2')), isTrue);
+    });
+
+    test('should reject PostgreSQL parameter overflow before execution', () {
+      RivetPredicate overflow(UserProfiles users) {
+        var level = List<RivetPredicate>.generate(
+          65536,
+          (index) => users.displayName.equals('$index'),
+          growable: false,
+        );
+        while (level.length > 1) {
+          level = [
+            for (var index = 0; index < level.length; index += 2)
+              if (index + 1 == level.length) level[index] else level[index] | level[index + 1],
+          ];
+        }
+        return level.single;
+      }
+
+      expect(
+        () => UserProfiles.db.find(where: overflow).get(executor),
+        throwsA(isA<RivetUnsupportedQueryException>()),
+      );
+      expect(executor.queries, isEmpty);
+    });
+
+    test('should not rewrite placeholder text inside quoted identifiers', () async {
+      await ParameterNames.db
+          .find(
+            where: (values) => values.value.equals('Ada') | ~values.value.equals('Grace'),
+          )
+          .get(executor);
+
+      expect(
+        executor.queries.single.sql,
+        contains(r'("a@value" = $1::text) OR (NOT ("a@value" = $2::text))'),
+      );
+      expect(executor.queries.single.parameters, ['Ada', 'Grace']);
+    });
+  });
+}
+
+final class _RecordingExecutor implements RivetExecutor {
+  List<(List<Object?>, List<bool>)> rows = [];
+  final queries = <RivetCompiledQuery>[];
+
+  @override
+  Future<List<Row>> execute<Row>(
+    RivetCompiledQuery query,
+    RivetRowDecoder<Row> decode,
+  ) async {
+    queries.add(query);
+    return [for (final row in rows) decode(row.$1, row.$2)];
+  }
+}
