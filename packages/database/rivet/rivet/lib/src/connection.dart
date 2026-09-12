@@ -22,7 +22,6 @@ final class RivetConnection {
   RivetConnection.url(
     this.url, {
     this.connectTimeout = const Duration(seconds: 10),
-    this.queryTimeout = const Duration(seconds: 30),
     RivetSslMode? sslMode,
     this.securityContext,
     this.onStatement,
@@ -30,7 +29,6 @@ final class RivetConnection {
 
   final String url;
   final Duration connectTimeout;
-  final Duration queryTimeout;
   final RivetSslMode sslMode;
   final SecurityContext? securityContext;
   final RivetStatementObserver? onStatement;
@@ -78,9 +76,6 @@ final class RivetDb implements RivetExecutor {
     if (connection.connectTimeout <= Duration.zero) {
       throw ArgumentError.value(connection.connectTimeout, 'connectTimeout', 'must be positive');
     }
-    if (connection.queryTimeout <= Duration.zero) {
-      throw ArgumentError.value(connection.queryTimeout, 'queryTimeout', 'must be positive');
-    }
     final uri = _parseConnectionUrl(connection.url);
     if (uri.scheme != 'postgres' && uri.scheme != 'postgresql') {
       throw ArgumentError.value(uri.scheme, 'url scheme', 'must be postgres or postgresql');
@@ -105,7 +100,7 @@ final class RivetDb implements RivetExecutor {
           RivetSslMode.disable => pg.SslMode.disable,
         },
         securityContext: connection.securityContext,
-        queryTimeout: connection.queryTimeout,
+        queryTimeout: const Duration(days: 3650),
       ),
       maxConnections: pool.maxConnections,
       acquireTimeout: pool.acquireTimeout,

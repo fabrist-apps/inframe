@@ -9,7 +9,7 @@ import 'generated_consumer.dart';
 
 void main() {
   group('Rivet connection configuration', () {
-    test('should apply secure defaults and explicit SSL precedence', () async {
+    test('should apply secure defaults and explicit SSL precedence', () {
       expect(RivetConnection.url('postgresql://localhost/db').sslMode, RivetSslMode.verifyFull);
       expect(
         RivetConnection.url('postgresql://localhost/db?sslmode=require').sslMode,
@@ -41,28 +41,8 @@ void main() {
         RivetConnection.url('postgresql://localhost/db').connectTimeout,
         const Duration(seconds: 10),
       );
-      expect(
-        RivetConnection.url('postgresql://localhost/db').queryTimeout,
-        const Duration(seconds: 30),
-      );
-      expect(
-        RivetConnection.url(
-          'postgresql://localhost/db',
-          queryTimeout: const Duration(seconds: 2),
-        ).queryTimeout,
-        const Duration(seconds: 2),
-      );
       expect(const RivetPoolOptions().maxConnections, 10);
       expect(const RivetPoolOptions().acquireTimeout, const Duration(seconds: 30));
-      await expectLater(
-        RivetTestDatabase().open(
-          connection: RivetConnection.url(
-            'postgresql://localhost/unused',
-            queryTimeout: Duration.zero,
-          ),
-        ),
-        throwsArgumentError,
-      );
     });
   });
 
