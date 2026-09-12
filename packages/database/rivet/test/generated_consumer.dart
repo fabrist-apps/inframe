@@ -431,6 +431,37 @@ final class MutationRestrictChildren extends RivetTableDefinition<MutationRestri
   )();
 }
 
+int batchCreatedCalls = 0;
+
+DateTime batchCreated() {
+  batchCreatedCalls++;
+  return DateTime.utc(2026, 9, 12, 14, 0, batchCreatedCalls);
+}
+
+@RivetTable(schema: 'fbr142')
+final class MutationBatchParents extends RivetTableDefinition<MutationBatchParents> {
+  static const db = _$MutationBatchParentsDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final createdAt = dateTime().defaultValue(batchCreated)();
+  late final nickname = text().nullable()();
+  late final serverValue = integer().defaultSql('42')();
+  late final children = many<MutationBatchChildren>(relation: (child) => child.parent)();
+}
+
+@RivetTable(schema: 'fbr142')
+final class MutationBatchChildren extends RivetTableDefinition<MutationBatchChildren> {
+  static const db = _$MutationBatchChildrenDB();
+
+  late final id = integer().primaryKey()();
+  late final parentId = integer().references<MutationBatchParents>((parent) => parent.id)();
+  late final parent = one<MutationBatchParents>(
+    fields: [parentId],
+    references: (parent) => [parent.id],
+  )();
+}
+
 @RivetDatabase(
   name: 'rivet_test',
   tables: [
@@ -452,6 +483,8 @@ final class MutationRestrictChildren extends RivetTableDefinition<MutationRestri
     MutationDeleteParents,
     MutationCascadeChildren,
     MutationRestrictChildren,
+    MutationBatchParents,
+    MutationBatchChildren,
   ],
 )
 final class RivetTestDatabase extends _$RivetTestDatabase {}

@@ -49,6 +49,10 @@ extension RivetMutationAccess<Definition, Row> on RivetTableAccessor<Definition,
   RivetInsert<Definition, Row> insert(RivetCompanion<Definition> companion) =>
       RivetInsert(buildSchema(), companion);
 
+  RivetInsertMany<Definition, Row> insertMany(
+    Iterable<RivetCompanion<Definition>> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   RivetUpdate<Definition, Row> update(
     RivetCompanion<Definition> companion, {
     RivetWhere<Definition>? where,
@@ -84,6 +88,45 @@ final class RivetReturningInsert<Definition, Row> {
     _compileInsert(_schema, _companion, returning: true),
     _schema.decode,
   );
+}
+
+final class RivetInsertMany<Definition, Row> {
+  RivetInsertMany(
+    this._schema,
+    Iterable<RivetCompanion<Definition>> companions,
+  ) : _companions = List.unmodifiable(companions);
+
+  final RivetTableSchema<Definition, Row> _schema;
+  final List<RivetCompanion<Definition>> _companions;
+
+  RivetInsertMany<Definition, Row> prepare() => this;
+
+  Future<int> execute(RivetExecutor executor) {
+    if (_companions.isEmpty) return Future.value(0);
+    return executor.executeAffected(
+      _compileInsertMany(_schema, _companions, returning: false),
+    );
+  }
+
+  RivetReturningInsertMany<Definition, Row> returning() =>
+      RivetReturningInsertMany(_schema, _companions);
+}
+
+final class RivetReturningInsertMany<Definition, Row> {
+  const RivetReturningInsertMany(this._schema, this._companions);
+
+  final RivetTableSchema<Definition, Row> _schema;
+  final List<RivetCompanion<Definition>> _companions;
+
+  RivetReturningInsertMany<Definition, Row> prepare() => this;
+
+  Future<List<Row>> get(RivetExecutor executor) {
+    if (_companions.isEmpty) return Future.value(const []);
+    return executor.execute(
+      _compileInsertMany(_schema, _companions, returning: true),
+      _schema.decode,
+    );
+  }
 }
 
 final class RivetUpdate<Definition, Row> {
@@ -170,21 +213,33 @@ RivetCompiledQuery _compileInsert<Definition, Row>(
   RivetCompanion<Definition> companion, {
   required bool returning,
 }) {
-  final supplied = {
-    for (final assignment in companion.assignments) assignment.columnName: assignment.value,
-  };
+  return _compileInsertMany(schema, [companion], returning: returning);
+}
+
+RivetCompiledQuery _compileInsertMany<Definition, Row>(
+  RivetTableSchema<Definition, Row> schema,
+  List<RivetCompanion<Definition>> companions, {
+  required bool returning,
+}) {
   final parameters = <Object?>[];
-  final valueSql = <String>[];
-  for (final column in schema.columns) {
-    final value = supplied[column.dartName];
-    if (value == null) {
-      throw StateError('Generated companion omitted ${column.dartName}.');
+  final rowsSql = <String>[];
+  for (final companion in companions) {
+    final supplied = {
+      for (final assignment in companion.assignments) assignment.columnName: assignment.value,
+    };
+    final valuesSql = <String>[];
+    for (final column in schema.columns) {
+      final value = supplied[column.dartName];
+      if (value == null) {
+        throw StateError('Generated companion omitted ${column.dartName}.');
+      }
+      valuesSql.add(_insertValue(schema, column, value, parameters));
     }
-    valueSql.add(_insertValue(schema, column, value, parameters));
+    rowsSql.add('(${valuesSql.join(', ')})');
   }
   final columns = schema.columns.map((column) => quoteIdentifier(column.physicalName)).join(', ');
   final sql = StringBuffer(
-    'INSERT INTO ${schema.qualifiedName} ($columns) VALUES (${valueSql.join(', ')})',
+    'INSERT INTO ${schema.qualifiedName} ($columns) VALUES ${rowsSql.join(', ')}',
   );
   if (returning) {
     sql

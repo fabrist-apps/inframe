@@ -216,6 +216,11 @@ $indexes$constraints${relations.isEmpty ? '' : '      relations: {$relationMap},
   RivetInsert<$className, $rowName> insert($companionName companion) =>
       RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<$className, $rowName> insertMany(
+    Iterable<$companionName> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<$className, $rowName> update(
     $companionName companion, {

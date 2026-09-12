@@ -210,6 +210,11 @@ final class _$PackageUsersDB
     PackageUsersCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<PackageUsers, PackageUsersRow> insertMany(
+    Iterable<PackageUsersCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<PackageUsers, PackageUsersRow> update(
     PackageUsersCompanion companion, {

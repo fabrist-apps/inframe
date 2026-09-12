@@ -99,6 +99,7 @@ final class Users extends RivetTableDefinition<Users> {
                 'RivetValue<Users, String, String> name = const RivetValue.absent(),',
               ),
               contains('RivetInsert<Users, UsersRow> insert(UsersCompanion companion)'),
+              contains('RivetInsertMany<Users, UsersRow> insertMany('),
               contains('RivetUpdate<Users, UsersRow> update('),
               contains('RivetDelete<Users, UsersRow> delete({'),
             ),

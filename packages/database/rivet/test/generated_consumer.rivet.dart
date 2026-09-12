@@ -81,6 +81,11 @@ final class _$UserProfilesDB
     UserProfilesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<UserProfiles, UserProfilesRow> insertMany(
+    Iterable<UserProfilesCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<UserProfiles, UserProfilesRow> update(
     UserProfilesCompanion companion, {
@@ -160,6 +165,11 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
   /// Creates a reusable insert plan.
   RivetInsert<Posts, PostsRow> insert(PostsCompanion companion) =>
       RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<Posts, PostsRow> insertMany(
+    Iterable<PostsCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<Posts, PostsRow> update(
@@ -390,6 +400,11 @@ final class _$ScalarValuesDB
     ScalarValuesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<ScalarValues, ScalarValuesRow> insertMany(
+    Iterable<ScalarValuesCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<ScalarValues, ScalarValuesRow> update(
     ScalarValuesCompanion companion, {
@@ -593,6 +608,11 @@ final class _$EnumValuesDB
     EnumValuesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<EnumValues, EnumValuesRow> insertMany(
+    Iterable<EnumValuesCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<EnumValues, EnumValuesRow> update(
     EnumValuesCompanion companion, {
@@ -696,6 +716,11 @@ final class _$VectorValuesDB
   RivetInsert<VectorValues, VectorValuesRow> insert(
     VectorValuesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<VectorValues, VectorValuesRow> insertMany(
+    Iterable<VectorValuesCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<VectorValues, VectorValuesRow> update(
@@ -922,6 +947,11 @@ final class _$ArrayValuesDB
     ArrayValuesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<ArrayValues, ArrayValuesRow> insertMany(
+    Iterable<ArrayValuesCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<ArrayValues, ArrayValuesRow> update(
     ArrayValuesCompanion companion, {
@@ -993,6 +1023,11 @@ final class _$MalformedArraysDB
   RivetInsert<MalformedArrays, MalformedArraysRow> insert(
     MalformedArraysCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MalformedArrays, MalformedArraysRow> insertMany(
+    Iterable<MalformedArraysCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<MalformedArrays, MalformedArraysRow> update(
@@ -1154,6 +1189,11 @@ final class _$MetadataColumnsDB
     MetadataColumnsCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MetadataColumns, MetadataColumnsRow> insertMany(
+    Iterable<MetadataColumnsCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<MetadataColumns, MetadataColumnsRow> update(
     MetadataColumnsCompanion companion, {
@@ -1223,6 +1263,11 @@ final class _$TextTargetsDB
   RivetInsert<TextTargets, TextTargetsRow> insert(
     TextTargetsCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<TextTargets, TextTargetsRow> insertMany(
+    Iterable<TextTargetsCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<TextTargets, TextTargetsRow> update(
@@ -1295,6 +1340,11 @@ final class _$InvalidReferencesDB
     InvalidReferencesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<InvalidReferences, InvalidReferencesRow> insertMany(
+    Iterable<InvalidReferencesCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<InvalidReferences, InvalidReferencesRow> update(
     InvalidReferencesCompanion companion, {
@@ -1365,6 +1415,11 @@ final class _$ParameterNamesDB
   RivetInsert<ParameterNames, ParameterNamesRow> insert(
     ParameterNamesCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<ParameterNames, ParameterNamesRow> insertMany(
+    Iterable<ParameterNamesCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<ParameterNames, ParameterNamesRow> update(
@@ -1839,6 +1894,11 @@ final class _$MutationCatalogDB
     MutationCatalogCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationCatalog, MutationCatalogRow> insertMany(
+    Iterable<MutationCatalogCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<MutationCatalog, MutationCatalogRow> update(
     MutationCatalogCompanion companion, {
@@ -2040,6 +2100,11 @@ final class _$MutationUsersDB
     MutationUsersCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationUsers, MutationUsersRow> insertMany(
+    Iterable<MutationUsersCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<MutationUsers, MutationUsersRow> update(
     MutationUsersCompanion companion, {
@@ -2134,6 +2199,11 @@ final class _$MutationParentsDB
   RivetInsert<MutationParents, MutationParentsRow> insert(
     MutationParentsCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationParents, MutationParentsRow> insertMany(
+    Iterable<MutationParentsCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<MutationParents, MutationParentsRow> update(
@@ -2231,6 +2301,11 @@ final class _$MutationChildrenDB
   RivetInsert<MutationChildren, MutationChildrenRow> insert(
     MutationChildrenCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationChildren, MutationChildrenRow> insertMany(
+    Iterable<MutationChildrenCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<MutationChildren, MutationChildrenRow> update(
@@ -2457,6 +2532,11 @@ final class _$MutationUpdateUsersDB
     MutationUpdateUsersCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationUpdateUsers, MutationUpdateUsersRow> insertMany(
+    Iterable<MutationUpdateUsersCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<MutationUpdateUsers, MutationUpdateUsersRow> update(
     MutationUpdateUsersCompanion companion, {
@@ -2557,6 +2637,11 @@ final class _$MutationUpdateChildrenDB
   RivetInsert<MutationUpdateChildren, MutationUpdateChildrenRow> insert(
     MutationUpdateChildrenCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationUpdateChildren, MutationUpdateChildrenRow> insertMany(
+    Iterable<MutationUpdateChildrenCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<MutationUpdateChildren, MutationUpdateChildrenRow> update(
@@ -2664,6 +2749,11 @@ final class _$MutationDeleteParentsDB
   RivetInsert<MutationDeleteParents, MutationDeleteParentsRow> insert(
     MutationDeleteParentsCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationDeleteParents, MutationDeleteParentsRow> insertMany(
+    Iterable<MutationDeleteParentsCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
 
   /// Creates a reusable update plan.
   RivetUpdate<MutationDeleteParents, MutationDeleteParentsRow> update(
@@ -2775,6 +2865,11 @@ final class _$MutationCascadeChildrenDB
     MutationCascadeChildrenCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationCascadeChildren, MutationCascadeChildrenRow>
+  insertMany(Iterable<MutationCascadeChildrenCompanion> companions) =>
+      RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<MutationCascadeChildren, MutationCascadeChildrenRow> update(
     MutationCascadeChildrenCompanion companion, {
@@ -2885,6 +2980,11 @@ final class _$MutationRestrictChildrenDB
     MutationRestrictChildrenCompanion companion,
   ) => RivetInsert(buildSchema(), companion);
 
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationRestrictChildren, MutationRestrictChildrenRow>
+  insertMany(Iterable<MutationRestrictChildrenCompanion> companions) =>
+      RivetInsertMany(buildSchema(), companions);
+
   /// Creates a reusable update plan.
   RivetUpdate<MutationRestrictChildren, MutationRestrictChildrenRow> update(
     MutationRestrictChildrenCompanion companion, {
@@ -2894,6 +2994,284 @@ final class _$MutationRestrictChildrenDB
   /// Creates a reusable delete plan.
   RivetDelete<MutationRestrictChildren, MutationRestrictChildrenRow> delete({
     RivetWhere<MutationRestrictChildren>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Generated row returned by reads from 'fbr142.mutationBatchParents'.
+final class MutationBatchParentsRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationBatchParentsRow({
+    required this.id,
+    required this.name,
+    required this.createdAt,
+    required this.nickname,
+    required this.serverValue,
+    this.children = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `name`.
+  final String name;
+
+  /// Value read from `createdAt`.
+  final DateTime createdAt;
+
+  /// Value read from `nickname`.
+  final String? nickname;
+
+  /// Value read from `serverValue`.
+  final int serverValue;
+
+  /// Loaded or unloaded `children` relation.
+  final Relation<List<MutationBatchChildrenRow>> children;
+}
+
+/// Generated values accepted by mutations of 'fbr142.mutationBatchParents'.
+final class MutationBatchParentsCompanion
+    implements RivetCompanion<MutationBatchParents> {
+  const MutationBatchParentsCompanion._({
+    required this.id,
+    required this.name,
+    required this.createdAt,
+    required this.nickname,
+    required this.serverValue,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationBatchParentsCompanion.insert({
+    required RivetValue<MutationBatchParents, int, int> id,
+    required RivetValue<MutationBatchParents, String, String> name,
+    RivetValue<MutationBatchParents, DateTime, DateTime> createdAt =
+        const RivetValue.absent(),
+    RivetValue<MutationBatchParents, String?, String?> nickname =
+        const RivetValue.absent(),
+    RivetValue<MutationBatchParents, int, int> serverValue =
+        const RivetValue.absent(),
+  }) => MutationBatchParentsCompanion._(
+    id: id,
+    name: name,
+    createdAt: createdAt,
+    nickname: nickname,
+    serverValue: serverValue,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationBatchParentsCompanion.update({
+    RivetValue<MutationBatchParents, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationBatchParents, String, String> name =
+        const RivetValue.absent(),
+    RivetValue<MutationBatchParents, DateTime, DateTime> createdAt =
+        const RivetValue.absent(),
+    RivetValue<MutationBatchParents, String?, String?> nickname =
+        const RivetValue.absent(),
+    RivetValue<MutationBatchParents, int, int> serverValue =
+        const RivetValue.absent(),
+  }) => MutationBatchParentsCompanion._(
+    id: id,
+    name: name,
+    createdAt: createdAt,
+    nickname: nickname,
+    serverValue: serverValue,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationBatchParents, int, int> id;
+
+  /// Mutation value for `name`.
+  final RivetValue<MutationBatchParents, String, String> name;
+
+  /// Mutation value for `createdAt`.
+  final RivetValue<MutationBatchParents, DateTime, DateTime> createdAt;
+
+  /// Mutation value for `nickname`.
+  final RivetValue<MutationBatchParents, String?, String?> nickname;
+
+  /// Mutation value for `serverValue`.
+  final RivetValue<MutationBatchParents, int, int> serverValue;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationBatchParents>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('name', name),
+    RivetAssignment('createdAt', createdAt),
+    RivetAssignment('nickname', nickname),
+    RivetAssignment('serverValue', serverValue),
+  ];
+}
+
+final class _$MutationBatchParentsDB
+    extends RivetTableAccessor<MutationBatchParents, MutationBatchParentsRow> {
+  const _$MutationBatchParentsDB();
+
+  @override
+  RivetTableSchema<MutationBatchParents, MutationBatchParentsRow>
+  buildSchema() {
+    final definition = MutationBatchParents();
+
+    return RivetTableSchema<MutationBatchParents, MutationBatchParentsRow>(
+      schemaName: 'fbr142',
+      tableName: 'mutationBatchParents',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+        definition.createdAt as RivetColumn<Object?>,
+        definition.nickname as RivetColumn<Object?>,
+        definition.serverValue as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'name', 'createdAt', 'nickname', 'serverValue'],
+      decode: (values, sqlNulls) => MutationBatchParentsRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        name: definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+        createdAt: definition.createdAt.decodeValue(
+          values[2],
+          isSqlNull: sqlNulls[2],
+        ),
+        nickname: definition.nickname.decodeValue(
+          values[3],
+          isSqlNull: sqlNulls[3],
+        ),
+        serverValue: definition.serverValue.decodeValue(
+          values[4],
+          isSqlNull: sqlNulls[4],
+        ),
+      ),
+      relations: {
+        'children': definition.children as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationBatchParents, MutationBatchParentsRow> insert(
+    MutationBatchParentsCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationBatchParents, MutationBatchParentsRow> insertMany(
+    Iterable<MutationBatchParentsCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationBatchParents, MutationBatchParentsRow> update(
+    MutationBatchParentsCompanion companion, {
+    RivetWhere<MutationBatchParents>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationBatchParents, MutationBatchParentsRow> delete({
+    RivetWhere<MutationBatchParents>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Generated row returned by reads from 'fbr142.mutationBatchChildren'.
+final class MutationBatchChildrenRow {
+  /// Creates a row from decoded column and relation values.
+  const MutationBatchChildrenRow({
+    required this.id,
+    required this.parentId,
+    this.parent = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `parentId`.
+  final int parentId;
+
+  /// Loaded or unloaded `parent` relation.
+  final Relation<MutationBatchParentsRow?> parent;
+}
+
+/// Generated values accepted by mutations of 'fbr142.mutationBatchChildren'.
+final class MutationBatchChildrenCompanion
+    implements RivetCompanion<MutationBatchChildren> {
+  const MutationBatchChildrenCompanion._({
+    required this.id,
+    required this.parentId,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MutationBatchChildrenCompanion.insert({
+    required RivetValue<MutationBatchChildren, int, int> id,
+    required RivetValue<MutationBatchChildren, int, int> parentId,
+  }) => MutationBatchChildrenCompanion._(id: id, parentId: parentId);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MutationBatchChildrenCompanion.update({
+    RivetValue<MutationBatchChildren, int, int> id = const RivetValue.absent(),
+    RivetValue<MutationBatchChildren, int, int> parentId =
+        const RivetValue.absent(),
+  }) => MutationBatchChildrenCompanion._(id: id, parentId: parentId);
+
+  /// Mutation value for `id`.
+  final RivetValue<MutationBatchChildren, int, int> id;
+
+  /// Mutation value for `parentId`.
+  final RivetValue<MutationBatchChildren, int, int> parentId;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MutationBatchChildren>> get assignments => [
+    RivetAssignment('id', id),
+    RivetAssignment('parentId', parentId),
+  ];
+}
+
+final class _$MutationBatchChildrenDB
+    extends
+        RivetTableAccessor<MutationBatchChildren, MutationBatchChildrenRow> {
+  const _$MutationBatchChildrenDB();
+
+  @override
+  RivetTableSchema<MutationBatchChildren, MutationBatchChildrenRow>
+  buildSchema() {
+    final definition = MutationBatchChildren();
+
+    return RivetTableSchema<MutationBatchChildren, MutationBatchChildrenRow>(
+      schemaName: 'fbr142',
+      tableName: 'mutationBatchChildren',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.parentId as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'parentId'],
+      decode: (values, sqlNulls) => MutationBatchChildrenRow(
+        id: definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+        parentId: definition.parentId.decodeValue(
+          values[1],
+          isSqlNull: sqlNulls[1],
+        ),
+      ),
+      relations: {
+        'parent': definition.parent as RivetRelationDescriptor<Object?>,
+      },
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MutationBatchChildren, MutationBatchChildrenRow> insert(
+    MutationBatchChildrenCompanion companion,
+  ) => RivetInsert(buildSchema(), companion);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MutationBatchChildren, MutationBatchChildrenRow> insertMany(
+    Iterable<MutationBatchChildrenCompanion> companions,
+  ) => RivetInsertMany(buildSchema(), companions);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MutationBatchChildren, MutationBatchChildrenRow> update(
+    MutationBatchChildrenCompanion companion, {
+    RivetWhere<MutationBatchChildren>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MutationBatchChildren, MutationBatchChildrenRow> delete({
+    RivetWhere<MutationBatchChildren>? where,
   }) => RivetDelete(buildSchema(), where: where);
 }
 
@@ -2932,6 +3310,10 @@ abstract class _$RivetTestDatabase {
       MutationCascadeChildren.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
       MutationRestrictChildren.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      MutationBatchParents.db.buildSchema()
+          as RivetTableSchema<Object?, Object?>,
+      MutationBatchChildren.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
     ],
   );
