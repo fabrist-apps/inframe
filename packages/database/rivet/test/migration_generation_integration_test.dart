@@ -162,13 +162,18 @@ void main() {
     test(
       'should round-trip scalar and array values through one generated native enum type',
       () async {
+        final schema = RivetDatabaseSchema(
+          name: 'enum_fixture',
+          tables: [EnumValues.db.buildSchema()],
+        );
         await const RivetMigrationGenerator().generate(
-          schema: RivetDatabaseSchema(
-            name: 'enum_fixture',
-            tables: [EnumValues.db.buildSchema()],
-          ),
+          schema: schema,
           directory: directory,
           name: 'native enum',
+        );
+        await const RivetMigrationChecker().check(
+          directory: directory,
+          schema: schema,
         );
         await _applyLastMigration(connection, directory);
         final database = await RivetTestDatabase().open(
@@ -213,7 +218,7 @@ void main() {
           directory: directory,
           name: 'initial enum',
         );
-        await _applyLastMigrationByPhase(connection, directory);
+        await _applyLastMigration(connection, directory);
         await connection.execute(
           'INSERT INTO enum_evolution.jobs (id, status, statuses) '
           "VALUES (1, 'done', ARRAY['queued', 'done']::enum_evolution.mood[])",
@@ -247,7 +252,7 @@ void main() {
         expect(enumValue['name'], 'state');
         final migration = _lastArtifact(directory, 'migration.json');
         expect(migration['phases']! as List<Object?>, hasLength(3));
-        await _applyLastMigrationByPhase(connection, directory);
+        await _applyLastMigration(connection, directory);
         final existing = await connection.execute(
           'SELECT status::text, statuses::text[] FROM enum_evolution.jobs WHERE id = 1',
         );
@@ -273,7 +278,7 @@ void main() {
           directory: directory,
           name: 'reorder enum',
         );
-        await _applyLastMigrationByPhase(connection, directory);
+        await _applyLastMigration(connection, directory);
         final order = await connection.execute(
           'SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid '
           "JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'enum_evolution' "
@@ -301,7 +306,7 @@ void main() {
           enumLabelTransforms: const {'enum_evolution.state.complete': 'queued'},
         );
         await expectLater(
-          _applyLastMigrationByPhase(connection, directory),
+          _applyLastMigration(connection, directory),
           throwsA(anything),
         );
         expect(
@@ -311,7 +316,7 @@ void main() {
           'complete',
         );
         await connection.execute('DELETE FROM enum_evolution.jobs WHERE id = 3');
-        await _applyLastMigrationByPhase(connection, directory);
+        await _applyLastMigration(connection, directory);
         final transformed = await connection.execute(
           'SELECT status::text, statuses::text[] FROM enum_evolution.jobs WHERE id = 1',
         );
@@ -609,31 +614,6 @@ Map<String, Object?> _operator(
   'arguments': [first, ?second],
 };
 
-Future<void> _applyLastMigration(pg.Connection connection, Directory directory) async {
-  final journal =
-      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
-  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
-  final migrationDirectory = '${directory.path}/${entry['directory']}';
-  final sqlBytes = File('$migrationDirectory/migration.sql').readAsBytesSync();
-  final migration = jsonDecode(
-    File('$migrationDirectory/migration.json').readAsStringSync(),
-  ) as Map<String, Object?>;
-  for (final rawPhase in migration['phases']! as List<Object?>) {
-    final phase = rawPhase! as Map<String, Object?>;
-    for (final value in phase['statements']! as List<Object?>) {
-      final statement = value! as Map<String, Object?>;
-      await connection.execute(
-        utf8.decode(
-          sqlBytes.sublist(
-            statement['startByte']! as int,
-            statement['endByte']! as int,
-          ),
-        ),
-      );
-    }
-  }
-}
-
 Map<String, Object?> _lastArtifact(Directory directory, String name) {
   final journal =
       jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
@@ -642,7 +622,7 @@ Map<String, Object?> _lastArtifact(Directory directory, String name) {
       as Map<String, Object?>;
 }
 
-Future<void> _applyLastMigrationByPhase(
+Future<void> _applyLastMigration(
   pg.Connection connection,
   Directory directory,
 ) async {
@@ -656,18 +636,23 @@ Future<void> _applyLastMigrationByPhase(
   ) as Map<String, Object?>;
   for (final rawPhase in migration['phases']! as List<Object?>) {
     final phase = rawPhase! as Map<String, Object?>;
+    if (phase['mode'] == 'nontransactional') {
+      for (final value in phase['statements']! as List<Object?>) {
+        await connection.execute(_statementSql(sqlBytes, value! as Map<String, Object?>));
+      }
+      continue;
+    }
     await connection.runTx((transaction) async {
       for (final value in phase['statements']! as List<Object?>) {
-        final statement = value! as Map<String, Object?>;
-        await transaction.execute(
-          utf8.decode(
-            sqlBytes.sublist(
-              statement['startByte']! as int,
-              statement['endByte']! as int,
-            ),
-          ),
-        );
+        await transaction.execute(_statementSql(sqlBytes, value! as Map<String, Object?>));
       }
     });
   }
 }
+
+String _statementSql(List<int> sqlBytes, Map<String, Object?> statement) => utf8.decode(
+  sqlBytes.sublist(
+    statement['startByte']! as int,
+    statement['endByte']! as int,
+  ),
+);

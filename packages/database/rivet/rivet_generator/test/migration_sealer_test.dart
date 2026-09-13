@@ -24,7 +24,8 @@ void main() {
       artifacts.sql.writeAsStringSync(
         '-- café; remains part of statement one\n'
         'CREATE SCHEMA IF NOT EXISTS "auth";\n'
-        'CREATE TABLE "auth"."users" ("note" text DEFAULT \'λ;value\');\n'
+        r'''CREATE TABLE "auth"."users" ("note" text DEFAULT E'λ\';value');'''
+        '\n'
         r'''DO $$ BEGIN RAISE NOTICE 'inside;dollar'; END $$;'''
         '\n',
       );
@@ -39,7 +40,7 @@ void main() {
       expect(ranges, hasLength(3));
       expect(
         utf8.decode(bytes.sublist(ranges[1]['startByte']! as int, ranges[1]['endByte']! as int)),
-        contains("'λ;value'"),
+        contains(r"E'λ\';value'"),
       );
       expect(sealed.entry['checksum'], isNot(oldChecksum));
       await const RivetMigrationChecker().check(directory: directory);

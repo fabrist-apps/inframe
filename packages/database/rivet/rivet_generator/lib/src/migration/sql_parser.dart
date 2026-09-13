@@ -9,6 +9,7 @@ List<Map<String, int>> parseRivetSqlStatements(String sql) {
   var index = statementStart;
   var blockDepth = 0;
   var quote = 0;
+  var backslashEscapes = false;
   String? dollarTag;
   while (index < sql.length) {
     if (dollarTag != null) {
@@ -33,11 +34,14 @@ List<Map<String, int>> parseRivetSqlStatements(String sql) {
       continue;
     }
     if (quote != 0) {
-      if (sql.codeUnitAt(index) == quote) {
+      if (backslashEscapes && sql.codeUnitAt(index) == 0x5c && index + 1 < sql.length) {
+        index += 2;
+      } else if (sql.codeUnitAt(index) == quote) {
         if (index + 1 < sql.length && sql.codeUnitAt(index + 1) == quote) {
           index += 2;
         } else {
           quote = 0;
+          backslashEscapes = false;
           index++;
         }
       } else {
@@ -58,6 +62,11 @@ List<Map<String, int>> parseRivetSqlStatements(String sql) {
     final unit = sql.codeUnitAt(index);
     if (unit == 0x27 || unit == 0x22) {
       quote = unit;
+      backslashEscapes =
+          unit == 0x27 &&
+          index > 0 &&
+          (sql.codeUnitAt(index - 1) == 0x45 || sql.codeUnitAt(index - 1) == 0x65) &&
+          (index < 2 || !RegExp(r'[A-Za-z0-9_$]').hasMatch(sql[index - 2]));
       index++;
       continue;
     }

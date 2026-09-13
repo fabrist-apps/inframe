@@ -348,6 +348,23 @@ void main() {
       );
     });
 
+    test('should reject unsupported backend requirements before publication', () async {
+      final declaration = _constraintDeclaration()
+        ..['requirements'] = [
+          {'kind': 'extension', 'name': 'vector', 'version': '0.8'},
+        ];
+
+      await expectLater(
+        const RivetMigrationGenerator().generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'unsupported requirement',
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      expect(File('${directory.path}/journal.json').existsSync(), false);
+    });
+
     test('should create one shared native enum before scalar and array columns', () async {
       var nextId = 0;
       final generator = RivetMigrationGenerator(

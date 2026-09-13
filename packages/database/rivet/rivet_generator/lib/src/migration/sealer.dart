@@ -29,6 +29,7 @@ final class RivetArtifactSealer {
     final migration = jsonDecode(migrationFile.readAsStringSync()) as Map<String, Object?>;
     final snapshot = jsonDecode(snapshotFile.readAsStringSync()) as Map<String, Object?>;
     final sql = _readUtf8(sqlFile);
+    final sqlBytes = utf8.encode(sql);
     final ranges = parseRivetSqlStatements(sql);
     final phases = (migration['phases']! as List<Object?>).cast<Map<String, Object?>>();
     final statementCounts = [
@@ -49,12 +50,10 @@ final class RivetArtifactSealer {
         [
           for (final range in phases[index]['statements']! as List<Object?>)
             utf8.decode(
-              utf8
-                  .encode(sql)
-                  .sublist(
-                    (range! as Map<String, Object?>)['startByte']! as int,
-                    (range as Map<String, Object?>)['endByte']! as int,
-                  ),
+              sqlBytes.sublist(
+                (range! as Map<String, Object?>)['startByte']! as int,
+                (range as Map<String, Object?>)['endByte']! as int,
+              ),
             ),
         ],
       );

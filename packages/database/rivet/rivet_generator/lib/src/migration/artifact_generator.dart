@@ -8,6 +8,7 @@ import 'package:rivet/rivet.dart';
 import 'package:rivet_generator/src/migration/canonical_json.dart';
 import 'package:rivet_generator/src/migration/checker.dart';
 import 'package:rivet_generator/src/migration/schema_expression.dart';
+import 'package:rivet_generator/src/migration/sql_parser.dart';
 
 // This coordinator is internal to RivetMigrationGenerator's public operation.
 // ignore_for_file: public_member_api_docs, unnecessary_cast, use_null_aware_elements
@@ -39,6 +40,11 @@ final class RivetArtifactGenerator {
   }) async {
     _validateLabel(name);
     final physicalDeclaration = normalizeDeclaration(declaration);
+    if ((physicalDeclaration['requirements']! as List<Object?>).isNotEmpty) {
+      throw UnsupportedError(
+        'Rivet migration generation does not provision extension requirements yet.',
+      );
+    }
     directory.createSync(recursive: true);
     final journalFile = File('${directory.path}/journal.json');
     if (journalFile.existsSync()) {
@@ -1401,24 +1407,7 @@ final class RivetArtifactGenerator {
     }
   }
 
-  List<Map<String, int>> _statementRanges(String sql) {
-    final bytes = utf8.encode(sql);
-    final ranges = <Map<String, int>>[];
-    var start = 0;
-    for (var index = 0; index < bytes.length; index++) {
-      if (bytes[index] != 0x3b) continue;
-      ranges.add({'startByte': start, 'endByte': index + 1});
-      start = index + 1;
-      while (start < bytes.length && (bytes[start] == 0x0a || bytes[start] == 0x0d)) {
-        start++;
-      }
-      index = start - 1;
-    }
-    if (start != bytes.length) {
-      throw StateError('Generated SQL contains an incomplete statement.');
-    }
-    return ranges;
-  }
+  List<Map<String, int>> _statementRanges(String sql) => parseRivetSqlStatements(sql);
 
   String _checksum(
     Map<String, Object?> metadata,
