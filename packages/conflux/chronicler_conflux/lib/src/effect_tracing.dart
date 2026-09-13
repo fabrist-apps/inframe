@@ -68,9 +68,18 @@ SpanStatus _statusFor<A, E>(Exit<A, E> exit) => switch (exit) {
     _isInterruptionOnly(cause) ? SpanStatus.cancelled : SpanStatus.error,
 };
 
-bool _isInterruptionOnly<E>(Cause<E> cause) => switch (cause) {
-  Interrupted<E>() => true,
-  Sequential<E>(:final causes) ||
-  Parallel<E>(:final causes) => causes.every((cause) => _isInterruptionOnly<E>(cause)),
-  Expected<E>() || Defect<E>() => false,
-};
+bool _isInterruptionOnly<E>(Cause<E> cause) {
+  final pending = <Cause<E>>[cause];
+  while (pending.isNotEmpty) {
+    final current = pending.removeLast();
+    switch (current) {
+      case Interrupted<E>():
+        break;
+      case Sequential<E>(:final causes) || Parallel<E>(:final causes):
+        pending.addAll(causes);
+      case Expected<E>() || Defect<E>():
+        return false;
+    }
+  }
+  return true;
+}

@@ -126,6 +126,26 @@ void main() {
       );
     });
 
+    test('should classify deeply nested causes without changing the outcome', () async {
+      final harness = _Harness();
+      addTearDown(harness.close);
+      Cause<Never> cause = const Interrupted('stop');
+      for (var depth = 0; depth < 20000; depth++) {
+        cause = Sequential([cause]);
+      }
+
+      final exit = await harness.runtime.run(
+        Effect.failCause<void, Never>(cause).withSpan('deep cancellation'),
+      );
+      await harness.chronicler.flush();
+
+      expect(identical((exit as Failed<void, Never>).cause, cause), isTrue);
+      expect(
+        harness.exporter.records.whereType<SpanRecord>().single.payload.status,
+        SpanStatus.cancelled,
+      );
+    });
+
     test('should preserve typed causes and never capture error occurrences', () async {
       final harness = _Harness();
       addTearDown(harness.close);
