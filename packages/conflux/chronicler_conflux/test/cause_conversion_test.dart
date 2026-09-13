@@ -54,6 +54,10 @@ void main() {
       final node = (metadata['nodes']! as List<Object?>).single! as Map<String, Object?>;
       expect(node['kind'], 'expected');
       expect(node['isNull'], isTrue);
+      expect(
+        () => (metadata['nodes']! as List<Object?>).clear(),
+        throwsUnsupportedError,
+      );
     });
 
     test('should bound nodes and encoded metadata with visible markers', () {
@@ -64,7 +68,7 @@ void main() {
 
       final input = cause.toChroniclerError();
       final metadata = input.attributes['conflux.cause']! as Map<String, Object?>;
-      final encodedBytes = utf8.encode(jsonEncode(metadata)).length;
+      final encodedBytes = utf8.encode(jsonEncode(input.attributes)).length;
 
       expect((metadata['nodes']! as List<Object?>).length, lessThanOrEqualTo(64));
       expect(encodedBytes, lessThanOrEqualTo(32 * 1024));

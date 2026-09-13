@@ -159,12 +159,13 @@ final class _CauseConverter<E> {
 
   bool _fits(Map<String, Object?> node) {
     final proposed = [..._nodes, node];
-    return utf8.encode(jsonEncode(_metadata(proposed))).length <= _maxMetadataBytes;
+    return utf8.encode(jsonEncode({'conflux.cause': _metadata(proposed)})).length <=
+        _maxMetadataBytes;
   }
 
   Map<String, Object?> _metadata(List<Map<String, Object?>> nodes) => {
     'version': 1,
-    'nodes': nodes,
+    'nodes': List<Map<String, Object?>>.unmodifiable(nodes),
     'nodesOmitted': _nodesOmitted,
     'textTruncated': _textTruncated,
     'textUnavailable': _textUnavailable,
