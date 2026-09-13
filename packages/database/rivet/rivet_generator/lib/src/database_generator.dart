@@ -70,16 +70,28 @@ final class RivetDatabaseGenerator extends GeneratorForAnnotation<RivetDatabase>
         .map((table) => '$table.db.buildSchema() as RivetTableSchema<Object?, Object?>')
         .join(', ');
     return '''
+/// Connection-free physical schema metadata for [$className].
+abstract final class ${className}RivetSchema {
+  /// Builds the composed schema used by offline migration tooling.
+  static RivetDatabaseSchema build() => RivetDatabaseSchema(
+    name: ${literal(databaseName)},
+    tables: [$descriptors],
+  );
+}
+
 abstract class _\$$className {
   Future<RivetDb> open({
     required RivetConnection connection,
     RivetPoolOptions pool = const RivetPoolOptions(),
-  }) => RivetDb.open(
-    name: ${literal(databaseName)},
-    connection: connection,
-    pool: pool,
-    tables: [$descriptors],
-  );
+  }) {
+    final schema = ${className}RivetSchema.build();
+    return RivetDb.open(
+      name: schema.name,
+      connection: connection,
+      pool: pool,
+      tables: schema.tables,
+    );
+  }
 }
 ''';
   }

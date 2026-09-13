@@ -912,14 +912,11 @@ final class _$AppProjectLabelsDB
 // RivetDatabaseGenerator
 // **************************************************************************
 
-abstract class _$FixtureAppDatabase {
-  Future<RivetDb> open({
-    required RivetConnection connection,
-    RivetPoolOptions pool = const RivetPoolOptions(),
-  }) => RivetDb.open(
+/// Connection-free physical schema metadata for [FixtureAppDatabase].
+abstract final class FixtureAppDatabaseRivetSchema {
+  /// Builds the composed schema used by offline migration tooling.
+  static RivetDatabaseSchema build() => RivetDatabaseSchema(
     name: 'fixture_app',
-    connection: connection,
-    pool: pool,
     tables: [
       schema.PackageUsers.db.buildSchema()
           as RivetTableSchema<Object?, Object?>,
@@ -932,4 +929,19 @@ abstract class _$FixtureAppDatabase {
       AppProjectLabels.db.buildSchema() as RivetTableSchema<Object?, Object?>,
     ],
   );
+}
+
+abstract class _$FixtureAppDatabase {
+  Future<RivetDb> open({
+    required RivetConnection connection,
+    RivetPoolOptions pool = const RivetPoolOptions(),
+  }) {
+    final schema = FixtureAppDatabaseRivetSchema.build();
+    return RivetDb.open(
+      name: schema.name,
+      connection: connection,
+      pool: pool,
+      tables: schema.tables,
+    );
+  }
 }

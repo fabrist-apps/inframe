@@ -9359,14 +9359,11 @@ final class _$MutationAssignmentNamesDB
 // RivetDatabaseGenerator
 // **************************************************************************
 
-abstract class _$RivetTestDatabase {
-  Future<RivetDb> open({
-    required RivetConnection connection,
-    RivetPoolOptions pool = const RivetPoolOptions(),
-  }) => RivetDb.open(
+/// Connection-free physical schema metadata for [RivetTestDatabase].
+abstract final class RivetTestDatabaseRivetSchema {
+  /// Builds the composed schema used by offline migration tooling.
+  static RivetDatabaseSchema build() => RivetDatabaseSchema(
     name: 'rivet_test',
-    connection: connection,
-    pool: pool,
     tables: [
       UserProfiles.db.buildSchema() as RivetTableSchema<Object?, Object?>,
       Posts.db.buildSchema() as RivetTableSchema<Object?, Object?>,
@@ -9418,6 +9415,21 @@ abstract class _$RivetTestDatabase {
           as RivetTableSchema<Object?, Object?>,
     ],
   );
+}
+
+abstract class _$RivetTestDatabase {
+  Future<RivetDb> open({
+    required RivetConnection connection,
+    RivetPoolOptions pool = const RivetPoolOptions(),
+  }) {
+    final schema = RivetTestDatabaseRivetSchema.build();
+    return RivetDb.open(
+      name: schema.name,
+      connection: connection,
+      pool: pool,
+      tables: schema.tables,
+    );
+  }
 }
 
 // **************************************************************************
