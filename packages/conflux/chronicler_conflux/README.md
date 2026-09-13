@@ -34,3 +34,17 @@ wrapper finish before its span ends. Expected errors and defects end the span
 as `Error`; an interruption-only cause ends it as `Cancelled`. The wrapper
 preserves the Effect's value or complete Cause and does not automatically
 capture an error occurrence.
+
+Convert a complete failure tree when the application chooses to capture it:
+
+```dart
+final input = cause.toChroniclerError();
+context.errors.capture(
+  input.error,
+  stackTrace: input.stackTrace,
+  attributes: input.attributes,
+);
+```
+
+Conversion is pure. It keeps sequential and parallel structure in a bounded
+`conflux.cause` attribute and leaves Chronicler's linear cause chain empty.
