@@ -12,6 +12,17 @@ dart run rivet_generator:rivet generate \
   --name create_accounts
 ```
 
+Removing a native enum label requires an explicit JSON transform file. Keys
+identify the resulting schema, enum, and removed label; values name a retained
+replacement label:
+
+```json
+{"public.order_status.cancelled": "archived"}
+```
+
+Pass it with `--transforms enum-transforms.json`. The reviewed migration updates
+every dependent scalar and array column before rebuilding the native type.
+
 The command writes `migration.sql`, `snapshot.json`, and `migration.json` in a
 new migration directory, then atomically replaces root `journal.json`. The
 journal records its generated source locator so the ordinary check command can

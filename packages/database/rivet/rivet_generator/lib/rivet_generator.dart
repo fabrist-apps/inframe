@@ -47,10 +47,12 @@ final class RivetMigrationGenerator {
     required Directory directory,
     required String name,
     Map<String, String>? source,
+    Map<String, String> enumLabelTransforms = const {},
   }) => RivetArtifactGenerator(createId: createId).generateDeclaration(
     declaration: declaration,
     directory: directory,
     name: name,
     source: source,
+    enumLabelTransforms: enumLabelTransforms,
   );
 }

@@ -264,6 +264,73 @@ void main() {
           )).single.single,
           'running',
         );
+
+        final evolvedValues = enumValue['values']! as List<Object?>;
+        enumValue['values'] = [evolvedValues.last, evolvedValues.first, evolvedValues[1]];
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'reorder enum',
+        );
+        await _applyLastMigrationByPhase(connection, directory);
+        final order = await connection.execute(
+          'SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid '
+          "JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'enum_evolution' "
+          "AND t.typname = 'state' ORDER BY e.enumsortorder",
+        );
+        expect(order.map((row) => row.single), ['complete', 'queued', 'running']);
+        await connection.execute(
+          'INSERT INTO enum_evolution.jobs (id, status, statuses) '
+          "VALUES (3, 'queued', ARRAY['queued']::enum_evolution.state[])",
+        );
+
+        enumValue['values'] = [evolvedValues.first, evolvedValues[1]];
+        await expectLater(
+          generator.generateDeclaration(
+            declaration: declaration,
+            directory: directory,
+            name: 'remove without transform',
+          ),
+          throwsA(isA<FormatException>()),
+        );
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'remove complete',
+          enumLabelTransforms: const {'enum_evolution.state.complete': 'queued'},
+        );
+        await expectLater(
+          _applyLastMigrationByPhase(connection, directory),
+          throwsA(anything),
+        );
+        expect(
+          (await connection.execute(
+            'SELECT status::text FROM enum_evolution.jobs WHERE id = 1',
+          )).single.single,
+          'complete',
+        );
+        await connection.execute('DELETE FROM enum_evolution.jobs WHERE id = 3');
+        await _applyLastMigrationByPhase(connection, directory);
+        final transformed = await connection.execute(
+          'SELECT status::text, statuses::text[] FROM enum_evolution.jobs WHERE id = 1',
+        );
+        expect(transformed.single, [
+          'queued',
+          ['queued', 'queued'],
+        ]);
+        expect(
+          (await connection.execute(
+            "SELECT count(*) FROM pg_indexes WHERE schemaname = 'enum_evolution' "
+            "AND indexname = 'jobs_status_idx'",
+          )).single.single,
+          1,
+        );
+        expect(
+          (await connection.execute(
+            "SELECT count(*) FROM pg_constraint WHERE conname = 'status_reflexive'",
+          )).single.single,
+          1,
+        );
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
@@ -296,8 +363,25 @@ Map<String, Object?> _evolvingEnumDeclaration() => {
           'primaryKey': false,
         },
       ],
-      'indexes': <Object?>[],
-      'constraints': <Object?>[],
+      'indexes': [
+        {
+          'name': 'jobs_status_idx',
+          'unique': true,
+          'terms': [
+            {'column': 'status', 'descending': false},
+          ],
+          'options': <String, Object?>{},
+          'platforms': ['postgresql'],
+        },
+      ],
+      'constraints': [
+        {
+          'name': 'status_reflexive',
+          'kind': 'check',
+          'columns': <String>[],
+          'expression': _operator('=', _reference('status'), _reference('status')),
+        },
+      ],
     },
   ],
   'enums': [

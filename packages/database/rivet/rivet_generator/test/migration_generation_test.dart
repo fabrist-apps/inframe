@@ -485,14 +485,56 @@ void main() {
 
       final reorderedValues = declaredEnum['values']! as List<Object?>;
       declaredEnum['values'] = [reorderedValues.last, reorderedValues.first, reorderedValues[1]];
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'reorder enum',
+      );
+      final reorderedSnapshot = _lastArtifact(directory, 'snapshot.json');
+      final reorderedEnum =
+          (reorderedSnapshot['enums']! as List<Object?>).single! as Map<String, Object?>;
+      expect(
+        (reorderedEnum['values']! as List<Object?>).cast<Map<String, Object?>>().map(
+          (value) => value['id'],
+        ),
+        [nextValues.last['id'], nextValues.first['id'], nextValues[1]['id']],
+      );
+      expect(
+        _lastArtifactFile(directory, 'migration.sql').readAsStringSync(),
+        allOf(contains('CREATE TYPE "types"."__rivet_'), contains('DROP TYPE "types"."state";')),
+      );
+
+      declaredEnum['values'] = [reorderedValues.last, reorderedValues.first];
+      final jobsColumns = (jobs['columns']! as List<Object?>).cast<Map<String, Object?>>();
+      jobsColumns.first['default'] = {
+        'formatVersion': 1,
+        'kind': 'literal',
+        'literalType': 'string',
+        'value': 'queued',
+      };
       await expectLater(
         generator.generateDeclaration(
           declaration: declaration,
           directory: directory,
-          name: 'unsupported reorder',
+          name: 'remove without transform',
         ),
-        throwsA(isA<UnsupportedError>()),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('requires --enum-transform'),
+          ),
+        ),
       );
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'remove enum label',
+        enumLabelTransforms: const {'types.state.running': 'queued'},
+      );
+      final removalSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      expect(removalSql, contains("SET \"mood\" = 'queued'::\"types\".\"state\""));
+      expect(removalSql, contains('array_replace("moods"'));
     });
   });
 }

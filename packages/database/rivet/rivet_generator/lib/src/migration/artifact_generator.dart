@@ -35,6 +35,7 @@ final class RivetArtifactGenerator {
     required Directory directory,
     required String name,
     Map<String, String>? source,
+    Map<String, String> enumLabelTransforms = const {},
   }) async {
     _validateLabel(name);
     final physicalDeclaration = normalizeDeclaration(declaration);
@@ -46,7 +47,11 @@ final class RivetArtifactGenerator {
         directory: directory,
         name: name,
         source: source,
+        enumLabelTransforms: enumLabelTransforms,
       );
+    }
+    if (enumLabelTransforms.isNotEmpty) {
+      throw const FormatException('Enum label transforms require a previous snapshot.');
     }
 
     final databaseId = _nextId();
@@ -217,6 +222,7 @@ final class RivetArtifactGenerator {
     required Map<String, Object?> declaration,
     required Directory directory,
     required String name,
+    required Map<String, String> enumLabelTransforms,
     Map<String, String>? source,
   }) async {
     await RivetArtifactChecker().check(directory: directory);
@@ -234,7 +240,7 @@ final class RivetArtifactGenerator {
 
     final migrationId = _nextId();
     snapshot['migrationId'] = migrationId;
-    final plan = _diffPlan(previousSnapshot, snapshot);
+    final plan = _diffPlan(previousSnapshot, snapshot, enumLabelTransforms);
     final sql = plan.sql;
     if (sql.isEmpty) {
       throw UnsupportedError(
@@ -731,9 +737,13 @@ final class RivetArtifactGenerator {
     return buffer.toString();
   }
 
-  _MigrationPlan _diffPlan(Map<String, Object?> previous, Map<String, Object?> next) {
+  _MigrationPlan _diffPlan(
+    Map<String, Object?> previous,
+    Map<String, Object?> next,
+    Map<String, String> enumLabelTransforms,
+  ) {
     final phases = <String>[];
-    final enumChanges = _enumChangeSql(previous, next);
+    final enumChanges = _enumChangeSql(previous, next, enumLabelTransforms);
     if (enumChanges.ordinary.isNotEmpty) phases.add(enumChanges.ordinary);
     phases.addAll(enumChanges.additions.where((sql) => sql.isNotEmpty));
     final ordinary = _diffSql(previous, next);
@@ -744,6 +754,7 @@ final class RivetArtifactGenerator {
   ({String ordinary, List<String> additions}) _enumChangeSql(
     Map<String, Object?> previous,
     Map<String, Object?> next,
+    Map<String, String> enumLabelTransforms,
   ) {
     final previousSchemas = _schemaNames(previous);
     final nextSchemas = _schemaNames(next);
@@ -757,6 +768,7 @@ final class RivetArtifactGenerator {
     };
     final ordinary = StringBuffer();
     final additions = <String>[];
+    final usedTransforms = <String>{};
     for (final entry in newEnums.entries) {
       final nextEnum = entry.value;
       final oldEnum = oldEnums[entry.key];
@@ -797,16 +809,20 @@ final class RivetArtifactGenerator {
           .where(nextIds.contains)
           .toList(growable: false);
       final retainedNextIds = nextIds.where(oldValues.containsKey).toList(growable: false);
-      if (canonicalJson(retainedOldIds) != canonicalJson(retainedNextIds)) {
-        throw UnsupportedError(
-          'Reordering enum ${nextEnum['name']} requires a native enum rebuild migration.',
-        );
-      }
       final removed = oldValues.keys.where((id) => !nextIds.contains(id));
-      if (removed.isNotEmpty) {
-        throw UnsupportedError(
-          'Removing labels from enum ${nextEnum['name']} requires an explicit data transformation.',
+      final reordered = canonicalJson(retainedOldIds) != canonicalJson(retainedNextIds);
+      if (reordered || removed.isNotEmpty) {
+        ordinary.write(
+          _enumRebuildSql(
+            previous,
+            next,
+            oldEnum,
+            nextEnum,
+            enumLabelTransforms,
+            usedTransforms,
+          ),
         );
+        continue;
       }
       for (final value in nextValues) {
         final oldValue = oldValues[value['id']];
@@ -838,8 +854,205 @@ final class RivetArtifactGenerator {
         availableIds.add(id);
       }
     }
+    final unusedTransforms = enumLabelTransforms.keys.where((key) => !usedTransforms.contains(key));
+    if (unusedTransforms.isNotEmpty) {
+      throw FormatException('Unused enum label transforms: ${unusedTransforms.join(', ')}.');
+    }
     return (ordinary: ordinary.toString(), additions: additions);
   }
+
+  String _enumRebuildSql(
+    Map<String, Object?> previous,
+    Map<String, Object?> next,
+    Map<String, Object?> oldEnum,
+    Map<String, Object?> nextEnum,
+    Map<String, String> transforms,
+    Set<String> usedTransforms,
+  ) {
+    final previousSchemas = _schemaNames(previous);
+    final nextSchemas = _schemaNames(next);
+    final oldSchema = previousSchemas[oldEnum['schemaId']]!;
+    final nextSchema = nextSchemas[nextEnum['schemaId']]!;
+    final oldQualified = '${_quote(oldSchema)}.${_quote(oldEnum['name']! as String)}';
+    final temporaryName = '__rivet_${(nextEnum['id']! as String).substring(0, 12)}';
+    final temporaryQualified = '${_quote(nextSchema)}.${_quote(temporaryName)}';
+    final oldValues = {
+      for (final value in (oldEnum['values']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value['label']! as String,
+    };
+    final nextValues = {
+      for (final value in (nextEnum['values']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value['label']! as String,
+    };
+    final nextLabels = nextValues.values.toSet();
+    final affectedColumns =
+        <String, ({Map<String, Object?> table, Map<String, Object?> column, bool array})>{};
+    for (final table in _snapshotTables(next)) {
+      for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>()) {
+        final storage = column['storage']! as Map<String, Object?>;
+        final array =
+            storage['kind'] == 'array' &&
+            (storage['element']! as Map<String, Object?>)['enumId'] == nextEnum['id'];
+        if (storage['enumId'] == nextEnum['id'] || array) {
+          affectedColumns[column['id']! as String] = (table: table, column: column, array: array);
+        }
+      }
+    }
+    final affectedIds = affectedColumns.keys.toSet();
+    final dependentConstraints = <({Map<String, Object?> table, Map<String, Object?> object})>[];
+    final dependentIndexes = <({Map<String, Object?> table, Map<String, Object?> object})>[];
+    for (final table in _snapshotTables(next)) {
+      for (final constraint in _objects(table, 'constraints')) {
+        if (_containsAny(constraint, affectedIds)) {
+          dependentConstraints.add((table: table, object: constraint));
+        }
+      }
+      for (final index in _objects(table, 'indexes')) {
+        if (_containsAny(index, affectedIds)) dependentIndexes.add((table: table, object: index));
+      }
+    }
+    final buffer = StringBuffer();
+    if (oldSchema != nextSchema) {
+      buffer.writeln('CREATE SCHEMA IF NOT EXISTS ${_quote(nextSchema)};');
+    }
+    final labels = (nextEnum['values']! as List<Object?>)
+        .cast<Map<String, Object?>>()
+        .map((value) => _stringLiteral(value['label']! as String))
+        .join(', ');
+    buffer.writeln('CREATE TYPE $temporaryQualified AS ENUM ($labels);');
+    for (final entry in oldValues.entries) {
+      final nextLabel = nextValues[entry.key];
+      if (nextLabel != null && nextLabel != entry.value) {
+        buffer.writeln(
+          'ALTER TYPE $oldQualified RENAME VALUE ${_stringLiteral(entry.value)} '
+          'TO ${_stringLiteral(nextLabel)};',
+        );
+        oldValues[entry.key] = nextLabel;
+      }
+    }
+    final nextTables = _tablesById(next);
+    final columnNames = <String, String>{
+      for (final table in nextTables.values)
+        for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>())
+          column['id']! as String: column['name']! as String,
+    };
+    for (final dependency in dependentConstraints) {
+      buffer.writeln(
+        'ALTER TABLE ${_qualifiedTable(dependency.table, nextSchemas)} DROP CONSTRAINT '
+        '${_quote(dependency.object['name']! as String)};',
+      );
+    }
+    for (final dependency in dependentIndexes) {
+      buffer.writeln(
+        'DROP INDEX ${_quote(nextSchemas[dependency.table['schemaId']]!)}.'
+        '${_quote(dependency.object['name']! as String)};',
+      );
+    }
+    for (final dependency in affectedColumns.values) {
+      if (dependency.column['default'] != null) {
+        buffer.writeln(
+          'ALTER TABLE ${_qualifiedTable(dependency.table, nextSchemas)} ALTER COLUMN '
+          '${_quote(dependency.column['name']! as String)} DROP DEFAULT;',
+        );
+      }
+    }
+    for (final removed in oldValues.entries.where((entry) => !nextValues.containsKey(entry.key))) {
+      final key = '$nextSchema.${nextEnum['name']}.${removed.value}';
+      final replacement = transforms[key];
+      if (replacement == null || !nextLabels.contains(replacement)) {
+        throw FormatException(
+          'Removing enum label ${removed.value} requires --enum-transform '
+          '$key=<retained-label>.',
+        );
+      }
+      usedTransforms.add(key);
+      for (final dependency in affectedColumns.values) {
+        final table = _qualifiedTable(dependency.table, nextSchemas);
+        final column = _quote(dependency.column['name']! as String);
+        if (dependency.array) {
+          buffer.writeln(
+            'UPDATE $table SET $column = array_replace($column, '
+            '${_stringLiteral(removed.value)}::$oldQualified, '
+            '${_stringLiteral(replacement)}::$oldQualified) '
+            'WHERE $column @> ARRAY[${_stringLiteral(removed.value)}::$oldQualified];',
+          );
+        } else {
+          buffer.writeln(
+            'UPDATE $table SET $column = ${_stringLiteral(replacement)}::$oldQualified '
+            'WHERE $column = ${_stringLiteral(removed.value)}::$oldQualified;',
+          );
+        }
+      }
+    }
+    for (final dependency in affectedColumns.values) {
+      final table = _qualifiedTable(dependency.table, nextSchemas);
+      final column = _quote(dependency.column['name']! as String);
+      final targetType = dependency.array ? '$temporaryQualified[]' : temporaryQualified;
+      final textType = dependency.array ? 'text[]' : 'text';
+      buffer.writeln(
+        'ALTER TABLE $table ALTER COLUMN $column TYPE $targetType '
+        'USING $column::$textType::$targetType;',
+      );
+    }
+    buffer
+      ..writeln('DROP TYPE $oldQualified;')
+      ..writeln('ALTER TYPE $temporaryQualified RENAME TO ${_quote(nextEnum['name']! as String)};');
+    for (final dependency in affectedColumns.values) {
+      if (dependency.column['default'] != null) {
+        buffer.writeln(
+          'ALTER TABLE ${_qualifiedTable(dependency.table, nextSchemas)} ALTER COLUMN '
+          '${_quote(dependency.column['name']! as String)} SET'
+          '${_defaultSql(dependency.column)};',
+        );
+      }
+    }
+    for (final dependency in dependentConstraints.where(
+      (dependency) => dependency.object['kind'] != 'foreignKey',
+    )) {
+      buffer.writeln(
+        _addConstraintSql(
+          _qualifiedTable(dependency.table, nextSchemas),
+          dependency.object,
+          nextTables,
+          nextSchemas,
+          columnNames,
+        ),
+      );
+    }
+    for (final dependency in dependentIndexes) {
+      buffer.writeln(
+        _createIndexSql(
+          _qualifiedTable(dependency.table, nextSchemas),
+          dependency.object,
+          columnNames,
+        ),
+      );
+    }
+    for (final dependency in dependentConstraints.where(
+      (dependency) => dependency.object['kind'] == 'foreignKey',
+    )) {
+      buffer.writeln(
+        _addConstraintSql(
+          _qualifiedTable(dependency.table, nextSchemas),
+          dependency.object,
+          nextTables,
+          nextSchemas,
+          columnNames,
+        ),
+      );
+    }
+    return buffer.toString();
+  }
+
+  bool _containsAny(Object? value, Set<String> ids) => switch (value) {
+    final String string => ids.contains(string),
+    final List<Object?> list => list.any((item) => _containsAny(item, ids)),
+    final Map<String, Object?> map => map.values.any((item) => _containsAny(item, ids)),
+    _ => false,
+  };
+
+  String _qualifiedTable(Map<String, Object?> table, Map<String, String> schemas) =>
+      '${_quote(schemas[table['schemaId']]!)}.${_quote(table['name']! as String)}';
 
   List<Map<String, Object?>> _phaseMetadata(_MigrationPlan plan, String databaseId) {
     var byteOffset = 0;
@@ -1045,20 +1258,27 @@ final class RivetArtifactGenerator {
             'Index ${index['name']} uses options or platforms that ordinary Rivet migrations do not support.',
           );
         }
-        final unique = index['unique'] == true ? 'UNIQUE ' : '';
-        final terms = [
-          for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>())
-            '${_quote(columnNames[term['columnId']]!)}${term['descending'] == true ? ' DESC' : ' ASC'}',
-        ].join(', ');
-        final predicate = index['predicate'] is Map<String, Object?>
-            ? ' WHERE ${renderSchemaExpression(index['predicate']! as Map<String, Object?>, resolveReference: (id) => columnNames[id]!)}'
-            : '';
-        buffer.writeln(
-          'CREATE ${unique}INDEX ${_quote(index['name']! as String)} ON $qualified ($terms)$predicate;',
-        );
+        buffer.writeln(_createIndexSql(qualified, index, columnNames));
       }
     }
     return '$buffer$foreignKeys';
+  }
+
+  String _createIndexSql(
+    String qualified,
+    Map<String, Object?> index,
+    Map<String, String> columnNames,
+  ) {
+    final unique = index['unique'] == true ? 'UNIQUE ' : '';
+    final terms = [
+      for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>())
+        '${_quote(columnNames[term['columnId']]!)}${term['descending'] == true ? ' DESC' : ' ASC'}',
+    ].join(', ');
+    final predicate = index['predicate'] is Map<String, Object?>
+        ? ' WHERE ${renderSchemaExpression(index['predicate']! as Map<String, Object?>, resolveReference: (id) => columnNames[id]!)}'
+        : '';
+    return 'CREATE ${unique}INDEX ${_quote(index['name']! as String)} '
+        'ON $qualified ($terms)$predicate;';
   }
 
   String _addConstraintSql(

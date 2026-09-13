@@ -51,14 +51,28 @@ final class RivetCli {
       throw FormatException('Invalid database class `$className`.');
     }
     final declaration = await _readDeclaration(library, className);
+    final transforms = options['transforms'] == null
+        ? const <String, String>{}
+        : _readEnumTransforms(File(options['transforms']!));
     final migrationId = await const RivetMigrationGenerator().generateDeclaration(
       declaration: declaration,
       directory: Directory(output),
       name: name,
       source: {'library': library, 'class': className},
+      enumLabelTransforms: transforms,
     );
     _stdout.writeln(migrationId == null ? 'Schema is current.' : 'Generated $migrationId.');
     return 0;
+  }
+
+  Map<String, String> _readEnumTransforms(File file) {
+    final value = jsonDecode(file.readAsStringSync());
+    if (value is! Map<String, Object?> || value.entries.any((entry) => entry.value is! String)) {
+      throw const FormatException(
+        'The transforms file must be a JSON object mapping enum label paths to retained labels.',
+      );
+    }
+    return {for (final entry in value.entries) entry.key: entry.value! as String};
   }
 
   Future<int> _check(List<String> arguments) async {
@@ -139,7 +153,7 @@ void main() {
 const _usage = '''
 Rivet migration tooling
 
-  rivet generate --database <library-uri>#<class> --out <directory> --name <label>
+  rivet generate --database <library-uri>#<class> --out <directory> --name <label> [--transforms <file>]
   rivet check --dir <directory>
   rivet seal --dir <directory> --migration <id>
 ''';
