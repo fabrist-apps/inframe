@@ -62,7 +62,131 @@ void main() {
       expect(migration['checksum'], entry['checksum']);
       expect(migration['phases']! as List<Object?>, hasLength(1));
     });
+
+    test('should reject a covered SQL edit during offline checking', () async {
+      var nextId = 0;
+      final schema = RivetDatabaseSchema(
+        name: 'accounts',
+        tables: [Users.db.buildSchema()],
+      );
+      await RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      ).generate(schema: schema, directory: directory, name: 'create users');
+
+      await const RivetMigrationChecker().check(
+        directory: directory,
+        schema: schema,
+      );
+      final journal = jsonDecode(
+        File('${directory.path}/journal.json').readAsStringSync(),
+      ) as Map<String, Object?>;
+      final entry = (journal['entries']! as List<Object?>).single! as Map<String, Object?>;
+      final sql = File('${directory.path}/${entry['directory']}/migration.sql');
+      sql.writeAsStringSync('${sql.readAsStringSync()}-- reviewed\n');
+
+      await expectLater(
+        const RivetMigrationChecker().check(directory: directory),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('should reject duplicate JSON keys before interpreting a journal', () async {
+      File('${directory.path}/journal.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          '{"formatVersion":1,"formatVersion":1,"dialect":"rivet",'
+          '"databaseId":"00000000000000000000000000000001","entries":[]}',
+        );
+
+      await expectLater(
+        const RivetMigrationChecker().check(directory: directory),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('Duplicate JSON key `formatVersion`'),
+          ),
+        ),
+      );
+    });
+
+    test('should reject a current composed schema mismatch', () async {
+      var nextId = 0;
+      await RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      ).generate(
+        schema: RivetDatabaseSchema(
+          name: 'accounts',
+          tables: [Users.db.buildSchema()],
+        ),
+        directory: directory,
+        name: 'create users',
+      );
+
+      await expectLater(
+        const RivetMigrationChecker().check(
+          directory: directory,
+          schema: RivetDatabaseSchema(
+            name: 'accounts',
+            tables: [RenamedUsers.db.buildSchema()],
+          ),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('should ignore JSON formatting and key order in checksums', () async {
+      var nextId = 0;
+      await RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      ).generate(
+        schema: RivetDatabaseSchema(
+          name: 'accounts',
+          tables: [Users.db.buildSchema()],
+        ),
+        directory: directory,
+        name: 'create users',
+      );
+      final journal = jsonDecode(
+        File('${directory.path}/journal.json').readAsStringSync(),
+      ) as Map<String, Object?>;
+      final entry = (journal['entries']! as List<Object?>).single! as Map<String, Object?>;
+      final snapshotFile = File(
+        '${directory.path}/${entry['directory']}/snapshot.json',
+      );
+      final snapshot = jsonDecode(snapshotFile.readAsStringSync()) as Map<String, Object?>;
+      snapshotFile.writeAsStringSync(
+        jsonEncode(Map.fromEntries(snapshot.entries.toList().reversed)),
+      );
+
+      await const RivetMigrationChecker().check(directory: directory);
+    });
   });
+}
+
+@RivetTable(schema: 'auth', name: 'renamedUsers')
+final class RenamedUsers extends RivetTableDefinition<RenamedUsers> {
+  static const db = _RenamedUsersAccessor();
+
+  late final RivetOrderableColumn<int> id = integer().primaryKey()();
+  late final RivetOrderableColumn<String> name = text()();
+}
+
+final class _RenamedUsersAccessor extends RivetTableAccessor<RenamedUsers, Object> {
+  const _RenamedUsersAccessor();
+
+  @override
+  RivetTableSchema<RenamedUsers, Object> buildSchema() {
+    final definition = RenamedUsers();
+    return RivetTableSchema(
+      schemaName: 'auth',
+      tableName: 'renamedUsers',
+      definition: definition,
+      columns: [definition.id, definition.name],
+      columnNames: const ['id', 'name'],
+      decode: (_, _) => Object(),
+    );
+  }
 }
 
 @RivetTable(schema: 'auth', name: 'users')

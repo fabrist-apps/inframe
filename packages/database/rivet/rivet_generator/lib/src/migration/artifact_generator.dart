@@ -32,6 +32,7 @@ final class RivetArtifactGenerator {
     required Map<String, Object?> declaration,
     required Directory directory,
     required String name,
+    Map<String, String>? source,
   }) async {
     _validateLabel(name);
     directory.createSync(recursive: true);
@@ -69,6 +70,7 @@ final class RivetArtifactGenerator {
       'formatVersion': 1,
       'dialect': 'rivet',
       'databaseId': databaseId,
+      if (source != null) 'source': source,
       'entries': [
         {'id': migrationId, 'directory': directoryName, 'checksum': checksum},
       ],

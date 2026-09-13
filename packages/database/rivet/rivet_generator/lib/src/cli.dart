@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:rivet_generator/rivet_generator.dart';
+import 'package:rivet_generator/src/migration/checker.dart';
 
 // This type is public only so the executable can keep argument handling testable.
 // ignore_for_file: public_member_api_docs, cascade_invocations
@@ -22,9 +23,8 @@ final class RivetCli {
     try {
       return switch (arguments.first) {
         'generate' => await _generate(arguments.skip(1).toList()),
-        'check' || 'seal' => throw UnsupportedError(
-          '${arguments.first} is implemented by a later FBR-104 slice.',
-        ),
+        'check' => await _check(arguments.skip(1).toList()),
+        'seal' => throw UnsupportedError('seal is implemented by a later FBR-104 slice.'),
         _ => throw FormatException('Unknown Rivet command `${arguments.first}`.'),
       };
     } on Object catch (error) {
@@ -55,8 +55,36 @@ final class RivetCli {
       declaration: declaration,
       directory: Directory(output),
       name: name,
+      source: {'library': library, 'class': className},
     );
     _stdout.writeln(migrationId == null ? 'Schema is current.' : 'Generated $migrationId.');
+    return 0;
+  }
+
+  Future<int> _check(List<String> arguments) async {
+    final options = _options(arguments);
+    final directoryPath = options['dir'];
+    if (directoryPath == null) throw const FormatException('check requires --dir.');
+    final directory = Directory(directoryPath);
+    final checker = RivetArtifactChecker();
+    await checker.check(directory: directory);
+    final journalValue = jsonDecode(
+      File('${directory.path}/journal.json').readAsStringSync(),
+    );
+    if (journalValue is! Map<String, Object?>) {
+      throw const FormatException('journal.json must be a JSON object.');
+    }
+    Map<String, Object?>? declaration;
+    if (journalValue['source'] case {
+      'library': final String library,
+      'class': final String className,
+    }) {
+      declaration = await _readDeclaration(library, className);
+    }
+    if (declaration != null) {
+      await checker.check(directory: directory, declaration: declaration);
+    }
+    _stdout.writeln('Rivet migration artifacts are valid.');
     return 0;
   }
 
