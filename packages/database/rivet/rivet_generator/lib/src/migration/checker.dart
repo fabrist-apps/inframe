@@ -1,11 +1,12 @@
 // The checker is internal to RivetMigrationChecker's documented operation.
-// ignore_for_file: public_member_api_docs, use_null_aware_elements
+// ignore_for_file: public_member_api_docs
 
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:rivet_generator/src/migration/canonical_json.dart';
+import 'package:rivet_generator/src/migration/schema_expression.dart';
 
 final class RivetArtifactChecker {
   Future<void> check({
@@ -166,17 +167,18 @@ final class RivetArtifactChecker {
   }
 
   Map<String, Object?> _physicalDeclaration(Map<String, Object?> declaration) {
+    final normalized = normalizeDeclaration(declaration);
     final tables = [
-      for (final raw in _list(declaration['tables'], 'declaration tables'))
-        Map<String, Object?>.from(_map(raw, 'declaration table')),
+      for (final raw in _list(normalized['tables'], 'declaration tables'))
+        _withoutRenameHints(_map(raw, 'declaration table'))! as Map<String, Object?>,
     ]..sort(_byPhysicalName);
     return {
       'formatVersion': 1,
       'dialect': 'rivet',
       'name': null,
       'tables': tables,
-      'enums': _list(declaration['enums'], 'declaration enums'),
-      'requirements': _list(declaration['requirements'], 'declaration requirements'),
+      'enums': _withoutRenameHints(_list(normalized['enums'], 'declaration enums')),
+      'requirements': _list(normalized['requirements'], 'declaration requirements'),
     };
   }
 
@@ -186,7 +188,6 @@ final class RivetArtifactChecker {
   ) => {
     'schema': schemaNames[table['schemaId']],
     'name': table['name'],
-    if (table['renamedFrom'] case final renamedFrom?) 'renamedFrom': renamedFrom,
     'columns': [
       for (final raw in _list(table['columns'], 'table columns'))
         _withoutKeys(_map(raw, 'table column'), {'id', 'tableId'}),
@@ -201,6 +202,15 @@ final class RivetArtifactChecker {
   Map<String, Object?> _withoutKeys(Map<String, Object?> value, Set<String> keys) => {
     for (final entry in value.entries)
       if (!keys.contains(entry.key)) entry.key: entry.value,
+  };
+
+  Object? _withoutRenameHints(Object? value) => switch (value) {
+    final Map<String, Object?> map => {
+      for (final entry in map.entries)
+        if (entry.key != 'renamedFrom') entry.key: _withoutRenameHints(entry.value),
+    },
+    final List<Object?> list => [for (final item in list) _withoutRenameHints(item)],
+    _ => value,
   };
 
   String _checksum(

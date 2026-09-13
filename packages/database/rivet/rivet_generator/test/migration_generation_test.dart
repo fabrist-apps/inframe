@@ -161,7 +161,129 @@ void main() {
 
       await const RivetMigrationChecker().check(directory: directory);
     });
+
+    test('should preserve identities through table and column renames', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generate(
+        schema: RivetDatabaseSchema(
+          name: 'accounts',
+          tables: [Users.db.buildSchema()],
+        ),
+        directory: directory,
+        name: 'create users',
+      );
+      final firstSnapshot = _lastArtifact(directory, 'snapshot.json');
+
+      final migrationId = await generator.generate(
+        schema: RivetDatabaseSchema(
+          name: 'accounts',
+          tables: [Members.db.buildSchema()],
+        ),
+        directory: directory,
+        name: 'rename users',
+      );
+      final secondSnapshot = _lastArtifact(directory, 'snapshot.json');
+      final migration = _lastArtifact(directory, 'migration.json');
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      final firstTable =
+          (firstSnapshot['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final secondTable =
+          (secondSnapshot['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final firstColumns = (firstTable['columns']! as List<Object?>).cast<Map<String, Object?>>();
+      final secondColumns = (secondTable['columns']! as List<Object?>).cast<Map<String, Object?>>();
+
+      expect(migrationId, isNotNull);
+      expect(migration['parentId'], firstSnapshot['migrationId']);
+      expect(secondTable['id'], firstTable['id']);
+      expect(secondColumns[0]['id'], firstColumns[0]['id']);
+      expect(secondColumns[1]['id'], firstColumns[1]['id']);
+      expect(sql, contains('ALTER TABLE "auth"."users" RENAME TO "members";'));
+      expect(sql, contains('RENAME COLUMN "name" TO "fullName";'));
+      expect(sql, contains('ADD COLUMN "active" bool DEFAULT true NOT NULL;'));
+      await const RivetMigrationChecker().check(
+        directory: directory,
+        schema: RivetDatabaseSchema(
+          name: 'accounts',
+          tables: [Members.db.buildSchema()],
+        ),
+      );
+
+      expect(
+        await generator.generate(
+          schema: RivetDatabaseSchema(
+            name: 'accounts',
+            tables: [Members.db.buildSchema()],
+          ),
+          directory: directory,
+          name: 'runtime only',
+        ),
+        isNull,
+      );
+    });
+
+    test('should generate supported column alterations and removals', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final initial = RivetDatabaseSchema(
+        name: 'accounts',
+        tables: [Users.db.buildSchema()],
+      );
+      await generator.generate(schema: initial, directory: directory, name: 'initial');
+      final declaration = initial.toJson();
+      final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
+      columns[0]['storage'] = {
+        ...(columns[0]['storage']! as Map<String, Object?>),
+        'kind': 'real',
+      };
+      columns[1]['storage'] = {
+        ...(columns[1]['storage']! as Map<String, Object?>),
+        'nullable': true,
+      };
+      columns[1]['default'] = {
+        'formatVersion': 1,
+        'kind': 'sql',
+        'sql': "'unknown'",
+      };
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'alter users',
+      );
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+
+      expect(sql, contains('TYPE float8 USING "id"::float8;'));
+      expect(sql, contains('ALTER COLUMN "name" DROP NOT NULL;'));
+      expect(sql, contains("ALTER COLUMN \"name\" SET DEFAULT 'unknown';"));
+
+      table['columns'] = [columns.first];
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'remove name',
+      );
+      expect(
+        _lastArtifactFile(directory, 'migration.sql').readAsStringSync(),
+        contains('DROP COLUMN "name";'),
+      );
+    });
   });
+}
+
+Map<String, Object?> _lastArtifact(Directory directory, String name) =>
+    jsonDecode(_lastArtifactFile(directory, name).readAsStringSync()) as Map<String, Object?>;
+
+File _lastArtifactFile(Directory directory, String name) {
+  final journal =
+      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  return File('${directory.path}/${entry['directory']}/$name');
 }
 
 @RivetTable(schema: 'auth', name: 'renamedUsers')
@@ -184,6 +306,33 @@ final class _RenamedUsersAccessor extends RivetTableAccessor<RenamedUsers, Objec
       definition: definition,
       columns: [definition.id, definition.name],
       columnNames: const ['id', 'name'],
+      decode: (_, _) => Object(),
+    );
+  }
+}
+
+@RivetTable(schema: 'auth', name: 'members', renamedFrom: 'users')
+final class Members extends RivetTableDefinition<Members> {
+  static const db = _MembersAccessor();
+
+  late final RivetOrderableColumn<int> id = integer().primaryKey()();
+  late final RivetOrderableColumn<String> fullName = text(renamedFrom: 'name')();
+  late final RivetOrderableColumn<bool> active = boolean().defaultSql('true')();
+}
+
+final class _MembersAccessor extends RivetTableAccessor<Members, Object> {
+  const _MembersAccessor();
+
+  @override
+  RivetTableSchema<Members, Object> buildSchema() {
+    final definition = Members();
+    return RivetTableSchema(
+      schemaName: 'auth',
+      tableName: 'members',
+      renamedFrom: 'users',
+      definition: definition,
+      columns: [definition.id, definition.fullName, definition.active],
+      columnNames: const ['id', 'fullName', 'active'],
       decode: (_, _) => Object(),
     );
   }

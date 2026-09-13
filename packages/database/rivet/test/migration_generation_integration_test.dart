@@ -70,5 +70,59 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should preserve data through declared table and column renames',
+      () async {
+        const generator = RivetMigrationGenerator();
+        await generator.generate(
+          schema: MigrationFixtureDatabaseRivetSchema.build(),
+          directory: directory,
+          name: 'initial',
+        );
+        await _applyLastMigration(connection, directory);
+        await connection.execute(
+          'INSERT INTO "auth"."users" ("id", "name") VALUES (1, \'Bhaswanth\')',
+        );
+
+        await generator.generate(
+          schema: MigratedFixtureDatabaseRivetSchema.build(),
+          directory: directory,
+          name: 'rename users',
+        );
+        await _applyLastMigration(connection, directory);
+        final rows = await connection.execute(
+          'SELECT "fullName", "active" FROM "auth"."members" WHERE "id" = 1',
+        );
+
+        expect(rows.single, ['Bhaswanth', true]);
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
+}
+
+Future<void> _applyLastMigration(pg.Connection connection, Directory directory) async {
+  final journal =
+      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  final migrationDirectory = '${directory.path}/${entry['directory']}';
+  final sqlBytes = File('$migrationDirectory/migration.sql').readAsBytesSync();
+  final migration = jsonDecode(
+    File('$migrationDirectory/migration.json').readAsStringSync(),
+  ) as Map<String, Object?>;
+  for (final rawPhase in migration['phases']! as List<Object?>) {
+    final phase = rawPhase! as Map<String, Object?>;
+    for (final value in phase['statements']! as List<Object?>) {
+      final statement = value! as Map<String, Object?>;
+      await connection.execute(
+        utf8.decode(
+          sqlBytes.sublist(
+            statement['startByte']! as int,
+            statement['endByte']! as int,
+          ),
+        ),
+      );
+    }
+  }
 }

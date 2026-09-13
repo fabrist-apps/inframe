@@ -130,6 +130,156 @@ final class _$MigrationUsersDB
   }) => RivetDelete(buildSchema(), where: where);
 }
 
+/// Generated row returned by reads from 'auth.members'.
+final class MigratedUsersRow {
+  /// Creates a row from decoded column and relation values.
+  const MigratedUsersRow({
+    required this.id,
+    required this.fullName,
+    required this.active,
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `fullName`.
+  final String fullName;
+
+  /// Value read from `active`.
+  final bool active;
+}
+
+/// Generated values accepted by mutations of 'auth.members'.
+final class MigratedUsersCompanion implements RivetCompanion<MigratedUsers> {
+  const MigratedUsersCompanion._({
+    required this.id,
+    required this.fullName,
+    required this.active,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory MigratedUsersCompanion.insert({
+    required RivetValue<MigratedUsers, int, int> id,
+    required RivetValue<MigratedUsers, String, String> fullName,
+    RivetValue<MigratedUsers, bool, bool> active = const RivetValue.absent(),
+  }) => MigratedUsersCompanion._(id: id, fullName: fullName, active: active);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory MigratedUsersCompanion.update({
+    RivetValue<MigratedUsers, int, int> id = const RivetValue.absent(),
+    RivetValue<MigratedUsers, String, String> fullName =
+        const RivetValue.absent(),
+    RivetValue<MigratedUsers, bool, bool> active = const RivetValue.absent(),
+  }) => MigratedUsersCompanion._(id: id, fullName: fullName, active: active);
+
+  /// Mutation value for `id`.
+  final RivetValue<MigratedUsers, int, int> id;
+
+  /// Mutation value for `fullName`.
+  final RivetValue<MigratedUsers, String, String> fullName;
+
+  /// Mutation value for `active`.
+  final RivetValue<MigratedUsers, bool, bool> active;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<MigratedUsers>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+    RivetAssignment('fullName', fullName),
+    RivetAssignment('active', active),
+  ];
+}
+
+final class _$MigratedUsersDB
+    extends RivetTableAccessor<MigratedUsers, MigratedUsersRow> {
+  const _$MigratedUsersDB();
+
+  @override
+  RivetTableSchema<MigratedUsers, MigratedUsersRow> buildSchema() {
+    MigratedUsers createDefinition() {
+      final definition = MigratedUsers();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    MigratedUsersRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => MigratedUsersRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      fullName: transport
+          ? definition.fullName.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.fullName.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      active: transport
+          ? definition.active.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.active.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+    );
+
+    return RivetTableSchema<MigratedUsers, MigratedUsersRow>(
+      schemaName: 'auth',
+      tableName: 'members',
+      renamedFrom: 'users',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.fullName as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'fullName', 'active'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.fullName as RivetColumn<Object?>,
+        definition.active as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<MigratedUsers, MigratedUsersRow> insert(
+    MigratedUsersCompanion companion, {
+    RivetOnConflict<MigratedUsers>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<MigratedUsers, MigratedUsersRow> insertMany(
+    Iterable<MigratedUsersCompanion> companions, {
+    RivetOnConflict<MigratedUsers>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<MigratedUsers, MigratedUsersRow> update(
+    MigratedUsersCompanion companion, {
+    RivetWhere<MigratedUsers>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<MigratedUsers, MigratedUsersRow> delete({
+    RivetWhere<MigratedUsers>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
 // **************************************************************************
 // RivetDatabaseGenerator
 // **************************************************************************
@@ -151,6 +301,32 @@ abstract class _$MigrationFixtureDatabase {
     RivetPoolOptions pool = const RivetPoolOptions(),
   }) {
     final schema = MigrationFixtureDatabaseRivetSchema.build();
+    return RivetDb.open(
+      name: schema.name,
+      connection: connection,
+      pool: pool,
+      tables: schema.tables,
+    );
+  }
+}
+
+/// Connection-free physical schema metadata for [MigratedFixtureDatabase].
+abstract final class MigratedFixtureDatabaseRivetSchema {
+  /// Builds the composed schema used by offline migration tooling.
+  static RivetDatabaseSchema build() => RivetDatabaseSchema(
+    name: 'migration_fixture',
+    tables: [
+      MigratedUsers.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+    ],
+  );
+}
+
+abstract class _$MigratedFixtureDatabase {
+  Future<RivetDb> open({
+    required RivetConnection connection,
+    RivetPoolOptions pool = const RivetPoolOptions(),
+  }) {
+    final schema = MigratedFixtureDatabaseRivetSchema.build();
     return RivetDb.open(
       name: schema.name,
       connection: connection,
