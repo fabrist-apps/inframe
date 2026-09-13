@@ -336,6 +336,16 @@ void main() {
         ),
         throwsA(isA<UnsupportedError>()),
       );
+      final migrationFile = _lastArtifactFile(directory, 'migration.json');
+      final editedMigration = jsonDecode(migrationFile.readAsStringSync()) as Map<String, Object?>;
+      final editedPhases = (editedMigration['phases']! as List<Object?>)
+          .cast<Map<String, Object?>>();
+      editedPhases.first['platforms'] = ['postgresql', 'review-edit'];
+      migrationFile.writeAsStringSync(jsonEncode(editedMigration));
+      await expectLater(
+        const RivetMigrationChecker().check(directory: directory),
+        throwsA(isA<FormatException>()),
+      );
     });
 
     test('should create one shared native enum before scalar and array columns', () async {
@@ -399,7 +409,101 @@ void main() {
         hasLength(1),
       );
     });
+
+    test('should separate enum additions from later uses and preserve rename identities', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'native enum',
+      );
+      final before = _lastArtifact(directory, 'snapshot.json');
+      final oldEnum = (before['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final oldValues = (oldEnum['values']! as List<Object?>).cast<Map<String, Object?>>();
+      final declaredEnum =
+          ((declaration['enums']! as List<Object?>).single! as Map<String, Object?>)
+            ..['name'] = 'state'
+            ..['renamedFrom'] = 'mood'
+            ..['values'] = [
+              {'dartName': 'queued', 'label': 'queued'},
+              {'dartName': 'running', 'label': 'running'},
+              {'dartName': 'complete', 'label': 'complete', 'renamedFrom': 'done'},
+            ];
+      for (final table in declaration['tables']! as List<Object?>) {
+        for (final column in (table! as Map<String, Object?>)['columns']! as List<Object?>) {
+          _renameEnumStorage((column! as Map<String, Object?>)['storage']! as Map<String, Object?>);
+        }
+      }
+      final jobs = (declaration['tables']! as List<Object?>).first! as Map<String, Object?>;
+      ((jobs['columns']! as List<Object?>).first! as Map<String, Object?>)['default'] = {
+        'formatVersion': 1,
+        'kind': 'literal',
+        'literalType': 'string',
+        'value': 'running',
+      };
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'evolve enum',
+      );
+      final after = _lastArtifact(directory, 'snapshot.json');
+      final migration = _lastArtifact(directory, 'migration.json');
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      final nextEnum = (after['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final nextValues = (nextEnum['values']! as List<Object?>).cast<Map<String, Object?>>();
+      final phases = (migration['phases']! as List<Object?>).cast<Map<String, Object?>>();
+
+      expect(nextEnum['id'], oldEnum['id']);
+      expect(nextValues.first['id'], oldValues.first['id']);
+      expect(nextValues.last['id'], oldValues.last['id']);
+      expect(nextValues.map((value) => value['label']), ['queued', 'running', 'complete']);
+      expect(sql, contains('ALTER TYPE "types"."mood" RENAME TO "state";'));
+      expect(sql, contains("RENAME VALUE 'done' TO 'complete';"));
+      expect(sql, contains("ADD VALUE 'running' BEFORE 'complete';"));
+      expect(phases, hasLength(3));
+      expect(
+        (phases[1]['statements']! as List<Object?>).single,
+        isA<Map<String, Object?>>(),
+      );
+      expect(
+        sql.indexOf("ADD VALUE 'running'"),
+        lessThan(sql.indexOf("SET DEFAULT 'running'")),
+      );
+      expect(
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'resolved enum hints',
+        ),
+        isNull,
+      );
+
+      final reorderedValues = declaredEnum['values']! as List<Object?>;
+      declaredEnum['values'] = [reorderedValues.last, reorderedValues.first, reorderedValues[1]];
+      await expectLater(
+        generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'unsupported reorder',
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
   });
+}
+
+void _renameEnumStorage(Map<String, Object?> storage) {
+  if (storage['kind'] == 'enum') {
+    storage['enum'] = {'schema': 'types', 'name': 'state'};
+  }
+  if (storage['element'] case final Map<String, Object?> element) {
+    _renameEnumStorage(element);
+  }
 }
 
 Map<String, Object?> _enumDeclaration() => {

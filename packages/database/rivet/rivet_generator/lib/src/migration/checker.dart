@@ -196,6 +196,7 @@ final class RivetArtifactChecker {
   void _validatePhases(Map<String, Object?> migration, String sql) {
     final bytes = utf8.encode(sql);
     final phaseIds = <String>{};
+    var previousEnd = -1;
     for (final (phaseIndex, rawPhase) in _list(migration['phases'], 'migration phases').indexed) {
       final phase = _map(rawPhase, 'phase $phaseIndex');
       final phaseId = phase['id'];
@@ -210,7 +211,6 @@ final class RivetArtifactChecker {
       if (phase['mode'] == 'transactional' && phase['recovery'] != null) {
         throw FormatException('Transactional phase $phaseId cannot have recovery metadata.');
       }
-      var previousEnd = -1;
       for (final rawStatement in _list(phase['statements'], 'phase statements')) {
         final statement = _map(rawStatement, 'statement range');
         final start = statement['startByte'];

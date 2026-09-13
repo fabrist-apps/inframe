@@ -22,6 +22,7 @@ void main() {
       await connection.execute('DROP SCHEMA IF EXISTS auth CASCADE');
       await connection.execute('DROP SCHEMA IF EXISTS work CASCADE');
       await connection.execute('DROP SCHEMA IF EXISTS fbr120 CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS enum_evolution CASCADE');
     });
 
     tearDown(() async {
@@ -200,7 +201,132 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should commit enum additions before later use and preserve stored data',
+      () async {
+        const generator = RivetMigrationGenerator();
+        final declaration = _evolvingEnumDeclaration();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial enum',
+        );
+        await _applyLastMigrationByPhase(connection, directory);
+        await connection.execute(
+          'INSERT INTO enum_evolution.jobs (id, status, statuses) '
+          "VALUES (1, 'done', ARRAY['queued', 'done']::enum_evolution.mood[])",
+        );
+
+        final enumValue = ((declaration['enums']! as List<Object?>).single! as Map<String, Object?>)
+          ..['name'] = 'state'
+          ..['renamedFrom'] = 'mood'
+          ..['values'] = [
+            {'dartName': 'queued', 'label': 'queued'},
+            {'dartName': 'running', 'label': 'running'},
+            {'dartName': 'complete', 'label': 'complete', 'renamedFrom': 'done'},
+          ];
+        final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+        final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
+        for (final column in columns) {
+          _renameEnumReference(column['storage']! as Map<String, Object?>);
+        }
+        columns[1]['default'] = {
+          'formatVersion': 1,
+          'kind': 'literal',
+          'literalType': 'string',
+          'value': 'running',
+        };
+
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'evolve enum',
+        );
+        expect(enumValue['name'], 'state');
+        final migration = _lastArtifact(directory, 'migration.json');
+        expect(migration['phases']! as List<Object?>, hasLength(3));
+        await _applyLastMigrationByPhase(connection, directory);
+        final existing = await connection.execute(
+          'SELECT status::text, statuses::text[] FROM enum_evolution.jobs WHERE id = 1',
+        );
+        expect(existing.single, [
+          'complete',
+          ['queued', 'complete'],
+        ]);
+        await connection.execute(
+          'INSERT INTO enum_evolution.jobs (id, statuses) '
+          "VALUES (2, ARRAY['running']::enum_evolution.state[])",
+        );
+        expect(
+          (await connection.execute(
+            'SELECT status::text FROM enum_evolution.jobs WHERE id = 2',
+          )).single.single,
+          'running',
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
+}
+
+Map<String, Object?> _evolvingEnumDeclaration() => {
+  'formatVersion': 1,
+  'dialect': 'rivet',
+  'name': 'enum_evolution',
+  'tables': [
+    {
+      'schema': 'enum_evolution',
+      'name': 'jobs',
+      'columns': [
+        _column('id', primaryKey: true),
+        {
+          'name': 'status',
+          'storage': _enumStorage(nullable: false),
+          'primaryKey': false,
+        },
+        {
+          'name': 'statuses',
+          'storage': {
+            'kind': 'array',
+            'nullable': false,
+            'codecVersion': 1,
+            'element': _enumStorage(nullable: false),
+          },
+          'primaryKey': false,
+        },
+      ],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+  ],
+  'enums': [
+    {
+      'schema': 'enum_evolution',
+      'name': 'mood',
+      'values': [
+        {'dartName': 'queued', 'label': 'queued'},
+        {'dartName': 'complete', 'label': 'done'},
+      ],
+    },
+  ],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _enumStorage({required bool nullable}) => {
+  'kind': 'enum',
+  'nullable': nullable,
+  'codecVersion': 1,
+  'enum': {'schema': 'enum_evolution', 'name': 'mood'},
+};
+
+void _renameEnumReference(Map<String, Object?> storage) {
+  if (storage['kind'] == 'enum') {
+    storage['enum'] = {'schema': 'enum_evolution', 'name': 'state'};
+  }
+  if (storage['element'] case final Map<String, Object?> element) {
+    _renameEnumReference(element);
+  }
 }
 
 Map<String, Object?> _constraintDeclaration() => {
@@ -331,5 +457,43 @@ Future<void> _applyLastMigration(pg.Connection connection, Directory directory) 
         ),
       );
     }
+  }
+}
+
+Map<String, Object?> _lastArtifact(Directory directory, String name) {
+  final journal =
+      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  return jsonDecode(File('${directory.path}/${entry['directory']}/$name').readAsStringSync())
+      as Map<String, Object?>;
+}
+
+Future<void> _applyLastMigrationByPhase(
+  pg.Connection connection,
+  Directory directory,
+) async {
+  final journal =
+      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  final migrationDirectory = '${directory.path}/${entry['directory']}';
+  final sqlBytes = File('$migrationDirectory/migration.sql').readAsBytesSync();
+  final migration = jsonDecode(
+    File('$migrationDirectory/migration.json').readAsStringSync(),
+  ) as Map<String, Object?>;
+  for (final rawPhase in migration['phases']! as List<Object?>) {
+    final phase = rawPhase! as Map<String, Object?>;
+    await connection.runTx((transaction) async {
+      for (final value in phase['statements']! as List<Object?>) {
+        final statement = value! as Map<String, Object?>;
+        await transaction.execute(
+          utf8.decode(
+            sqlBytes.sublist(
+              statement['startByte']! as int,
+              statement['endByte']! as int,
+            ),
+          ),
+        );
+      }
+    });
   }
 }

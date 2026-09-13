@@ -234,7 +234,8 @@ final class RivetArtifactGenerator {
 
     final migrationId = _nextId();
     snapshot['migrationId'] = migrationId;
-    final sql = _diffSql(previousSnapshot, snapshot);
+    final plan = _diffPlan(previousSnapshot, snapshot);
+    final sql = plan.sql;
     if (sql.isEmpty) {
       throw UnsupportedError(
         'The composed schema changed, but Rivet cannot generate its PostgreSQL DDL.',
@@ -246,16 +247,7 @@ final class RivetArtifactGenerator {
       'databaseId': databaseId,
       'id': migrationId,
       'parentId': previousEntry['id'],
-      'phases': [
-        {
-          'id': '0',
-          'scopeId': databaseId,
-          'mode': 'transactional',
-          'platforms': ['postgresql'],
-          'statements': _statementRanges(sql),
-          'recovery': null,
-        },
-      ],
+      'phases': _phaseMetadata(plan, databaseId),
     };
     final checksum = _checksum(metadata, snapshot, sql);
     final migration = {...metadata, 'checksum': checksum};
@@ -371,10 +363,7 @@ final class RivetArtifactGenerator {
       if (old == null && declared['renamedFrom'] is String) {
         final renamedFrom = declared['renamedFrom']! as String;
         final candidates = previousEnums.where(
-          (value) =>
-              previousSchemaNames[value['schemaId']] == schema &&
-              value['name'] == renamedFrom &&
-              !usedIds.contains(value['id']),
+          (value) => value['name'] == renamedFrom && !usedIds.contains(value['id']),
         );
         if (candidates.length != 1) {
           throw FormatException('Enum rename $schema.$renamedFrom -> $name has no unique source.');
@@ -740,6 +729,140 @@ final class RivetArtifactGenerator {
     }
     buffer.write(_addedObjectsSql(next, previous));
     return buffer.toString();
+  }
+
+  _MigrationPlan _diffPlan(Map<String, Object?> previous, Map<String, Object?> next) {
+    final phases = <String>[];
+    final enumChanges = _enumChangeSql(previous, next);
+    if (enumChanges.ordinary.isNotEmpty) phases.add(enumChanges.ordinary);
+    phases.addAll(enumChanges.additions.where((sql) => sql.isNotEmpty));
+    final ordinary = _diffSql(previous, next);
+    if (ordinary.isNotEmpty) phases.add(ordinary);
+    return _MigrationPlan(phases);
+  }
+
+  ({String ordinary, List<String> additions}) _enumChangeSql(
+    Map<String, Object?> previous,
+    Map<String, Object?> next,
+  ) {
+    final previousSchemas = _schemaNames(previous);
+    final nextSchemas = _schemaNames(next);
+    final oldEnums = {
+      for (final value in (previous['enums']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value,
+    };
+    final newEnums = {
+      for (final value in (next['enums']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value,
+    };
+    final ordinary = StringBuffer();
+    final additions = <String>[];
+    for (final entry in newEnums.entries) {
+      final nextEnum = entry.value;
+      final oldEnum = oldEnums[entry.key];
+      final nextQualified =
+          '${_quote(nextSchemas[nextEnum['schemaId']]!)}.'
+          '${_quote(nextEnum['name']! as String)}';
+      if (oldEnum == null) {
+        final labels = (nextEnum['values']! as List<Object?>)
+            .cast<Map<String, Object?>>()
+            .map((value) => _stringLiteral(value['label']! as String))
+            .join(', ');
+        ordinary.writeln('CREATE TYPE $nextQualified AS ENUM ($labels);');
+        continue;
+      }
+      final oldSchema = previousSchemas[oldEnum['schemaId']]!;
+      final nextSchema = nextSchemas[nextEnum['schemaId']]!;
+      var currentQualified = '${_quote(oldSchema)}.${_quote(oldEnum['name']! as String)}';
+      if (oldSchema != nextSchema) {
+        ordinary
+          ..writeln('CREATE SCHEMA IF NOT EXISTS ${_quote(nextSchema)};')
+          ..writeln('ALTER TYPE $currentQualified SET SCHEMA ${_quote(nextSchema)};');
+        currentQualified = '${_quote(nextSchema)}.${_quote(oldEnum['name']! as String)}';
+      }
+      if (oldEnum['name'] != nextEnum['name']) {
+        ordinary.writeln(
+          'ALTER TYPE $currentQualified RENAME TO ${_quote(nextEnum['name']! as String)};',
+        );
+      }
+      final oldValues = {
+        for (final value in (oldEnum['values']! as List<Object?>).cast<Map<String, Object?>>())
+          value['id']! as String: value,
+      };
+      final nextValues = (nextEnum['values']! as List<Object?>).cast<Map<String, Object?>>();
+      final nextIds = nextValues.map((value) => value['id']! as String).toList(growable: false);
+      final retainedOldIds = (oldEnum['values']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map((value) => value['id']! as String)
+          .where(nextIds.contains)
+          .toList(growable: false);
+      final retainedNextIds = nextIds.where(oldValues.containsKey).toList(growable: false);
+      if (canonicalJson(retainedOldIds) != canonicalJson(retainedNextIds)) {
+        throw UnsupportedError(
+          'Reordering enum ${nextEnum['name']} requires a native enum rebuild migration.',
+        );
+      }
+      final removed = oldValues.keys.where((id) => !nextIds.contains(id));
+      if (removed.isNotEmpty) {
+        throw UnsupportedError(
+          'Removing labels from enum ${nextEnum['name']} requires an explicit data transformation.',
+        );
+      }
+      for (final value in nextValues) {
+        final oldValue = oldValues[value['id']];
+        if (oldValue != null && oldValue['label'] != value['label']) {
+          ordinary.writeln(
+            'ALTER TYPE $nextQualified RENAME VALUE ${_stringLiteral(oldValue['label']! as String)} '
+            'TO ${_stringLiteral(value['label']! as String)};',
+          );
+        }
+      }
+      final availableIds = oldValues.keys.toSet();
+      for (var index = 0; index < nextValues.length; index++) {
+        final value = nextValues[index];
+        final id = value['id']! as String;
+        if (availableIds.contains(id)) continue;
+        final following = nextValues
+            .skip(index + 1)
+            .where(
+              (candidate) => availableIds.contains(candidate['id']),
+            );
+        final position = following.isNotEmpty
+            ? ' BEFORE ${_stringLiteral(following.first['label']! as String)}'
+            : index > 0
+            ? ' AFTER ${_stringLiteral(nextValues[index - 1]['label']! as String)}'
+            : '';
+        additions.add(
+          'ALTER TYPE $nextQualified ADD VALUE ${_stringLiteral(value['label']! as String)}$position;\n',
+        );
+        availableIds.add(id);
+      }
+    }
+    return (ordinary: ordinary.toString(), additions: additions);
+  }
+
+  List<Map<String, Object?>> _phaseMetadata(_MigrationPlan plan, String databaseId) {
+    var byteOffset = 0;
+    final phases = <Map<String, Object?>>[];
+    for (final (index, phaseSql) in plan.phases.indexed) {
+      final ranges = [
+        for (final range in _statementRanges(phaseSql))
+          {
+            'startByte': range['startByte']! + byteOffset,
+            'endByte': range['endByte']! + byteOffset,
+          },
+      ];
+      phases.add({
+        'id': '$index',
+        'scopeId': databaseId,
+        'mode': 'transactional',
+        'platforms': ['postgresql'],
+        'statements': ranges,
+        'recovery': null,
+      });
+      byteOffset += utf8.encode(phaseSql).length;
+    }
+    return phases;
   }
 
   void _writeColumnDiff(
@@ -1131,4 +1254,11 @@ final class RivetArtifactGenerator {
     final List<Object?> list => [for (final item in list) _sorted(item)],
     _ => value,
   };
+}
+
+final class _MigrationPlan {
+  const _MigrationPlan(this.phases);
+
+  final List<String> phases;
+  String get sql => phases.join();
 }
