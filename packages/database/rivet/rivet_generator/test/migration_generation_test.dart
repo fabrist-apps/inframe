@@ -337,8 +337,127 @@ void main() {
         throwsA(isA<UnsupportedError>()),
       );
     });
+
+    test('should create one shared native enum before scalar and array columns', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'native enum',
+      );
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      final snapshot = _lastArtifact(directory, 'snapshot.json');
+      final enumValue = (snapshot['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final values = (enumValue['values']! as List<Object?>).cast<Map<String, Object?>>();
+      final tables = (snapshot['tables']! as List<Object?>).cast<Map<String, Object?>>();
+      final storages = [
+        for (final table in tables)
+          for (final column in table['columns']! as List<Object?>)
+            (column! as Map<String, Object?>)['storage']! as Map<String, Object?>,
+      ];
+
+      expect('CREATE TYPE'.allMatches(sql), hasLength(1));
+      expect(sql.indexOf('CREATE TYPE'), lessThan(sql.indexOf('CREATE TABLE')));
+      expect(sql, contains('CREATE TYPE "types"."mood" AS ENUM (\'queued\', \'done\');'));
+      expect(values.map((value) => value['label']), ['queued', 'done']);
+      expect(values.map((value) => value['id']).toSet(), hasLength(2));
+      expect(storages.first['enumId'], enumValue['id']);
+      expect((storages.last['element']! as Map<String, Object?>)['enumId'], enumValue['id']);
+      final declaredValues =
+          ((declaration['enums']! as List<Object?>).single! as Map<String, Object?>)['values']!
+              as List<Object?>;
+      (declaredValues.last! as Map<String, Object?>)['dartName'] = 'finished';
+      expect(
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'no enum change',
+        ),
+        isNull,
+      );
+      final declaredEnum = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      declaredEnum['values'] = [
+        {'dartName': 'first', 'label': 'same'},
+        {'dartName': 'second', 'label': 'same'},
+      ];
+      await expectLater(
+        generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'invalid enum',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        (jsonDecode(File('${directory.path}/journal.json').readAsStringSync())
+            as Map<String, Object?>)['entries'],
+        hasLength(1),
+      );
+    });
   });
 }
+
+Map<String, Object?> _enumDeclaration() => {
+  'formatVersion': 1,
+  'dialect': 'rivet',
+  'name': 'enums',
+  'tables': [
+    {
+      'schema': 'auth',
+      'name': 'jobs',
+      'columns': [_enumColumn('mood')],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+    {
+      'schema': 'work',
+      'name': 'queues',
+      'columns': [
+        {
+          'name': 'moods',
+          'storage': {
+            'kind': 'array',
+            'nullable': true,
+            'codecVersion': 1,
+            'element': _enumStorage(nullable: true),
+          },
+          'primaryKey': false,
+        },
+      ],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+  ],
+  'enums': [
+    {
+      'schema': 'types',
+      'name': 'mood',
+      'values': [
+        {'dartName': 'queued', 'label': 'queued'},
+        {'dartName': 'complete', 'label': 'done'},
+      ],
+    },
+  ],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _enumColumn(String name) => {
+  'name': name,
+  'storage': _enumStorage(nullable: false),
+  'primaryKey': false,
+};
+
+Map<String, Object?> _enumStorage({required bool nullable}) => {
+  'kind': 'enum',
+  'nullable': nullable,
+  'codecVersion': 1,
+  'enum': {'schema': 'types', 'name': 'mood'},
+};
 
 Map<String, Object?> _constraintDeclaration() => {
   'formatVersion': 1,

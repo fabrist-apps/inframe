@@ -136,8 +136,9 @@ final class RivetDatabaseSchema {
             'name': entry.value.typeName,
             if (entry.value.renamedFrom case final renamedFrom?) 'renamedFrom': renamedFrom,
             'values': [
-              for (final label in entry.value.labels)
+              for (final (index, label) in entry.value.labels.indexed)
                 {
+                  'dartName': entry.value.values[index].name,
                   'label': label,
                   if (entry.value.renamedLabels[label] case final renamedFrom?)
                     'renamedFrom': renamedFrom,

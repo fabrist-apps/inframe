@@ -75,6 +75,7 @@ final class RivetArtifactChecker {
     final schemaIds = <String>{};
     final tableIds = <String>{};
     final columnOwners = <String, String>{};
+    final enumIds = <String>{};
     for (final raw in _list(snapshot['schemas'], 'snapshot schemas')) {
       final schema = _map(raw, 'snapshot schema');
       final id = _id(schema['id'], 'schema identity');
@@ -88,6 +89,7 @@ final class RivetArtifactChecker {
         final id = _id(value['id'], '$group identity');
         if (!ids.add(id)) throw FormatException('Duplicate snapshot identity `$id`.');
         if (group == 'tables') tableIds.add(id);
+        if (group == 'enums') enumIds.add(id);
         if (!schemaIds.contains(value['schemaId'])) {
           throw FormatException('$group entry $id references an unknown schema.');
         }
@@ -107,6 +109,9 @@ final class RivetArtifactChecker {
               throw FormatException('$childGroup entry $id references the wrong table.');
             }
             if (childGroup == 'columns') columnOwners[id] = value['id']! as String;
+            if (childGroup == 'values' && child['enumId'] != value['id']) {
+              throw FormatException('Enum value $id references the wrong enum.');
+            }
           }
         }
       }
@@ -114,6 +119,12 @@ final class RivetArtifactChecker {
     for (final rawTable in _list(snapshot['tables'], 'snapshot tables')) {
       final table = _map(rawTable, 'snapshot table');
       final tableId = table['id']! as String;
+      for (final rawColumn in _list(table['columns'], 'table columns')) {
+        _validateStorageReferences(
+          _map(rawColumn, 'table column')['storage']! as Map<String, Object?>,
+          enumIds,
+        );
+      }
       for (final rawIndex in _list(table['indexes'], 'table indexes')) {
         final index = _map(rawIndex, 'table index');
         for (final rawTerm in _list(index['terms'], 'index terms')) {
@@ -153,6 +164,15 @@ final class RivetArtifactChecker {
       }
     }
     _list(snapshot['requirements'], 'snapshot requirements');
+  }
+
+  void _validateStorageReferences(Map<String, Object?> storage, Set<String> enumIds) {
+    if (storage['kind'] == 'enum' && !enumIds.contains(storage['enumId'])) {
+      throw const FormatException('Enum storage references an unknown type.');
+    }
+    if (storage['element'] case final Map<String, Object?> element) {
+      _validateStorageReferences(element, enumIds);
+    }
   }
 
   void _validateExpressionReferences(
@@ -231,16 +251,35 @@ final class RivetArtifactChecker {
         columnNames[column['id']! as String] = column['name']! as String;
       }
     }
+    final enumNames = <String, ({String schema, String name})>{};
+    final physicalEnums = <Map<String, Object?>>[];
+    for (final raw in _list(snapshot['enums'], 'snapshot enums')) {
+      final value = _map(raw, 'snapshot enum');
+      final physical = <String, Object?>{
+        'schema': schemaNames[value['schemaId']],
+        'name': value['name'],
+        'values': [
+          for (final rawValue in _list(value['values'], 'enum values'))
+            {'label': _map(rawValue, 'enum value')['label']},
+        ],
+      };
+      enumNames[value['id']! as String] = (
+        schema: physical['schema']! as String,
+        name: physical['name']! as String,
+      );
+      physicalEnums.add(physical);
+    }
+    physicalEnums.sort(_byPhysicalName);
     final tables = [
       for (final table in snapshotTables)
-        _stripSnapshotTable(table, schemaNames, tablesById, columnNames),
+        _stripSnapshotTable(table, schemaNames, tablesById, columnNames, enumNames),
     ]..sort(_byPhysicalName);
     return {
       'formatVersion': 1,
       'dialect': 'rivet',
       'name': null,
       'tables': tables,
-      'enums': _list(snapshot['enums'], 'snapshot enums'),
+      'enums': physicalEnums,
       'requirements': _list(snapshot['requirements'], 'snapshot requirements'),
     };
   }
@@ -256,7 +295,9 @@ final class RivetArtifactChecker {
       'dialect': 'rivet',
       'name': null,
       'tables': tables,
-      'enums': _withoutRenameHints(_list(normalized['enums'], 'declaration enums')),
+      'enums': _physicalDeclarationEnums(
+        _list(normalized['enums'], 'declaration enums'),
+      ),
       'requirements': _list(normalized['requirements'], 'declaration requirements'),
     };
   }
@@ -266,12 +307,13 @@ final class RivetArtifactChecker {
     Map<String, String> schemaNames,
     Map<String, Map<String, Object?>> tablesById,
     Map<String, String> columnNames,
+    Map<String, ({String schema, String name})> enumNames,
   ) => {
     'schema': schemaNames[table['schemaId']],
     'name': table['name'],
     'columns': [
       for (final raw in _list(table['columns'], 'table columns'))
-        _withoutKeys(_map(raw, 'table column'), {'id', 'tableId'}),
+        _stripSnapshotColumn(_map(raw, 'table column'), enumNames),
     ],
     'indexes': [
       for (final raw in _list(table['indexes'], 'table indexes'))
@@ -288,6 +330,50 @@ final class RivetArtifactChecker {
           ),
     ],
   };
+
+  Map<String, Object?> _stripSnapshotColumn(
+    Map<String, Object?> column,
+    Map<String, ({String schema, String name})> enumNames,
+  ) => {
+    ..._withoutKeys(column, {'id', 'tableId'}),
+    'storage': _storageNames(column['storage']! as Map<String, Object?>, enumNames),
+  };
+
+  Map<String, Object?> _storageNames(
+    Map<String, Object?> storage,
+    Map<String, ({String schema, String name})> enumNames,
+  ) {
+    if (storage['kind'] == 'enum') {
+      final value = enumNames[storage['enumId']];
+      return {
+        ..._withoutKeys(storage, {'enumId'}),
+        'enum': {'schema': value?.schema, 'name': value?.name},
+      };
+    }
+    return {
+      ...storage,
+      if (storage['element'] case final Map<String, Object?> element)
+        'element': _storageNames(element, enumNames),
+    };
+  }
+
+  List<Object?> _physicalDeclarationEnums(List<Object?> values) {
+    final enums = [
+      for (final raw in values)
+        {
+          'schema': _map(raw, 'declaration enum')['schema'],
+          'name': _map(raw, 'declaration enum')['name'],
+          'values': [
+            for (final rawValue in _list(
+              _map(raw, 'declaration enum')['values'],
+              'declaration enum values',
+            ))
+              {'label': _map(rawValue, 'declaration enum value')['label']},
+          ],
+        },
+    ]..sort(_byPhysicalName);
+    return enums;
+  }
 
   Map<String, Object?> _stripSnapshotIndex(
     Map<String, Object?> index,

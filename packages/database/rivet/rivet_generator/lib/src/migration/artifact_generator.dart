@@ -112,6 +112,10 @@ final class RivetArtifactGenerator {
     for (final table in declaredTables) {
       schemaIds.putIfAbsent(table['schema']! as String, _nextId);
     }
+    for (final rawEnum in declaration['enums']! as List<Object?>) {
+      final declaredEnum = rawEnum! as Map<String, Object?>;
+      schemaIds.putIfAbsent(declaredEnum['schema']! as String, _nextId);
+    }
     final previousTables = (previous['tables']! as List<Object?>).cast<Map<String, Object?>>();
     final usedTableIds = <String>{};
     final tables = <Map<String, Object?>>[];
@@ -185,6 +189,13 @@ final class RivetArtifactGenerator {
         'constraints': declaredTable['constraints'],
       });
     }
+    final enums = _settleEnums(
+      declaration,
+      (previous['enums']! as List<Object?>).cast<Map<String, Object?>>(),
+      schemaIds,
+      previousSchemaNames,
+    );
+    _settleEnumStorage(tables, enums, schemas: schemaIds);
     _settleTableObjects(tables, declaredTables, previousTables, previousSchemaNames);
     tables.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
     final schemas = [
@@ -197,7 +208,7 @@ final class RivetArtifactGenerator {
       'migrationId': '',
       'schemas': schemas,
       'tables': tables,
-      'enums': previous['enums'],
+      'enums': enums,
       'requirements': declaration['requirements'],
     };
   }
@@ -289,6 +300,10 @@ final class RivetArtifactGenerator {
     for (final table in declaredTables) {
       schemaIds.putIfAbsent(table['schema']! as String, _nextId);
     }
+    for (final rawEnum in declaration['enums']! as List<Object?>) {
+      final declaredEnum = rawEnum! as Map<String, Object?>;
+      schemaIds.putIfAbsent(declaredEnum['schema']! as String, _nextId);
+    }
     final schemas = [
       for (final entry in schemaIds.entries) {'id': entry.value, 'name': entry.key},
     ]..sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
@@ -315,6 +330,8 @@ final class RivetArtifactGenerator {
         'constraints': declaredTable['constraints'],
       });
     }
+    final enums = _settleEnums(declaration, const [], schemaIds, const {});
+    _settleEnumStorage(tables, enums, schemas: schemaIds);
     _settleTableObjects(tables, declaredTables, const [], const {});
     tables.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
 
@@ -325,9 +342,131 @@ final class RivetArtifactGenerator {
       'migrationId': '',
       'schemas': schemas,
       'tables': tables,
-      'enums': <Object?>[],
+      'enums': enums,
       'requirements': declaration['requirements'],
     };
+  }
+
+  List<Map<String, Object?>> _settleEnums(
+    Map<String, Object?> declaration,
+    List<Map<String, Object?>> previousEnums,
+    Map<String, String> schemaIds,
+    Map<Object?, String> previousSchemaNames,
+  ) {
+    final usedIds = <String>{};
+    final declaredNames = <String>{};
+    final enums = <Map<String, Object?>>[];
+    for (final raw in declaration['enums']! as List<Object?>) {
+      final declared = raw! as Map<String, Object?>;
+      final schema = declared['schema']! as String;
+      final name = declared['name']! as String;
+      if (!declaredNames.add('$schema.$name')) {
+        throw FormatException('Duplicate Rivet enum declaration $schema.$name.');
+      }
+      var old = previousEnums
+          .where(
+            (value) => previousSchemaNames[value['schemaId']] == schema && value['name'] == name,
+          )
+          .singleOrNull;
+      if (old == null && declared['renamedFrom'] is String) {
+        final renamedFrom = declared['renamedFrom']! as String;
+        final candidates = previousEnums.where(
+          (value) =>
+              previousSchemaNames[value['schemaId']] == schema &&
+              value['name'] == renamedFrom &&
+              !usedIds.contains(value['id']),
+        );
+        if (candidates.length != 1) {
+          throw FormatException('Enum rename $schema.$renamedFrom -> $name has no unique source.');
+        }
+        old = candidates.single;
+      }
+      if (old != null && !usedIds.add(old['id']! as String)) {
+        throw FormatException('Several enum declarations resolve to ${old['name']}.');
+      }
+      if (old == null &&
+          (declared['renamedFrom'] != null ||
+              (declared['values']! as List<Object?>).any(
+                (value) => (value! as Map<String, Object?>)['renamedFrom'] != null,
+              ))) {
+        throw const FormatException('Enum rename hints require a matching previous snapshot.');
+      }
+      final oldValues = old == null
+          ? const <Map<String, Object?>>[]
+          : (old['values']! as List<Object?>).cast<Map<String, Object?>>();
+      final usedValueIds = <String>{};
+      final declaredLabels = <String>{};
+      final values = <Map<String, Object?>>[];
+      for (final rawValue in declared['values']! as List<Object?>) {
+        final value = rawValue! as Map<String, Object?>;
+        final label = value['label']! as String;
+        if (!declaredLabels.add(label)) {
+          throw FormatException('Enum $schema.$name has duplicate label `$label`.');
+        }
+        var oldValue = oldValues.where((candidate) => candidate['label'] == label).singleOrNull;
+        if (oldValue == null && value['renamedFrom'] is String) {
+          final renamedFrom = value['renamedFrom']! as String;
+          final candidates = oldValues.where(
+            (candidate) =>
+                candidate['label'] == renamedFrom && !usedValueIds.contains(candidate['id']),
+          );
+          if (candidates.length != 1) {
+            throw FormatException('Enum label rename $renamedFrom -> $label has no unique source.');
+          }
+          oldValue = candidates.single;
+        }
+        if (oldValue != null && !usedValueIds.add(oldValue['id']! as String)) {
+          throw FormatException('Several enum values resolve to ${oldValue['label']}.');
+        }
+        values.add({
+          'id': oldValue?['id'] as String? ?? _nextId(),
+          'enumId': old?['id'],
+          'label': label,
+        });
+      }
+      final enumId = old?['id'] as String? ?? _nextId();
+      for (final value in values) {
+        value['enumId'] = enumId;
+      }
+      enums.add({
+        'id': enumId,
+        'schemaId': schemaIds[schema],
+        'name': name,
+        'values': values,
+      });
+    }
+    enums.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
+    return enums;
+  }
+
+  void _settleEnumStorage(
+    List<Map<String, Object?>> tables,
+    List<Map<String, Object?>> enums, {
+    required Map<String, String> schemas,
+  }) {
+    final byName = {
+      for (final value in enums)
+        '${schemas.entries.singleWhere((entry) => entry.value == value['schemaId']).key}.${value['name']}':
+            value['id']! as String,
+    };
+    Map<String, Object?> settle(Map<String, Object?> storage) {
+      if (storage['kind'] == 'enum') {
+        final reference = storage['enum']! as Map<String, Object?>;
+        final enumId = byName['${reference['schema']}.${reference['name']}'];
+        if (enumId == null) throw const FormatException('Enum column references an unknown type.');
+        return {..._withoutKey(storage, 'enum'), 'enumId': enumId};
+      }
+      if (storage['element'] case final Map<String, Object?> element) {
+        return {...storage, 'element': settle(element)};
+      }
+      return storage;
+    }
+
+    for (final table in tables) {
+      for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>()) {
+        column['storage'] = settle(column['storage']! as Map<String, Object?>);
+      }
+    }
   }
 
   void _settleTableObjects(
@@ -504,21 +643,35 @@ final class RivetArtifactGenerator {
     for (final schema in schemas) {
       buffer.writeln('CREATE SCHEMA IF NOT EXISTS ${_quote(schema['name']! as String)};');
     }
+    final enumTypes = _enumTypes(snapshot, schemaNames.cast<String, String>());
+    for (final enumValue in (snapshot['enums']! as List<Object?>).cast<Map<String, Object?>>()) {
+      final labels = (enumValue['values']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map((value) => _stringLiteral(value['label']! as String))
+          .join(', ');
+      buffer.writeln('CREATE TYPE ${enumTypes[enumValue['id']]} AS ENUM ($labels);');
+    }
     for (final table in (snapshot['tables']! as List<Object?>).cast<Map<String, Object?>>()) {
-      buffer.write(_createTableSql(table, schemaNames.cast<String, String>()));
+      buffer.write(_createTableSql(table, schemaNames.cast<String, String>(), enumTypes));
     }
     buffer.write(_addedObjectsSql(snapshot, const {}));
     return buffer.toString();
   }
 
-  String _postgresType(Map<String, Object?> storage) => switch (storage['kind']) {
+  String _postgresType(
+    Map<String, Object?> storage, [
+    Map<String, String> enumTypes = const {},
+  ]) => switch (storage['kind']) {
     'text' => 'text',
     'integer' => 'int4',
     'real' => 'float8',
     'boolean' => 'bool',
     'dateTime' => 'timestamptz(3)',
     'json' => 'jsonb',
-    'array' => '${_postgresType(storage['element']! as Map<String, Object?>)}[]',
+    'enum' =>
+      enumTypes[storage['enumId']] ??
+          (throw const FormatException('Enum storage references an unknown type.')),
+    'array' => '${_postgresType(storage['element']! as Map<String, Object?>, enumTypes)}[]',
     final kind => throw UnsupportedError('Rivet migrations do not support $kind columns yet.'),
   };
 
@@ -549,6 +702,7 @@ final class RivetArtifactGenerator {
       for (final value in (next['tables']! as List<Object?>).cast<Map<String, Object?>>())
         value['id']! as String: value,
     };
+    final nextEnumTypes = _enumTypes(next, nextSchemas);
     final buffer = StringBuffer()..write(_droppedObjectsSql(previous, next));
     for (final entry in nextSchemas.entries) {
       if (!previousSchemas.containsKey(entry.key)) {
@@ -567,7 +721,7 @@ final class RivetArtifactGenerator {
       final nextTable = entry.value;
       final previousTable = previousTables[entry.key];
       if (previousTable == null) {
-        buffer.write(_createTableSql(nextTable, nextSchemas));
+        buffer.write(_createTableSql(nextTable, nextSchemas, nextEnumTypes));
         continue;
       }
       final oldSchema = previousSchemas[previousTable['schemaId']]!;
@@ -582,7 +736,7 @@ final class RivetArtifactGenerator {
         );
         qualifiedTable = '${_quote(newSchema)}.${_quote(nextTable['name']! as String)}';
       }
-      _writeColumnDiff(buffer, qualifiedTable, previousTable, nextTable);
+      _writeColumnDiff(buffer, qualifiedTable, previousTable, nextTable, nextEnumTypes);
     }
     buffer.write(_addedObjectsSql(next, previous));
     return buffer.toString();
@@ -593,6 +747,7 @@ final class RivetArtifactGenerator {
     String qualifiedTable,
     Map<String, Object?> previousTable,
     Map<String, Object?> nextTable,
+    Map<String, String> enumTypes,
   ) {
     final previousColumns = {
       for (final value in (previousTable['columns']! as List<Object?>).cast<Map<String, Object?>>())
@@ -609,7 +764,7 @@ final class RivetArtifactGenerator {
         final storage = nextColumn['storage']! as Map<String, Object?>;
         buffer.writeln(
           'ALTER TABLE $qualifiedTable ADD COLUMN ${_quote(nextColumn['name']! as String)} '
-          '${_postgresType(storage)}${_defaultSql(nextColumn)}'
+          '${_postgresType(storage, enumTypes)}${_defaultSql(nextColumn)}'
           '${storage['nullable'] == true ? '' : ' NOT NULL'};',
         );
         continue;
@@ -626,7 +781,7 @@ final class RivetArtifactGenerator {
       final newStorage = nextColumn['storage']! as Map<String, Object?>;
       if (canonicalJson(_withoutKey(oldStorage, 'nullable')) !=
           canonicalJson(_withoutKey(newStorage, 'nullable'))) {
-        final type = _postgresType(newStorage);
+        final type = _postgresType(newStorage, enumTypes);
         buffer.writeln(
           'ALTER TABLE $qualifiedTable ALTER COLUMN ${_quote(columnName)} '
           'TYPE $type USING ${_quote(columnName)}::$type;',
@@ -658,6 +813,7 @@ final class RivetArtifactGenerator {
   String _createTableSql(
     Map<String, Object?> table,
     Map<String, String> schemaNames,
+    Map<String, String> enumTypes,
   ) {
     final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
     final buffer = StringBuffer()
@@ -669,7 +825,7 @@ final class RivetArtifactGenerator {
       final column = columns[index];
       final storage = column['storage']! as Map<String, Object?>;
       buffer.writeln(
-        '  ${_quote(column['name']! as String)} ${_postgresType(storage)}'
+        '  ${_quote(column['name']! as String)} ${_postgresType(storage, enumTypes)}'
         '${storage['nullable'] == true ? '' : ' NOT NULL'}'
         '${_defaultSql(column)}${index == columns.length - 1 ? '' : ','}',
       );
@@ -847,6 +1003,15 @@ final class RivetArtifactGenerator {
       schema['id']! as String: schema['name']! as String,
   };
 
+  Map<String, String> _enumTypes(
+    Map<String, Object?> snapshot,
+    Map<String, String> schemaNames,
+  ) => {
+    for (final value in (snapshot['enums']! as List<Object?>).cast<Map<String, Object?>>())
+      value['id']! as String:
+          '${_quote(schemaNames[value['schemaId']]!)}.${_quote(value['name']! as String)}',
+  };
+
   List<Map<String, Object?>> _objects(Map<String, Object?> table, String key) =>
       (table[key]! as List<Object?>).cast<Map<String, Object?>>();
 
@@ -945,6 +1110,8 @@ final class RivetArtifactGenerator {
   }
 
   String _quote(String identifier) => '"${identifier.replaceAll('"', '""')}"';
+
+  String _stringLiteral(String value) => "'${value.replaceAll("'", "''")}'";
 
   void _writeText(File file, String contents) {
     file.writeAsBytesSync(utf8.encode(contents), flush: true);

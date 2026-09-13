@@ -322,6 +322,30 @@ void main() {
       expect(table.code.storage.asc(), isA<RivetOrder>());
     });
 
+    test('should compose one native enum declaration for scalar and array storage', () {
+      final declaration = RivetDatabaseSchema(
+        name: 'enum_fixture',
+        tables: [EnumValues.db.buildSchema()],
+      ).toJson();
+      final enumValue = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
+
+      expect(enumValue['schema'], 'fbr120');
+      expect(enumValue['name'], 'workStatus');
+      expect(enumValue['values'], [
+        {'dartName': 'queued', 'label': 'zeta'},
+        {'dartName': 'complete', 'label': 'alpha'},
+      ]);
+      expect(
+        (columns.first['storage']! as Map<String, Object?>)['enum'],
+        {'schema': 'fbr120', 'name': 'workStatus'},
+      );
+      final arrayStorage = columns[2]['storage']! as Map<String, Object?>;
+      expect(arrayStorage['nullable'], false);
+      expect((arrayStorage['element']! as Map<String, Object?>)['nullable'], true);
+    });
+
     test('should reject incompatible foreign-key storage before connecting', () async {
       final connection = RivetConnection.url(
         'postgresql://localhost/unused',

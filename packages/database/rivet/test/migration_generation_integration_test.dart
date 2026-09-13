@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:postgres/postgres.dart' as pg;
+import 'package:rivet/rivet.dart';
 import 'package:rivet_generator/rivet_generator.dart';
 import 'package:test/test.dart';
 
+import 'generated_consumer.dart';
 import 'migration_fixture.dart';
 
 void main() {
@@ -19,6 +21,7 @@ void main() {
       connection = await pg.Connection.openFromUrl(databaseUrl);
       await connection.execute('DROP SCHEMA IF EXISTS auth CASCADE');
       await connection.execute('DROP SCHEMA IF EXISTS work CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS fbr120 CASCADE');
     });
 
     tearDown(() async {
@@ -150,6 +153,50 @@ void main() {
           indexDefinition.single.single,
           allOf(contains('(email)'), contains('WHERE (active = true)')),
         );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should round-trip scalar and array values through one generated native enum type',
+      () async {
+        await const RivetMigrationGenerator().generate(
+          schema: RivetDatabaseSchema(
+            name: 'enum_fixture',
+            tables: [EnumValues.db.buildSchema()],
+          ),
+          directory: directory,
+          name: 'native enum',
+        );
+        await _applyLastMigration(connection, directory);
+        final database = await RivetTestDatabase().open(
+          connection: RivetConnection.url(databaseUrl!, sslMode: RivetSslMode.disable),
+        );
+        addTearDown(database.close);
+
+        await EnumValues.db
+            .insert(
+              EnumValuesCompanion.insert(
+                status: const RivetValue.present(WorkStatus.queued),
+                nullableStatuses: const RivetValue.present([
+                  WorkStatus.queued,
+                  null,
+                  WorkStatus.complete,
+                ]),
+                mappedStatus: const RivetValue.present(WorkState(WorkStatus.complete)),
+              ),
+            )
+            .execute(database);
+        final row = (await EnumValues.db.find().get(database)).single;
+
+        expect(row.status, WorkStatus.queued);
+        expect(row.nullableStatuses, [WorkStatus.queued, null, WorkStatus.complete]);
+        expect(row.mappedStatus.value, WorkStatus.complete);
+        final enumTypes = await connection.execute(
+          'SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace '
+          "WHERE n.nspname = 'fbr120' AND t.typname = 'workStatus'",
+        );
+        expect(enumTypes.single.single, 1);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
