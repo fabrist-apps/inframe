@@ -6,6 +6,8 @@ import 'package:conflux/effect.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/memory_exporter.dart';
+
 void main() {
   group('Conflux Cause conversion', () {
     test('should preserve the ordered tree and the first genuine defect stack', () {
@@ -70,6 +72,21 @@ void main() {
       expect(metadata['textTruncated'], isTrue);
     });
 
+    test('should retain the first defect stack beyond the node prefix', () {
+      final stack = StackTrace.fromString('late defect stack');
+      final cause = Sequential<Object>([
+        for (var index = 0; index < 70; index++) Expected(index),
+        Defect(StateError('late defect'), stack),
+      ]);
+
+      final input = cause.toChroniclerError();
+      final metadata = input.attributes['conflux.cause']! as Map<String, Object?>;
+
+      expect(metadata['nodes']! as List<Object?>, hasLength(64));
+      expect(metadata['nodesOmitted'], isTrue);
+      expect(input.stackTrace, same(stack));
+    });
+
     test('should contain throwing text conversion with explicit markers', () {
       final cause = Defect<Never>(_ThrowingText(), _ThrowingStack());
 
@@ -83,7 +100,7 @@ void main() {
     });
 
     test('should remain pure until its input is captured explicitly', () async {
-      final exporter = _MemoryExporter();
+      final exporter = MemoryExporter();
       final chronicler = Chronicler(
         appId: 'app',
         release: 'test',
@@ -120,27 +137,4 @@ final class _ThrowingText {
 final class _ThrowingStack implements StackTrace {
   @override
   String toString() => throw StateError('stack failed');
-}
-
-final class _MemoryExporter implements ChroniclerExporter {
-  final records = <ChroniclerRecord>[];
-
-  @override
-  ExportAttempt export(ChroniclerBatch batch) {
-    records.addAll(batch.records);
-    return const _AcceptedAttempt();
-  }
-
-  @override
-  Future<void> close() async {}
-}
-
-final class _AcceptedAttempt implements ExportAttempt {
-  const _AcceptedAttempt();
-
-  @override
-  Future<ExportResult> get result async => const ExportResult.accepted();
-
-  @override
-  void cancel() {}
 }

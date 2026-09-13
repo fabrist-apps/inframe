@@ -323,42 +323,6 @@ final class ChroniclerRecorder {
     }
   }
 
-  _StartedSpan _startSpan(
-    String name, {
-    required SpanKind kind,
-    required Map<String, Object?> attributes,
-    required bool forceRoot,
-    required RemoteTraceParent? remoteParent,
-  }) {
-    final attribution = _attribution;
-    final state = _runtime.tracing.start(
-      attribution.span,
-      name,
-      kind: kind,
-      attributes: attributes,
-      forceRoot: forceRoot,
-      remoteParent: remoteParent,
-      userId: attribution.userId,
-      anonymousId: attribution.anonymousId,
-      sessionId: attribution.sessionId,
-    );
-    if (state == null) return _StartedSpan(null, this);
-    return _StartedSpan(
-      state,
-      ChroniclerRecorder._(
-        _runtime,
-        RecorderAttribution(
-          userId: attribution.userId,
-          anonymousId: attribution.anonymousId,
-          sessionId: attribution.sessionId,
-          traceId: state.traceId,
-          spanId: state.spanId,
-          span: state,
-        ),
-      ),
-    );
-  }
-
   ChroniclerSpan _startSpanHandle(
     String name, {
     required SpanKind kind,
@@ -367,14 +331,32 @@ final class ChroniclerRecorder {
     required RemoteTraceParent? remoteParent,
   }) {
     try {
-      final started = _startSpan(
+      final attribution = _attribution;
+      final state = _runtime.tracing.start(
+        attribution.span,
         name,
         kind: kind,
         attributes: attributes,
         forceRoot: forceRoot,
         remoteParent: remoteParent,
+        userId: attribution.userId,
+        anonymousId: attribution.anonymousId,
+        sessionId: attribution.sessionId,
       );
-      return ChroniclerSpan._(_runtime, started.state, started.recorder);
+      final recorder = state == null
+          ? this
+          : ChroniclerRecorder._(
+              _runtime,
+              RecorderAttribution(
+                userId: attribution.userId,
+                anonymousId: attribution.anonymousId,
+                sessionId: attribution.sessionId,
+                traceId: state.traceId,
+                spanId: state.spanId,
+                span: state,
+              ),
+            );
+      return ChroniclerSpan._(_runtime, state, recorder);
     } on Object {
       _runtime.diagnostics.record(DiagnosticReason.spanStartFailed);
       return ChroniclerSpan._(_runtime, null, this);
@@ -483,13 +465,6 @@ final class ChroniclerTracingFixture {
   /// Returns the number of payload attributes retained by [recorder]'s span.
   static int retainedAttributeCount(ChroniclerRecorder recorder) =>
       recorder._attribution.span?.retainedAttributeCount ?? 0;
-}
-
-final class _StartedSpan {
-  const _StartedSpan(this.state, this.recorder);
-
-  final ActiveSpan? state;
-  final ChroniclerRecorder recorder;
 }
 
 /// Internal fixture bridge for deterministic delivery tests.

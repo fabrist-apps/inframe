@@ -50,6 +50,7 @@ final class _CauseConverter<E> {
   StackTrace? _firstDefectStack;
 
   ChroniclerErrorInput convert(Cause<E> cause) {
+    _firstDefectStack = _findFirstDefectStack(cause);
     final pending = <_PendingNode<E>>[_PendingNode(cause, null)];
     while (pending.isNotEmpty) {
       if (_nodes.length == _maxNodes) {
@@ -88,7 +89,6 @@ final class _CauseConverter<E> {
       case Expected<E>(:final error):
         _addValue(node, error, label: 'error');
       case Defect<E>(:final error, :final stackTrace):
-        _firstDefectStack ??= stackTrace;
         _addValue(node, error, label: 'error');
         _addText(node, 'stackTrace', _safeStack(stackTrace));
       case Interrupted<E>(:final reason):
@@ -169,6 +169,22 @@ final class _CauseConverter<E> {
     'textTruncated': _textTruncated,
     'textUnavailable': _textUnavailable,
   };
+}
+
+StackTrace? _findFirstDefectStack<E>(Cause<E> cause) {
+  final pending = <Cause<E>>[cause];
+  while (pending.isNotEmpty) {
+    final current = pending.removeLast();
+    switch (current) {
+      case Defect<E>(:final stackTrace):
+        return stackTrace;
+      case Sequential<E>(:final causes) || Parallel<E>(:final causes):
+        pending.addAll(causes.reversed);
+      case Expected<E>() || Interrupted<E>():
+        break;
+    }
+  }
+  return null;
 }
 
 String _kind<E>(Cause<E> cause) => switch (cause) {

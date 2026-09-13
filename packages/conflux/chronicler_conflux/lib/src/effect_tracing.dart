@@ -38,9 +38,9 @@ extension ChroniclerEffectTracing<A, E> on Effect<A, E> {
     required RemoteTraceParent? parent,
   }) => Effect.defer((_) {
     ChroniclerSpan? span;
-    final operation = Effect.build<A, E>(($) async {
+    final operation = Effect.build<A, E>(($) {
       final context = $.context;
-      span = forceRoot
+      final acquired = forceRoot
           ? context.tracing.startRootSpan(
               name,
               parent: parent,
@@ -52,7 +52,8 @@ extension ChroniclerEffectTracing<A, E> on Effect<A, E> {
               kind: kind,
               attributes: attributes,
             );
-      final traced = context.withChronicler(span!.recorder);
+      span = acquired;
+      final traced = context.withChronicler(acquired.recorder);
       return $(Effect.using(withContext(traced)));
     });
     return operation.onExit((exit, _) {

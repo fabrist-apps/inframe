@@ -7,6 +7,8 @@ import 'package:conflux/conflux.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/memory_exporter.dart';
+
 void main() {
   group('Chronicler Effect tracing', () {
     test('should stay lazy and create isolated spans for every execution', () async {
@@ -251,7 +253,7 @@ final class _Harness {
     );
   }
 
-  final exporter = _MemoryExporter();
+  final exporter = MemoryExporter();
   late final Chronicler chronicler;
   late final Runtime runtime;
 
@@ -259,27 +261,4 @@ final class _Harness {
     await runtime.close();
     await chronicler.close();
   }
-}
-
-final class _MemoryExporter implements ChroniclerExporter {
-  final records = <ChroniclerRecord>[];
-
-  @override
-  ExportAttempt export(ChroniclerBatch batch) {
-    records.addAll(batch.records);
-    return const _AcceptedAttempt();
-  }
-
-  @override
-  Future<void> close() async {}
-}
-
-final class _AcceptedAttempt implements ExportAttempt {
-  const _AcceptedAttempt();
-
-  @override
-  Future<ExportResult> get result async => const ExportResult.accepted();
-
-  @override
-  void cancel() {}
 }
