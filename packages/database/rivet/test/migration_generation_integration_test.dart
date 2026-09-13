@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:postgres/postgres.dart' as pg;
 import 'package:rivet/rivet.dart';
 import 'package:rivet_generator/rivet_generator.dart';
+import 'package:rivet_generator/src/migration/sealer.dart';
 import 'package:test/test.dart';
 
 import 'generated_consumer.dart';
@@ -330,6 +331,95 @@ void main() {
             "SELECT count(*) FROM pg_constraint WHERE conname = 'status_reflexive'",
           )).single.single,
           1,
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should execute a sealed concurrent index with structural recovery metadata',
+      () async {
+        const generator = RivetMigrationGenerator();
+        final declaration = _constraintDeclaration();
+        final users = (declaration['tables']! as List<Object?>).first! as Map<String, Object?>;
+        final indexes = users['indexes']! as List<Object?>;
+        users['indexes'] = <Object?>[];
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial',
+        );
+        await _applyLastMigration(connection, directory);
+        users['indexes'] = indexes;
+        final migrationId = await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'concurrent index',
+        );
+        final journal = jsonDecode(
+          File('${directory.path}/journal.json').readAsStringSync(),
+        ) as Map<String, Object?>;
+        final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+        final path = '${directory.path}/${entry['directory']}';
+        final sqlFile = File('$path/migration.sql');
+        sqlFile.writeAsStringSync(
+          sqlFile.readAsStringSync().replaceFirst(
+            'CREATE UNIQUE INDEX',
+            'CREATE UNIQUE INDEX CONCURRENTLY',
+          ),
+        );
+        final migrationFile = File('$path/migration.json');
+        final migration = jsonDecode(migrationFile.readAsStringSync()) as Map<String, Object?>;
+        final phase = ((migration['phases']! as List<Object?>).single! as Map<String, Object?>)
+          ..['mode'] = 'nontransactional'
+          ..['recovery'] = {
+            'kind': 'catalog',
+            'operationId': '22222222222222222222222222222222',
+            'before': {
+              'schema': 'auth',
+              'table': 'users',
+              'index': 'users_email_active',
+              'exists': false,
+            },
+            'after': {
+              'schema': 'auth',
+              'table': 'users',
+              'index': 'users_email_active',
+              'method': 'btree',
+              'terms': [
+                {'column': 'email', 'descending': false},
+              ],
+              'predicate': '(active = true)',
+              'options': <String, Object?>{},
+              'unique': true,
+              'valid': true,
+              'ready': true,
+            },
+            'inspector': 'postgresql.index.v1',
+          };
+        migrationFile.writeAsStringSync(jsonEncode(migration));
+        expect(phase['mode'], 'nontransactional');
+        await RivetArtifactSealer().seal(
+          directory: directory,
+          migrationId: migrationId!,
+        );
+        await _applyLastMigration(connection, directory);
+
+        final catalog = await connection.execute(
+          'SELECT i.indisvalid, i.indisready, pg_get_indexdef(i.indexrelid) '
+          'FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid '
+          'JOIN pg_namespace n ON n.oid = c.relnamespace '
+          "WHERE n.nspname = 'auth' AND c.relname = 'users_email_active'",
+        );
+        expect(catalog.single[0], true);
+        expect(catalog.single[1], true);
+        expect(
+          catalog.single[2],
+          allOf(
+            contains('UNIQUE INDEX'),
+            contains('(email)'),
+            contains('WHERE (active = true)'),
+          ),
         );
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,

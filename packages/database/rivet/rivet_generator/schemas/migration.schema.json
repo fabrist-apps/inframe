@@ -47,8 +47,34 @@
         "operationId": {"$ref": "#/$defs/id"},
         "before": {"type": "object"},
         "after": {"type": "object"},
-        "checks": {"type": "array", "items": {"type": "object"}},
-        "inspector": {"type": "string"}
+        "checks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/recoveryCheck"}},
+        "inspector": {"const": "postgresql.index.v1"}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "manual"}}},
+          "then": {"not": {"anyOf": [{"required": ["checks"]}, {"required": ["inspector"]}]}},
+          "else": {"anyOf": [{"required": ["checks"]}, {"required": ["inspector"]}]}
+        }
+      ]
+    },
+    "recoveryCheck": {
+      "type": "object",
+      "required": ["sql", "parameters", "expected"],
+      "properties": {
+        "sql": {"type": "string", "minLength": 1},
+        "parameters": {"type": "array", "items": {"$ref": "#/$defs/typedLiteral"}},
+        "expected": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "typedLiteral": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"enum": ["null", "boolean", "decimal", "string"]},
+        "value": {}
       },
       "additionalProperties": false
     }

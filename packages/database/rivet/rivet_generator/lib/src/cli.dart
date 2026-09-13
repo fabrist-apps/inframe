@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:rivet_generator/rivet_generator.dart';
 import 'package:rivet_generator/src/migration/checker.dart';
+import 'package:rivet_generator/src/migration/sealer.dart';
 
 // This type is public only so the executable can keep argument handling testable.
 // ignore_for_file: public_member_api_docs, cascade_invocations
@@ -24,7 +25,7 @@ final class RivetCli {
       return switch (arguments.first) {
         'generate' => await _generate(arguments.skip(1).toList()),
         'check' => await _check(arguments.skip(1).toList()),
-        'seal' => throw UnsupportedError('seal is implemented by a later FBR-104 slice.'),
+        'seal' => await _seal(arguments.skip(1).toList()),
         _ => throw FormatException('Unknown Rivet command `${arguments.first}`.'),
       };
     } on Object catch (error) {
@@ -99,6 +100,21 @@ final class RivetCli {
       await checker.check(directory: directory, declaration: declaration);
     }
     _stdout.writeln('Rivet migration artifacts are valid.');
+    return 0;
+  }
+
+  Future<int> _seal(List<String> arguments) async {
+    final options = _options(arguments);
+    final directory = options['dir'];
+    final migration = options['migration'];
+    if (directory == null || migration == null) {
+      throw const FormatException('seal requires --dir and --migration.');
+    }
+    await RivetArtifactSealer().seal(
+      directory: Directory(directory),
+      migrationId: migration,
+    );
+    _stdout.writeln('Sealed $migration.');
     return 0;
   }
 

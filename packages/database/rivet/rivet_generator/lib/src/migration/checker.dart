@@ -6,12 +6,15 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:rivet_generator/src/migration/canonical_json.dart';
+import 'package:rivet_generator/src/migration/recovery_validator.dart';
 import 'package:rivet_generator/src/migration/schema_expression.dart';
+import 'package:rivet_generator/src/migration/sql_parser.dart';
 
 final class RivetArtifactChecker {
   Future<void> check({
     required Directory directory,
     Map<String, Object?>? declaration,
+    String? allowUnsealedMigrationId,
   }) async {
     final journal = _readJson(File('${directory.path}/journal.json'));
     _expectVersion(journal, 'journal.json');
@@ -44,11 +47,12 @@ final class RivetArtifactChecker {
       }
       final expectedChecksum = _checksum(migration, snapshot, sql);
       final recordedChecksum = entry['checksum'];
-      if (migration['checksum'] != expectedChecksum || recordedChecksum != expectedChecksum) {
+      if (migrationId != allowUnsealedMigrationId &&
+          (migration['checksum'] != expectedChecksum || recordedChecksum != expectedChecksum)) {
         throw FormatException('Migration $migrationId checksum does not match its artifacts.');
       }
       _validateSnapshot(snapshot);
-      _validatePhases(migration, sql);
+      if (migrationId != allowUnsealedMigrationId) _validatePhases(migration, sql);
       parentId = migrationId;
       finalSnapshot = snapshot;
     }
@@ -62,6 +66,15 @@ final class RivetArtifactChecker {
         'The current composed Rivet schema does not match the final migration snapshot.',
       );
     }
+  }
+
+  void validateSealedMigration(
+    Map<String, Object?> migration,
+    Map<String, Object?> snapshot,
+    String sql,
+  ) {
+    _validateSnapshot(snapshot);
+    _validatePhases(migration, sql);
   }
 
   void _expectVersion(Map<String, Object?> value, String source) {
@@ -195,6 +208,8 @@ final class RivetArtifactChecker {
 
   void _validatePhases(Map<String, Object?> migration, String sql) {
     final bytes = utf8.encode(sql);
+    final parsedRanges = parseRivetSqlStatements(sql);
+    var parsedIndex = 0;
     final phaseIds = <String>{};
     var previousEnd = -1;
     for (final (phaseIndex, rawPhase) in _list(migration['phases'], 'migration phases').indexed) {
@@ -211,6 +226,7 @@ final class RivetArtifactChecker {
       if (phase['mode'] == 'transactional' && phase['recovery'] != null) {
         throw FormatException('Transactional phase $phaseId cannot have recovery metadata.');
       }
+      final phaseSql = <String>[];
       for (final rawStatement in _list(phase['statements'], 'phase statements')) {
         final statement = _map(rawStatement, 'statement range');
         final start = statement['startByte'];
@@ -223,13 +239,19 @@ final class RivetArtifactChecker {
             end > bytes.length) {
           throw FormatException('Phase $phaseId contains an invalid statement byte range.');
         }
-        final statementSql = utf8.decode(bytes.sublist(start, end)).trim();
-        if (!statementSql.endsWith(';') ||
-            statementSql.substring(0, statementSql.length - 1).contains(';')) {
+        if (parsedIndex >= parsedRanges.length ||
+            parsedRanges[parsedIndex]['startByte'] != start ||
+            parsedRanges[parsedIndex]['endByte'] != end) {
           throw FormatException('Phase $phaseId byte range is not one complete statement.');
         }
+        parsedIndex++;
+        phaseSql.add(utf8.decode(bytes.sublist(start, end)));
         previousEnd = end;
       }
+      validateRivetRecovery(phase, phaseSql);
+    }
+    if (parsedIndex != parsedRanges.length) {
+      throw const FormatException('Migration phases do not cover every SQL statement.');
     }
   }
 

@@ -38,6 +38,26 @@ claim that reviewed custom SQL produces the declared snapshot. Deployment
 history, locks, receipts, recovery, status, and resolution belong to Rivet's
 separate migration runner.
 
+After reviewing an unapplied migration's SQL, reseal its statement ranges and
+integrity metadata:
+
+```sh
+dart run rivet_generator:rivet seal --dir migrations --migration <id>
+```
+
+The sealer parses PostgreSQL comments, quoted strings and identifiers,
+dollar-quoted bodies, and UTF-8 byte offsets. It preserves the existing phase
+statement counts so an edit cannot silently change phase assignment. Reviewed
+nontransactional SQL must carry either manual recovery metadata or checked
+catalog recovery metadata; `CREATE INDEX CONCURRENTLY` requires the versioned
+PostgreSQL index inspector description, including qualified identity,
+definition, uniqueness, validity, and readiness.
+
+Started or applied migrations are immutable and require a new corrective
+migration. Offline sealing cannot inspect deployment receipts or prove that
+arbitrary reviewed SQL produces the declared snapshot. It only validates and
+reseals the supplied artifacts.
+
 Format version 1 is described by the checked-in JSON Schemas in `schemas/`.
 Migration checksums cover the exact decoded UTF-8 SQL plus canonicalized
 snapshot and migration metadata. JSON whitespace and key order therefore do
