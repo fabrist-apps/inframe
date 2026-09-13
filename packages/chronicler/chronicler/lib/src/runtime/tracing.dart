@@ -48,6 +48,10 @@ final class TraceController {
   final int Function() _nextSecureByte;
   final void Function(SpanRecord) _finalize;
   final _liveSpans = <ActiveSpan>{};
+  bool _failNextStart = false;
+
+  /// Makes the next start throw for deterministic containment tests.
+  void failNextStartForTest() => _failNextStart = true;
 
   /// Discards live payloads and stops recording descendants of existing spans.
   void disableCollection() {
@@ -82,6 +86,10 @@ final class TraceController {
     required bool forceRoot,
     required RemoteTraceParent? remoteParent,
   }) {
+    if (_failNextStart) {
+      _failNextStart = false;
+      throw StateError('Injected span start failure.');
+    }
     if (!_canStart()) return null;
     final acceptedRemote = forceRoot && _propagationEnabled() ? remoteParent : null;
     final activeParent = !forceRoot && current != null && !current._ended ? current : null;

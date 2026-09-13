@@ -126,6 +126,26 @@ final class ChroniclerTracing {
 
   final ChroniclerRecorder _recorder;
 
+  /// Starts a child span, or a root when this Context has no active span.
+  ChroniclerSpan startSpan(
+    String name, {
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => _recorder.startSpan(name, kind: kind, attributes: attributes);
+
+  /// Starts an explicit root boundary, optionally continuing [parent].
+  ChroniclerSpan startRootSpan(
+    String name, {
+    RemoteTraceParent? parent,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => _recorder.startRootSpan(
+    name,
+    parent: parent,
+    kind: kind,
+    attributes: attributes,
+  );
+
   /// Marks the active span as failed without changing the callback result.
   void setError() => _recorder.setSpanError();
 
