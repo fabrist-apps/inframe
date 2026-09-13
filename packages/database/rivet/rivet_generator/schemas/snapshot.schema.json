@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inframe.dev/rivet/migrations/v1/snapshot.schema.json",
+  "title": "Rivet physical snapshot version 1",
+  "type": "object",
+  "required": ["formatVersion", "dialect", "databaseId", "migrationId", "schemas", "tables", "enums", "requirements"],
+  "properties": {
+    "formatVersion": {"const": 1},
+    "dialect": {"const": "rivet"},
+    "databaseId": {"$ref": "#/$defs/id"},
+    "migrationId": {"$ref": "#/$defs/id"},
+    "schemas": {"type": "array", "items": {"$ref": "#/$defs/named"}},
+    "tables": {"type": "array", "items": {"$ref": "#/$defs/table"}},
+    "enums": {"type": "array", "items": {"$ref": "#/$defs/enum"}},
+    "requirements": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "named": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "name": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "table": {
+      "type": "object",
+      "required": ["id", "schemaId", "name", "columns", "indexes", "constraints"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "schemaId": {"$ref": "#/$defs/id"}, "name": {"type": "string"},
+        "columns": {"type": "array", "items": {"$ref": "#/$defs/column"}},
+        "indexes": {"type": "array", "items": {"$ref": "#/$defs/index"}},
+        "constraints": {"type": "array", "items": {"$ref": "#/$defs/constraint"}}
+      },
+      "additionalProperties": false
+    },
+    "column": {
+      "type": "object",
+      "required": ["id", "tableId", "name", "storage", "primaryKey"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "tableId": {"$ref": "#/$defs/id"}, "name": {"type": "string"},
+        "storage": {"$ref": "#/$defs/storage"}, "primaryKey": {"type": "boolean"},
+        "default": {"$ref": "expression.schema.json"}
+      },
+      "additionalProperties": false
+    },
+    "storage": {
+      "type": "object",
+      "required": ["kind", "nullable", "codecVersion"],
+      "properties": {
+        "kind": {"enum": ["text", "integer", "real", "boolean", "dateTime", "json", "enum", "vector", "array"]},
+        "nullable": {"type": "boolean"}, "codecVersion": {"type": "integer", "minimum": 1},
+        "enumId": {"$ref": "#/$defs/id"}, "dimensions": {"type": "integer", "minimum": 1},
+        "element": {"$ref": "#/$defs/storage"}
+      },
+      "additionalProperties": false
+    },
+    "index": {
+      "type": "object",
+      "required": ["id", "tableId", "name", "unique", "terms", "options", "platforms"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "tableId": {"$ref": "#/$defs/id"}, "name": {"type": "string"},
+        "unique": {"type": "boolean"},
+        "terms": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/indexTerm"}},
+        "predicate": {"$ref": "expression.schema.json"}, "options": {"type": "object"},
+        "platforms": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "indexTerm": {
+      "type": "object",
+      "required": ["columnId", "descending"],
+      "properties": {"columnId": {"$ref": "#/$defs/id"}, "descending": {"type": "boolean"}},
+      "additionalProperties": false
+    },
+    "constraint": {
+      "type": "object",
+      "required": ["id", "tableId", "name", "kind", "columnIds"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "tableId": {"$ref": "#/$defs/id"}, "name": {"type": "string"},
+        "kind": {"enum": ["check", "primaryKey", "foreignKey"]},
+        "columnIds": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "expression": {"$ref": "expression.schema.json"},
+        "referenceTableId": {"$ref": "#/$defs/id"},
+        "referenceColumnIds": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "onDelete": {"enum": ["noAction", "restrict", "cascade", "setNull", "setDefault"]},
+        "onUpdate": {"enum": ["noAction", "restrict", "cascade", "setNull", "setDefault"]}
+      },
+      "additionalProperties": false
+    },
+    "enum": {
+      "type": "object",
+      "required": ["id", "schemaId", "name", "values"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "schemaId": {"$ref": "#/$defs/id"}, "name": {"type": "string"},
+        "values": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/enumValue"}}
+      },
+      "additionalProperties": false
+    },
+    "enumValue": {
+      "type": "object",
+      "required": ["id", "enumId", "label"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "enumId": {"$ref": "#/$defs/id"}, "label": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

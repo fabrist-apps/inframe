@@ -73,12 +73,29 @@ final class RivetTableSchema<Definition, Row> {
       }
     }
     for (final constraint in this.constraints) {
+      if (constraint.columns.any((column) => !columns.contains(column))) {
+        throw ArgumentError(
+          'Constraint $schemaName.$tableName.${constraint.name} has invalid columns.',
+        );
+      }
       if (constraint.predicate case final predicate?
           when predicate.columns.any((column) => !columns.contains(column))) {
         throw ArgumentError(
           'Constraint $schemaName.$tableName.${constraint.name} has an invalid expression.',
         );
       }
+    }
+    final tablePrimaryKeys = this.constraints.where(
+      (constraint) => constraint.kind == RivetConstraintKind.primaryKey,
+    );
+    if (tablePrimaryKeys.length > 1 ||
+        (tablePrimaryKeys.isNotEmpty && columns.any((column) => column.isPrimaryKey))) {
+      throw ArgumentError(
+        'Table $schemaName.$tableName must declare either one table primary key or column primary keys.',
+      );
+    }
+    if (tablePrimaryKeys.any((constraint) => constraint.columns.isEmpty)) {
+      throw ArgumentError('A composite primary key must contain at least one column.');
     }
   }
 
@@ -215,6 +232,11 @@ abstract class RivetTableDefinition<Self> {
     expression: predicate.sql,
     predicate: predicate,
   );
+  RivetConstraint primaryKey(String name, List<RivetColumn<dynamic>> columns) => RivetConstraint(
+    name: name,
+    kind: RivetConstraintKind.primaryKey,
+    columns: List.unmodifiable(columns),
+  );
 }
 
 enum RivetReferentialAction { noAction, restrict, cascade, setNull, setDefault }
@@ -242,12 +264,14 @@ final class RivetConstraint {
     required this.kind,
     this.expression,
     this.predicate,
+    this.columns = const [],
   });
 
   final String name;
   final RivetConstraintKind kind;
   final String? expression;
   final RivetPredicate? predicate;
+  final List<RivetColumn<dynamic>> columns;
 }
 
 final class RivetIndex {
@@ -1381,7 +1405,18 @@ class RivetColumn<T> implements RivetExpression<T> {
   }
 
   RivetPredicate equals(T value) {
-    if (value == null) return RivetPredicate._raw(() => '$sql IS NULL', [this]);
+    if (value == null) {
+      return RivetPredicate._raw(
+        () => '$sql IS NULL',
+        [this],
+        {
+          'formatVersion': 1,
+          'kind': 'operator',
+          'operator': 'IS NULL',
+          'arguments': [_schemaReference(this)],
+        },
+      );
+    }
     final encoded = _convert('encode', () => codec.encode(value));
     return RivetPredicate._value(() => '$sql = ', '::${codec.cast}', encoded, [this]);
   }
@@ -1414,6 +1449,42 @@ class RivetColumn<T> implements RivetExpression<T> {
     }
   }
 }
+
+Map<String, Object?> _schemaExpressionFor(RivetExpression<dynamic> expression) =>
+    switch (expression) {
+      final RivetColumn<dynamic> column => _schemaReference(column),
+      final _RivetBoundExpression<dynamic> bound => _schemaLiteral(bound.parameters.single),
+      final _RivetBinaryExpression<dynamic> binary => {
+        'formatVersion': 1,
+        'kind': 'operator',
+        'operator': binary.operator,
+        'arguments': [_schemaExpressionFor(binary.left), _schemaLiteral(binary._right)],
+      },
+      _ => throw UnsupportedError(
+        'Expression ${expression.runtimeType} cannot be used in a schema declaration.',
+      ),
+    };
+
+Map<String, Object?> _schemaReference(RivetColumn<dynamic> column) => {
+  'formatVersion': 1,
+  'kind': 'reference',
+  'objectName': column.physicalName,
+};
+
+Map<String, Object?> _schemaLiteral(Object? value) => {
+  'formatVersion': 1,
+  'kind': 'literal',
+  'literalType': switch (value) {
+    null => 'null',
+    bool() => 'boolean',
+    num() => 'decimal',
+    String() => 'string',
+    _ => throw UnsupportedError(
+      'Schema expressions do not support ${value.runtimeType} literals.',
+    ),
+  },
+  'value': value is num ? value.toString() : value,
+};
 
 /// A column that supports SQL ordering.
 final class RivetOrderableColumn<T> extends RivetColumn<T> implements RivetOrderableExpression<T> {
@@ -1766,11 +1837,15 @@ final class RivetPredicate {
     List<Object?> parameters,
     List<RivetColumn<dynamic>> columns,
     this.usesRelations,
+    this._schemaExpression,
   ) : parameters = List.unmodifiable(parameters),
       columns = List.unmodifiable(columns);
 
-  RivetPredicate._raw(String Function() sql, List<RivetColumn<dynamic>> columns)
-    : this._((_, _) => sql(), const [], columns, false);
+  RivetPredicate._raw(
+    String Function() sql,
+    List<RivetColumn<dynamic>> columns,
+    Map<String, Object?> schemaExpression,
+  ) : this._((_, _) => sql(), const [], columns, false, () => schemaExpression);
 
   RivetPredicate._value(
     String Function() before,
@@ -1782,6 +1857,15 @@ final class RivetPredicate {
         [parameter],
         columns,
         false,
+        () => {
+          'formatVersion': 1,
+          'kind': 'operator',
+          'operator': '=',
+          'arguments': [
+            _schemaReference(columns.single),
+            _schemaLiteral(parameter),
+          ],
+        },
       );
 
   RivetPredicate.relation({
@@ -1803,6 +1887,7 @@ final class RivetPredicate {
          parameters,
          columns,
          true,
+         null,
        );
 
   RivetPredicate._comparison(
@@ -1820,6 +1905,12 @@ final class RivetPredicate {
         [...left.parameters, ...right.parameters],
         [...left.columns, ...right.columns],
         _usesRelationAliases(left) || _usesRelationAliases(right),
+        () => {
+          'formatVersion': 1,
+          'kind': 'operator',
+          'operator': operator,
+          'arguments': [_schemaExpressionFor(left), _schemaExpressionFor(right)],
+        },
       );
 
   final String Function(
@@ -1830,6 +1921,15 @@ final class RivetPredicate {
   final List<Object?> parameters;
   final List<RivetColumn<dynamic>> columns;
   final bool usesRelations;
+  final Map<String, Object?> Function()? _schemaExpression;
+
+  Map<String, Object?> schemaExpression() {
+    final build = _schemaExpression;
+    if (build == null) {
+      throw UnsupportedError('Relation predicates cannot be used as schema expressions.');
+    }
+    return build();
+  }
 
   String get sql => _render((_) => '@value', null);
 
@@ -1850,6 +1950,12 @@ final class RivetPredicate {
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
     usesRelations || other.usesRelations,
+    () => {
+      'formatVersion': 1,
+      'kind': 'operator',
+      'operator': 'AND',
+      'arguments': [schemaExpression(), other.schemaExpression()],
+    },
   );
 
   RivetPredicate operator |(RivetPredicate other) => RivetPredicate._(
@@ -1859,6 +1965,12 @@ final class RivetPredicate {
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
     usesRelations || other.usesRelations,
+    () => {
+      'formatVersion': 1,
+      'kind': 'operator',
+      'operator': 'OR',
+      'arguments': [schemaExpression(), other.schemaExpression()],
+    },
   );
 
   RivetPredicate operator ~() => RivetPredicate._(
@@ -1866,6 +1978,12 @@ final class RivetPredicate {
     parameters,
     columns,
     usesRelations,
+    () => {
+      'formatVersion': 1,
+      'kind': 'operator',
+      'operator': 'NOT',
+      'arguments': [schemaExpression()],
+    },
   );
 
   String renderWith(

@@ -149,6 +149,20 @@ void main() {
         expect(users.renamedFrom, 'profiles');
         expect(users.indexes.single.name, 'display_name_idx');
         expect(users.constraints.single.name, 'display_name_present');
+        expect(users.constraints.single.predicate?.schemaExpression(), {
+          'formatVersion': 1,
+          'kind': 'operator',
+          'operator': '=',
+          'arguments': [
+            {'formatVersion': 1, 'kind': 'reference', 'objectName': 'displayName'},
+            {
+              'formatVersion': 1,
+              'kind': 'literal',
+              'literalType': 'string',
+              'value': '',
+            },
+          ],
+        });
         expect(users.relations['posts']?.kind, RivetRelationKind.many);
         expect(posts.relations['author']?.kind, RivetRelationKind.one);
         expect(posts.columns.single.foreignKey?.targetTable, UserProfiles);
@@ -306,6 +320,56 @@ void main() {
       expect((table.code.defaultFn!()! as UserCode).value, 'code_generated');
       expect((table.code.onUpdateFn!()! as UserCode).value, 'code_updated');
       expect(table.code.storage.asc(), isA<RivetOrder>());
+    });
+
+    test('should compose one native enum declaration for scalar and array storage', () {
+      final declaration = RivetDatabaseSchema(
+        name: 'enum_fixture',
+        tables: [EnumValues.db.buildSchema()],
+      ).toJson();
+      final enumValue = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
+
+      expect(enumValue['schema'], 'fbr120');
+      expect(enumValue['name'], 'workStatus');
+      expect(enumValue['values'], [
+        {'dartName': 'queued', 'label': 'zeta'},
+        {'dartName': 'complete', 'label': 'alpha'},
+      ]);
+      expect(
+        (columns.first['storage']! as Map<String, Object?>)['enum'],
+        {'schema': 'fbr120', 'name': 'workStatus'},
+      );
+      final arrayStorage = columns[2]['storage']! as Map<String, Object?>;
+      expect(arrayStorage['nullable'], false);
+      expect((arrayStorage['element']! as Map<String, Object?>)['nullable'], true);
+    });
+
+    test('should discover a native enum used only inside array storage', () {
+      final declaration = RivetDatabaseSchema(
+        name: 'array_enum_fixture',
+        tables: [ArrayValues.db.buildSchema()],
+      ).toJson();
+
+      final enumValue = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      expect(enumValue['name'], 'workStatus');
+    });
+
+    test('should compose relation predicates before rendering them', () {
+      final relation = RivetPredicate.relation(
+        renderSql: (_, nextAlias) => 'EXISTS (${nextAlias()})',
+        parameters: const [],
+        columns: const [],
+      );
+
+      final predicate = relation & ~relation;
+
+      expect(
+        predicate.renderWith((index) => '\$$index', () => 'SELECT 1'),
+        '(EXISTS (SELECT 1)) AND (NOT (EXISTS (SELECT 1)))',
+      );
+      expect(predicate.schemaExpression, throwsUnsupportedError);
     });
 
     test('should reject incompatible foreign-key storage before connecting', () async {
