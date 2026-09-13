@@ -371,6 +371,12 @@ enum DiagnosticReason {
   /// A span update violated its lifecycle contract.
   invalidSpanUpdate,
 
+  /// Starting an SDK-managed span failed unexpectedly.
+  spanStartFailed,
+
+  /// Ending an SDK-managed span failed unexpectedly.
+  spanEndFailed,
+
   /// A metric measurement was invalid.
   invalidMeasurement,
 

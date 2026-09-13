@@ -8,4 +8,4 @@ dependencies:
   artificer_core:
     path: ../../..
   conflux:
-    path: ../../../../../../conflux
+    path: ../../../../../../conflux/conflux

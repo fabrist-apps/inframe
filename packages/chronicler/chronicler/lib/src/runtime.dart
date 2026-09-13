@@ -81,6 +81,33 @@ final class ChroniclerRecorder {
   /// Metric instruments shared by this recorder's application runtime.
   ChroniclerMetrics get metrics => _runtime.metrics;
 
+  /// Starts a child span, or a root when this recorder has no active span.
+  ChroniclerSpan startSpan(
+    String name, {
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => _startSpanHandle(
+    name,
+    kind: kind,
+    attributes: attributes,
+    forceRoot: false,
+    remoteParent: null,
+  );
+
+  /// Starts an explicit root boundary, optionally continuing [parent].
+  ChroniclerSpan startRootSpan(
+    String name, {
+    RemoteTraceParent? parent,
+    SpanKind kind = SpanKind.internal,
+    Map<String, Object?> attributes = const {},
+  }) => _startSpanHandle(
+    name,
+    kind: kind,
+    attributes: attributes,
+    forceRoot: true,
+    remoteParent: parent,
+  );
+
   /// Runs [run] in a new root trace and records its callback lifetime.
   Future<T> trace<T>(
     String name, {
@@ -250,7 +277,7 @@ final class ChroniclerRecorder {
     required RemoteTraceParent? remoteParent,
     required FutureOr<T> Function(ChroniclerRecorder recorder) run,
   }) async {
-    final started = _startSpan(
+    final span = _startSpanHandle(
       name,
       kind: kind,
       attributes: attributes,
@@ -258,12 +285,12 @@ final class ChroniclerRecorder {
       remoteParent: remoteParent,
     );
     try {
-      final result = run(started.recorder);
+      final result = run(span.recorder);
       final value = await result;
-      _runtime.tracing.finish(started.state, SpanStatus.success);
+      span.end(SpanStatus.success);
       return value;
     } on Object catch (error) {
-      _runtime.tracing.finish(started.state, _runtime.tracing.failureStatus(error));
+      span.end(_runtime.tracing.failureStatus(error));
       rethrow;
     }
   }
@@ -276,7 +303,7 @@ final class ChroniclerRecorder {
     required RemoteTraceParent? remoteParent,
     required T Function(ChroniclerRecorder recorder) run,
   }) {
-    final started = _startSpan(
+    final span = _startSpanHandle(
       name,
       kind: kind,
       attributes: attributes,
@@ -284,52 +311,81 @@ final class ChroniclerRecorder {
       remoteParent: remoteParent,
     );
     try {
-      final result = run(started.recorder);
+      final result = run(span.recorder);
       if (result is Future) {
         _runtime.diagnostics.record(DiagnosticReason.syncCallbackReturnedFuture);
       }
-      _runtime.tracing.finish(started.state, SpanStatus.success);
+      span.end(SpanStatus.success);
       return result;
     } on Object catch (error) {
-      _runtime.tracing.finish(started.state, _runtime.tracing.failureStatus(error));
+      span.end(_runtime.tracing.failureStatus(error));
       rethrow;
     }
   }
 
-  _StartedSpan _startSpan(
+  ChroniclerSpan _startSpanHandle(
     String name, {
     required SpanKind kind,
     required Map<String, Object?> attributes,
     required bool forceRoot,
     required RemoteTraceParent? remoteParent,
   }) {
-    final attribution = _attribution;
-    final state = _runtime.tracing.start(
-      attribution.span,
-      name,
-      kind: kind,
-      attributes: attributes,
-      forceRoot: forceRoot,
-      remoteParent: remoteParent,
-      userId: attribution.userId,
-      anonymousId: attribution.anonymousId,
-      sessionId: attribution.sessionId,
-    );
-    if (state == null) return _StartedSpan(null, this);
-    return _StartedSpan(
-      state,
-      ChroniclerRecorder._(
-        _runtime,
-        RecorderAttribution(
-          userId: attribution.userId,
-          anonymousId: attribution.anonymousId,
-          sessionId: attribution.sessionId,
-          traceId: state.traceId,
-          spanId: state.spanId,
-          span: state,
-        ),
-      ),
-    );
+    try {
+      final attribution = _attribution;
+      final state = _runtime.tracing.start(
+        attribution.span,
+        name,
+        kind: kind,
+        attributes: attributes,
+        forceRoot: forceRoot,
+        remoteParent: remoteParent,
+        userId: attribution.userId,
+        anonymousId: attribution.anonymousId,
+        sessionId: attribution.sessionId,
+      );
+      final recorder = state == null
+          ? this
+          : ChroniclerRecorder._(
+              _runtime,
+              RecorderAttribution(
+                userId: attribution.userId,
+                anonymousId: attribution.anonymousId,
+                sessionId: attribution.sessionId,
+                traceId: state.traceId,
+                spanId: state.spanId,
+                span: state,
+              ),
+            );
+      return ChroniclerSpan._(_runtime, state, recorder);
+    } on Object {
+      _runtime.diagnostics.record(DiagnosticReason.spanStartFailed);
+      return ChroniclerSpan._(_runtime, null, this);
+    }
+  }
+}
+
+/// A borrowed SDK span whose first explicit completion wins.
+final class ChroniclerSpan {
+  ChroniclerSpan._(this._runtime, this._state, this.recorder);
+
+  final ChroniclerRuntime _runtime;
+  final ActiveSpan? _state;
+
+  /// Recorder carrying this span's correlation, or its original attribution
+  /// when span acquisition failed.
+  final ChroniclerRecorder recorder;
+
+  bool _ended = false;
+
+  /// Ends this span once with [status] without flushing borrowed runtime work.
+  void end(SpanStatus status) {
+    if (_ended) return;
+    _ended = true;
+    try {
+      _runtime.tracing.finish(_state, status);
+    } on Object {
+      _runtime.diagnostics.record(DiagnosticReason.spanEndFailed);
+    }
   }
 }
 
@@ -401,16 +457,14 @@ final class ChroniclerTracingFixture {
     RuntimeTestAccess.overrideSamplingRandom(chronicler._runtime, random);
   }
 
+  /// Makes the next manual or callback span start fail unexpectedly.
+  static void failNextSpanStart(Chronicler chronicler) {
+    chronicler._runtime.tracing.failNextStartForTest();
+  }
+
   /// Returns the number of payload attributes retained by [recorder]'s span.
   static int retainedAttributeCount(ChroniclerRecorder recorder) =>
       recorder._attribution.span?.retainedAttributeCount ?? 0;
-}
-
-final class _StartedSpan {
-  const _StartedSpan(this.state, this.recorder);
-
-  final ActiveSpan? state;
-  final ChroniclerRecorder recorder;
 }
 
 /// Internal fixture bridge for deterministic delivery tests.
