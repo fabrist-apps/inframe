@@ -149,6 +149,20 @@ void main() {
         expect(users.renamedFrom, 'profiles');
         expect(users.indexes.single.name, 'display_name_idx');
         expect(users.constraints.single.name, 'display_name_present');
+        expect(users.constraints.single.predicate?.schemaExpression(), {
+          'formatVersion': 1,
+          'kind': 'operator',
+          'operator': '=',
+          'arguments': [
+            {'formatVersion': 1, 'kind': 'reference', 'objectName': 'displayName'},
+            {
+              'formatVersion': 1,
+              'kind': 'literal',
+              'literalType': 'string',
+              'value': '',
+            },
+          ],
+        });
         expect(users.relations['posts']?.kind, RivetRelationKind.many);
         expect(posts.relations['author']?.kind, RivetRelationKind.one);
         expect(posts.columns.single.foreignKey?.targetTable, UserProfiles);

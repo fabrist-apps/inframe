@@ -185,6 +185,7 @@ final class RivetArtifactGenerator {
         'constraints': declaredTable['constraints'],
       });
     }
+    _settleTableObjects(tables, declaredTables, previousTables, previousSchemaNames);
     tables.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
     final schemas = [
       for (final entry in schemaIds.entries) {'id': entry.value, 'name': entry.key},
@@ -314,6 +315,7 @@ final class RivetArtifactGenerator {
         'constraints': declaredTable['constraints'],
       });
     }
+    _settleTableObjects(tables, declaredTables, const [], const {});
     tables.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
 
     return {
@@ -328,6 +330,171 @@ final class RivetArtifactGenerator {
     };
   }
 
+  void _settleTableObjects(
+    List<Map<String, Object?>> tables,
+    List<Map<String, Object?>> declarations,
+    List<Map<String, Object?>> previousTables,
+    Map<Object?, String> previousSchemaNames,
+  ) {
+    final tableByName = <String, Map<String, Object?>>{};
+    for (var index = 0; index < tables.length; index++) {
+      final declaration = declarations[index];
+      tableByName['${declaration['schema']}.${declaration['name']}'] = tables[index];
+    }
+    for (var index = 0; index < tables.length; index++) {
+      final table = tables[index];
+      final declaration = declarations[index];
+      final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
+      final columnsByName = {
+        for (final column in columns) column['name']! as String: column,
+      };
+      final oldTable = previousTables.where((value) => value['id'] == table['id']).singleOrNull;
+      final oldIndexes = oldTable == null
+          ? const <Map<String, Object?>>[]
+          : (oldTable['indexes']! as List<Object?>).cast<Map<String, Object?>>();
+      final indexes = <Map<String, Object?>>[];
+      for (final raw in declaration['indexes']! as List<Object?>) {
+        final declared = raw! as Map<String, Object?>;
+        final name = declared['name']! as String;
+        final old = oldIndexes.where((value) => value['name'] == name).singleOrNull;
+        indexes.add({
+          'id': old?['id'] as String? ?? _nextId(),
+          'tableId': table['id'],
+          'name': name,
+          'unique': declared['unique'],
+          'terms': [
+            for (final rawTerm in declared['terms']! as List<Object?>)
+              _settleIndexTerm(rawTerm! as Map<String, Object?>, columnsByName),
+          ],
+          if (declared['predicate'] case final Map<String, Object?> predicate)
+            'predicate': _settleExpression(predicate, columnsByName),
+          'options': declared['options'] ?? <String, Object?>{},
+          'platforms': declared['platforms'] ?? const ['postgresql'],
+        });
+      }
+
+      final declaredConstraints = [
+        ...(declaration['constraints']! as List<Object?>).cast<Map<String, Object?>>(),
+        if (columns.any((column) => column['primaryKey'] == true))
+          <String, Object?>{
+            'name': '${declaration['name']}_pkey',
+            'kind': 'primaryKey',
+            'columns': [
+              for (final column in columns)
+                if (column['primaryKey'] == true) column['name'],
+            ],
+          },
+      ];
+      final oldConstraints = oldTable == null
+          ? const <Map<String, Object?>>[]
+          : (oldTable['constraints']! as List<Object?>).cast<Map<String, Object?>>();
+      final constraints = <Map<String, Object?>>[];
+      for (final declared in declaredConstraints) {
+        final kind = declared['kind']! as String;
+        final columnIds = [
+          for (final name in (declared['columns']! as List<Object?>).cast<String>())
+            columnsByName[name]?['id'] as String? ??
+                (throw FormatException(
+                  'Constraint ${declaration['schema']}.${declaration['name']}.${declared['name']} references unknown column $name.',
+                )),
+        ];
+        final exact = oldConstraints.where((value) => value['name'] == declared['name']);
+        final structural = oldConstraints.where(
+          (value) =>
+              value['kind'] == kind &&
+              canonicalJson(value['columnIds']) == canonicalJson(columnIds),
+        );
+        final old = exact.singleOrNull ?? structural.singleOrNull;
+        final constraint = <String, Object?>{
+          'id': old?['id'] as String? ?? _nextId(),
+          'tableId': table['id'],
+          'name': declared['name'],
+          'kind': kind,
+          'columnIds': columnIds,
+        };
+        if (declared['expression'] case final Map<String, Object?> expression) {
+          constraint['expression'] = _settleExpression(expression, columnsByName);
+        }
+        if (kind == 'foreignKey') {
+          final reference = declared['references']! as Map<String, Object?>;
+          final target = tableByName['${reference['schema']}.${reference['table']}'];
+          if (target == null) {
+            throw FormatException(
+              'Foreign key ${declaration['schema']}.${declaration['name']}.${declared['name']} references an unknown table.',
+            );
+          }
+          final targetColumns = {
+            for (final value in (target['columns']! as List<Object?>).cast<Map<String, Object?>>())
+              value['name']! as String: value,
+          };
+          final referenceIds = [
+            for (final name in (reference['columns']! as List<Object?>).cast<String>())
+              targetColumns[name]?['id'] as String? ??
+                  (throw FormatException('Foreign key references unknown column $name.')),
+          ];
+          if (referenceIds.length != columnIds.length) {
+            throw const FormatException('Foreign key column counts must match.');
+          }
+          for (var position = 0; position < columnIds.length; position++) {
+            final local = columns.singleWhere((value) => value['id'] == columnIds[position]);
+            final remote = (target['columns']! as List<Object?>)
+                .cast<Map<String, Object?>>()
+                .singleWhere((value) => value['id'] == referenceIds[position]);
+            if (canonicalJson(_withoutKey(local['storage']! as Map<String, Object?>, 'nullable')) !=
+                canonicalJson(
+                  _withoutKey(remote['storage']! as Map<String, Object?>, 'nullable'),
+                )) {
+              throw const FormatException('Foreign key columns must use compatible storage.');
+            }
+          }
+          constraint
+            ..['referenceTableId'] = target['id']
+            ..['referenceColumnIds'] = referenceIds
+            ..['onDelete'] = declared['onDelete']
+            ..['onUpdate'] = declared['onUpdate'];
+        }
+        constraints.add(constraint);
+      }
+      indexes.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
+      constraints.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
+      table
+        ..['indexes'] = indexes
+        ..['constraints'] = constraints;
+    }
+  }
+
+  Map<String, Object?> _settleIndexTerm(
+    Map<String, Object?> term,
+    Map<String, Map<String, Object?>> columns,
+  ) {
+    final name = term['column']! as String;
+    final column = columns[name];
+    if (column == null) throw FormatException('Index references unknown column $name.');
+    return {'columnId': column['id'], 'descending': term['descending'] == true};
+  }
+
+  Map<String, Object?> _settleExpression(
+    Map<String, Object?> expression,
+    Map<String, Map<String, Object?>> columns,
+  ) {
+    if (expression['kind'] == 'reference') {
+      final name = expression['objectName'];
+      final column = columns[name];
+      if (name is! String || column == null) {
+        throw FormatException('Schema expression references unknown column $name.');
+      }
+      return {'formatVersion': 1, 'kind': 'reference', 'objectId': column['id']};
+    }
+    return {
+      ...expression,
+      if (expression['arguments'] case final List<Object?> arguments)
+        'arguments': [
+          for (final argument in arguments)
+            _settleExpression(argument! as Map<String, Object?>, columns),
+        ],
+    };
+  }
+
   String _initialSql(Map<String, Object?> snapshot) {
     final schemas = (snapshot['schemas']! as List<Object?>).cast<Map<String, Object?>>();
     final schemaNames = {
@@ -338,23 +505,9 @@ final class RivetArtifactGenerator {
       buffer.writeln('CREATE SCHEMA IF NOT EXISTS ${_quote(schema['name']! as String)};');
     }
     for (final table in (snapshot['tables']! as List<Object?>).cast<Map<String, Object?>>()) {
-      final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
-      buffer.writeln(
-        'CREATE TABLE ${_quote(schemaNames[table['schemaId']]!)}.${_quote(table['name']! as String)} (',
-      );
-      for (var index = 0; index < columns.length; index++) {
-        final column = columns[index];
-        final storage = column['storage']! as Map<String, Object?>;
-        final suffix = index == columns.length - 1 ? '' : ',';
-        buffer.writeln(
-          '  ${_quote(column['name']! as String)} ${_postgresType(storage)}'
-          '${storage['nullable'] == true ? '' : ' NOT NULL'}'
-          '${column['primaryKey'] == true ? ' PRIMARY KEY' : ''}'
-          '${_defaultSql(column)}$suffix',
-        );
-      }
-      buffer.writeln(');');
+      buffer.write(_createTableSql(table, schemaNames.cast<String, String>()));
     }
+    buffer.write(_addedObjectsSql(snapshot, const {}));
     return buffer.toString();
   }
 
@@ -396,7 +549,7 @@ final class RivetArtifactGenerator {
       for (final value in (next['tables']! as List<Object?>).cast<Map<String, Object?>>())
         value['id']! as String: value,
     };
-    final buffer = StringBuffer();
+    final buffer = StringBuffer()..write(_droppedObjectsSql(previous, next));
     for (final entry in nextSchemas.entries) {
       if (!previousSchemas.containsKey(entry.key)) {
         buffer.writeln('CREATE SCHEMA IF NOT EXISTS ${_quote(entry.value)};');
@@ -431,6 +584,7 @@ final class RivetArtifactGenerator {
       }
       _writeColumnDiff(buffer, qualifiedTable, previousTable, nextTable);
     }
+    buffer.write(_addedObjectsSql(next, previous));
     return buffer.toString();
   }
 
@@ -490,9 +644,6 @@ final class RivetArtifactGenerator {
           '${nextColumn['default'] == null ? 'DROP DEFAULT' : 'SET${_defaultSql(nextColumn)}'};',
         );
       }
-      if (previousColumn['primaryKey'] != nextColumn['primaryKey']) {
-        throw UnsupportedError('Changing an existing primary key is not supported.');
-      }
     }
     for (final entry in previousColumns.entries) {
       if (!nextColumns.containsKey(entry.key)) {
@@ -520,12 +671,184 @@ final class RivetArtifactGenerator {
       buffer.writeln(
         '  ${_quote(column['name']! as String)} ${_postgresType(storage)}'
         '${storage['nullable'] == true ? '' : ' NOT NULL'}'
-        '${column['primaryKey'] == true ? ' PRIMARY KEY' : ''}'
         '${_defaultSql(column)}${index == columns.length - 1 ? '' : ','}',
       );
     }
     return (buffer..writeln(');')).toString();
   }
+
+  String _droppedObjectsSql(
+    Map<String, Object?> previous,
+    Map<String, Object?> next,
+  ) {
+    final previousSchemas = _schemaNames(previous);
+    final nextTables = _tablesById(next);
+    final buffer = StringBuffer();
+    for (final oldTable in _snapshotTables(previous)) {
+      final nextTable = nextTables[oldTable['id']];
+      final qualified =
+          '${_quote(previousSchemas[oldTable['schemaId']]!)}.'
+          '${_quote(oldTable['name']! as String)}';
+      for (final constraint in _objects(oldTable, 'constraints')) {
+        final replacement = nextTable == null
+            ? null
+            : _objects(
+                nextTable,
+                'constraints',
+              ).where((value) => value['id'] == constraint['id']).singleOrNull;
+        if (nextTable == null || replacement == null || !_sameObject(constraint, replacement)) {
+          buffer.writeln(
+            'ALTER TABLE $qualified DROP CONSTRAINT ${_quote(constraint['name']! as String)};',
+          );
+        }
+      }
+      if (nextTable == null) continue;
+      for (final index in _objects(oldTable, 'indexes')) {
+        final replacement = _objects(
+          nextTable,
+          'indexes',
+        ).where((value) => value['id'] == index['id']).singleOrNull;
+        if (replacement == null || !_sameObject(index, replacement)) {
+          buffer.writeln(
+            'DROP INDEX ${_quote(previousSchemas[oldTable['schemaId']]!)}.'
+            '${_quote(index['name']! as String)};',
+          );
+        }
+      }
+    }
+    return buffer.toString();
+  }
+
+  String _addedObjectsSql(
+    Map<String, Object?> next,
+    Map<String, Object?> previous,
+  ) {
+    final schemas = _schemaNames(next);
+    final tables = _tablesById(next);
+    final previousTables = previous.isEmpty
+        ? const <String, Map<String, Object?>>{}
+        : _tablesById(previous);
+    final columnNames = <String, String>{};
+    for (final table in tables.values) {
+      for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>()) {
+        columnNames[column['id']! as String] = column['name']! as String;
+      }
+    }
+    final buffer = StringBuffer();
+    final foreignKeys = StringBuffer();
+    for (final table in tables.values) {
+      final oldTable = previousTables[table['id']];
+      final qualified =
+          '${_quote(schemas[table['schemaId']]!)}.${_quote(table['name']! as String)}';
+      for (final constraint in _objects(table, 'constraints')) {
+        final old = oldTable == null
+            ? null
+            : _objects(
+                oldTable,
+                'constraints',
+              ).where((value) => value['id'] == constraint['id']).singleOrNull;
+        if (old != null && _sameObject(old, constraint)) continue;
+        (constraint['kind'] == 'foreignKey' ? foreignKeys : buffer).writeln(
+          _addConstraintSql(qualified, constraint, tables, schemas, columnNames),
+        );
+      }
+      for (final index in _objects(table, 'indexes')) {
+        final old = oldTable == null
+            ? null
+            : _objects(
+                oldTable,
+                'indexes',
+              ).where((value) => value['id'] == index['id']).singleOrNull;
+        if (old != null && _sameObject(old, index)) continue;
+        if (canonicalJson(index['options']) != canonicalJson(<String, Object?>{}) ||
+            canonicalJson(index['platforms']) != canonicalJson(const ['postgresql'])) {
+          throw UnsupportedError(
+            'Index ${index['name']} uses options or platforms that ordinary Rivet migrations do not support.',
+          );
+        }
+        final unique = index['unique'] == true ? 'UNIQUE ' : '';
+        final terms = [
+          for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>())
+            '${_quote(columnNames[term['columnId']]!)}${term['descending'] == true ? ' DESC' : ' ASC'}',
+        ].join(', ');
+        final predicate = index['predicate'] is Map<String, Object?>
+            ? ' WHERE ${renderSchemaExpression(index['predicate']! as Map<String, Object?>, resolveReference: (id) => columnNames[id]!)}'
+            : '';
+        buffer.writeln(
+          'CREATE ${unique}INDEX ${_quote(index['name']! as String)} ON $qualified ($terms)$predicate;',
+        );
+      }
+    }
+    return '$buffer$foreignKeys';
+  }
+
+  String _addConstraintSql(
+    String qualified,
+    Map<String, Object?> constraint,
+    Map<String, Map<String, Object?>> tables,
+    Map<String, String> schemas,
+    Map<String, String> columnNames,
+  ) {
+    final name = _quote(constraint['name']! as String);
+    final columns = (constraint['columnIds']! as List<Object?>)
+        .cast<String>()
+        .map((id) => _quote(columnNames[id]!))
+        .join(', ');
+    final definition = switch (constraint['kind']) {
+      'primaryKey' => 'PRIMARY KEY ($columns)',
+      'check' =>
+        'CHECK (${renderSchemaExpression(constraint['expression']! as Map<String, Object?>, resolveReference: (id) => columnNames[id]!)})',
+      'foreignKey' => _foreignKeySql(constraint, tables, schemas, columnNames, columns),
+      final kind => throw UnsupportedError('Rivet migrations do not support $kind constraints.'),
+    };
+    return 'ALTER TABLE $qualified ADD CONSTRAINT $name $definition;';
+  }
+
+  String _foreignKeySql(
+    Map<String, Object?> constraint,
+    Map<String, Map<String, Object?>> tables,
+    Map<String, String> schemas,
+    Map<String, String> columnNames,
+    String columns,
+  ) {
+    final target = tables[constraint['referenceTableId']]!;
+    final targetColumns = (constraint['referenceColumnIds']! as List<Object?>)
+        .cast<String>()
+        .map((id) => _quote(columnNames[id]!))
+        .join(', ');
+    return 'FOREIGN KEY ($columns) REFERENCES '
+        '${_quote(schemas[target['schemaId']]!)}.${_quote(target['name']! as String)} '
+        '($targetColumns) ON DELETE ${_referentialAction(constraint['onDelete']! as String)} '
+        'ON UPDATE ${_referentialAction(constraint['onUpdate']! as String)}';
+  }
+
+  String _referentialAction(String value) => switch (value) {
+    'noAction' => 'NO ACTION',
+    'restrict' => 'RESTRICT',
+    'cascade' => 'CASCADE',
+    'setNull' => 'SET NULL',
+    'setDefault' => 'SET DEFAULT',
+    _ => throw FormatException('Unknown referential action `$value`.'),
+  };
+
+  bool _sameObject(Map<String, Object?> left, Map<String, Object?> right) =>
+      canonicalJson(_withoutKeysRecursively(left, {'id', 'tableId'})) ==
+      canonicalJson(_withoutKeysRecursively(right, {'id', 'tableId'}));
+
+  List<Map<String, Object?>> _snapshotTables(Map<String, Object?> snapshot) =>
+      (snapshot['tables']! as List<Object?>).cast<Map<String, Object?>>();
+
+  Map<String, Map<String, Object?>> _tablesById(Map<String, Object?> snapshot) => {
+    for (final table in _snapshotTables(snapshot)) table['id']! as String: table,
+  };
+
+  Map<String, String> _schemaNames(Map<String, Object?> snapshot) => {
+    for (final schema in (snapshot['schemas']! as List<Object?>).cast<Map<String, Object?>>())
+      schema['id']! as String: schema['name']! as String,
+  };
+
+  List<Map<String, Object?>> _objects(Map<String, Object?> table, String key) =>
+      (table[key]! as List<Object?>).cast<Map<String, Object?>>();
 
   Map<String, Object?> _withoutKey(Map<String, Object?> value, String key) => {
     for (final entry in value.entries)

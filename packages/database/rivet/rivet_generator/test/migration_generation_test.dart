@@ -31,7 +31,7 @@ void main() {
         name: 'create users',
       );
 
-      expect(migrationId, '00000000000000000000000000000006');
+      expect(migrationId, '00000000000000000000000000000007');
       final journal = jsonDecode(
         File('${directory.path}/journal.json').readAsStringSync(),
       ) as Map<String, Object?>;
@@ -50,9 +50,10 @@ void main() {
         File('${migrationDirectory.path}/migration.sql').readAsStringSync(),
         'CREATE SCHEMA IF NOT EXISTS "auth";\n'
         'CREATE TABLE "auth"."users" (\n'
-        '  "id" int4 NOT NULL PRIMARY KEY,\n'
+        '  "id" int4 NOT NULL,\n'
         '  "name" text NOT NULL\n'
-        ');\n',
+        ');\n'
+        'ALTER TABLE "auth"."users" ADD CONSTRAINT "users_pkey" PRIMARY KEY ("id");\n',
       );
       final migration = jsonDecode(
         File('${migrationDirectory.path}/migration.json').readAsStringSync(),
@@ -273,8 +274,170 @@ void main() {
         contains('DROP COLUMN "name";'),
       );
     });
+
+    test('should generate indexes, checks, composite keys, and foreign keys', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _constraintDeclaration();
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'constraints',
+      );
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      final snapshot = _lastArtifact(directory, 'snapshot.json');
+
+      expect(
+        sql,
+        contains(
+          'CREATE UNIQUE INDEX "users_email_active" ON "auth"."users" '
+          '("email" ASC, "tenant" DESC) WHERE ("active" = true);',
+        ),
+      );
+      expect(sql, contains('ADD CONSTRAINT "email_present" CHECK (NOT (("email" = \'\')));'));
+      expect(
+        sql,
+        contains('ADD CONSTRAINT "memberships_pkey" PRIMARY KEY ("tenant", "userId");'),
+      );
+      expect(
+        sql,
+        contains(
+          'REFERENCES "auth"."users" ("tenant") ON DELETE CASCADE ON UPDATE RESTRICT;',
+        ),
+      );
+      final tables = (snapshot['tables']! as List<Object?>).cast<Map<String, Object?>>();
+      final identities = <Object?>{
+        for (final table in tables) ...[
+          for (final index in table['indexes']! as List<Object?>)
+            (index! as Map<String, Object?>)['id'],
+          for (final constraint in table['constraints']! as List<Object?>)
+            (constraint! as Map<String, Object?>)['id'],
+        ],
+      };
+      expect(identities, hasLength(5));
+      await const RivetMigrationChecker().check(directory: directory);
+
+      final users = (declaration['tables']! as List<Object?>).cast<Map<String, Object?>>().first;
+      final index = (users['indexes']! as List<Object?>).first! as Map<String, Object?>;
+      users['indexes'] = [
+        {
+          ...index,
+          'options': <String, Object?>{'method': 'hnsw'},
+        },
+      ];
+      await expectLater(
+        generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'unsupported search index',
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
   });
 }
+
+Map<String, Object?> _constraintDeclaration() => {
+  'formatVersion': 1,
+  'dialect': 'rivet',
+  'name': 'constraints',
+  'tables': [
+    {
+      'schema': 'auth',
+      'name': 'users',
+      'columns': [
+        _column('tenant', primaryKey: true),
+        _column('email'),
+        _column('active', kind: 'boolean'),
+      ],
+      'indexes': [
+        {
+          'name': 'users_email_active',
+          'unique': true,
+          'terms': [
+            {'column': 'email', 'descending': false},
+            {'column': 'tenant', 'descending': true},
+          ],
+          'predicate': _operator('=', _reference('active'), _literal(true)),
+          'options': <String, Object?>{},
+          'platforms': ['postgresql'],
+        },
+      ],
+      'constraints': [
+        {
+          'name': 'email_present',
+          'kind': 'check',
+          'columns': <String>[],
+          'expression': _operator('NOT', _operator('=', _reference('email'), _literal(''))),
+        },
+      ],
+    },
+    {
+      'schema': 'work',
+      'name': 'memberships',
+      'columns': [_column('tenant'), _column('userId')],
+      'indexes': <Object?>[],
+      'constraints': [
+        {
+          'name': 'memberships_pkey',
+          'kind': 'primaryKey',
+          'columns': ['tenant', 'userId'],
+        },
+        {
+          'name': 'membership_tenant_fkey',
+          'kind': 'foreignKey',
+          'columns': ['tenant'],
+          'references': {
+            'schema': 'auth',
+            'table': 'users',
+            'columns': ['tenant'],
+          },
+          'onDelete': 'cascade',
+          'onUpdate': 'restrict',
+        },
+      ],
+    },
+  ],
+  'enums': <Object?>[],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _column(
+  String name, {
+  String kind = 'integer',
+  bool primaryKey = false,
+}) => {
+  'name': name,
+  'storage': {'kind': kind, 'nullable': false, 'codecVersion': 1},
+  'primaryKey': primaryKey,
+};
+
+Map<String, Object?> _reference(String name) => {
+  'formatVersion': 1,
+  'kind': 'reference',
+  'objectName': name,
+};
+
+Map<String, Object?> _literal(Object value) => {
+  'formatVersion': 1,
+  'kind': 'literal',
+  'literalType': value is bool ? 'boolean' : 'string',
+  'value': value,
+};
+
+Map<String, Object?> _operator(
+  String operator,
+  Map<String, Object?> first, [
+  Map<String, Object?>? second,
+]) => {
+  'formatVersion': 1,
+  'kind': 'operator',
+  'operator': operator,
+  'arguments': [first, ?second],
+};
 
 Map<String, Object?> _lastArtifact(Directory directory, String name) =>
     jsonDecode(_lastArtifactFile(directory, name).readAsStringSync()) as Map<String, Object?>;

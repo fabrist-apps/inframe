@@ -18,6 +18,7 @@ void main() {
       if (databaseUrl == null) return;
       connection = await pg.Connection.openFromUrl(databaseUrl);
       await connection.execute('DROP SCHEMA IF EXISTS auth CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS work CASCADE');
     });
 
     tearDown(() async {
@@ -99,8 +100,167 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should enforce generated indexes, checks, composite keys, and foreign keys',
+      () async {
+        await const RivetMigrationGenerator().generateDeclaration(
+          declaration: _constraintDeclaration(),
+          directory: directory,
+          name: 'constraints',
+        );
+        await _applyLastMigration(connection, directory);
+
+        await connection.execute(
+          "INSERT INTO auth.users (id, email, active) VALUES (1, 'a@example.com', true)",
+        );
+        await expectLater(
+          connection.execute(
+            "INSERT INTO auth.users (id, email, active) VALUES (2, 'a@example.com', true)",
+          ),
+          throwsA(anything),
+        );
+        await connection.execute(
+          "INSERT INTO auth.users (id, email, active) VALUES (2, 'a@example.com', false)",
+        );
+        await expectLater(
+          connection.execute("INSERT INTO auth.users (id, email, active) VALUES (3, '', true)"),
+          throwsA(anything),
+        );
+        await expectLater(
+          connection.execute('INSERT INTO work.projects (id, "ownerId") VALUES (1, 999)'),
+          throwsA(anything),
+        );
+        await connection.execute('INSERT INTO work.projects (id, "ownerId") VALUES (1, 1)');
+        await connection.execute('DELETE FROM auth.users WHERE id = 1');
+        expect(
+          (await connection.execute('SELECT count(*) FROM work.projects')).single.single,
+          0,
+        );
+        await connection.execute('INSERT INTO work.memberships (tenant, "userId") VALUES (1, 2)');
+        await expectLater(
+          connection.execute('INSERT INTO work.memberships (tenant, "userId") VALUES (1, 2)'),
+          throwsA(anything),
+        );
+        final indexDefinition = await connection.execute(
+          "SELECT indexdef FROM pg_indexes WHERE schemaname = 'auth' "
+          "AND indexname = 'users_email_active'",
+        );
+        expect(
+          indexDefinition.single.single,
+          allOf(contains('(email)'), contains('WHERE (active = true)')),
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }
+
+Map<String, Object?> _constraintDeclaration() => {
+  'formatVersion': 1,
+  'dialect': 'rivet',
+  'name': 'constraints',
+  'tables': [
+    {
+      'schema': 'auth',
+      'name': 'users',
+      'columns': [
+        _column('id', primaryKey: true),
+        _column('email', kind: 'text'),
+        _column('active', kind: 'boolean'),
+      ],
+      'indexes': [
+        {
+          'name': 'users_email_active',
+          'unique': true,
+          'terms': [
+            {'column': 'email', 'descending': false},
+          ],
+          'predicate': _operator('=', _reference('active'), _literal(true)),
+          'options': <String, Object?>{},
+          'platforms': ['postgresql'],
+        },
+      ],
+      'constraints': [
+        {
+          'name': 'email_present',
+          'kind': 'check',
+          'columns': <String>[],
+          'expression': _operator('NOT', _operator('=', _reference('email'), _literal(''))),
+        },
+      ],
+    },
+    {
+      'schema': 'work',
+      'name': 'projects',
+      'columns': [_column('id', primaryKey: true), _column('ownerId')],
+      'indexes': <Object?>[],
+      'constraints': [
+        {
+          'name': 'projects_owner_fkey',
+          'kind': 'foreignKey',
+          'columns': ['ownerId'],
+          'references': {
+            'schema': 'auth',
+            'table': 'users',
+            'columns': ['id'],
+          },
+          'onDelete': 'cascade',
+          'onUpdate': 'restrict',
+        },
+      ],
+    },
+    {
+      'schema': 'work',
+      'name': 'memberships',
+      'columns': [_column('tenant'), _column('userId')],
+      'indexes': <Object?>[],
+      'constraints': [
+        {
+          'name': 'memberships_pkey',
+          'kind': 'primaryKey',
+          'columns': ['tenant', 'userId'],
+        },
+      ],
+    },
+  ],
+  'enums': <Object?>[],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _column(
+  String name, {
+  String kind = 'integer',
+  bool primaryKey = false,
+}) => {
+  'name': name,
+  'storage': {'kind': kind, 'nullable': false, 'codecVersion': 1},
+  'primaryKey': primaryKey,
+};
+
+Map<String, Object?> _reference(String name) => {
+  'formatVersion': 1,
+  'kind': 'reference',
+  'objectName': name,
+};
+
+Map<String, Object?> _literal(Object value) => {
+  'formatVersion': 1,
+  'kind': 'literal',
+  'literalType': value is bool ? 'boolean' : 'string',
+  'value': value,
+};
+
+Map<String, Object?> _operator(
+  String operator,
+  Map<String, Object?> first, [
+  Map<String, Object?>? second,
+]) => {
+  'formatVersion': 1,
+  'kind': 'operator',
+  'operator': operator,
+  'arguments': [first, ?second],
+};
 
 Future<void> _applyLastMigration(pg.Connection connection, Directory directory) async {
   final journal =

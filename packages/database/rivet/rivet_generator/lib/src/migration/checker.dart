@@ -73,6 +73,8 @@ final class RivetArtifactChecker {
   void _validateSnapshot(Map<String, Object?> snapshot) {
     final ids = <String>{};
     final schemaIds = <String>{};
+    final tableIds = <String>{};
+    final columnOwners = <String, String>{};
     for (final raw in _list(snapshot['schemas'], 'snapshot schemas')) {
       final schema = _map(raw, 'snapshot schema');
       final id = _id(schema['id'], 'schema identity');
@@ -85,6 +87,7 @@ final class RivetArtifactChecker {
         final value = _map(raw, 'snapshot $group entry');
         final id = _id(value['id'], '$group identity');
         if (!ids.add(id)) throw FormatException('Duplicate snapshot identity `$id`.');
+        if (group == 'tables') tableIds.add(id);
         if (!schemaIds.contains(value['schemaId'])) {
           throw FormatException('$group entry $id references an unknown schema.');
         }
@@ -97,14 +100,77 @@ final class RivetArtifactChecker {
             if (childId == null) continue;
             final id = _id(childId, '$childGroup identity');
             if (!ids.add(id)) throw FormatException('Duplicate snapshot identity `$id`.');
-            if (childGroup == 'columns' && child['tableId'] != value['id']) {
-              throw FormatException('Column $id references the wrong table.');
+            if ((childGroup == 'columns' ||
+                    childGroup == 'indexes' ||
+                    childGroup == 'constraints') &&
+                child['tableId'] != value['id']) {
+              throw FormatException('$childGroup entry $id references the wrong table.');
+            }
+            if (childGroup == 'columns') columnOwners[id] = value['id']! as String;
+          }
+        }
+      }
+    }
+    for (final rawTable in _list(snapshot['tables'], 'snapshot tables')) {
+      final table = _map(rawTable, 'snapshot table');
+      final tableId = table['id']! as String;
+      for (final rawIndex in _list(table['indexes'], 'table indexes')) {
+        final index = _map(rawIndex, 'table index');
+        for (final rawTerm in _list(index['terms'], 'index terms')) {
+          final columnId = _map(rawTerm, 'index term')['columnId'];
+          if (columnOwners[columnId] != tableId) {
+            throw const FormatException('Index term references a column outside its table.');
+          }
+        }
+        if (index['predicate'] case final Map<String, Object?> expression) {
+          _validateExpressionReferences(expression, tableId, columnOwners);
+        }
+      }
+      for (final rawConstraint in _list(table['constraints'], 'table constraints')) {
+        final constraint = _map(rawConstraint, 'table constraint');
+        for (final columnId in _list(constraint['columnIds'], 'constraint columns')) {
+          if (columnOwners[columnId] != tableId) {
+            throw const FormatException('Constraint references a column outside its table.');
+          }
+        }
+        if (constraint['expression'] case final Map<String, Object?> expression) {
+          _validateExpressionReferences(expression, tableId, columnOwners);
+        }
+        if (constraint['kind'] == 'foreignKey') {
+          final target = constraint['referenceTableId'];
+          if (!tableIds.contains(target)) {
+            throw const FormatException('Foreign key references an unknown table.');
+          }
+          for (final columnId in _list(
+            constraint['referenceColumnIds'],
+            'foreign key columns',
+          )) {
+            if (columnOwners[columnId] != target) {
+              throw const FormatException('Foreign key references a column outside its target.');
             }
           }
         }
       }
     }
     _list(snapshot['requirements'], 'snapshot requirements');
+  }
+
+  void _validateExpressionReferences(
+    Map<String, Object?> expression,
+    String tableId,
+    Map<String, String> columnOwners,
+  ) {
+    if (expression['formatVersion'] != 1) {
+      throw const FormatException('Schema expression has an unknown format version.');
+    }
+    if (expression['kind'] == 'reference' && columnOwners[expression['objectId']] != tableId) {
+      throw const FormatException('Schema expression references a column outside its table.');
+    }
+    if (expression['arguments'] case final List<Object?> arguments) {
+      for (final argument in arguments) {
+        _validateExpressionReferences(_map(argument, 'expression argument'), tableId, columnOwners);
+      }
+    }
   }
 
   void _validatePhases(Map<String, Object?> migration, String sql) {
@@ -152,9 +218,22 @@ final class RivetArtifactChecker {
       for (final raw in _list(snapshot['schemas'], 'snapshot schemas'))
         (_map(raw, 'schema')['id']! as String): _map(raw, 'schema')['name']! as String,
     };
+    final snapshotTables = [
+      for (final raw in _list(snapshot['tables'], 'snapshot tables')) _map(raw, 'snapshot table'),
+    ];
+    final tablesById = {
+      for (final table in snapshotTables) table['id']! as String: table,
+    };
+    final columnNames = <String, String>{};
+    for (final table in snapshotTables) {
+      for (final raw in _list(table['columns'], 'table columns')) {
+        final column = _map(raw, 'table column');
+        columnNames[column['id']! as String] = column['name']! as String;
+      }
+    }
     final tables = [
-      for (final raw in _list(snapshot['tables'], 'snapshot tables'))
-        _stripSnapshotTable(_map(raw, 'snapshot table'), schemaNames),
+      for (final table in snapshotTables)
+        _stripSnapshotTable(table, schemaNames, tablesById, columnNames),
     ]..sort(_byPhysicalName);
     return {
       'formatVersion': 1,
@@ -185,6 +264,8 @@ final class RivetArtifactChecker {
   Map<String, Object?> _stripSnapshotTable(
     Map<String, Object?> table,
     Map<String, String> schemaNames,
+    Map<String, Map<String, Object?>> tablesById,
+    Map<String, String> columnNames,
   ) => {
     'schema': schemaNames[table['schemaId']],
     'name': table['name'],
@@ -192,9 +273,108 @@ final class RivetArtifactChecker {
       for (final raw in _list(table['columns'], 'table columns'))
         _withoutKeys(_map(raw, 'table column'), {'id', 'tableId'}),
     ],
-    'indexes': table['indexes'],
-    'constraints': table['constraints'],
+    'indexes': [
+      for (final raw in _list(table['indexes'], 'table indexes'))
+        _stripSnapshotIndex(_map(raw, 'table index'), columnNames),
+    ],
+    'constraints': [
+      for (final raw in _list(table['constraints'], 'table constraints'))
+        if (!_isImplicitPrimaryKey(_map(raw, 'table constraint'), table, columnNames))
+          _stripSnapshotConstraint(
+            _map(raw, 'table constraint'),
+            schemaNames,
+            tablesById,
+            columnNames,
+          ),
+    ],
   };
+
+  Map<String, Object?> _stripSnapshotIndex(
+    Map<String, Object?> index,
+    Map<String, String> columnNames,
+  ) => {
+    'name': index['name'],
+    'unique': index['unique'],
+    'terms': [
+      for (final raw in _list(index['terms'], 'index terms'))
+        {
+          'column': columnNames[_map(raw, 'index term')['columnId']],
+          'descending': _map(raw, 'index term')['descending'],
+        },
+    ],
+    if (index['predicate'] case final Map<String, Object?> expression)
+      'predicate': _expressionNames(expression, columnNames),
+    'options': index['options'],
+    'platforms': index['platforms'],
+  };
+
+  Map<String, Object?> _stripSnapshotConstraint(
+    Map<String, Object?> constraint,
+    Map<String, String> schemaNames,
+    Map<String, Map<String, Object?>> tablesById,
+    Map<String, String> columnNames,
+  ) {
+    final result = <String, Object?>{
+      'name': constraint['name'],
+      'kind': constraint['kind'],
+      'columns': [
+        for (final id in _list(constraint['columnIds'], 'constraint columns')) columnNames[id],
+      ],
+      if (constraint['expression'] case final Map<String, Object?> expression)
+        'expression': _expressionNames(expression, columnNames),
+    };
+    if (constraint['kind'] == 'foreignKey') {
+      final target = tablesById[constraint['referenceTableId']]!;
+      result
+        ..['references'] = {
+          'schema': schemaNames[target['schemaId']],
+          'table': target['name'],
+          'columns': [
+            for (final id in _list(constraint['referenceColumnIds'], 'foreign key columns'))
+              columnNames[id],
+          ],
+        }
+        ..['onDelete'] = constraint['onDelete']
+        ..['onUpdate'] = constraint['onUpdate'];
+    }
+    return result;
+  }
+
+  bool _isImplicitPrimaryKey(
+    Map<String, Object?> constraint,
+    Map<String, Object?> table,
+    Map<String, String> columnNames,
+  ) {
+    if (constraint['kind'] != 'primaryKey' || constraint['name'] != '${table['name']}_pkey') {
+      return false;
+    }
+    final primaryColumns = [
+      for (final raw in _list(table['columns'], 'table columns'))
+        if (_map(raw, 'table column')['primaryKey'] == true) _map(raw, 'table column')['name'],
+    ];
+    return canonicalJson(primaryColumns) ==
+        canonicalJson([
+          for (final id in _list(constraint['columnIds'], 'constraint columns')) columnNames[id],
+        ]);
+  }
+
+  Map<String, Object?> _expressionNames(
+    Map<String, Object?> expression,
+    Map<String, String> columnNames,
+  ) => expression['kind'] == 'reference'
+      ? {
+          'formatVersion': 1,
+          'kind': 'reference',
+          'objectName': columnNames[expression['objectId']],
+        }
+      : {
+          ...expression,
+          if (expression['arguments'] case final List<Object?> arguments)
+            'arguments': [
+              for (final argument in arguments)
+                _expressionNames(_map(argument, 'expression argument'), columnNames),
+            ],
+        };
 
   int _byPhysicalName(Map<String, Object?> left, Map<String, Object?> right) =>
       '${left['schema']}.${left['name']}'.compareTo('${right['schema']}.${right['name']}');

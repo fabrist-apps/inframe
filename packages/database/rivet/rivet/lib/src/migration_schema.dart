@@ -28,6 +28,7 @@ final class RivetDatabaseSchema {
     final encodedTables = <Map<String, Object?>>[];
     for (final table in tables) {
       final encodedColumns = <Map<String, Object?>>[];
+      final encodedForeignKeys = <Map<String, Object?>>[];
       for (final column in table.columns) {
         final storage = _storage(column.codec);
         final enumCodec = storage.enumCodec;
@@ -59,9 +60,14 @@ final class RivetDatabaseSchema {
             throw ArgumentError('A Rivet foreign key references an unregistered column.');
           }
           encodedForeignKey = {
-            'schema': target.schemaName,
-            'table': target.tableName,
-            'column': referenced.physicalName,
+            'name': '${table.tableName}_${column.physicalName}_fkey',
+            'kind': 'foreignKey',
+            'columns': [column.physicalName],
+            'references': {
+              'schema': target.schemaName,
+              'table': target.tableName,
+              'columns': [referenced.physicalName],
+            },
             'onDelete': foreignKey.onDelete.name,
             'onUpdate': foreignKey.onUpdate.name,
           };
@@ -74,8 +80,8 @@ final class RivetDatabaseSchema {
           'primaryKey': column.isPrimaryKey,
           if (column.sqlDefault case final sqlDefault?)
             'default': {'formatVersion': 1, 'kind': 'sql', 'sql': sqlDefault},
-          if (encodedForeignKey != null) 'foreignKey': encodedForeignKey,
         });
+        if (encodedForeignKey != null) encodedForeignKeys.add(encodedForeignKey);
       }
 
       encodedTables.add({
@@ -92,12 +98,9 @@ final class RivetDatabaseSchema {
                 for (final term in index.terms)
                   {'column': term.column.physicalName, 'descending': term.descending},
               ],
-              if (index.predicate case final predicate?)
-                'predicate': {
-                  'formatVersion': 1,
-                  'kind': 'sql',
-                  'sql': predicate.renderLiterals(),
-                },
+              if (index.predicate case final predicate?) 'predicate': predicate.schemaExpression(),
+              'options': <String, Object?>{},
+              'platforms': ['postgresql'],
             },
         ],
         'constraints': [
@@ -105,12 +108,9 @@ final class RivetDatabaseSchema {
             {
               'name': constraint.name,
               'kind': constraint.kind.name,
+              'columns': [for (final column in constraint.columns) column.physicalName],
               if (constraint.predicate case final predicate?)
-                'expression': {
-                  'formatVersion': 1,
-                  'kind': 'sql',
-                  'sql': predicate.renderLiterals(),
-                }
+                'expression': predicate.schemaExpression()
               else if (constraint.expression case final expression?)
                 'expression': {
                   'formatVersion': 1,
@@ -118,6 +118,7 @@ final class RivetDatabaseSchema {
                   'sql': expression,
                 },
             },
+          ...encodedForeignKeys,
         ],
       });
     }
