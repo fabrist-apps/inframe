@@ -107,7 +107,10 @@ void main() {
       final migrationId = await _generateConcurrentIndexMigration(directory);
       final artifacts = _artifacts(directory);
       artifacts.sql.writeAsStringSync(
-        artifacts.sql.readAsStringSync().replaceFirst('CREATE INDEX', 'CREATE INDEX CONCURRENTLY'),
+        artifacts.sql.readAsStringSync().replaceFirst(
+          'CREATE INDEX',
+          '-- reviewed\nCREATE INDEX CONCURRENTLY',
+        ),
       );
       final migration = jsonDecode(artifacts.migration.readAsStringSync()) as Map<String, Object?>;
       final phase = ((migration['phases']! as List<Object?>).single! as Map<String, Object?>)
@@ -142,6 +145,22 @@ void main() {
       await RivetArtifactSealer().seal(directory: directory, migrationId: migrationId);
       expect(phase['mode'], 'nontransactional');
       await const RivetMigrationChecker().check(directory: directory);
+    });
+
+    test('should reject a comment-prefixed concurrent index in a transactional phase', () async {
+      final migrationId = await _generateConcurrentIndexMigration(directory);
+      final artifacts = _artifacts(directory);
+      artifacts.sql.writeAsStringSync(
+        artifacts.sql.readAsStringSync().replaceFirst(
+          'CREATE INDEX',
+          '/* reviewed */\nCREATE INDEX CONCURRENTLY',
+        ),
+      );
+
+      await expectLater(
+        RivetArtifactSealer().seal(directory: directory, migrationId: migrationId),
+        throwsA(isA<FormatException>()),
+      );
     });
   });
 }

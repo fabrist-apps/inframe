@@ -290,7 +290,26 @@ void main() {
           "VALUES (3, 'queued', ARRAY['queued']::enum_evolution.state[])",
         );
 
+        columns[1]['default'] = {
+          'formatVersion': 1,
+          'kind': 'literal',
+          'literalType': 'string',
+          'value': 'complete',
+        };
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'default to removable label',
+        );
+        await _applyLastMigration(connection, directory);
+
         enumValue['values'] = [evolvedValues.first, evolvedValues[1]];
+        columns[1]['default'] = {
+          'formatVersion': 1,
+          'kind': 'literal',
+          'literalType': 'string',
+          'value': 'queued',
+        };
         await expectLater(
           generator.generateDeclaration(
             declaration: declaration,
@@ -425,6 +444,109 @@ void main() {
             contains('(email)'),
             contains('WHERE (active = true)'),
           ),
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should apply an enum rebuild before renaming its dependent table',
+      () async {
+        const generator = RivetMigrationGenerator();
+        final declaration = _evolvingEnumDeclaration();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial enum',
+        );
+        await _applyLastMigration(connection, directory);
+        await connection.execute(
+          '''INSERT INTO enum_evolution.jobs (id, status, statuses) '''
+          '''VALUES (1, 'done', ARRAY['queued', 'done']::enum_evolution.mood[])''',
+        );
+
+        (declaration['tables']! as List<Object?>).single! as Map<String, Object?>
+          ..['name'] = 'tasks'
+          ..['renamedFrom'] = 'jobs';
+        final enumValue = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+        final values = enumValue['values']! as List<Object?>;
+        enumValue['values'] = values.reversed.toList();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'rebuild enum and rename table',
+        );
+
+        await _applyLastMigration(connection, directory);
+
+        expect(
+          (await connection.execute(
+            'SELECT status::text FROM enum_evolution.tasks WHERE id = 1',
+          )).single.single,
+          'done',
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should rename a referenced table without dropping its primary key',
+      () async {
+        const generator = RivetMigrationGenerator();
+        final declaration = _constraintDeclaration();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial constraints',
+        );
+        await _applyLastMigration(connection, directory);
+        (declaration['tables']! as List<Object?>).first! as Map<String, Object?>
+          ..['name'] = 'accounts'
+          ..['renamedFrom'] = 'users';
+        final projects = (declaration['tables']! as List<Object?>)[1]! as Map<String, Object?>;
+        final foreignKey =
+            (projects['constraints']! as List<Object?>).single! as Map<String, Object?>;
+        (foreignKey['references']! as Map<String, Object?>)['table'] = 'accounts';
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'rename referenced table',
+        );
+
+        await _applyLastMigration(connection, directory);
+        await connection.execute(
+          "INSERT INTO auth.accounts (id, email, active) VALUES (1, 'a@example.com', true)",
+        );
+        await connection.execute('INSERT INTO work.projects (id, "ownerId") VALUES (1, 1)');
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should drop foreign keys before their referenced primary keys',
+      () async {
+        const generator = RivetMigrationGenerator();
+        final declaration = _constraintDeclaration();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial constraints',
+        );
+        await _applyLastMigration(connection, directory);
+        declaration['tables'] = <Object?>[];
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'drop related tables',
+        );
+
+        await _applyLastMigration(connection, directory);
+
+        expect(
+          (await connection.execute(
+            "SELECT count(*) FROM pg_tables WHERE schemaname IN ('auth', 'work')",
+          )).single.single,
+          0,
         );
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,

@@ -310,7 +310,9 @@ final class RivetArtifactChecker {
     final normalized = normalizeDeclaration(declaration);
     final tables = [
       for (final raw in _list(normalized['tables'], 'declaration tables'))
-        _withoutRenameHints(_map(raw, 'declaration table'))! as Map<String, Object?>,
+        _sortDeclarationTable(
+          _withoutRenameHints(_map(raw, 'declaration table'))! as Map<String, Object?>,
+        ),
     ]..sort(_byPhysicalName);
     return {
       'formatVersion': 1,
@@ -337,11 +339,11 @@ final class RivetArtifactChecker {
       for (final raw in _list(table['columns'], 'table columns'))
         _stripSnapshotColumn(_map(raw, 'table column'), enumNames),
     ],
-    'indexes': [
+    'indexes': ([
       for (final raw in _list(table['indexes'], 'table indexes'))
         _stripSnapshotIndex(_map(raw, 'table index'), columnNames),
-    ],
-    'constraints': [
+    ]..sort(_byName)),
+    'constraints': ([
       for (final raw in _list(table['constraints'], 'table constraints'))
         if (!_isImplicitPrimaryKey(_map(raw, 'table constraint'), table, columnNames))
           _stripSnapshotConstraint(
@@ -350,7 +352,7 @@ final class RivetArtifactChecker {
             tablesById,
             columnNames,
           ),
-    ],
+    ]..sort(_byName)),
   };
 
   Map<String, Object?> _stripSnapshotColumn(
@@ -359,6 +361,18 @@ final class RivetArtifactChecker {
   ) => {
     ..._withoutKeys(column, {'id', 'tableId'}),
     'storage': _storageNames(column['storage']! as Map<String, Object?>, enumNames),
+  };
+
+  Map<String, Object?> _sortDeclarationTable(Map<String, Object?> table) => {
+    ...table,
+    'indexes': ([
+      for (final raw in _list(table['indexes'], 'declaration indexes'))
+        _map(raw, 'declaration index'),
+    ]..sort(_byName)),
+    'constraints': ([
+      for (final raw in _list(table['constraints'], 'declaration constraints'))
+        _map(raw, 'declaration constraint'),
+    ]..sort(_byName)),
   };
 
   Map<String, Object?> _storageNames(
@@ -486,6 +500,9 @@ final class RivetArtifactChecker {
 
   int _byPhysicalName(Map<String, Object?> left, Map<String, Object?> right) =>
       '${left['schema']}.${left['name']}'.compareTo('${right['schema']}.${right['name']}');
+
+  int _byName(Map<String, Object?> left, Map<String, Object?> right) =>
+      (left['name']! as String).compareTo(right['name']! as String);
 
   Map<String, Object?> _withoutKeys(Map<String, Object?> value, Set<String> keys) => {
     for (final entry in value.entries)

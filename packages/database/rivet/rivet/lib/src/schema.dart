@@ -1845,7 +1845,7 @@ final class RivetPredicate {
     String Function() sql,
     List<RivetColumn<dynamic>> columns,
     Map<String, Object?> schemaExpression,
-  ) : this._((_, _) => sql(), const [], columns, false, schemaExpression);
+  ) : this._((_, _) => sql(), const [], columns, false, () => schemaExpression);
 
   RivetPredicate._value(
     String Function() before,
@@ -1857,7 +1857,7 @@ final class RivetPredicate {
         [parameter],
         columns,
         false,
-        {
+        () => {
           'formatVersion': 1,
           'kind': 'operator',
           'operator': '=',
@@ -1905,7 +1905,7 @@ final class RivetPredicate {
         [...left.parameters, ...right.parameters],
         [...left.columns, ...right.columns],
         _usesRelationAliases(left) || _usesRelationAliases(right),
-        {
+        () => {
           'formatVersion': 1,
           'kind': 'operator',
           'operator': operator,
@@ -1921,14 +1921,14 @@ final class RivetPredicate {
   final List<Object?> parameters;
   final List<RivetColumn<dynamic>> columns;
   final bool usesRelations;
-  final Map<String, Object?>? _schemaExpression;
+  final Map<String, Object?> Function()? _schemaExpression;
 
   Map<String, Object?> schemaExpression() {
-    final expression = _schemaExpression;
-    if (expression == null) {
+    final build = _schemaExpression;
+    if (build == null) {
       throw UnsupportedError('Relation predicates cannot be used as schema expressions.');
     }
-    return expression;
+    return build();
   }
 
   String get sql => _render((_) => '@value', null);
@@ -1950,7 +1950,7 @@ final class RivetPredicate {
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
     usesRelations || other.usesRelations,
-    {
+    () => {
       'formatVersion': 1,
       'kind': 'operator',
       'operator': 'AND',
@@ -1965,7 +1965,7 @@ final class RivetPredicate {
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
     usesRelations || other.usesRelations,
-    {
+    () => {
       'formatVersion': 1,
       'kind': 'operator',
       'operator': 'OR',
@@ -1978,7 +1978,7 @@ final class RivetPredicate {
     parameters,
     columns,
     usesRelations,
-    {
+    () => {
       'formatVersion': 1,
       'kind': 'operator',
       'operator': 'NOT',

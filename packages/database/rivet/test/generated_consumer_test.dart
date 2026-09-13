@@ -346,6 +346,32 @@ void main() {
       expect((arrayStorage['element']! as Map<String, Object?>)['nullable'], true);
     });
 
+    test('should discover a native enum used only inside array storage', () {
+      final declaration = RivetDatabaseSchema(
+        name: 'array_enum_fixture',
+        tables: [ArrayValues.db.buildSchema()],
+      ).toJson();
+
+      final enumValue = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      expect(enumValue['name'], 'workStatus');
+    });
+
+    test('should compose relation predicates before rendering them', () {
+      final relation = RivetPredicate.relation(
+        renderSql: (_, nextAlias) => 'EXISTS (${nextAlias()})',
+        parameters: const [],
+        columns: const [],
+      );
+
+      final predicate = relation & ~relation;
+
+      expect(
+        predicate.renderWith((index) => '\$$index', () => 'SELECT 1'),
+        '(EXISTS (SELECT 1)) AND (NOT (EXISTS (SELECT 1)))',
+      );
+      expect(predicate.schemaExpression, throwsUnsupportedError);
+    });
+
     test('should reject incompatible foreign-key storage before connecting', () async {
       final connection = RivetConnection.url(
         'postgresql://localhost/unused',

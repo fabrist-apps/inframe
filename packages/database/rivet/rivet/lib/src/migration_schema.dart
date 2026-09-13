@@ -31,7 +31,7 @@ final class RivetDatabaseSchema {
       final encodedForeignKeys = <Map<String, Object?>>[];
       for (final column in table.columns) {
         final storage = _storage(column.codec);
-        final enumCodec = storage.enumCodec;
+        final enumCodec = _enumCodec(storage);
         if (enumCodec != null) {
           final key = '${enumCodec.schemaName}.${enumCodec.typeName}';
           final existing = enumCodecs[key];
@@ -175,6 +175,9 @@ final class _StorageDescriptor {
     if (dimensions != null) 'dimensions': dimensions,
   };
 }
+
+RivetEnumCodec<Enum>? _enumCodec(_StorageDescriptor storage) =>
+    storage.enumCodec ?? (storage.element == null ? null : _enumCodec(storage.element!));
 
 _StorageDescriptor _storage(RivetCodec<dynamic> codec, {bool nullable = false}) {
   if (codec is RivetMappedCodec<dynamic, dynamic>) {

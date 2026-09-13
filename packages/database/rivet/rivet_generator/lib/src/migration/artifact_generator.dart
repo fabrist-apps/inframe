@@ -705,11 +705,6 @@ final class RivetArtifactGenerator {
     };
     final nextEnumTypes = _enumTypes(next, nextSchemas);
     final buffer = StringBuffer()..write(_droppedObjectsSql(previous, next));
-    for (final entry in nextSchemas.entries) {
-      if (!previousSchemas.containsKey(entry.key)) {
-        buffer.writeln('CREATE SCHEMA IF NOT EXISTS ${_quote(entry.value)};');
-      }
-    }
     for (final entry in previousTables.entries) {
       if (!nextTables.containsKey(entry.key)) {
         buffer.writeln(
@@ -749,12 +744,25 @@ final class RivetArtifactGenerator {
     Map<String, String> enumLabelTransforms,
   ) {
     final phases = <String>[];
+    final schemas = _addedSchemasSql(previous, next);
+    if (schemas.isNotEmpty) phases.add(schemas);
     final enumChanges = _enumChangeSql(previous, next, enumLabelTransforms);
     if (enumChanges.ordinary.isNotEmpty) phases.add(enumChanges.ordinary);
     phases.addAll(enumChanges.additions.where((sql) => sql.isNotEmpty));
     final ordinary = _diffSql(previous, next);
     if (ordinary.isNotEmpty) phases.add(ordinary);
     return _MigrationPlan(phases);
+  }
+
+  String _addedSchemasSql(Map<String, Object?> previous, Map<String, Object?> next) {
+    final previousSchemas = _schemaNames(previous);
+    final buffer = StringBuffer();
+    for (final entry in _schemaNames(next).entries) {
+      if (!previousSchemas.containsKey(entry.key)) {
+        buffer.writeln('CREATE SCHEMA IF NOT EXISTS ${_quote(entry.value)};');
+      }
+    }
+    return buffer.toString();
   }
 
   ({String ordinary, List<String> additions}) _enumChangeSql(
@@ -879,7 +887,7 @@ final class RivetArtifactGenerator {
     final nextSchemas = _schemaNames(next);
     final oldSchema = previousSchemas[oldEnum['schemaId']]!;
     final nextSchema = nextSchemas[nextEnum['schemaId']]!;
-    final oldQualified = '${_quote(oldSchema)}.${_quote(oldEnum['name']! as String)}';
+    final oldQualified = '${_quote(nextSchema)}.${_quote(nextEnum['name']! as String)}';
     final temporaryName = '__rivet_${(nextEnum['id']! as String).substring(0, 12)}';
     final temporaryQualified = '${_quote(nextSchema)}.${_quote(temporaryName)}';
     final oldValues = {
@@ -893,7 +901,7 @@ final class RivetArtifactGenerator {
     final nextLabels = nextValues.values.toSet();
     final affectedColumns =
         <String, ({Map<String, Object?> table, Map<String, Object?> column, bool array})>{};
-    for (final table in _snapshotTables(next)) {
+    for (final table in _snapshotTables(previous)) {
       for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>()) {
         final storage = column['storage']! as Map<String, Object?>;
         final array =
@@ -907,7 +915,7 @@ final class RivetArtifactGenerator {
     final affectedIds = affectedColumns.keys.toSet();
     final dependentConstraints = <({Map<String, Object?> table, Map<String, Object?> object})>[];
     final dependentIndexes = <({Map<String, Object?> table, Map<String, Object?> object})>[];
-    for (final table in _snapshotTables(next)) {
+    for (final table in _snapshotTables(previous)) {
       for (final constraint in _objects(table, 'constraints')) {
         if (_containsAny(constraint, affectedIds)) {
           dependentConstraints.add((table: table, object: constraint));
@@ -936,28 +944,43 @@ final class RivetArtifactGenerator {
         oldValues[entry.key] = nextLabel;
       }
     }
-    final nextTables = _tablesById(next);
+    final existingTables = _tablesById(previous);
+    final nextColumns = <String, Map<String, Object?>>{
+      for (final table in _snapshotTables(next))
+        for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>())
+          column['id']! as String: column,
+    };
     final columnNames = <String, String>{
-      for (final table in nextTables.values)
+      for (final table in existingTables.values)
         for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>())
           column['id']! as String: column['name']! as String,
     };
-    for (final dependency in dependentConstraints) {
+    for (final dependency in dependentConstraints.where(
+      (dependency) => dependency.object['kind'] == 'foreignKey',
+    )) {
       buffer.writeln(
-        'ALTER TABLE ${_qualifiedTable(dependency.table, nextSchemas)} DROP CONSTRAINT '
+        'ALTER TABLE ${_qualifiedTable(dependency.table, previousSchemas)} DROP CONSTRAINT '
+        '${_quote(dependency.object['name']! as String)};',
+      );
+    }
+    for (final dependency in dependentConstraints.where(
+      (dependency) => dependency.object['kind'] != 'foreignKey',
+    )) {
+      buffer.writeln(
+        'ALTER TABLE ${_qualifiedTable(dependency.table, previousSchemas)} DROP CONSTRAINT '
         '${_quote(dependency.object['name']! as String)};',
       );
     }
     for (final dependency in dependentIndexes) {
       buffer.writeln(
-        'DROP INDEX ${_quote(nextSchemas[dependency.table['schemaId']]!)}.'
+        'DROP INDEX ${_quote(previousSchemas[dependency.table['schemaId']]!)}.'
         '${_quote(dependency.object['name']! as String)};',
       );
     }
     for (final dependency in affectedColumns.values) {
       if (dependency.column['default'] != null) {
         buffer.writeln(
-          'ALTER TABLE ${_qualifiedTable(dependency.table, nextSchemas)} ALTER COLUMN '
+          'ALTER TABLE ${_qualifiedTable(dependency.table, previousSchemas)} ALTER COLUMN '
           '${_quote(dependency.column['name']! as String)} DROP DEFAULT;',
         );
       }
@@ -973,7 +996,7 @@ final class RivetArtifactGenerator {
       }
       usedTransforms.add(key);
       for (final dependency in affectedColumns.values) {
-        final table = _qualifiedTable(dependency.table, nextSchemas);
+        final table = _qualifiedTable(dependency.table, previousSchemas);
         final column = _quote(dependency.column['name']! as String);
         if (dependency.array) {
           buffer.writeln(
@@ -991,7 +1014,7 @@ final class RivetArtifactGenerator {
       }
     }
     for (final dependency in affectedColumns.values) {
-      final table = _qualifiedTable(dependency.table, nextSchemas);
+      final table = _qualifiedTable(dependency.table, previousSchemas);
       final column = _quote(dependency.column['name']! as String);
       final targetType = dependency.array ? '$temporaryQualified[]' : temporaryQualified;
       final textType = dependency.array ? 'text[]' : 'text';
@@ -1004,11 +1027,12 @@ final class RivetArtifactGenerator {
       ..writeln('DROP TYPE $oldQualified;')
       ..writeln('ALTER TYPE $temporaryQualified RENAME TO ${_quote(nextEnum['name']! as String)};');
     for (final dependency in affectedColumns.values) {
-      if (dependency.column['default'] != null) {
+      final nextColumn = nextColumns[dependency.column['id']];
+      if (nextColumn?['default'] != null) {
         buffer.writeln(
-          'ALTER TABLE ${_qualifiedTable(dependency.table, nextSchemas)} ALTER COLUMN '
+          'ALTER TABLE ${_qualifiedTable(dependency.table, previousSchemas)} ALTER COLUMN '
           '${_quote(dependency.column['name']! as String)} SET'
-          '${_defaultSql(dependency.column)};',
+          '${_defaultSql(nextColumn!)};',
         );
       }
     }
@@ -1017,10 +1041,10 @@ final class RivetArtifactGenerator {
     )) {
       buffer.writeln(
         _addConstraintSql(
-          _qualifiedTable(dependency.table, nextSchemas),
+          _qualifiedTable(dependency.table, previousSchemas),
           dependency.object,
-          nextTables,
-          nextSchemas,
+          existingTables,
+          previousSchemas,
           columnNames,
         ),
       );
@@ -1028,7 +1052,7 @@ final class RivetArtifactGenerator {
     for (final dependency in dependentIndexes) {
       buffer.writeln(
         _createIndexSql(
-          _qualifiedTable(dependency.table, nextSchemas),
+          _qualifiedTable(dependency.table, previousSchemas),
           dependency.object,
           columnNames,
         ),
@@ -1039,10 +1063,10 @@ final class RivetArtifactGenerator {
     )) {
       buffer.writeln(
         _addConstraintSql(
-          _qualifiedTable(dependency.table, nextSchemas),
+          _qualifiedTable(dependency.table, previousSchemas),
           dependency.object,
-          nextTables,
-          nextSchemas,
+          existingTables,
+          previousSchemas,
           columnNames,
         ),
       );
@@ -1181,7 +1205,9 @@ final class RivetArtifactGenerator {
   ) {
     final previousSchemas = _schemaNames(previous);
     final nextTables = _tablesById(next);
-    final buffer = StringBuffer();
+    final foreignKeys = StringBuffer();
+    final constraints = StringBuffer();
+    final indexes = StringBuffer();
     for (final oldTable in _snapshotTables(previous)) {
       final nextTable = nextTables[oldTable['id']];
       final qualified =
@@ -1194,8 +1220,16 @@ final class RivetArtifactGenerator {
                 nextTable,
                 'constraints',
               ).where((value) => value['id'] == constraint['id']).singleOrNull;
+        if (replacement != null && _sameObjectIgnoringName(constraint, replacement)) {
+          constraints.writeln(
+            'ALTER TABLE $qualified RENAME CONSTRAINT '
+            '${_quote(constraint['name']! as String)} TO '
+            '${_quote(replacement['name']! as String)};',
+          );
+          continue;
+        }
         if (nextTable == null || replacement == null || !_sameObject(constraint, replacement)) {
-          buffer.writeln(
+          (constraint['kind'] == 'foreignKey' ? foreignKeys : constraints).writeln(
             'ALTER TABLE $qualified DROP CONSTRAINT ${_quote(constraint['name']! as String)};',
           );
         }
@@ -1207,14 +1241,14 @@ final class RivetArtifactGenerator {
           'indexes',
         ).where((value) => value['id'] == index['id']).singleOrNull;
         if (replacement == null || !_sameObject(index, replacement)) {
-          buffer.writeln(
+          indexes.writeln(
             'DROP INDEX ${_quote(previousSchemas[oldTable['schemaId']]!)}.'
             '${_quote(index['name']! as String)};',
           );
         }
       }
     }
-    return buffer.toString();
+    return '$foreignKeys$constraints$indexes';
   }
 
   String _addedObjectsSql(
@@ -1245,7 +1279,10 @@ final class RivetArtifactGenerator {
                 oldTable,
                 'constraints',
               ).where((value) => value['id'] == constraint['id']).singleOrNull;
-        if (old != null && _sameObject(old, constraint)) continue;
+        if (old != null &&
+            (_sameObject(old, constraint) || _sameObjectIgnoringName(old, constraint))) {
+          continue;
+        }
         (constraint['kind'] == 'foreignKey' ? foreignKeys : buffer).writeln(
           _addConstraintSql(qualified, constraint, tables, schemas, columnNames),
         );
@@ -1339,6 +1376,11 @@ final class RivetArtifactGenerator {
   bool _sameObject(Map<String, Object?> left, Map<String, Object?> right) =>
       canonicalJson(_withoutKeysRecursively(left, {'id', 'tableId'})) ==
       canonicalJson(_withoutKeysRecursively(right, {'id', 'tableId'}));
+
+  bool _sameObjectIgnoringName(Map<String, Object?> left, Map<String, Object?> right) =>
+      left['name'] != right['name'] &&
+      canonicalJson(_withoutKeysRecursively(left, {'id', 'tableId', 'name'})) ==
+          canonicalJson(_withoutKeysRecursively(right, {'id', 'tableId', 'name'}));
 
   List<Map<String, Object?>> _snapshotTables(Map<String, Object?> snapshot) =>
       (snapshot['tables']! as List<Object?>).cast<Map<String, Object?>>();

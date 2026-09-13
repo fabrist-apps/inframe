@@ -553,6 +553,185 @@ void main() {
       expect(removalSql, contains("SET \"mood\" = 'queued'::\"types\".\"state\""));
       expect(removalSql, contains('array_replace("moods"'));
     });
+
+    test('should create newly introduced schemas before their enum types', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generate(
+        schema: RivetDatabaseSchema(name: 'schemas', tables: [Users.db.buildSchema()]),
+        directory: directory,
+        name: 'initial',
+      );
+      final declaration = _enumDeclaration();
+      final users =
+          (RivetDatabaseSchema(
+                    name: 'schemas',
+                    tables: [Users.db.buildSchema()],
+                  ).toJson()['tables']!
+                  as List<Object?>)
+              .single;
+      declaration['tables'] = <Object?>[
+        ...(declaration['tables']! as List<Object?>),
+        users,
+      ];
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'add enum schemas',
+      );
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+
+      expect(
+        sql.indexOf('CREATE SCHEMA IF NOT EXISTS "types"'),
+        lessThan(sql.indexOf('CREATE TYPE')),
+      );
+    });
+
+    test('should rebuild enums through the table names that currently exist', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'initial enum',
+      );
+      (declaration['tables']! as List<Object?>).first! as Map<String, Object?>
+        ..['name'] = 'tasks'
+        ..['renamedFrom'] = 'jobs';
+      final enumValue = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final values = enumValue['values']! as List<Object?>;
+      enumValue['values'] = values.reversed.toList();
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'rebuild and rename',
+      );
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      final renameOffset = sql.indexOf('ALTER TABLE "auth"."jobs" RENAME TO "tasks"');
+
+      expect(sql, contains('ALTER TABLE "auth"."jobs" ALTER COLUMN "mood" TYPE'));
+      expect(
+        sql.indexOf('ALTER TABLE "auth"."jobs" ALTER COLUMN "mood" TYPE'),
+        lessThan(renameOffset),
+      );
+      expect(sql.substring(0, renameOffset), isNot(contains('"auth"."tasks"')));
+    });
+
+    test('should rename an implicit primary key before renaming a referenced table', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _constraintDeclaration();
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'initial constraints',
+      );
+      (declaration['tables']! as List<Object?>).first! as Map<String, Object?>
+        ..['name'] = 'accounts'
+        ..['renamedFrom'] = 'users';
+      final memberships = (declaration['tables']! as List<Object?>).last! as Map<String, Object?>;
+      final foreignKey =
+          (memberships['constraints']! as List<Object?>).last! as Map<String, Object?>;
+      (foreignKey['references']! as Map<String, Object?>)['table'] = 'accounts';
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'rename referenced table',
+      );
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+
+      expect(
+        sql,
+        contains(
+          'ALTER TABLE "auth"."users" RENAME CONSTRAINT "users_pkey" TO "accounts_pkey";',
+        ),
+      );
+      expect(sql, isNot(contains('DROP CONSTRAINT "users_pkey"')));
+    });
+
+    test('should compare generated indexes independently of identity order', () async {
+      var nextId = 100;
+      final generator = RivetMigrationGenerator(
+        createId: () => (--nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final schema = RivetDatabaseSchema(
+        name: 'ordered_indexes',
+        tables: [IndexedUsers.db.buildSchema()],
+      );
+
+      await generator.generate(schema: schema, directory: directory, name: 'indexes');
+
+      await const RivetMigrationChecker().check(directory: directory, schema: schema);
+    });
+
+    test('should replace removed enum defaults before restoring them', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+      final column =
+          (((declaration['tables']! as List<Object?>).first! as Map<String, Object?>)['columns']!
+                      as List<Object?>)
+                  .first!
+              as Map<String, Object?>;
+      column['default'] = _literal('done');
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'enum default',
+      );
+      column['default'] = _literal('queued');
+      final enumValue = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      enumValue['values'] = [(enumValue['values']! as List<Object?>).first];
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'remove default label',
+        enumLabelTransforms: const {'types.mood.done': 'queued'},
+      );
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+
+      expect(sql, isNot(contains("SET DEFAULT 'done'")));
+      expect(sql, contains("SET DEFAULT 'queued'"));
+    });
+
+    test('should drop foreign keys before referenced primary keys', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _constraintDeclaration();
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'constraints',
+      );
+      declaration['tables'] = <Object?>[];
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'remove constraints',
+      );
+      final sql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+
+      expect(
+        sql.indexOf('DROP CONSTRAINT "membership_tenant_fkey"'),
+        lessThan(sql.indexOf('DROP CONSTRAINT "users_pkey"')),
+      );
+    });
   });
 }
 
@@ -803,6 +982,34 @@ final class _UsersAccessor extends RivetTableAccessor<Users, Object> {
       definition: definition,
       columns: [definition.id, definition.name],
       columnNames: const ['id', 'name'],
+      decode: (_, _) => Object(),
+    );
+  }
+}
+
+final class IndexedUsers extends RivetTableDefinition<IndexedUsers> {
+  static const db = _IndexedUsersAccessor();
+
+  late final RivetOrderableColumn<int> id = integer().primaryKey()();
+  late final RivetOrderableColumn<String> name = text()();
+}
+
+final class _IndexedUsersAccessor extends RivetTableAccessor<IndexedUsers, Object> {
+  const _IndexedUsersAccessor();
+
+  @override
+  RivetTableSchema<IndexedUsers, Object> buildSchema() {
+    final definition = IndexedUsers();
+    return RivetTableSchema(
+      schemaName: 'auth',
+      tableName: 'indexedUsers',
+      definition: definition,
+      columns: [definition.id, definition.name],
+      columnNames: const ['id', 'name'],
+      indexes: () => [
+        definition.index('z_name').on([definition.name]),
+        definition.index('a_id').on([definition.id]),
+      ],
       decode: (_, _) => Object(),
     );
   }

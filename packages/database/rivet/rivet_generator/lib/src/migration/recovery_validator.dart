@@ -8,7 +8,7 @@ void validateRivetRecovery(Map<String, Object?> phase, List<String> statements) 
     (sql) => RegExp(
       r'^\s*create\s+(unique\s+)?index\s+concurrently\b',
       caseSensitive: false,
-    ).hasMatch(sql),
+    ).hasMatch(_withoutLeadingComments(sql)),
   );
   if (mode == 'transactional') {
     if (recovery != null) {
@@ -55,6 +55,38 @@ void validateRivetRecovery(Map<String, Object?> phase, List<String> statements) 
     }
     _validateIndex(recovery['after']! as Map<String, Object?>);
   }
+}
+
+String _withoutLeadingComments(String sql) {
+  var index = 0;
+  while (index < sql.length) {
+    while (index < sql.length && RegExp(r'\s').hasMatch(sql[index])) {
+      index++;
+    }
+    if (sql.startsWith('--', index)) {
+      final newline = sql.indexOf('\n', index + 2);
+      index = newline < 0 ? sql.length : newline + 1;
+      continue;
+    }
+    if (sql.startsWith('/*', index)) {
+      var depth = 1;
+      index += 2;
+      while (index < sql.length && depth > 0) {
+        if (sql.startsWith('/*', index)) {
+          depth++;
+          index += 2;
+        } else if (sql.startsWith('*/', index)) {
+          depth--;
+          index += 2;
+        } else {
+          index++;
+        }
+      }
+      continue;
+    }
+    break;
+  }
+  return sql.substring(index);
 }
 
 void _validateChecks(Object? value) {
