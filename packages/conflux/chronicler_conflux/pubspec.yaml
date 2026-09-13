@@ -1,0 +1,19 @@
+name: chronicler_conflux
+description: Chronicler tracing and error capture integration for Conflux Effects.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  chronicler:
+    path: ../../chronicler/chronicler
+  conflux:
+    path: ../conflux
+  context:
+    path: ../../context
+
+dev_dependencies:
+  test: ^1.26.3

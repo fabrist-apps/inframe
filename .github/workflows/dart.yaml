@@ -75,7 +75,7 @@ jobs:
           dart run packages/inlet/example/web_socket_chat.dart
 
       - name: Run Conflux tests and consumer checks
-        run: dart test packages/conflux/test --chain-stack-traces
+        run: dart test packages/conflux/conflux/test --chain-stack-traces
 
       - name: Run Artificer provider-core tests and example
         run: |

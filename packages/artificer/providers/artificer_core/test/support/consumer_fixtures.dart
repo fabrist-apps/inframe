@@ -27,9 +27,12 @@ final class ConsumerFixtures {
       await destination.parent.create(recursive: true);
       var contents = await entity.readAsString();
       if (relativePath.endsWith('pubspec.yaml')) {
-        final conflux = Directory.fromUri(package.uri.resolve('../../../conflux'));
+        final conflux = Directory.fromUri(package.uri.resolve('../../../conflux/conflux'));
         contents = contents
-            .replaceAll('path: ../../../../../../conflux', 'path: ${jsonEncode(conflux.path)}')
+            .replaceAll(
+              'path: ../../../../../../conflux/conflux',
+              'path: ${jsonEncode(conflux.path)}',
+            )
             .replaceAll('path: ../../..', 'path: ${jsonEncode(package.path)}');
       }
       await destination.writeAsString(contents);

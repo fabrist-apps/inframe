@@ -9,7 +9,7 @@ environment:
 
 dependencies:
   conflux:
-    path: ../../../conflux
+    path: ../../../conflux/conflux
   http: ^1.6.0
 
 dev_dependencies:

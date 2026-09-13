@@ -355,5 +355,5 @@ ordinary Dart exceptions rather than validation failures.
 Run the package tests from the repository root:
 
 ```sh
-dart test packages/conflux/test --chain-stack-traces
+dart test packages/conflux/conflux/test --chain-stack-traces
 ```
