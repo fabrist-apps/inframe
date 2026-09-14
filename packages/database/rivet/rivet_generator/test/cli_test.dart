@@ -150,26 +150,44 @@ void main() {
     },
     skip: Platform.environment['RIVET_TEST_DATABASE_URL'] == null
         ? 'RIVET_TEST_DATABASE_URL is not configured.'
+        : Platform.environment['RIVET_TEST_DATABASE_ISOLATED'] != '1'
+        ? 'RIVET_TEST_DATABASE_ISOLATED=1 is required before destructive fixture cleanup.'
         : false,
   );
 
   test('deployment failures should redact credentials', () async {
     final directory = Directory.systemTemp.createTempSync('rivet_cli_redact_test_');
     addTearDown(() => directory.deleteSync(recursive: true));
-    File('${directory.path}/journal.json').writeAsStringSync('{}');
     final output = File('${directory.path}/stdout.txt').openWrite();
     final errorFile = File('${directory.path}/stderr.txt');
     final errors = errorFile.openWrite();
     addTearDown(output.close);
     addTearDown(errors.close);
     const password = 'credential-that-must-not-leak';
+    const querySecret = 'query-secret-that-must-not-leak';
     final cli = RivetCli(
       stdout: output,
       stderr: errors,
       environment: const {
         'DEPLOY_DATABASE_URL':
-            'postgresql://operator:$password@127.0.0.1:1/missing?sslmode=$password',
+            'postgresql://operator:$password@127.0.0.1:1/missing?sslmode=$querySecret',
       },
+    );
+    final library = Uri.file(
+      '${Directory.current.path}/packages/database/rivet/test/migration_fixture.dart',
+    ).toString();
+
+    expect(
+      await cli.run([
+        'generate',
+        '--database',
+        '$library#MigrationFixtureDatabase',
+        '--out',
+        directory.path,
+        '--name',
+        'initial',
+      ]),
+      0,
     );
 
     expect(
@@ -186,5 +204,6 @@ void main() {
     final error = errorFile.readAsStringSync();
     expect(error, contains('[REDACTED]'));
     expect(error, isNot(contains(password)));
+    expect(error, isNot(contains(querySecret)));
   });
 }

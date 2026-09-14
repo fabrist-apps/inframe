@@ -93,6 +93,11 @@ void main() {
         r'SELECT pg_advisory_unlock/**/($1)',
         r'SELECT "pg_advisory_unlock"($1)',
         r"SELECT length('\') = 1 AND pg_advisory_unlock($1)",
+        r'SELECT lowrite($1, $2)',
+        r'SELECT lo_truncate($1, $2)',
+        r'SELECT lo_truncate64($1, $2)',
+        r'SELECT lo_from_bytea($1, $2)',
+        r'SELECT lo_open($1, 131072)',
       ]) {
         await expectLater(
           _sealRecovery(directory, migrationId!, {
@@ -111,6 +116,7 @@ void main() {
             ],
           }),
           throwsA(isA<FormatException>()),
+          reason: sql,
         );
       }
     });

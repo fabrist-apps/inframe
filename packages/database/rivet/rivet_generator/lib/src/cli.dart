@@ -219,14 +219,17 @@ final class RivetCli {
   void _rememberCredentials(String databaseUrl) {
     _redactions.add(databaseUrl);
     final uri = Uri.tryParse(databaseUrl);
-    if (uri == null || uri.userInfo.isEmpty) return;
-    _redactions.add(uri.userInfo);
-    _redactions.add(Uri.decodeComponent(uri.userInfo));
-    final separator = uri.userInfo.indexOf(':');
-    if (separator >= 0 && separator < uri.userInfo.length - 1) {
-      _redactions.add(uri.userInfo.substring(separator + 1));
-      _redactions.add(Uri.decodeComponent(uri.userInfo.substring(separator + 1)));
+    if (uri == null) return;
+    if (uri.userInfo.isNotEmpty) {
+      _redactions.add(uri.userInfo);
+      _redactions.add(Uri.decodeComponent(uri.userInfo));
+      final separator = uri.userInfo.indexOf(':');
+      if (separator >= 0 && separator < uri.userInfo.length - 1) {
+        _redactions.add(uri.userInfo.substring(separator + 1));
+        _redactions.add(Uri.decodeComponent(uri.userInfo.substring(separator + 1)));
+      }
     }
+    uri.queryParametersAll.values.forEach(_redactions.addAll);
   }
 
   String _redact(String message) {

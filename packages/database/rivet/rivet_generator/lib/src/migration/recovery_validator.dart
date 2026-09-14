@@ -122,7 +122,8 @@ void _validateChecks(Object? value) {
 bool _hasSideEffectingFunction(String sql) => RegExp(
   r'\b(nextval|setval|set_config|pg_notify|pg_(cancel|terminate)_backend|'
   'pg_(try_)?advisory_(xact_)?lock(_shared)?|pg_advisory_unlock(_all|_shared)?|'
-  r'pg_export_snapshot|pg_logical_emit_message|lo_(create|creat|unlink|import|export|put))\s*\(',
+  'pg_export_snapshot|pg_logical_emit_message|lowrite|lo_truncate(?:64)?|'
+  r'lo_from_bytea|lo_open|lo_(create|creat|unlink|import|export|put))\s*\(',
 ).hasMatch(_functionScanSql(sql));
 
 String _functionScanSql(String sql) {
