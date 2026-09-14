@@ -1682,9 +1682,9 @@ class VoxelColumn<T> implements VoxelExpression<T> {
   }
 
   VoxelPredicate equals(T value) {
-    if (value == null) return VoxelPredicate._raw('$sql IS NULL', [this]);
+    if (value == null) return VoxelPredicate._isNull(this);
     final encoded = _convert('encode', () => codec.encode(value));
-    return VoxelPredicate._value('$sql = ', '', encoded, [this]);
+    return VoxelPredicate._value('$sql = ', '', '=', encoded, [this]);
   }
 
   T decodeValue(Object? value, {required bool isSqlNull}) =>
@@ -1722,7 +1722,7 @@ final class VoxelOrderableColumn<T> extends VoxelColumn<T> {
       VoxelOrder(this, descending: true, nulls: nulls);
 
   VoxelPredicate greaterThan(T value) =>
-      VoxelPredicate._value('$sql > ', '', encodeValue(value), [this]);
+      VoxelPredicate._value('$sql > ', '', '>', encodeValue(value), [this]);
 }
 
 extension VoxelIntegerExpression on VoxelExpression<int> {
@@ -2015,18 +2015,43 @@ final class VoxelPredicate {
     this._renderSql,
     List<Object?> parameters,
     List<VoxelColumn<dynamic>> columns,
+    this._schemaExpression,
   ) : parameters = List.unmodifiable(parameters),
       columns = List.unmodifiable(columns);
 
-  VoxelPredicate._raw(String sql, List<VoxelColumn<dynamic>> columns)
-    : this._((_) => sql, const [], columns);
+  VoxelPredicate._isNull(VoxelColumn<dynamic> column)
+    : this._(
+        (_) => '${column.sql} IS NULL',
+        const [],
+        [column],
+        () => {
+          'formatVersion': 1,
+          'kind': 'operator',
+          'operator': 'IS NULL',
+          'arguments': [_voxelSchemaReference(column)],
+        },
+      );
 
   VoxelPredicate._value(
     String before,
     String after,
+    String operator,
     Object? parameter,
     List<VoxelColumn<dynamic>> columns,
-  ) : this._((placeholder) => '$before${placeholder(0)}$after', [parameter], columns);
+  ) : this._(
+        (placeholder) => '$before${placeholder(0)}$after',
+        [parameter],
+        columns,
+        () => {
+          'formatVersion': 1,
+          'kind': 'operator',
+          'operator': operator,
+          'arguments': [
+            _voxelSchemaReference(columns.single),
+            _voxelSchemaLiteral(parameter),
+          ],
+        },
+      );
 
   VoxelPredicate._comparison(
     VoxelExpression<dynamic> left,
@@ -2038,11 +2063,23 @@ final class VoxelPredicate {
             '${right.renderPlaceholders((index) => placeholder(left.parameters.length + index))}',
         [...left.parameters, ...right.parameters],
         [...left.columns, ...right.columns],
+        () => {
+          'formatVersion': 1,
+          'kind': 'operator',
+          'operator': operator,
+          'arguments': [
+            _voxelSchemaExpressionFor(left),
+            _voxelSchemaExpressionFor(right),
+          ],
+        },
       );
 
   final String Function(String Function(int index) placeholder) _renderSql;
   final List<Object?> parameters;
   final List<VoxelColumn<dynamic>> columns;
+  final Map<String, Object?> Function() _schemaExpression;
+
+  Map<String, Object?> schemaExpression() => _schemaExpression();
 
   String get sql => _render((_) => '@value');
 
@@ -2060,6 +2097,12 @@ final class VoxelPredicate {
         '(${other._renderSql((index) => placeholder(parameters.length + index))})',
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
+    () => {
+      'formatVersion': 1,
+      'kind': 'operator',
+      'operator': 'AND',
+      'arguments': [schemaExpression(), other.schemaExpression()],
+    },
   );
 
   VoxelPredicate operator |(VoxelPredicate other) => VoxelPredicate._(
@@ -2068,16 +2111,67 @@ final class VoxelPredicate {
         '(${other._renderSql((index) => placeholder(parameters.length + index))})',
     [...parameters, ...other.parameters],
     [...columns, ...other.columns],
+    () => {
+      'formatVersion': 1,
+      'kind': 'operator',
+      'operator': 'OR',
+      'arguments': [schemaExpression(), other.schemaExpression()],
+    },
   );
 
   VoxelPredicate operator ~() => VoxelPredicate._(
     (placeholder) => 'NOT (${_renderSql(placeholder)})',
     parameters,
     columns,
+    () => {
+      'formatVersion': 1,
+      'kind': 'operator',
+      'operator': 'NOT',
+      'arguments': [schemaExpression()],
+    },
   );
 
   String _render(String Function(int index) placeholder) => _renderSql(placeholder);
 }
+
+Map<String, Object?> _voxelSchemaExpressionFor(VoxelExpression<dynamic> expression) =>
+    switch (expression) {
+      final VoxelColumn<dynamic> column => _voxelSchemaReference(column),
+      final _VoxelBoundExpression<dynamic> bound => _voxelSchemaLiteral(bound.parameters.single),
+      final _VoxelBinaryExpression<dynamic> binary => {
+        'formatVersion': 1,
+        'kind': 'operator',
+        'operator': binary.operator,
+        'arguments': [
+          _voxelSchemaExpressionFor(binary.left),
+          _voxelSchemaLiteral(binary._right),
+        ],
+      },
+      _ => throw UnsupportedError(
+        'Expression ${expression.runtimeType} cannot be used in a schema declaration.',
+      ),
+    };
+
+Map<String, Object?> _voxelSchemaReference(VoxelColumn<dynamic> column) => {
+  'formatVersion': 1,
+  'kind': 'reference',
+  'objectName': column.physicalName,
+};
+
+Map<String, Object?> _voxelSchemaLiteral(Object? value) => {
+  'formatVersion': 1,
+  'kind': 'literal',
+  'literalType': switch (value) {
+    null => 'null',
+    bool() => 'boolean',
+    BigInt() || num() => 'decimal',
+    String() => 'string',
+    _ => throw UnsupportedError(
+      'Schema expressions do not support ${value.runtimeType} literals.',
+    ),
+  },
+  'value': value is BigInt || value is num ? value.toString() : value,
+};
 
 String _tursoLiteral(Object? value) => switch (value) {
   null => 'NULL',

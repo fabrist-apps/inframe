@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inframe.dev/voxel/migrations/v1/journal.schema.json",
+  "title": "Voxel migration journal version 1",
+  "type": "object",
+  "required": ["formatVersion", "dialect", "databaseId", "entries"],
+  "properties": {
+    "formatVersion": {"const": 1},
+    "dialect": {"const": "voxel"},
+    "databaseId": {"$ref": "#/$defs/id"},
+    "source": {
+      "type": "object",
+      "required": ["library", "class"],
+      "properties": {"library": {"type": "string"}, "class": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "directory", "checksum"],
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "directory": {"type": "string", "minLength": 1},
+          "checksum": {"$ref": "#/$defs/checksum"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

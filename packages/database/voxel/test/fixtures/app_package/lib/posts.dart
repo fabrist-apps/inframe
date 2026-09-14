@@ -6,12 +6,15 @@ import 'package:voxel_fixture_schema/authors.dart' as schema;
 
 part 'posts.voxel.dart';
 
-@VoxelTable(schema: 'content')
+@VoxelTable(schema: 'content', name: 'posts', renamedFrom: 'articles')
 final class Posts extends VoxelTableDefinition<Posts> {
   static const db = _$PostsDB();
 
   late final id = text().primaryKey()();
-  late final authorID = text().references<schema.Authors>((author) => author.id)();
+  late final authorID = text(
+    name: 'authorID',
+    renamedFrom: 'writerID',
+  ).references<schema.Authors>((author) => author.id)();
   late final VoxelOrderableColumn<schema.PostStatus> status = enumText<schema.PostStatus>()
       .defaultValue(() => schema.PostStatus.draft)();
   late final VoxelOneRelation<schema.Authors> author = one<schema.Authors>(

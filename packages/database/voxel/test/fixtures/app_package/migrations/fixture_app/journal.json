@@ -1,0 +1,26 @@
+{
+  "databaseId": "00000000000000000000000000000001",
+  "dialect": "voxel",
+  "entries": [
+    {
+      "checksum": "b63e20ac33713e6cc58eeb36ce087500611ee551cf175ebc7c90463eb9109c85",
+      "directory": "0000_initial_imported_schema_00000000000000000000000000000023",
+      "id": "00000000000000000000000000000023"
+    },
+    {
+      "checksum": "ed0b7ba45cf318d72fdeaa602b20b2eb3d3422c606cad93077851c4f314396a4",
+      "directory": "0001_rename_physical_objects_00000000000000000000000000000024",
+      "id": "00000000000000000000000000000024"
+    },
+    {
+      "checksum": "8ab80af084c54d4797cc66551226fa08b649f0768cb72d6c90cdf52fcac0ccf8",
+      "directory": "0002_evolve_enum_labels_00000000000000000000000000000025",
+      "id": "00000000000000000000000000000025"
+    }
+  ],
+  "formatVersion": 1,
+  "source": {
+    "class": "FixtureAppDatabase",
+    "library": "package:voxel_fixture_app/app_database.dart"
+  }
+}

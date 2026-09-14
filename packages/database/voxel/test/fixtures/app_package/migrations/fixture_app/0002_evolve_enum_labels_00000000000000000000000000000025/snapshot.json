@@ -1,0 +1,405 @@
+{
+  "databaseId": "00000000000000000000000000000001",
+  "dialect": "voxel",
+  "enums": [
+    {
+      "id": "00000000000000000000000000000018",
+      "name": "postStatus",
+      "schemaId": "00000000000000000000000000000002",
+      "values": [
+        {
+          "enumId": "00000000000000000000000000000018",
+          "id": "00000000000000000000000000000016",
+          "label": "draft"
+        },
+        {
+          "enumId": "00000000000000000000000000000018",
+          "id": "00000000000000000000000000000017",
+          "label": "live"
+        }
+      ]
+    }
+  ],
+  "formatVersion": 1,
+  "migrationId": "00000000000000000000000000000025",
+  "requirements": [],
+  "schemas": [
+    {
+      "id": "00000000000000000000000000000002",
+      "name": "content"
+    }
+  ],
+  "tables": [
+    {
+      "columns": [
+        {
+          "id": "00000000000000000000000000000004",
+          "name": "id",
+          "primaryKey": true,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "00000000000000000000000000000003"
+        },
+        {
+          "id": "00000000000000000000000000000005",
+          "name": "name",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "00000000000000000000000000000003"
+        }
+      ],
+      "constraints": [
+        {
+          "columnIds": [],
+          "expression": {
+            "arguments": [
+              {
+                "formatVersion": 1,
+                "kind": "reference",
+                "objectId": "00000000000000000000000000000005"
+              },
+              {
+                "formatVersion": 1,
+                "kind": "literal",
+                "literalType": "string",
+                "value": ""
+              }
+            ],
+            "formatVersion": 1,
+            "kind": "operator",
+            "operator": ">"
+          },
+          "id": "0000000000000000000000000000001a",
+          "kind": "check",
+          "name": "authors_name_present",
+          "tableId": "00000000000000000000000000000003"
+        },
+        {
+          "columnIds": [
+            "00000000000000000000000000000004"
+          ],
+          "id": "0000000000000000000000000000001b",
+          "kind": "primaryKey",
+          "name": "authors_pkey",
+          "tableId": "00000000000000000000000000000003"
+        }
+      ],
+      "id": "00000000000000000000000000000003",
+      "indexes": [
+        {
+          "id": "00000000000000000000000000000019",
+          "name": "authors_name",
+          "options": {},
+          "platforms": [
+            "native",
+            "browser"
+          ],
+          "predicate": {
+            "arguments": [
+              {
+                "arguments": [
+                  {
+                    "formatVersion": 1,
+                    "kind": "reference",
+                    "objectId": "00000000000000000000000000000005"
+                  },
+                  {
+                    "formatVersion": 1,
+                    "kind": "literal",
+                    "literalType": "string",
+                    "value": ""
+                  }
+                ],
+                "formatVersion": 1,
+                "kind": "operator",
+                "operator": "="
+              }
+            ],
+            "formatVersion": 1,
+            "kind": "operator",
+            "operator": "NOT"
+          },
+          "tableId": "00000000000000000000000000000003",
+          "terms": [
+            {
+              "columnId": "00000000000000000000000000000005",
+              "descending": false
+            }
+          ],
+          "unique": true
+        }
+      ],
+      "name": "authors",
+      "schemaId": "00000000000000000000000000000002"
+    },
+    {
+      "columns": [
+        {
+          "id": "00000000000000000000000000000007",
+          "name": "id",
+          "primaryKey": true,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "00000000000000000000000000000006"
+        },
+        {
+          "id": "00000000000000000000000000000008",
+          "name": "authorID",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "00000000000000000000000000000006"
+        },
+        {
+          "id": "00000000000000000000000000000009",
+          "name": "status",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "enumId": "00000000000000000000000000000018",
+            "kind": "enum",
+            "nullable": false
+          },
+          "tableId": "00000000000000000000000000000006"
+        }
+      ],
+      "constraints": [
+        {
+          "columnIds": [
+            "00000000000000000000000000000008"
+          ],
+          "id": "0000000000000000000000000000001c",
+          "kind": "foreignKey",
+          "name": "posts_authorID_fkey",
+          "onDelete": "noAction",
+          "onUpdate": "noAction",
+          "referenceColumnIds": [
+            "00000000000000000000000000000004"
+          ],
+          "referenceTableId": "00000000000000000000000000000003",
+          "tableId": "00000000000000000000000000000006"
+        },
+        {
+          "columnIds": [
+            "00000000000000000000000000000007"
+          ],
+          "id": "0000000000000000000000000000001d",
+          "kind": "primaryKey",
+          "name": "posts_pkey",
+          "tableId": "00000000000000000000000000000006"
+        }
+      ],
+      "id": "00000000000000000000000000000006",
+      "indexes": [],
+      "name": "posts",
+      "schemaId": "00000000000000000000000000000002"
+    },
+    {
+      "columns": [
+        {
+          "id": "0000000000000000000000000000000b",
+          "name": "id",
+          "primaryKey": true,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "0000000000000000000000000000000a"
+        }
+      ],
+      "constraints": [
+        {
+          "columnIds": [
+            "0000000000000000000000000000000b"
+          ],
+          "id": "0000000000000000000000000000001e",
+          "kind": "primaryKey",
+          "name": "tags_pkey",
+          "tableId": "0000000000000000000000000000000a"
+        }
+      ],
+      "id": "0000000000000000000000000000000a",
+      "indexes": [],
+      "name": "tags",
+      "schemaId": "00000000000000000000000000000002"
+    },
+    {
+      "columns": [
+        {
+          "id": "0000000000000000000000000000000d",
+          "name": "postID",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "0000000000000000000000000000000c"
+        },
+        {
+          "id": "0000000000000000000000000000000e",
+          "name": "tagID",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "0000000000000000000000000000000c"
+        }
+      ],
+      "constraints": [
+        {
+          "columnIds": [
+            "0000000000000000000000000000000d"
+          ],
+          "id": "0000000000000000000000000000001f",
+          "kind": "foreignKey",
+          "name": "postTags_postID_fkey",
+          "onDelete": "noAction",
+          "onUpdate": "noAction",
+          "referenceColumnIds": [
+            "00000000000000000000000000000007"
+          ],
+          "referenceTableId": "00000000000000000000000000000006",
+          "tableId": "0000000000000000000000000000000c"
+        },
+        {
+          "columnIds": [
+            "0000000000000000000000000000000e"
+          ],
+          "id": "00000000000000000000000000000020",
+          "kind": "foreignKey",
+          "name": "postTags_tagID_fkey",
+          "onDelete": "noAction",
+          "onUpdate": "noAction",
+          "referenceColumnIds": [
+            "0000000000000000000000000000000b"
+          ],
+          "referenceTableId": "0000000000000000000000000000000a",
+          "tableId": "0000000000000000000000000000000c"
+        }
+      ],
+      "id": "0000000000000000000000000000000c",
+      "indexes": [],
+      "name": "postTags",
+      "schemaId": "00000000000000000000000000000002"
+    },
+    {
+      "columns": [
+        {
+          "id": "00000000000000000000000000000010",
+          "name": "language",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "0000000000000000000000000000000f"
+        },
+        {
+          "id": "00000000000000000000000000000011",
+          "name": "key",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "0000000000000000000000000000000f"
+        }
+      ],
+      "constraints": [
+        {
+          "columnIds": [
+            "00000000000000000000000000000010",
+            "00000000000000000000000000000011"
+          ],
+          "id": "00000000000000000000000000000021",
+          "kind": "primaryKey",
+          "name": "locales_pk",
+          "tableId": "0000000000000000000000000000000f"
+        }
+      ],
+      "id": "0000000000000000000000000000000f",
+      "indexes": [],
+      "name": "locales",
+      "schemaId": "00000000000000000000000000000002"
+    },
+    {
+      "columns": [
+        {
+          "id": "00000000000000000000000000000013",
+          "name": "language",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "00000000000000000000000000000012"
+        },
+        {
+          "id": "00000000000000000000000000000014",
+          "name": "key",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "00000000000000000000000000000012"
+        },
+        {
+          "id": "00000000000000000000000000000015",
+          "name": "value",
+          "primaryKey": false,
+          "storage": {
+            "codecVersion": 1,
+            "kind": "text",
+            "nullable": false
+          },
+          "tableId": "00000000000000000000000000000012"
+        }
+      ],
+      "constraints": [
+        {
+          "columnIds": [
+            "00000000000000000000000000000013",
+            "00000000000000000000000000000014"
+          ],
+          "id": "00000000000000000000000000000022",
+          "kind": "foreignKey",
+          "name": "translations_locale_fk",
+          "onDelete": "cascade",
+          "onUpdate": "noAction",
+          "referenceColumnIds": [
+            "00000000000000000000000000000010",
+            "00000000000000000000000000000011"
+          ],
+          "referenceTableId": "0000000000000000000000000000000f",
+          "tableId": "00000000000000000000000000000012"
+        }
+      ],
+      "id": "00000000000000000000000000000012",
+      "indexes": [],
+      "name": "translations",
+      "schemaId": "00000000000000000000000000000002"
+    }
+  ]
+}
