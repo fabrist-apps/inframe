@@ -271,6 +271,81 @@ VALUES (?, ?, ?, ?, 'completed')
       }
     }
   }
+
+  /// Applies one persistent physical scope with durable attempt and completion
+  /// receipts in that same file.
+  Future<void> applyPersistentScope(
+    TursoDatabase database, {
+    required String scope,
+    required String fileIdentity,
+    Future<void> Function(VoxelMigrationInterruption interruption)? interrupt,
+  }) async {
+    final schemaId = scope == 'main'
+        ? 'main'
+        : _scopeNames.last.entries
+              .singleWhere(
+                (entry) => entry.value == scope,
+                orElse: () => throw ArgumentError.value(
+                  scope,
+                  'scope',
+                  'is not registered by the migration bundle',
+                ),
+              )
+              .key;
+    await _bootstrapPersistent(
+      database,
+      scope,
+      bundle.databaseId,
+      schemaId,
+      fileIdentity,
+    );
+    final scopedMigrations =
+        <
+          ({
+            int ordinal,
+            VoxelBundledMigration migration,
+            List<Map<String, Object?>> phases,
+          })
+        >[];
+    for (final (ordinal, migration) in bundle.migrations.indexed) {
+      final phases = <Map<String, Object?>>[];
+      for (final rawPhase in _list(migration.metadata['phases'], 'migration phases')) {
+        final phase = _map(rawPhase, 'migration phase');
+        if (!(phase['platforms']! as List<Object?>).contains(voxelPlatform)) continue;
+        if (_scopeNames[ordinal][phase['scopeId']] == scope) phases.add(phase);
+      }
+      if (phases.isNotEmpty) {
+        scopedMigrations.add((ordinal: ordinal, migration: migration, phases: phases));
+      }
+    }
+    await _validatePersistentHistory(database, scope, scopedMigrations);
+    for (final entry in scopedMigrations) {
+      for (final phase in entry.phases) {
+        await _applyPersistentPhase(
+          database,
+          scope,
+          entry.ordinal,
+          entry.migration,
+          phase,
+          interrupt,
+        );
+      }
+    }
+  }
+}
+
+enum VoxelMigrationInterruptionPoint { beforePhaseCommit, afterPhaseCommit }
+
+final class VoxelMigrationInterruption {
+  const VoxelMigrationInterruption({
+    required this.point,
+    required this.migrationId,
+    required this.phaseId,
+  });
+
+  final VoxelMigrationInterruptionPoint point;
+  final String migrationId;
+  final String phaseId;
 }
 
 void _validatePhases(VoxelBundledMigration migration, Map<String, String> scopes) {
@@ -390,6 +465,232 @@ ON CONFLICT (singleton) DO NOTHING
   }
 }
 
+Future<void> _bootstrapPersistent(
+  TursoDatabase database,
+  String scope,
+  String databaseId,
+  String schemaId,
+  String fileIdentity,
+) async {
+  await database.transaction<void>((transaction) async {
+    await transaction.execute('''
+CREATE TABLE IF NOT EXISTS ${_qualified(scope, '_voxel_identity')} (
+  singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+  database_id TEXT NOT NULL,
+  schema_id TEXT NOT NULL
+)
+''');
+    await transaction.execute('''
+CREATE TABLE IF NOT EXISTS ${_qualified(scope, '_voxel_files')} (
+  schema_id TEXT NOT NULL PRIMARY KEY,
+  file_identity TEXT NOT NULL UNIQUE
+)
+''');
+    await transaction.execute('''
+CREATE TABLE IF NOT EXISTS ${_qualified(scope, '_voxel_migrations')} (
+  migration_id TEXT NOT NULL PRIMARY KEY,
+  parent_id TEXT,
+  checksum TEXT NOT NULL,
+  ordinal INTEGER NOT NULL UNIQUE
+)
+''');
+    await transaction.execute('''
+CREATE TABLE IF NOT EXISTS ${_qualified(scope, '_voxel_phases')} (
+  migration_id TEXT NOT NULL,
+  phase_id TEXT NOT NULL,
+  checksum TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  status TEXT NOT NULL,
+  PRIMARY KEY (migration_id, phase_id),
+  FOREIGN KEY (migration_id) REFERENCES _voxel_migrations (migration_id)
+)
+''');
+    await transaction.execute('''
+CREATE TABLE IF NOT EXISTS ${_qualified(scope, '_voxel_phase_attempts')} (
+  migration_id TEXT NOT NULL,
+  phase_id TEXT NOT NULL,
+  checksum TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  PRIMARY KEY (migration_id, phase_id)
+)
+''');
+    await transaction.execute(
+      '''
+INSERT INTO ${_qualified(scope, '_voxel_identity')}
+  (singleton, database_id, schema_id)
+VALUES (1, ?, ?)
+ON CONFLICT (singleton) DO NOTHING
+''',
+      parameters: [databaseId, schemaId],
+    );
+    await transaction.execute(
+      '''
+INSERT INTO ${_qualified(scope, '_voxel_files')} (schema_id, file_identity)
+VALUES (?, ?)
+ON CONFLICT (schema_id) DO NOTHING
+''',
+      parameters: [schemaId, fileIdentity],
+    );
+  });
+  final identity = (await database.query(
+    'SELECT database_id, schema_id FROM ${_qualified(scope, '_voxel_identity')}',
+  )).rows.single;
+  final file = (await database.query(
+    'SELECT file_identity FROM ${_qualified(scope, '_voxel_files')} WHERE schema_id = ?',
+    parameters: [schemaId],
+  )).rows.single;
+  if (identity.getString('database_id') != databaseId ||
+      identity.getString('schema_id') != schemaId ||
+      file.getString('file_identity') != fileIdentity) {
+    throw FormatException('Schema `$scope` has a different Voxel file identity.');
+  }
+}
+
+Future<void> _validatePersistentHistory(
+  TursoDatabase database,
+  String scope,
+  List<
+    ({
+      int ordinal,
+      VoxelBundledMigration migration,
+      List<Map<String, Object?>> phases,
+    })
+  >
+  expected,
+) async {
+  final applied = (await database.query(
+    '''
+SELECT migration_id, parent_id, checksum, ordinal
+FROM ${_qualified(scope, '_voxel_migrations')}
+ORDER BY ordinal
+''',
+  )).rows;
+  if (applied.length > expected.length) {
+    throw const FormatException('Applied Voxel history is not a prefix of the bundle.');
+  }
+  for (final (index, row) in applied.indexed) {
+    final bundled = expected[index];
+    if (row.getString('migration_id') != bundled.migration.id ||
+        row.value('parent_id') != bundled.migration.parentId ||
+        row.getString('checksum') != bundled.migration.checksum ||
+        row.getInt('ordinal') != bundled.ordinal) {
+      throw const FormatException('Applied Voxel history is not an unchanged bundle prefix.');
+    }
+  }
+
+  final attempts = (await database.query(
+    '''
+SELECT migration_id, phase_id, checksum, platform
+FROM ${_qualified(scope, '_voxel_phase_attempts')}
+''',
+  )).rows;
+  final expectedPhases = <String, ({String checksum, Set<String> phaseIds})>{
+    for (final entry in expected)
+      entry.migration.id: (
+        checksum: entry.migration.checksum,
+        phaseIds: entry.phases.map((phase) => phase['id']! as String).toSet(),
+      ),
+  };
+  final appliedIds = applied.map((row) => row.getString('migration_id')).toSet();
+  final receipts = (await database.query(
+    '''
+SELECT migration_id, phase_id, checksum, platform, status
+FROM ${_qualified(scope, '_voxel_phases')}
+''',
+  )).rows;
+  for (final receipt in receipts) {
+    final migrationId = receipt.getString('migration_id');
+    final phaseId = receipt.getString('phase_id');
+    final bundled = expectedPhases[migrationId];
+    if (!appliedIds.contains(migrationId) ||
+        bundled == null ||
+        !bundled.phaseIds.contains(phaseId) ||
+        receipt.getString('checksum') != bundled.checksum ||
+        receipt.getString('platform') != voxelPlatform ||
+        receipt.getString('status') != 'completed') {
+      throw FormatException('Migration $migrationId has inconsistent durable receipts.');
+    }
+  }
+  for (final attempt in attempts) {
+    final migrationId = attempt.getString('migration_id');
+    final phaseId = attempt.getString('phase_id');
+    final bundled = expectedPhases[migrationId];
+    if (bundled == null ||
+        !bundled.phaseIds.contains(phaseId) ||
+        attempt.getString('checksum') != bundled.checksum ||
+        attempt.getString('platform') != voxelPlatform) {
+      throw FormatException('Started migration $migrationId has changed in the bundle.');
+    }
+  }
+}
+
+Future<void> _applyPersistentPhase(
+  TursoDatabase database,
+  String scope,
+  int ordinal,
+  VoxelBundledMigration migration,
+  Map<String, Object?> phase,
+  Future<void> Function(VoxelMigrationInterruption interruption)? interrupt,
+) async {
+  if (phase['mode'] != 'transactional') {
+    throw UnsupportedError(
+      'Persistent native migration does not support ${phase['mode']} phases yet.',
+    );
+  }
+  if (await _phaseCompleted(database, scope, migration, phase)) return;
+  await database.execute(
+    '''
+INSERT INTO ${_qualified(scope, '_voxel_phase_attempts')}
+  (migration_id, phase_id, checksum, platform)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (migration_id, phase_id) DO NOTHING
+''',
+    parameters: [migration.id, phase['id'], migration.checksum, voxelPlatform],
+  );
+  final bytes = utf8.encode(migration.sql);
+  await database.transaction<void>((transaction) async {
+    for (final rawRange in _list(phase['statements'], 'phase statements')) {
+      final range = _map(rawRange, 'statement range');
+      await transaction.execute(
+        utf8.decode(
+          bytes.sublist(range['startByte']! as int, range['endByte']! as int),
+        ),
+      );
+    }
+    await transaction.execute(
+      '''
+INSERT INTO ${_qualified(scope, '_voxel_migrations')}
+  (migration_id, parent_id, checksum, ordinal)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (migration_id) DO NOTHING
+''',
+      parameters: [migration.id, migration.parentId, migration.checksum, ordinal],
+    );
+    await transaction.execute(
+      '''
+INSERT INTO ${_qualified(scope, '_voxel_phases')}
+  (migration_id, phase_id, checksum, platform, status)
+VALUES (?, ?, ?, ?, 'completed')
+''',
+      parameters: [migration.id, phase['id'], migration.checksum, voxelPlatform],
+    );
+    await interrupt?.call(
+      VoxelMigrationInterruption(
+        point: VoxelMigrationInterruptionPoint.beforePhaseCommit,
+        migrationId: migration.id,
+        phaseId: phase['id']! as String,
+      ),
+    );
+  });
+  await interrupt?.call(
+    VoxelMigrationInterruption(
+      point: VoxelMigrationInterruptionPoint.afterPhaseCommit,
+      migrationId: migration.id,
+      phaseId: phase['id']! as String,
+    ),
+  );
+}
+
 Future<bool> _phaseCompleted(
   TursoDatabase database,
   String scope,
@@ -398,7 +699,7 @@ Future<bool> _phaseCompleted(
 ) async {
   final result = await database.query(
     '''
-SELECT checksum, status
+SELECT checksum, platform, status
 FROM ${_qualified(scope, '_voxel_phases')}
 WHERE migration_id = ? AND phase_id = ?
 ''',
@@ -406,7 +707,9 @@ WHERE migration_id = ? AND phase_id = ?
   );
   if (result.rows.isEmpty) return false;
   final row = result.rows.single;
-  if (row.getString('checksum') != migration.checksum || row.getString('status') != 'completed') {
+  if (row.getString('checksum') != migration.checksum ||
+      row.getString('platform') != voxelPlatform ||
+      row.getString('status') != 'completed') {
     throw FormatException('Migration ${migration.id} has inconsistent durable phase history.');
   }
   return true;

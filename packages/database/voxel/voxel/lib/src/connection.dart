@@ -110,6 +110,17 @@ final class VoxelMigrationOptions {
   final Duration lockTimeout;
 }
 
+/// Configures the application-support directory used by native default opens.
+///
+/// Flutter applications should register a resolver during startup. Plain Dart
+/// callers can instead pass [VoxelStorage.directory] to each open call.
+abstract final class VoxelNativeStorageDefaults {
+  /// Registers the asynchronous application-support directory resolver.
+  static void register(Future<String> Function() resolver) {
+    registerVoxelNativeDefaultStorage(resolver);
+  }
+}
+
 /// An initialized Voxel database and the Turso connection it owns.
 ///
 /// Obtain this through the generated `VoxelApp().open(...)` extension. The
@@ -407,23 +418,43 @@ abstract final class VoxelDatabaseRuntime {
         'must not be negative',
       );
     }
-    final selectedStorage =
-        storage ??
-        (throw UnsupportedError(
-          'Voxel memory bootstrap requires storage: VoxelStorage.memory().',
-        ));
-    if (selectedStorage is! VoxelMemoryStorage) {
+    if (schemaStorage.isNotEmpty || schemaEncryption.isNotEmpty) {
       throw UnsupportedError(
-        'FBR-201 supports VoxelStorage.memory(); persistent storage is not available yet.',
-      );
-    }
-    if (schemaStorage.isNotEmpty || encryption != null || schemaEncryption.isNotEmpty) {
-      throw UnsupportedError(
-        'Memory bootstrap does not yet support storage or encryption overrides.',
+        'Per-schema storage and encryption require attached-file support.',
       );
     }
 
     final checked = VoxelMigrationPlan.validate(schema: schema, bundle: bundle);
+    final selectedStorage = storage;
+    if (selectedStorage is VoxelMemoryStorage) {
+      if (encryption != null) {
+        throw UnsupportedError('Memory storage does not support encryption.');
+      }
+      return _openMemory(schema, checked);
+    }
+    if (selectedStorage is VoxelOpfsStorage) {
+      throw UnsupportedError('Browser OPFS storage is not available yet.');
+    }
+    final directory = switch (selectedStorage) {
+      VoxelDirectoryStorage(:final path) => path,
+      null => null,
+      _ => throw UnsupportedError('Unsupported Voxel storage selection.'),
+    };
+    final database = await openVoxelPersistentMain(
+      databaseName: schema.name,
+      directory: directory,
+      migrations: checked,
+      lockTimeout: migrations.lockTimeout,
+      encryptionCipher: encryption?.cipher.name,
+      encryptionKey: encryption?.key,
+    );
+    return VoxelDb._(database, schema.name, schema.tables);
+  }
+
+  static Future<VoxelDb> _openMemory(
+    VoxelDatabaseSchema schema,
+    VoxelMigrationPlan checked,
+  ) async {
     TursoDatabase? database;
     try {
       database = await TursoDatabase.open(

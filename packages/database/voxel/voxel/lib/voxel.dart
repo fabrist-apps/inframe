@@ -11,6 +11,7 @@ export 'src/connection.dart'
         VoxelEncryption,
         VoxelExecutor,
         VoxelMigrationOptions,
+        VoxelNativeStorageDefaults,
         VoxelStorage,
         VoxelTransaction;
 export 'src/errors.dart';
