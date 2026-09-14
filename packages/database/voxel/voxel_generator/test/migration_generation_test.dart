@@ -313,6 +313,165 @@ void main() {
       ) as Map<String, Object?>;
       expect(journal['entries']! as List<Object?>, hasLength(1));
     });
+
+    test('should preserve enum identities and emit scalar label checks', () async {
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'enums',
+      );
+      final before = _finalSnapshot(directory);
+      final beforeEnum = (before['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final beforeValues = (beforeEnum['values']! as List<Object?>).cast<Map<String, Object?>>();
+
+      expect(_finalSql(directory), isNot(contains('CREATE TYPE')));
+      expect(_finalSql(directory), contains('CHECK ("mood" IN (\'queued\', \'done\'))'));
+      expect(beforeValues.map((value) => value['label']), ['queued', 'done']);
+      final declaredValues =
+          ((declaration['enums']! as List<Object?>).single! as Map<String, Object?>)['values']!
+              as List<Object?>;
+      (declaredValues.last! as Map<String, Object?>)['dartName'] = 'finished';
+      expect(
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'runtime enum rename',
+        ),
+        isNull,
+      );
+
+      final declaredEnum =
+          ((declaration['enums']! as List<Object?>).single! as Map<String, Object?>)
+            ..['name'] = 'state'
+            ..['renamedFrom'] = 'mood';
+      for (final rawTable in declaration['tables']! as List<Object?>) {
+        final table = rawTable! as Map<String, Object?>;
+        for (final rawColumn in table['columns']! as List<Object?>) {
+          _renameEnumStorage(
+            (rawColumn! as Map<String, Object?>)['storage']! as Map<String, Object?>,
+          );
+        }
+      }
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'enum identity rename',
+      );
+      final renamedEnum =
+          (_finalSnapshot(directory)['enums']! as List<Object?>).single! as Map<String, Object?>;
+      expect(renamedEnum['id'], beforeEnum['id']);
+      expect(_finalSql(directory), isEmpty);
+
+      final reordered = declaredValues.reversed.toList();
+      declaredEnum['values'] = reordered;
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'enum rank order',
+      );
+      final afterEnum =
+          (_finalSnapshot(directory)['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final afterValues = (afterEnum['values']! as List<Object?>).cast<Map<String, Object?>>();
+      expect(
+        afterValues.map((value) => value['id']),
+        beforeValues.reversed.map((value) => value['id']),
+      );
+      expect(_finalSql(directory), isEmpty);
+    });
+
+    test('should require explicit scalar and array transforms for stored-label changes', () async {
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'enums',
+      );
+      final before = _finalSnapshot(directory);
+      final beforeEnum = (before['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final beforeDone = (beforeEnum['values']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .singleWhere((value) => value['label'] == 'done');
+      final declaredEnum = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      declaredEnum['values'] = [
+        {'dartName': 'queued', 'label': 'queued'},
+        {'dartName': 'complete', 'label': 'complete', 'renamedFrom': 'done'},
+      ];
+
+      await expectLater(
+        generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'rename enum label',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'rename enum label',
+        storageTransforms: {
+          'auth.jobs.mood': 'CASE "mood" WHEN \'done\' THEN \'complete\' ELSE "mood" END',
+          'auth.queues.moods': '(SELECT json_group_array(CASE value WHEN \'done\' THEN \'complete\' ELSE value END) FROM json_each("moods"))',
+        },
+      );
+      final afterEnum =
+          (_finalSnapshot(directory)['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final afterComplete = (afterEnum['values']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .singleWhere((value) => value['label'] == 'complete');
+      expect(afterComplete['id'], beforeDone['id']);
+      expect(_finalSql(directory), contains("WHEN 'done' THEN 'complete'"));
+    });
+
+    test('should rebuild enum checks for an added label without rewriting values', () async {
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'enums',
+      );
+      final beforeEnum =
+          (_finalSnapshot(directory)['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final beforeIds = {
+        for (final value in (beforeEnum['values']! as List<Object?>).cast<Map<String, Object?>>())
+          value['label']: value['id'],
+      };
+      final declaredEnum = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      (declaredEnum['values']! as List<Object?>).add({
+        'dartName': 'running',
+        'label': 'running',
+      });
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'add enum label',
+      );
+      final afterEnum =
+          (_finalSnapshot(directory)['enums']! as List<Object?>).single! as Map<String, Object?>;
+      final afterValues = (afterEnum['values']! as List<Object?>).cast<Map<String, Object?>>();
+      expect(
+        afterValues.where((value) => beforeIds.containsKey(value['label'])),
+        everyElement(
+          predicate<Map<String, Object?>>((value) => beforeIds[value['label']] == value['id']),
+        ),
+      );
+      expect(_finalSql(directory), contains("'running'"));
+      expect(_finalSql(directory), contains('SELECT "mood"'));
+    });
   });
 }
 
@@ -351,6 +510,72 @@ Map<String, Object?> _declaration({
   'enums': <Object?>[],
   'requirements': <Object?>[],
 };
+
+Map<String, Object?> _enumDeclaration() => {
+  'formatVersion': 1,
+  'dialect': 'voxel',
+  'name': 'enums',
+  'tables': [
+    {
+      'schema': 'auth',
+      'name': 'jobs',
+      'columns': [_enumColumn('mood')],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+    {
+      'schema': 'auth',
+      'name': 'queues',
+      'columns': [
+        {
+          'name': 'moods',
+          'storage': {
+            'kind': 'array',
+            'nullable': true,
+            'codecVersion': 1,
+            'element': _enumStorage(nullable: true),
+          },
+          'primaryKey': false,
+        },
+      ],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+  ],
+  'enums': [
+    {
+      'schema': 'types',
+      'name': 'mood',
+      'values': [
+        {'dartName': 'queued', 'label': 'queued'},
+        {'dartName': 'complete', 'label': 'done'},
+      ],
+    },
+  ],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _enumColumn(String name) => {
+  'name': name,
+  'storage': _enumStorage(nullable: false),
+  'primaryKey': false,
+};
+
+Map<String, Object?> _enumStorage({required bool nullable}) => {
+  'kind': 'enum',
+  'nullable': nullable,
+  'codecVersion': 1,
+  'enum': {'schema': 'types', 'name': 'mood'},
+};
+
+void _renameEnumStorage(Map<String, Object?> storage) {
+  if (storage['kind'] == 'enum') {
+    storage['enum'] = {'schema': 'types', 'name': 'state'};
+  }
+  if (storage['element'] case final Map<String, Object?> element) {
+    _renameEnumStorage(element);
+  }
+}
 
 Map<String, Object?> _finalSnapshot(Directory directory) {
   final journal =

@@ -280,22 +280,38 @@ final class VoxelArtifactChecker {
     };
     for (final rawValidation in _list(rebuild['validations'], 'rebuild validations')) {
       final validation = _map(rawValidation, 'rebuild validation');
-      if (validation['kind'] != 'foreignKeyAntiJoin') {
+      if (validation['kind'] != 'foreignKeyAntiJoin' && validation['kind'] != 'enumArrayLabels') {
         throw const FormatException('A rebuild contains an unknown validation kind.');
       }
       final table = tables[validation['tableId']];
       if (table == null || table['schemaId'] != phase['scopeId']) {
         throw const FormatException('A rebuild validation references a table outside its scope.');
       }
-      final constraints = _list(
-        table['constraints'],
-        'table constraints',
-      ).map((value) => _map(value, 'table constraint'));
-      if (!constraints.any(
-        (constraint) =>
-            constraint['id'] == validation['constraintId'] && constraint['kind'] == 'foreignKey',
-      )) {
-        throw const FormatException('A rebuild validation references an unknown foreign key.');
+      if (validation['kind'] == 'foreignKeyAntiJoin') {
+        final constraints = _list(
+          table['constraints'],
+          'table constraints',
+        ).map((value) => _map(value, 'table constraint'));
+        if (!constraints.any(
+          (constraint) =>
+              constraint['id'] == validation['constraintId'] && constraint['kind'] == 'foreignKey',
+        )) {
+          throw const FormatException('A rebuild validation references an unknown foreign key.');
+        }
+      } else {
+        final columns = _list(
+          table['columns'],
+          'table columns',
+        ).map((value) => _map(value, 'table column'));
+        if (!columns.any((column) {
+          if (column['id'] != validation['columnId']) return false;
+          final storage = column['storage']! as Map<String, Object?>;
+          return storage['kind'] == 'array' &&
+              storage['element'] is Map<String, Object?> &&
+              (storage['element']! as Map<String, Object?>)['kind'] == 'enum';
+        })) {
+          throw const FormatException('A rebuild validation references an unknown enum array.');
+        }
       }
       final validationSql = validation['sql'];
       if (validationSql is! String ||

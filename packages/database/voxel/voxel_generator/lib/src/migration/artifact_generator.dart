@@ -21,12 +21,14 @@ final class VoxelArtifactGenerator {
     required VoxelDatabaseSchema schema,
     required Directory directory,
     required String name,
+    Map<String, String> storageTransforms = const {},
   }) async {
     _validateLabel(name);
     return generateDeclaration(
       declaration: voxelMigrationSchemaToJson(schema),
       directory: directory,
       name: name,
+      storageTransforms: storageTransforms,
     );
   }
 
@@ -102,8 +104,12 @@ final class VoxelArtifactGenerator {
       for (final schema in previousSchemas) schema['name']! as String: schema['id']! as String,
     };
     final declaredTables = (declaration['tables']! as List<Object?>).cast<Map<String, Object?>>();
+    final declaredEnums = (declaration['enums']! as List<Object?>).cast<Map<String, Object?>>();
     for (final table in declaredTables) {
       schemaIds.putIfAbsent(table['schema']! as String, _nextId);
+    }
+    for (final value in declaredEnums) {
+      schemaIds.putIfAbsent(value['schema']! as String, _nextId);
     }
     final previousTables = (previous['tables']! as List<Object?>).cast<Map<String, Object?>>();
     final usedTableIds = <String>{};
@@ -178,6 +184,13 @@ final class VoxelArtifactGenerator {
         'constraints': declaredTable['constraints'],
       });
     }
+    final enums = _settleEnums(
+      declaration,
+      (previous['enums']! as List<Object?>).cast<Map<String, Object?>>(),
+      schemaIds,
+      previousSchemaNames,
+    );
+    _settleEnumStorage(tables, enums, schemas: schemaIds);
     _settleTableObjects(tables, declaredTables, previousTables, previousSchemaNames);
     tables.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
     final schemas = [
@@ -190,7 +203,7 @@ final class VoxelArtifactGenerator {
       'migrationId': '',
       'schemas': schemas,
       'tables': tables,
-      'enums': previous['enums'],
+      'enums': enums,
       'requirements': declaration['requirements'],
     };
   }
@@ -224,11 +237,6 @@ final class VoxelArtifactGenerator {
       storageTransforms,
       rebuiltScopes,
     );
-    if (sql.isEmpty) {
-      throw UnsupportedError(
-        'The composed schema changed, but Voxel cannot generate its Turso DDL.',
-      );
-    }
     final metadata = <String, Object?>{
       'formatVersion': 1,
       'dialect': 'voxel',
@@ -280,6 +288,10 @@ final class VoxelArtifactGenerator {
     for (final table in declaredTables) {
       schemaIds.putIfAbsent(table['schema']! as String, _nextId);
     }
+    for (final rawEnum in declaration['enums']! as List<Object?>) {
+      final declaredEnum = rawEnum! as Map<String, Object?>;
+      schemaIds.putIfAbsent(declaredEnum['schema']! as String, _nextId);
+    }
     final schemas = [
       for (final entry in schemaIds.entries) {'id': entry.value, 'name': entry.key},
     ]..sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
@@ -306,6 +318,8 @@ final class VoxelArtifactGenerator {
         'constraints': declaredTable['constraints'],
       });
     }
+    final enums = _settleEnums(declaration, const [], schemaIds, const {});
+    _settleEnumStorage(tables, enums, schemas: schemaIds);
     _settleTableObjects(tables, declaredTables, const [], const {});
     tables.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
 
@@ -316,9 +330,131 @@ final class VoxelArtifactGenerator {
       'migrationId': '',
       'schemas': schemas,
       'tables': tables,
-      'enums': <Object?>[],
+      'enums': enums,
       'requirements': declaration['requirements'],
     };
+  }
+
+  List<Map<String, Object?>> _settleEnums(
+    Map<String, Object?> declaration,
+    List<Map<String, Object?>> previousEnums,
+    Map<String, String> schemaIds,
+    Map<Object?, String> previousSchemaNames,
+  ) {
+    final usedIds = <String>{};
+    final declaredNames = <String>{};
+    final enums = <Map<String, Object?>>[];
+    for (final raw in declaration['enums']! as List<Object?>) {
+      final declared = raw! as Map<String, Object?>;
+      final schema = declared['schema']! as String;
+      final name = declared['name']! as String;
+      if (!declaredNames.add('$schema.$name')) {
+        throw FormatException('Duplicate Voxel enum declaration $schema.$name.');
+      }
+      var old = previousEnums
+          .where(
+            (value) => previousSchemaNames[value['schemaId']] == schema && value['name'] == name,
+          )
+          .singleOrNull;
+      if (old == null && declared['renamedFrom'] is String) {
+        final renamedFrom = declared['renamedFrom']! as String;
+        final candidates = previousEnums.where(
+          (value) =>
+              previousSchemaNames[value['schemaId']] == schema &&
+              value['name'] == renamedFrom &&
+              !usedIds.contains(value['id']),
+        );
+        if (candidates.length != 1) {
+          throw FormatException('Enum rename $schema.$renamedFrom -> $name has no unique source.');
+        }
+        old = candidates.single;
+      }
+      if (old != null && !usedIds.add(old['id']! as String)) {
+        throw FormatException('Several enum declarations resolve to ${old['name']}.');
+      }
+      if (old == null &&
+          (declared['renamedFrom'] != null ||
+              (declared['values']! as List<Object?>).any(
+                (value) => (value! as Map<String, Object?>)['renamedFrom'] != null,
+              ))) {
+        throw const FormatException('Enum rename hints require a matching previous snapshot.');
+      }
+      final oldValues = old == null
+          ? const <Map<String, Object?>>[]
+          : (old['values']! as List<Object?>).cast<Map<String, Object?>>();
+      final usedValueIds = <String>{};
+      final declaredLabels = <String>{};
+      final values = <Map<String, Object?>>[];
+      for (final rawValue in declared['values']! as List<Object?>) {
+        final value = rawValue! as Map<String, Object?>;
+        final label = value['label']! as String;
+        if (!declaredLabels.add(label)) {
+          throw FormatException('Enum $schema.$name has duplicate label `$label`.');
+        }
+        var oldValue = oldValues.where((candidate) => candidate['label'] == label).singleOrNull;
+        if (oldValue == null && value['renamedFrom'] is String) {
+          final renamedFrom = value['renamedFrom']! as String;
+          final candidates = oldValues.where(
+            (candidate) =>
+                candidate['label'] == renamedFrom && !usedValueIds.contains(candidate['id']),
+          );
+          if (candidates.length != 1) {
+            throw FormatException('Enum label rename $renamedFrom -> $label has no unique source.');
+          }
+          oldValue = candidates.single;
+        }
+        if (oldValue != null && !usedValueIds.add(oldValue['id']! as String)) {
+          throw FormatException('Several enum values resolve to ${oldValue['label']}.');
+        }
+        values.add({
+          'id': oldValue?['id'] as String? ?? _nextId(),
+          'enumId': old?['id'],
+          'label': label,
+        });
+      }
+      final enumId = old?['id'] as String? ?? _nextId();
+      for (final value in values) {
+        value['enumId'] = enumId;
+      }
+      enums.add({
+        'id': enumId,
+        'schemaId': schemaIds[schema],
+        'name': name,
+        'values': values,
+      });
+    }
+    enums.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
+    return enums;
+  }
+
+  void _settleEnumStorage(
+    List<Map<String, Object?>> tables,
+    List<Map<String, Object?>> enums, {
+    required Map<String, String> schemas,
+  }) {
+    final byName = {
+      for (final value in enums)
+        '${schemas.entries.singleWhere((entry) => entry.value == value['schemaId']).key}.${value['name']}':
+            value['id']! as String,
+    };
+    Map<String, Object?> settle(Map<String, Object?> storage) {
+      if (storage['kind'] == 'enum') {
+        final reference = storage['enum']! as Map<String, Object?>;
+        final enumId = byName['${reference['schema']}.${reference['name']}'];
+        if (enumId == null) throw const FormatException('Enum column references an unknown type.');
+        return {..._withoutKey(storage, 'enum'), 'enumId': enumId};
+      }
+      if (storage['element'] case final Map<String, Object?> element) {
+        return {...storage, 'element': settle(element)};
+      }
+      return storage;
+    }
+
+    for (final table in tables) {
+      for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>()) {
+        column['storage'] = settle(column['storage']! as Map<String, Object?>);
+      }
+    }
   }
 
   void _settleTableObjects(
@@ -498,6 +634,7 @@ final class VoxelArtifactGenerator {
           table,
           schemaNames.cast<String, String>(),
           _tablesById(snapshot),
+          enums: _enumsById(snapshot),
         ),
       );
     }
@@ -545,10 +682,22 @@ final class VoxelArtifactGenerator {
       for (final value in (next['tables']! as List<Object?>).cast<Map<String, Object?>>())
         value['id']! as String: value,
     };
+    final previousEnums = _enumsById(previous);
+    final nextEnums = _enumsById(next);
+    final changedEnumIds = <String>{
+      for (final entry in nextEnums.entries)
+        if (previousEnums[entry.key] case final oldEnum?
+            when !_sameEnumLabels(oldEnum, entry.value))
+          entry.key,
+    };
+    final destructiveEnumIds = <String>{
+      for (final id in changedEnumIds)
+        if (!_enumLabels(nextEnums[id]!).containsAll(_enumLabels(previousEnums[id]!))) id,
+    };
     final rebuiltTableIds = <String>{
       for (final entry in nextTables.entries)
         if (previousTables[entry.key] case final oldTable?
-            when _requiresRebuild(oldTable, entry.value))
+            when _requiresRebuild(oldTable, entry.value, changedEnumIds))
           entry.key,
     };
     final usedTransformPaths = <String>{};
@@ -565,7 +714,9 @@ final class VoxelArtifactGenerator {
       final nextTable = entry.value;
       final previousTable = previousTables[entry.key];
       if (previousTable == null) {
-        buffer.write(_createTableSql(nextTable, nextSchemas, nextTables));
+        buffer.write(
+          _createTableSql(nextTable, nextSchemas, nextTables, enums: nextEnums),
+        );
         continue;
       }
       final oldSchema = previousSchemas[previousTable['schemaId']]!;
@@ -581,8 +732,10 @@ final class VoxelArtifactGenerator {
             nextTable,
             nextSchemas,
             nextTables,
+            nextEnums,
             storageTransforms,
             usedTransformPaths,
+            destructiveEnumIds,
           ),
         );
         continue;
@@ -609,6 +762,7 @@ final class VoxelArtifactGenerator {
   bool _requiresRebuild(
     Map<String, Object?> previous,
     Map<String, Object?> next,
+    Set<String> changedEnumIds,
   ) {
     final oldColumns = {
       for (final column in (previous['columns']! as List<Object?>).cast<Map<String, Object?>>())
@@ -633,6 +787,9 @@ final class VoxelArtifactGenerator {
           old['primaryKey'] != column['primaryKey']) {
         return true;
       }
+      if (_referencesAnyEnum(column['storage']! as Map<String, Object?>, changedEnumIds)) {
+        return true;
+      }
     }
     final oldConstraints = _objects(
       previous,
@@ -650,8 +807,10 @@ final class VoxelArtifactGenerator {
     Map<String, Object?> next,
     Map<String, String> schemas,
     Map<String, Map<String, Object?>> tables,
+    Map<String, Map<String, Object?>> enums,
     Map<String, String> storageTransforms,
     Set<String> usedTransformPaths,
+    Set<String> destructiveEnumIds,
   ) {
     final schema = schemas[next['schemaId']]!;
     final oldName = previous['name']! as String;
@@ -687,7 +846,11 @@ final class VoxelArtifactGenerator {
         }
         continue;
       }
-      if (canonicalJson(old['storage']) != canonicalJson(column['storage'])) {
+      if (canonicalJson(old['storage']) != canonicalJson(column['storage']) ||
+          _referencesAnyEnum(
+            column['storage']! as Map<String, Object?>,
+            destructiveEnumIds,
+          )) {
         if (transform == null) {
           throw FormatException('Rebuilding $schema.$newName requires storage transform `$path`.');
         }
@@ -699,7 +862,7 @@ final class VoxelArtifactGenerator {
     final temporaryTable = {...next, 'name': replacement, 'indexes': <Object?>[]};
     final columns = targetColumns.map((column) => _quote(column['name']! as String)).join(', ');
     final buffer = StringBuffer()
-      ..write(_createTableSql(temporaryTable, schemas, tables))
+      ..write(_createTableSql(temporaryTable, schemas, tables, enums: enums))
       ..writeln(
         'INSERT INTO ${_quote(schema)}.${_quote(replacement)} ($columns) '
         'SELECT ${expressions.join(', ')} FROM ${_quote(schema)}.${_quote(oldName)};',
@@ -777,8 +940,9 @@ final class VoxelArtifactGenerator {
   String _createTableSql(
     Map<String, Object?> table,
     Map<String, String> schemaNames,
-    Map<String, Map<String, Object?>> tables,
-  ) {
+    Map<String, Map<String, Object?>> tables, {
+    Map<String, Map<String, Object?>> enums = const {},
+  }) {
     final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
     final buffer = StringBuffer()
       ..writeln(
@@ -793,6 +957,26 @@ final class VoxelArtifactGenerator {
         '${storage['nullable'] == true ? '' : ' NOT NULL'}'
         '${_defaultSql(column)}',
       );
+      if (storage['kind'] == 'enum') {
+        final value =
+            enums[storage['enumId']] ??
+            (throw const FormatException('Enum column references an unknown snapshot enum.'));
+        final labels = (value['values']! as List<Object?>)
+            .cast<Map<String, Object?>>()
+            .map((entry) => _stringLiteral(entry['label']! as String))
+            .join(', ');
+        definitions.add(
+          '  CHECK (${_quote(column['name']! as String)} IN ($labels))',
+        );
+      }
+      if (storage case {'kind': 'array', 'element': final Map<String, Object?> element}
+          when element['kind'] == 'enum') {
+        final name = _quote(column['name']! as String);
+        definitions.add(
+          '  CHECK (CASE WHEN $name IS NULL THEN ${storage['nullable'] == true ? '1' : '0'} '
+          "WHEN json_valid($name) THEN json_type($name) = 'array' ELSE 0 END)",
+        );
+      }
     }
     final columnNames = <String, String>{
       for (final currentTable in tables.values)
@@ -984,6 +1168,27 @@ final class VoxelArtifactGenerator {
     for (final table in _snapshotTables(snapshot)) table['id']! as String: table,
   };
 
+  Map<String, Map<String, Object?>> _enumsById(Map<String, Object?> snapshot) => {
+    for (final value in (snapshot['enums']! as List<Object?>).cast<Map<String, Object?>>())
+      value['id']! as String: value,
+  };
+
+  Set<String> _enumLabels(Map<String, Object?> value) => {
+    for (final item in (value['values']! as List<Object?>).cast<Map<String, Object?>>())
+      item['label']! as String,
+  };
+
+  bool _sameEnumLabels(Map<String, Object?> left, Map<String, Object?> right) {
+    final leftLabels = _enumLabels(left).toList()..sort();
+    final rightLabels = _enumLabels(right).toList()..sort();
+    return canonicalJson(leftLabels) == canonicalJson(rightLabels);
+  }
+
+  bool _referencesAnyEnum(Map<String, Object?> storage, Set<String> enumIds) =>
+      enumIds.contains(storage['enumId']) ||
+      (storage['element'] is Map<String, Object?> &&
+          _referencesAnyEnum(storage['element']! as Map<String, Object?>, enumIds));
+
   Map<String, String> _schemaNames(Map<String, Object?> snapshot) => {
     for (final schema in (snapshot['schemas']! as List<Object?>).cast<Map<String, Object?>>())
       schema['id']! as String: schema['name']! as String,
@@ -1071,7 +1276,7 @@ final class VoxelArtifactGenerator {
         if (rebuiltScopes.contains(matchingSchemas.single['name']))
           'rebuild': {
             'foreignKeys': 'offOutsideTransaction',
-            'validations': _foreignKeyValidations(
+            'validations': _rebuildValidations(
               snapshot,
               matchingSchemas.single['id']! as String,
             ),
@@ -1081,7 +1286,7 @@ final class VoxelArtifactGenerator {
     return phases;
   }
 
-  List<Map<String, Object?>> _foreignKeyValidations(
+  List<Map<String, Object?>> _rebuildValidations(
     Map<String, Object?> snapshot,
     String schemaId,
   ) {
@@ -1093,6 +1298,28 @@ final class VoxelArtifactGenerator {
     };
     final validations = <Map<String, Object?>>[];
     for (final table in tables.values.where((value) => value['schemaId'] == schemaId)) {
+      for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>()) {
+        final storage = column['storage']! as Map<String, Object?>;
+        if (storage case {'kind': 'array', 'element': final Map<String, Object?> element}
+            when element['kind'] == 'enum') {
+          final value = _enumsById(snapshot)[element['enumId']]!;
+          final labels = _enumLabels(value).map(_stringLiteral).join(', ');
+          final invalidValue = element['nullable'] == true
+              ? '"voxel_value".value IS NOT NULL AND "voxel_value".value NOT IN ($labels)'
+              : '"voxel_value".value IS NULL OR "voxel_value".value NOT IN ($labels)';
+          validations.add({
+            'kind': 'enumArrayLabels',
+            'tableId': table['id'],
+            'columnId': column['id'],
+            'sql':
+                'SELECT NOT EXISTS (SELECT 1 FROM '
+                '${_quote(_schemaNames(snapshot)[schemaId]!)}.${_quote(table['name']! as String)} '
+                'AS "voxel_row", json_each("voxel_row".${_quote(column['name']! as String)}) '
+                'AS "voxel_value" WHERE "voxel_row".${_quote(column['name']! as String)} '
+                'IS NOT NULL AND ($invalidValue)) AS "valid";',
+          });
+        }
+      }
       for (final constraint in _objects(table, 'constraints')) {
         if (constraint['kind'] != 'foreignKey') continue;
         final target = tables[constraint['referenceTableId']]!;
@@ -1209,6 +1436,8 @@ final class VoxelArtifactGenerator {
   }
 
   String _quote(String identifier) => '"${identifier.replaceAll('"', '""')}"';
+
+  String _stringLiteral(String value) => "'${value.replaceAll("'", "''")}'";
 
   void _writeText(File file, String contents) {
     file.writeAsBytesSync(utf8.encode(contents), flush: true);

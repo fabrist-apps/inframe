@@ -34,10 +34,12 @@ final class VoxelMigrationGenerator {
     required VoxelDatabaseSchema schema,
     required Directory directory,
     required String name,
+    Map<String, String> storageTransforms = const {},
   }) => VoxelArtifactGenerator(createId: createId).generate(
     schema: schema,
     directory: directory,
     name: name,
+    storageTransforms: storageTransforms,
   );
 
   /// Generates artifacts from a descriptor emitted by generated application

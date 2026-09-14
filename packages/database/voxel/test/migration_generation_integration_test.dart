@@ -208,6 +208,54 @@ void main() {
       expect(parent.getString('storage'), 'text');
       expect((await database.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys'), 1);
     });
+
+    test('should transform scalar and array enum labels without collapsing nulls', () async {
+      final directory = Directory.systemTemp.createTempSync('voxel_enum_migration_test_');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'enums',
+      );
+      final database = await TursoDatabase.open(TursoLocation.memory());
+      addTearDown(database.close);
+      await database.execute("ATTACH DATABASE ':memory:' AS auth");
+      await _executeMigration(database, _migrationSql(directory));
+      await database.execute("INSERT INTO auth.jobs VALUES ('done')");
+      await database.execute("INSERT INTO auth.queues VALUES ('[\"done\",null,\"queued\"]')");
+      await database.execute('INSERT INTO auth.queues VALUES (NULL)');
+
+      final declaredEnum = (declaration['enums']! as List<Object?>).single! as Map<String, Object?>;
+      declaredEnum['values'] = [
+        {'dartName': 'queued', 'label': 'queued'},
+        {'dartName': 'complete', 'label': 'complete', 'renamedFrom': 'done'},
+      ];
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'rename enum label',
+        storageTransforms: {
+          'auth.jobs.mood': 'CASE "mood" WHEN \'done\' THEN \'complete\' ELSE "mood" END',
+          'auth.queues.moods': 'CASE WHEN "moods" IS NULL THEN NULL ELSE (SELECT json_group_array(CASE value WHEN \'done\' THEN \'complete\' ELSE value END) FROM json_each("moods")) END',
+        },
+      );
+      await const VoxelMigrationChecker().check(directory: directory);
+      await _executeLatestGeneratedMigration(database, directory);
+
+      expect(
+        (await database.query('SELECT mood FROM auth.jobs')).rows.single.getString('mood'),
+        'complete',
+      );
+      final arrays = (await database.query('SELECT moods FROM auth.queues ORDER BY moods IS NULL'))
+          .rows;
+      expect(arrays.first.getString('moods'), '["complete",null,"queued"]');
+      expect(arrays.last.value('moods'), isNull);
+    });
   });
 }
 
@@ -334,6 +382,63 @@ Map<String, Object?> _physicalDeclaration(
   ],
   'enums': <Object?>[],
   'requirements': <Object?>[],
+};
+
+Map<String, Object?> _enumDeclaration() => {
+  'formatVersion': 1,
+  'dialect': 'voxel',
+  'name': 'enums',
+  'tables': [
+    {
+      'schema': 'auth',
+      'name': 'jobs',
+      'columns': [_enumColumn('mood')],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+    {
+      'schema': 'auth',
+      'name': 'queues',
+      'columns': [
+        {
+          'name': 'moods',
+          'storage': {
+            'kind': 'array',
+            'nullable': true,
+            'codecVersion': 1,
+            'element': _enumStorage(nullable: true),
+          },
+          'primaryKey': false,
+        },
+      ],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+  ],
+  'enums': [
+    {
+      'schema': 'types',
+      'name': 'mood',
+      'values': [
+        {'dartName': 'queued', 'label': 'queued'},
+        {'dartName': 'complete', 'label': 'done'},
+      ],
+    },
+  ],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _enumColumn(String name) => {
+  'name': name,
+  'storage': _enumStorage(nullable: false),
+  'primaryKey': false,
+};
+
+Map<String, Object?> _enumStorage({required bool nullable}) => {
+  'kind': 'enum',
+  'nullable': nullable,
+  'codecVersion': 1,
+  'enum': {'schema': 'types', 'name': 'mood'},
 };
 
 String _migrationSql(Directory directory) {

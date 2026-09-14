@@ -45,14 +45,22 @@
     },
     "rebuildValidation": {
       "type": "object",
-      "required": ["kind", "tableId", "constraintId", "sql"],
+      "required": ["kind", "tableId", "sql"],
       "properties": {
-        "kind": {"const": "foreignKeyAntiJoin"},
+        "kind": {"enum": ["foreignKeyAntiJoin", "enumArrayLabels"]},
         "tableId": {"$ref": "#/$defs/id"},
         "constraintId": {"$ref": "#/$defs/id"},
+        "columnId": {"$ref": "#/$defs/id"},
         "sql": {"type": "string", "minLength": 1}
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "foreignKeyAntiJoin"}}},
+          "then": {"required": ["constraintId"]},
+          "else": {"required": ["columnId"]}
+        }
+      ]
     },
     "statement": {
       "type": "object",
