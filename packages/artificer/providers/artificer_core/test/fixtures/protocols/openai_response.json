@@ -1,8 +1,0 @@
-{
-  "id": "resp_1",
-  "output": [
-    {"type": "message", "content": [{"type": "output_text", "text": "hello"}]},
-    {"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{"}
-  ],
-  "unknown_future_field": {"keep": true}
-}

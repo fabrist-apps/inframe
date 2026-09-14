@@ -1,9 +1,0 @@
-{
-  "id": "msg_1",
-  "content": [
-    {"type": "text", "text": "hello", "citations": [{"url": "https://example.com"}]},
-    {"type": "server_tool_use", "id": "server_1", "name": "web_search", "input": {"query": "dart"}}
-  ],
-  "stop_reason": "end_turn",
-  "unknown_future_field": {"keep": true}
-}

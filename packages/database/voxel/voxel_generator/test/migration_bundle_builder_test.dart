@@ -8,6 +8,41 @@ import 'package:voxel_generator/src/migration_bundle_builder.dart';
 import 'package:voxel_generator/voxel_generator.dart';
 
 void main() {
+  group('VoxelMigrationBundleBuilder', () {
+    test('should evaluate generated parts and imported models from build assets', () async {
+      final fixture = await _fixture();
+      addTearDown(() => fixture.directory.deleteSync(recursive: true));
+      final assets = Map<String, Object>.from(fixture.assets)
+        ..['voxel_generator|lib/database.dart'] = '''
+import 'package:fixture_models/model.dart';
+part 'database.voxel.dart';
+'''
+        ..['voxel_generator|lib/database.voxel.dart'] = '''
+part of 'database.dart';
+abstract final class AccountsDatabaseVoxelSchema {
+  static Map<String, Object?> toJson() => declaration;
+}
+'''
+        ..['fixture_models|lib/model.dart'] =
+            '''
+import 'dart:convert';
+Map<String, Object?> get declaration =>
+    jsonDecode(${jsonEncode(jsonEncode(fixture.declaration))}) as Map<String, Object?>;
+''';
+      final result = await testBuilder(
+        const VoxelMigrationBundleBuilder(),
+        assets,
+        readerWriter: TestReaderWriter(rootPackage: 'voxel_generator'),
+        outputs: {
+          'voxel_generator|lib/accounts.voxel_migrations.dart': decodedMatches(
+            contains('abstract final class AccountsDatabaseVoxelMigrations'),
+          ),
+        },
+      );
+      expect(result.succeeded, isTrue);
+    });
+  });
+
   test('should bundle checked artifacts in journal order with exact SQL', () async {
     final fixture = await _fixture();
     addTearDown(() => fixture.directory.deleteSync(recursive: true));

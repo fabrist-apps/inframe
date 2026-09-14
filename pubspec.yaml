@@ -5,12 +5,6 @@ environment:
   sdk: ^3.13.0
 
 workspace:
-  - packages/artificer/providers/artificer_core
-  - packages/artificer/providers/artificer_anthropic
-  - packages/artificer/providers/artificer_baseten
-  - packages/artificer/providers/artificer_google
-  - packages/artificer/providers/artificer_openai
-  - packages/artificer/providers/artificer_xai
   - packages/context
   - packages/inlet
   - packages/database/clickhouse
