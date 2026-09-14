@@ -116,29 +116,6 @@ Future<TursoDatabase> openVoxelNativePersistentMain({
   }
 }
 
-Future<TursoDatabase> openVoxelPersistentMain({
-  required String databaseName,
-  required String? directory,
-  required VoxelMigrationPlan migrations,
-  required Duration lockTimeout,
-  required String? encryptionCipher,
-  required Uint8List? encryptionKey,
-}) async {
-  final resource = await resolveVoxelNativeMainResource(
-    databaseName: databaseName,
-    directory: directory,
-  );
-  final encryption = encryptionCipher == null
-      ? null
-      : voxelNativeEncryption(cipher: encryptionCipher, key: encryptionKey!);
-  return openVoxelNativePersistentMain(
-    resource: resource,
-    migrations: migrations,
-    lockTimeout: lockTimeout,
-    encryption: encryption,
-  );
-}
-
 Future<TursoDatabase> openVoxelPersistentDatabase({
   required String databaseName,
   required String? directory,

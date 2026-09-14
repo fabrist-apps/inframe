@@ -62,12 +62,15 @@ final class VoxelBundledMigration {
 
 /// A resource-free, validated execution plan for one bundled history.
 final class VoxelMigrationPlan {
-  VoxelMigrationPlan._(this.bundle, this.schemaNames, this.scopes, this._scopeNames);
+  VoxelMigrationPlan._(this.bundle, this.scopes, this._scopeNames);
 
   final VoxelMigrationBundle bundle;
-  final List<String> schemaNames;
   final List<VoxelMigrationScope> scopes;
   final List<Map<String, String>> _scopeNames;
+
+  List<String> get schemaNames => ([for (final scope in scopes) scope.name]..sort()).toList(
+    growable: false,
+  );
 
   String get mainSchemaId =>
       scopes.where((scope) => scope.name == 'main').firstOrNull?.id ?? 'main';
@@ -208,7 +211,6 @@ final class VoxelMigrationPlan {
     }
     return VoxelMigrationPlan._(
       bundle,
-      (registeredSchemas.toList()..sort()).toList(growable: false),
       [
         for (final entry in _scopeDescriptors(bundle, scopesByMigration)) entry,
       ],

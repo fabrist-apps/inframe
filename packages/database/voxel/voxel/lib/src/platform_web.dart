@@ -21,25 +21,6 @@ void registerVoxelNativeDefaultStorage(Future<String> Function() resolver) {
   throw UnsupportedError('Native default storage is unavailable in browsers.');
 }
 
-Future<TursoDatabase> openVoxelPersistentMain({
-  required String databaseName,
-  required String? directory,
-  required VoxelMigrationPlan migrations,
-  required Duration lockTimeout,
-  required String? encryptionCipher,
-  required Object? encryptionKey,
-}) => openVoxelPersistentDatabase(
-  databaseName: databaseName,
-  directory: directory,
-  migrations: migrations,
-  lockTimeout: lockTimeout,
-  encryptionCipher: encryptionCipher,
-  encryptionKey: encryptionKey as Uint8List?,
-  schemaDirectories: const {},
-  schemaEncryptionCiphers: const {},
-  schemaEncryptionKeys: const {},
-);
-
 Future<TursoDatabase> openVoxelPersistentDatabase({
   required String databaseName,
   required String? directory,
