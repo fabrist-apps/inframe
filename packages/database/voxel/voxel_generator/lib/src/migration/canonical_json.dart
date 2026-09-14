@@ -9,7 +9,9 @@ String canonicalJson(Object? value) => _encode(value);
 String _encode(Object? value) => switch (value) {
   null || bool() || String() => jsonEncode(value),
   int() => value.toString(),
-  double() when value.isFinite && value == value.truncateToDouble() => value.toInt().toString(),
+  double()
+      when value.isFinite && value.abs() <= 9007199254740991 && value == value.truncateToDouble() =>
+    value.toInt().toString(),
   double() when value.isFinite => jsonEncode(value),
   List<Object?>() => '[${value.map(_encode).join(',')}]',
   Map<String, Object?>() => _encodeObject(value),

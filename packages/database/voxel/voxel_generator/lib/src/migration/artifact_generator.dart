@@ -32,6 +32,7 @@ final class VoxelArtifactGenerator {
     required Map<String, Object?> declaration,
     required Directory directory,
     required String name,
+    Map<String, String>? source,
   }) async {
     _validateLabel(name);
     directory.createSync(recursive: true);
@@ -49,6 +50,7 @@ final class VoxelArtifactGenerator {
       'formatVersion': 1,
       'dialect': 'voxel',
       'databaseId': databaseId,
+      if (source != null) 'source': source,
       'id': migrationId,
       'parentId': null,
       'phases': [

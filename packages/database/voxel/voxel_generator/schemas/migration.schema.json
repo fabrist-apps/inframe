@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inframe.dev/voxel/migrations/v1/migration.schema.json",
+  "title": "Voxel migration metadata version 1",
+  "type": "object",
+  "required": ["formatVersion", "dialect", "databaseId", "id", "parentId", "checksum", "phases"],
+  "properties": {
+    "formatVersion": {"const": 1},
+    "dialect": {"const": "voxel"},
+    "databaseId": {"$ref": "#/$defs/id"},
+    "id": {"$ref": "#/$defs/id"},
+    "parentId": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+    "checksum": {"$ref": "#/$defs/checksum"},
+    "phases": {"type": "array", "items": {"$ref": "#/$defs/phase"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "phase": {
+      "type": "object",
+      "required": ["id", "scopeId", "mode", "platforms", "statements", "recovery"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+        "scopeId": {"$ref": "#/$defs/id"},
+        "mode": {"enum": ["transactional", "nontransactional"]},
+        "platforms": {"type": "array", "items": {"type": "string"}},
+        "statements": {"type": "array", "items": {"$ref": "#/$defs/statement"}},
+        "recovery": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/recovery"}]}
+      },
+      "additionalProperties": false
+    },
+    "statement": {
+      "type": "object",
+      "required": ["startByte", "endByte"],
+      "properties": {
+        "startByte": {"type": "integer", "minimum": 0},
+        "endByte": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "recovery": {
+      "type": "object",
+      "required": ["kind", "operationId", "before", "after"],
+      "properties": {
+        "kind": {"enum": ["catalog", "manual"]},
+        "operationId": {"$ref": "#/$defs/id"},
+        "before": {"type": "object"},
+        "after": {"type": "object"},
+        "checks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/recoveryCheck"}},
+        "inspector": {"const": "native.index.v1"}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "manual"}}},
+          "then": {"not": {"anyOf": [{"required": ["checks"]}, {"required": ["inspector"]}]}},
+          "else": {"anyOf": [{"required": ["checks"]}, {"required": ["inspector"]}]}
+        }
+      ]
+    },
+    "recoveryCheck": {
+      "type": "object",
+      "required": ["sql", "parameters", "expected"],
+      "properties": {
+        "sql": {"type": "string", "minLength": 1},
+        "parameters": {"type": "array", "items": {"$ref": "#/$defs/typedLiteral"}},
+        "expected": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "typedLiteral": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"enum": ["null", "boolean", "decimal", "string"]},
+        "value": {}
+      },
+      "additionalProperties": false
+    }
+  }
+}
