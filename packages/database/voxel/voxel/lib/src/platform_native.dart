@@ -67,6 +67,17 @@ final class VoxelNativeResource {
   final String lockPath;
 }
 
+List<VoxelNativeResource> uniqueVoxelNativeMigrationResources(
+  Iterable<VoxelNativeResource> resources,
+) {
+  final byPath = <String, VoxelNativeResource>{};
+  for (final resource in resources) {
+    final canonical = _canonicalPersistentPath(resource.path);
+    byPath.putIfAbsent(_pathKey(canonical), () => VoxelNativeResource(canonical));
+  }
+  return List.unmodifiable(byPath.values);
+}
+
 Future<TursoDatabase> openVoxelNativePersistentMain({
   required VoxelNativeResource resource,
   required VoxelMigrationPlan migrations,
@@ -154,7 +165,10 @@ Future<TursoDatabase> openVoxelPersistentDatabase({
       ),
     );
   }
-  final plannedResources = [main, ...attachments.values.map((entry) => entry.resource)];
+  final plannedResources = uniqueVoxelNativeMigrationResources([
+    main,
+    ...attachments.values.map((entry) => entry.resource),
+  ]);
   var lease = await VoxelNativeMigrationCoordinator.acquire(
     plannedResources,
     timeout: lockTimeout,
@@ -208,7 +222,10 @@ WHERE schema_id = ?
         .map((entry) => VoxelNativeResource(entry.locationIdentity))
         .toList();
     final currentKeys = lease.paths.map(_pathKey).toSet();
-    final completeResources = [...plannedResources, ...discovered];
+    final completeResources = uniqueVoxelNativeMigrationResources([
+      ...plannedResources,
+      ...discovered,
+    ]);
     final completeKeys = completeResources
         .map((entry) => _pathKey(_canonicalPersistentPath(entry.path)))
         .toSet();
@@ -387,7 +404,13 @@ Future<T?> withVoxelPersistentMaintenance<T>({
   required Map<String, String?> schemaDirectories,
   required Map<String, String?> schemaEncryptionCiphers,
   required Map<String, Uint8List?> schemaEncryptionKeys,
-  required Future<T> Function(TursoDatabase database) operation,
+  required bool allowMissingAttachments,
+  required Future<T> Function(
+    TursoDatabase database,
+    Set<String> availableScopes,
+    Set<String> uncertainScopes,
+  )
+  operation,
 }) async {
   final selected = directory ?? await _resolveDefaultStorage();
   final parent = Directory(selected).absolute;
@@ -428,15 +451,23 @@ Future<T?> withVoxelPersistentMaintenance<T>({
       _optionalEncryption(encryptionCipher, encryptionKey),
     );
     final registry = await _readRegistry(database);
+    final availableScopes = <String>{'main'};
+    final uncertainScopes = <String>{};
     for (final attachment in attachments.values) {
       final registered = registry[attachment.scope.id];
-      if (registered == null || registered.state != 'initialized') {
+      if (registered == null ||
+          (registered.state == 'prepared' && !File(attachment.resource.path).existsSync())) {
+        if (allowMissingAttachments) continue;
         throw FormatException(
           'Schema `${attachment.scope.name}` has no initialized persistent file.',
         );
       }
       if (!_samePath(registered.locationIdentity, attachment.resource.path) ||
           !File(attachment.resource.path).existsSync()) {
+        if (allowMissingAttachments && registered.state == 'initialized') {
+          uncertainScopes.add(attachment.scope.name);
+          continue;
+        }
         throw FormatException(
           'Schema `${attachment.scope.name}` is missing or configured at another location.',
         );
@@ -454,8 +485,9 @@ Future<T?> withVoxelPersistentMaintenance<T>({
         schemaId: attachment.scope.id,
         fileIdentity: registered.fileIdentity,
       );
+      availableScopes.add(attachment.scope.name);
     }
-    return await operation(database);
+    return await operation(database, availableScopes, uncertainScopes);
   } finally {
     await database?.close();
     lease.release();

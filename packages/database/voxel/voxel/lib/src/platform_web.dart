@@ -286,7 +286,13 @@ Future<T?> withVoxelPersistentMaintenance<T>({
   required Map<String, String?> schemaDirectories,
   required Map<String, String?> schemaEncryptionCiphers,
   required Map<String, Uint8List?> schemaEncryptionKeys,
-  required Future<T> Function(TursoDatabase database) operation,
+  required bool allowMissingAttachments,
+  required Future<T> Function(
+    TursoDatabase database,
+    Set<String> availableScopes,
+    Set<String> uncertainScopes,
+  )
+  operation,
 }) async {
   final options = voxelWebOptions();
   final main = resolveVoxelWebMainResource(
@@ -325,15 +331,23 @@ Future<T?> withVoxelPersistentMaintenance<T>({
       options,
     );
     final registry = await _readRegistry(database);
+    final availableScopes = <String>{'main'};
+    final uncertainScopes = <String>{};
     for (final attachment in attachments.values) {
       final registered = registry[attachment.scope.id];
-      if (registered == null || registered.state != 'initialized') {
+      if (registered == null ||
+          (registered.state == 'prepared' && !await _exists(attachment.resource, options))) {
+        if (allowMissingAttachments) continue;
         throw FormatException(
           'Schema `${attachment.scope.name}` has no initialized persistent file.',
         );
       }
       if (_canonicalRegisteredPath(registered.locationIdentity) != attachment.resource.path ||
           !await _exists(attachment.resource, options)) {
+        if (allowMissingAttachments && registered.state == 'initialized') {
+          uncertainScopes.add(attachment.scope.name);
+          continue;
+        }
         throw FormatException(
           'Schema `${attachment.scope.name}` is missing or configured at another location.',
         );
@@ -351,8 +365,9 @@ Future<T?> withVoxelPersistentMaintenance<T>({
         schemaId: attachment.scope.id,
         fileIdentity: registered.fileIdentity,
       );
+      availableScopes.add(attachment.scope.name);
     }
-    return await operation(database);
+    return await operation(database, availableScopes, uncertainScopes);
   } finally {
     await database?.close();
     await lease.release();

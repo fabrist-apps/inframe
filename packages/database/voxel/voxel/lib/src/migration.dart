@@ -355,6 +355,7 @@ final class VoxelMigrationPlan {
     for (final entry in fileIdentities.entries) {
       await _validatePersistentHistoryForScope(database, entry.key);
     }
+    if (fileIdentities.containsKey('main')) await _validateMainSummaries(database);
     for (final (ordinal, migration) in bundle.migrations.indexed) {
       for (final rawPhase in _list(migration.metadata['phases'], 'migration phases')) {
         final phase = _map(rawPhase, 'migration phase');
@@ -436,17 +437,66 @@ ON CONFLICT (migration_id, phase_id) DO UPDATE SET
     await _validatePersistentHistory(database, scope, expected);
   }
 
+  Future<void> _validateMainSummaries(TursoDatabase database) async {
+    final summaries = (await database.query(
+      '''
+SELECT migration_id, phase_id, scope_id, checksum, status
+FROM main._voxel_phase_summaries
+''',
+    )).rows;
+    for (final summary in summaries) {
+      final migrationId = summary.getString('migration_id');
+      final phaseId = summary.getString('phase_id');
+      final scopeId = summary.getString('scope_id');
+      final migration = bundle.migrations.where((entry) => entry.id == migrationId).firstOrNull;
+      if (migration == null ||
+          summary.getString('checksum') != migration.checksum ||
+          summary.getString('status') != 'completed') {
+        throw const FormatException('Main migration summary does not match checked history.');
+      }
+      final scope = scopeName(scopeId);
+      if (scope == 'main') {
+        throw const FormatException('Main migration summary cannot summarize the main scope.');
+      }
+      final receipt = (await database.query(
+        '''
+SELECT checksum, platform, status
+FROM ${_qualified(scope, '_voxel_phases')}
+WHERE migration_id = ? AND phase_id = ?
+''',
+        parameters: [migrationId, phaseId],
+      )).rows;
+      if (receipt.length != 1 ||
+          receipt.single.getString('checksum') != migration.checksum ||
+          receipt.single.getString('platform') != voxelPlatform ||
+          receipt.single.getString('status') != 'completed') {
+        throw const FormatException(
+          'Main migration summary is contradicted by its per-file phase receipt.',
+        );
+      }
+    }
+  }
+
   /// Reads receipt-derived state from already opened persistent scopes.
-  Future<VoxelMigrationStatus> migrationStatus(TursoDatabase database) async {
+  Future<VoxelMigrationStatus> migrationStatus(
+    TursoDatabase database, {
+    Set<String>? availableScopes,
+    Set<String> uncertainScopes = const {},
+  }) async {
     final phaseStates = <String, VoxelMigrationPhaseStatus>{};
     for (final migration in bundle.migrations) {
       for (final rawPhase in _list(migration.metadata['phases'], 'migration phases')) {
         final phase = _map(rawPhase, 'migration phase');
         final applies = (phase['platforms']! as List<Object?>).contains(voxelPlatform);
+        final scope = scopeName(phase['scopeId']! as String);
         phaseStates['${migration.id}:${phase['id']}'] = VoxelMigrationPhaseStatus(
           id: phase['id']! as String,
           scopeId: phase['scopeId']! as String,
-          state: applies ? VoxelMigrationPhaseState.pending : VoxelMigrationPhaseState.skipped,
+          state: !applies
+              ? VoxelMigrationPhaseState.skipped
+              : uncertainScopes.contains(scope)
+              ? VoxelMigrationPhaseState.uncertain
+              : VoxelMigrationPhaseState.pending,
           attemptId: null,
           completionRecorded: false,
           evidence: null,
@@ -454,6 +504,7 @@ ON CONFLICT (migration_id, phase_id) DO UPDATE SET
       }
     }
     for (final scope in scopes.map((entry) => entry.name)) {
+      if (availableScopes != null && !availableScopes.contains(scope)) continue;
       await _validatePersistentHistoryForScope(database, scope);
       final completed = (await database.query(
         'SELECT migration_id, phase_id FROM ${_qualified(scope, '_voxel_phases')}',
@@ -463,7 +514,7 @@ ON CONFLICT (migration_id, phase_id) DO UPDATE SET
           '${row.getString('migration_id')}:${row.getString('phase_id')}',
       };
       final attempts = (await database.query(
-        'SELECT migration_id, phase_id, attempt_id, evidence '
+        'SELECT migration_id, phase_id, attempt_id, evidence, retry_authorized '
         'FROM ${_qualified(scope, '_voxel_phase_attempts')}',
       )).rows;
       final attemptsByKey = {
@@ -526,6 +577,9 @@ ON CONFLICT (migration_id, phase_id) DO UPDATE SET
         }
       }
     }
+    if (availableScopes == null || scopes.every((scope) => availableScopes.contains(scope.name))) {
+      await _validateMainSummaries(database);
+    }
     return VoxelMigrationStatus(
       databaseId: bundle.databaseId,
       migrations: [
@@ -582,7 +636,7 @@ ON CONFLICT (migration_id, phase_id) DO UPDATE SET
     await _validatePersistentHistoryForScope(database, scope);
     final rows = (await database.query(
       '''
-SELECT attempt_id, evidence
+SELECT attempt_id, evidence, retry_authorized
 FROM ${_qualified(scope, '_voxel_phase_attempts')}
 WHERE migration_id = ? AND phase_id = ? AND checksum = ? AND platform = ?
 ''',
@@ -641,15 +695,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
         await transaction.execute(
           '''
 UPDATE ${_qualified(scope, '_voxel_phase_attempts')}
-SET attempt_id = ?, evidence = ?
+SET retry_authorized = 1
 WHERE migration_id = ? AND phase_id = ?
 ''',
-          parameters: [
-            _newAttemptId(),
-            jsonEncode({'before': inspected.observations}),
-            migrationId,
-            phaseId,
-          ],
+          parameters: [migrationId, phaseId],
         );
       }
     });
@@ -925,6 +974,7 @@ CREATE TABLE IF NOT EXISTS ${_qualified(scope, '_voxel_phase_attempts')} (
   platform TEXT NOT NULL,
   attempt_id TEXT NOT NULL,
   evidence TEXT NOT NULL,
+  retry_authorized INTEGER NOT NULL DEFAULT 0 CHECK (retry_authorized IN (0, 1)),
   PRIMARY KEY (migration_id, phase_id)
 )
 ''');
@@ -1043,7 +1093,7 @@ ORDER BY ordinal
 
   final attempts = (await database.query(
     '''
-SELECT migration_id, phase_id, checksum, platform, attempt_id, evidence
+SELECT migration_id, phase_id, checksum, platform, attempt_id, evidence, retry_authorized
 FROM ${_qualified(scope, '_voxel_phase_attempts')}
 ''',
   )).rows;
@@ -1074,6 +1124,32 @@ FROM ${_qualified(scope, '_voxel_phases')}
       throw FormatException('Migration $migrationId has inconsistent durable receipts.');
     }
   }
+  final receiptKeys = {
+    for (final receipt in receipts)
+      '${receipt.getString('migration_id')}:${receipt.getString('phase_id')}',
+  };
+  var missingSeen = false;
+  for (final entry in expected) {
+    var receiptsForMigration = 0;
+    for (final phase in entry.phases) {
+      final present = receiptKeys.contains('${entry.migration.id}:${phase['id']}');
+      if (present) {
+        receiptsForMigration++;
+        if (missingSeen) {
+          throw const FormatException(
+            'Voxel phase receipts are not an ordered prefix of the checked history.',
+          );
+        }
+      } else {
+        missingSeen = true;
+      }
+    }
+    if (appliedIds.contains(entry.migration.id) && receiptsForMigration == 0) {
+      throw FormatException(
+        'Applied migration ${entry.migration.id} has no durable phase receipt.',
+      );
+    }
+  }
   for (final attempt in attempts) {
     final migrationId = attempt.getString('migration_id');
     final phaseId = attempt.getString('phase_id');
@@ -1083,8 +1159,22 @@ FROM ${_qualified(scope, '_voxel_phases')}
         attempt.getString('checksum') != bundled.checksum ||
         attempt.getString('platform') != voxelPlatform ||
         attempt.getString('attempt_id').isEmpty ||
+        (attempt.getInt('retry_authorized') != 0 && attempt.getInt('retry_authorized') != 1) ||
         !_isEvidence(attempt.getString('evidence'))) {
       throw FormatException('Started migration $migrationId has changed in the bundle.');
+    }
+    final attemptKey = '$migrationId:$phaseId';
+    if (receiptKeys.contains(attemptKey)) continue;
+    final firstMissing = expected
+        .expand(
+          (entry) => entry.phases.map((phase) => '${entry.migration.id}:${phase['id']}'),
+        )
+        .where((key) => !receiptKeys.contains(key))
+        .firstOrNull;
+    if (attemptKey != firstMissing) {
+      throw const FormatException(
+        'Started phase is not the next unfinished phase in checked history.',
+      );
     }
   }
 }
@@ -1139,25 +1229,35 @@ Future<void> _runNontransactionalPhase(
       : null;
   final existing = (await database.query(
     '''
-SELECT attempt_id, evidence
+SELECT attempt_id, evidence, retry_authorized
 FROM ${_qualified(scope, '_voxel_phase_attempts')}
 WHERE migration_id = ? AND phase_id = ?
 ''',
     parameters: [migration.id, phase['id']],
   )).rows;
   if (plan == null) {
-    if (existing.isNotEmpty) {
+    if (existing.isNotEmpty && existing.single.getInt('retry_authorized') != 1) {
       throw FormatException(
         'Migration ${migration.id} phase ${phase['id']} requires manual recovery.',
       );
     }
-    await _recordStartedAttempt(
-      database,
-      scope,
-      migration,
-      phase,
-      jsonEncode({'before': recovery['before']}),
-    );
+    if (existing.isEmpty) {
+      await _recordStartedAttempt(
+        database,
+        scope,
+        migration,
+        phase,
+        jsonEncode({'before': recovery['before']}),
+      );
+    } else {
+      await _consumeRetryAuthorization(
+        database,
+        scope,
+        migration,
+        phase,
+        jsonEncode({'before': recovery['before']}),
+      );
+    }
   } else if (existing.isEmpty) {
     final inspected = await _inspectRecovery(database, plan);
     if (inspected.classification != VoxelRecoveryClassification.notStarted) {
@@ -1181,6 +1281,15 @@ WHERE migration_id = ? AND phase_id = ?
     if (inspected.classification != VoxelRecoveryClassification.notStarted) {
       throw FormatException(
         'Migration ${migration.id} phase ${phase['id']} has an uncertain outcome.',
+      );
+    }
+    if (existing.single.getInt('retry_authorized') == 1) {
+      await _consumeRetryAuthorization(
+        database,
+        scope,
+        migration,
+        phase,
+        jsonEncode({'before': inspected.observations}),
       );
     }
   }
@@ -1237,8 +1346,8 @@ Future<void> _recordStartedAttempt(
 ) => database.execute(
   '''
 INSERT INTO ${_qualified(scope, '_voxel_phase_attempts')}
-  (migration_id, phase_id, checksum, platform, attempt_id, evidence)
-VALUES (?, ?, ?, ?, ?, ?)
+  (migration_id, phase_id, checksum, platform, attempt_id, evidence, retry_authorized)
+VALUES (?, ?, ?, ?, ?, ?, 0)
 ''',
   parameters: [
     migration.id,
@@ -1248,6 +1357,21 @@ VALUES (?, ?, ?, ?, ?, ?)
     _newAttemptId(),
     evidence,
   ],
+);
+
+Future<void> _consumeRetryAuthorization(
+  TursoDatabase database,
+  String scope,
+  VoxelBundledMigration migration,
+  Map<String, Object?> phase,
+  String evidence,
+) => database.execute(
+  '''
+UPDATE ${_qualified(scope, '_voxel_phase_attempts')}
+SET attempt_id = ?, evidence = ?, retry_authorized = 0
+WHERE migration_id = ? AND phase_id = ? AND retry_authorized = 1
+''',
+  parameters: [_newAttemptId(), evidence, migration.id, phase['id']],
 );
 
 final class _RecoveryInspection {

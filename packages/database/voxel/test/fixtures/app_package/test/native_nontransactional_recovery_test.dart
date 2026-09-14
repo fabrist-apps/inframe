@@ -187,6 +187,62 @@ void main() {
       expect(phase.completionRecorded, isFalse);
       expect(storage.listSync(), isEmpty);
     });
+
+    test('should consume an audited manual retry with a fresh attempt', () async {
+      final manualArtifacts = await Directory.systemTemp.createTemp(
+        'voxel-manual-artifacts-',
+      );
+      final storage = await Directory.systemTemp.createTemp('voxel-manual-retry-');
+      addTearDown(() => manualArtifacts.delete(recursive: true));
+      addTearDown(() => storage.delete(recursive: true));
+      final manualBundle = await _recoveryBundle(schema, manualArtifacts, manual: true);
+      await expectLater(
+        _openWithInterruption(
+          schema,
+          manualBundle,
+          storage.path,
+          VoxelMigrationInterruptionPoint.afterPhaseStarted,
+        ),
+        throwsStateError,
+      );
+      final phase = (await _status(
+        schema,
+        manualBundle,
+        storage.path,
+      )).migrations.single.phases.single;
+      await _resolve(
+        schema,
+        manualBundle,
+        storage.path,
+        phase,
+        resolution: VoxelMigrationResolution.retry,
+      );
+
+      final opened = await VoxelDatabaseRuntime.open(
+        schema: schema,
+        bundle: manualBundle,
+        storage: VoxelStorage.directory(storage.path),
+      );
+      addTearDown(opened.close);
+      expect(
+        await VoxelTesting.scalarInt(
+          opened,
+          'SELECT COUNT(*) AS value FROM content._voxel_migration_resolutions '
+          "WHERE resolution = 'retry'",
+        ),
+        1,
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          opened,
+          'SELECT COUNT(*) AS value FROM content._voxel_phase_attempts a '
+          'JOIN content._voxel_migration_resolutions r '
+          'ON a.migration_id = r.migration_id AND a.phase_id = r.phase_id '
+          'WHERE a.attempt_id != r.attempt_id AND a.retry_authorized = 0',
+        ),
+        1,
+      );
+    });
   });
 }
 
@@ -194,6 +250,7 @@ Future<VoxelMigrationBundle> _recoveryBundle(
   VoxelDatabaseSchema schema,
   Directory directory, {
   List<String> platforms = const ['native', 'browser'],
+  bool manual = false,
 }) async {
   final migrationId = (await const VoxelMigrationGenerator().generate(
     schema: schema,
@@ -215,43 +272,50 @@ Future<VoxelMigrationBundle> _recoveryBundle(
   phase
     ..['mode'] = 'nontransactional'
     ..['platforms'] = platforms
-    ..['recovery'] = {
-      'kind': 'catalog',
-      'operationId': '11111111111111111111111111111111',
-      'before': {'schema': 'content', 'table': 'authors', 'exists': false},
-      'after': {'schema': 'content', 'table': 'authors', 'sql': storedSql},
-      'checks': [
-        {
-          'sql': '''
+    ..['recovery'] = manual
+        ? {
+            'kind': 'manual',
+            'operationId': '11111111111111111111111111111111',
+            'before': {'schema': 'content', 'table': 'authors', 'exists': false},
+            'after': {'schema': 'content', 'table': 'authors', 'sql': storedSql},
+          }
+        : {
+            'kind': 'catalog',
+            'operationId': '11111111111111111111111111111111',
+            'before': {'schema': 'content', 'table': 'authors', 'exists': false},
+            'after': {'schema': 'content', 'table': 'authors', 'sql': storedSql},
+            'checks': [
+              {
+                'sql': '''
 SELECT NOT EXISTS (
   SELECT 1 FROM "content".sqlite_schema
   WHERE type = ? AND name = ? AND tbl_name = ?
 )
 ''',
-          'parameters': [
-            {'type': 'string', 'value': 'table'},
-            {'type': 'string', 'value': 'authors'},
-            {'type': 'string', 'value': 'authors'},
-          ],
-          'expected': false,
-        },
-        {
-          'sql': '''
+                'parameters': [
+                  {'type': 'string', 'value': 'table'},
+                  {'type': 'string', 'value': 'authors'},
+                  {'type': 'string', 'value': 'authors'},
+                ],
+                'expected': false,
+              },
+              {
+                'sql': '''
 SELECT EXISTS (
   SELECT 1 FROM "content".sqlite_schema
   WHERE type = ? AND name = ? AND tbl_name = ? AND sql = ?
 )
 ''',
-          'parameters': [
-            {'type': 'string', 'value': 'table'},
-            {'type': 'string', 'value': 'authors'},
-            {'type': 'string', 'value': 'authors'},
-            {'type': 'string', 'value': storedSql},
-          ],
-          'expected': true,
-        },
-      ],
-    };
+                'parameters': [
+                  {'type': 'string', 'value': 'table'},
+                  {'type': 'string', 'value': 'authors'},
+                  {'type': 'string', 'value': 'authors'},
+                  {'type': 'string', 'value': storedSql},
+                ],
+                'expected': true,
+              },
+            ],
+          };
   metadataFile.writeAsStringSync(jsonEncode(metadata));
   await VoxelArtifactSealer().seal(directory: directory, migrationId: migrationId);
   final sealedMetadata = jsonDecode(metadataFile.readAsStringSync()) as Map<String, Object?>;

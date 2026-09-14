@@ -12,6 +12,22 @@ import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
 
 void main() {
   group('Voxel native platform', () {
+    test('should deduplicate planned and discovered attachment resources', () {
+      final resources = uniqueVoxelNativeMigrationResources([
+        VoxelNativeResource('/tmp/voxel-main.db'),
+        VoxelNativeResource('/tmp/voxel-auth.db'),
+        VoxelNativeResource('/tmp/voxel-content.db'),
+        VoxelNativeResource('/tmp/voxel-auth.db'),
+        VoxelNativeResource('/tmp/voxel-content.db'),
+      ]);
+
+      expect(resources.map((resource) => File(resource.path).uri.pathSegments.last), [
+        'voxel-main.db',
+        'voxel-auth.db',
+        'voxel-content.db',
+      ]);
+    });
+
     test('should require configured storage in plain Dart', () async {
       await expectLater(
         resolveVoxelNativeStorageDirectory(null),

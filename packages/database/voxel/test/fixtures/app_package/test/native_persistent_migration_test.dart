@@ -64,6 +64,30 @@ void main() {
     expect(temporaryDirectory.listSync(), isEmpty);
   });
 
+  test('status should reject an applied migration missing its per-file receipt', () async {
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'voxel-missing-receipt-',
+    );
+    addTearDown(() => temporaryDirectory.delete(recursive: true));
+    final storage = VoxelStorage.directory(temporaryDirectory.path);
+    final database = await FixtureAppDatabase().open(storage: storage);
+    await VoxelTesting.execute(
+      database,
+      'DELETE FROM content._voxel_phases WHERE migration_id = '
+      "'${FixtureAppDatabaseVoxelMigrations.bundle.migrations.first.id}'",
+    );
+    await database.close();
+
+    await expectLater(
+      VoxelDatabaseRuntime.migrationStatus(
+        schema: FixtureAppDatabaseVoxelSchema.build(),
+        bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+        storage: storage,
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test('generated open creates and reopens its persistent main file', () async {
     final temporaryDirectory = await Directory.systemTemp.createTemp(
       'voxel-generated-persistent-',

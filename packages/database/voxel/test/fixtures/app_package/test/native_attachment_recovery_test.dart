@@ -6,6 +6,7 @@ import 'package:test/test.dart';
 import 'package:turso/turso.dart';
 import 'package:voxel/src/connection.dart';
 import 'package:voxel/src/migration.dart';
+import 'package:voxel/src/migration_status.dart';
 import 'package:voxel/src/platform_native.dart';
 import 'package:voxel_fixture_app/app_database.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
@@ -100,6 +101,20 @@ void main() {
         directory: storage.path,
       );
       await File(attachment.path).delete();
+
+      final status = await VoxelDatabaseRuntime.migrationStatus(
+        schema: FixtureAppDatabaseVoxelSchema.build(),
+        bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+        storage: VoxelStorage.directory(storage.path),
+      );
+      expect(
+        status.migrations
+            .expand((migration) => migration.phases)
+            .where((phase) => phase.scopeId == content.id)
+            .map((phase) => phase.state),
+        everyElement(VoxelMigrationPhaseState.uncertain),
+      );
+      expect(File(attachment.path).existsSync(), isFalse);
 
       await expectLater(
         FixtureAppDatabase().open(storage: VoxelStorage.directory(storage.path)),
@@ -264,6 +279,41 @@ void main() {
         _openPlan(plan, storage.path),
         throwsA(isA<FormatException>()),
       );
+    });
+
+    test('status should leave a prepared attachment pending without creating it', () async {
+      await expectLater(
+        _openPlan(
+          plan,
+          storage.path,
+          interrupt: (event) async {
+            if (event.point == VoxelMigrationInterruptionPoint.afterCreationPrepared) {
+              throw StateError('simulated prepared crash');
+            }
+          },
+        ),
+        throwsStateError,
+      );
+      final attachment = resolveVoxelNativeAttachmentResource(
+        databaseName: 'fixture_app',
+        schemaId: content.id,
+        directory: storage.path,
+      );
+      expect(File(attachment.path).existsSync(), isFalse);
+
+      final status = await VoxelDatabaseRuntime.migrationStatus(
+        schema: FixtureAppDatabaseVoxelSchema.build(),
+        bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+        storage: VoxelStorage.directory(storage.path),
+      );
+      expect(
+        status.migrations
+            .expand((migration) => migration.phases)
+            .where((phase) => phase.scopeId == content.id)
+            .map((phase) => phase.state),
+        everyElement(VoxelMigrationPhaseState.pending),
+      );
+      expect(File(attachment.path).existsSync(), isFalse);
     });
 
     test('should recover attachment commit and main-summary interruptions', () async {

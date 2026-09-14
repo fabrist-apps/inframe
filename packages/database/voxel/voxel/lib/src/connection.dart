@@ -517,7 +517,13 @@ abstract final class VoxelDatabaseRuntime {
           schemaDirectories: configuration.schemaDirectories,
           schemaEncryptionCiphers: configuration.schemaEncryptionCiphers,
           schemaEncryptionKeys: configuration.schemaEncryptionKeys,
-          operation: configuration.plan.migrationStatus,
+          allowMissingAttachments: true,
+          operation: (database, availableScopes, uncertainScopes) =>
+              configuration.plan.migrationStatus(
+                database,
+                availableScopes: availableScopes,
+                uncertainScopes: uncertainScopes,
+              ),
         ) ??
         configuration.plan.pendingStatus();
   }
@@ -560,7 +566,8 @@ abstract final class VoxelDatabaseRuntime {
       schemaDirectories: configuration.schemaDirectories,
       schemaEncryptionCiphers: configuration.schemaEncryptionCiphers,
       schemaEncryptionKeys: configuration.schemaEncryptionKeys,
-      operation: (database) async {
+      allowMissingAttachments: false,
+      operation: (database, _, _) async {
         await configuration.plan.resolveMigration(
           database,
           migrationId: migrationId,
