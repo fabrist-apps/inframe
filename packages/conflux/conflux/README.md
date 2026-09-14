@@ -209,10 +209,13 @@ void main() {
 }
 ```
 
-Parsing requires `YYYY-MM-DDTHH:mm:ss[.fraction](Z|±HH:MM[:SS])`, with
+Parsing requires `year-MM-DDTHH:mm:ss[.fraction](Z|±HH:MM[:SS])`, with
 1–6 fractional digits and no whitespace. Invalid fields never normalize.
 Expected failures are `Result<..., MomentError>` with a diagnostic kind and
-optional field. UTC and derived local years must remain in 1–9999.
+optional field. UTC and derived local fields use Dart DateTime’s full native
+range, including year zero and negative years. Years follow Dart’s ISO spelling:
+`0000` through `9999`, `-0001` through `-9999`, and signed six digits outside
+that interval (for example, `+010000`). Parsing rejects other year spellings.
 
 `setZone` preserves an instant. To interpret local fields, use
 `Moment.zoned(parts, zone, disambiguation: ...)`; `withParts`, calendar
@@ -226,11 +229,13 @@ database and retains its resolved Location.
 months, clamps the day once, then adds weeks and days before resolving the
 final local fields. One calendar day can differ from 24 elapsed hours across
 DST. `startOf`/`endOf` use local fields and Monday weeks; a gap shift may leave
-the nominal period. Calendar getters include `dayOfYear` and `isoWeek`.
+the nominal period. Boundaries outside the native range return `outOfRange`. Calendar getters include `dayOfYear` and `isoWeek`.
 
 Equality includes representation and exact zone identity, so UTC, fixed zero,
 and named UTC differ. Comparison, difference, and bounds use the instant;
-`min`/`max` retain the first input on ties. `formatIso` emits UTC with six
+`difference` returns `Result<Duration, MomentError>` with `outOfRange` if the
+elapsed microseconds exceed Duration’s signed 64-bit range. `min`/`max` retain
+the first input on ties. `formatIso` emits UTC with six
 fractional digits; `formatIsoOffset` retains the numeric offset, including
 historical seconds. Parsing offset output loses named identity.
 

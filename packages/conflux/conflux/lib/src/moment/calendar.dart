@@ -66,19 +66,20 @@ extension MomentCalendar on Moment {
     // cancellation between years/months or weeks/days.
     final sign = BigInt.from(subtract ? -1 : 1);
     final displacement = (BigInt.from(years) * BigInt.from(12) + BigInt.from(months)) * sign;
-    final monthIndex = BigInt.from((p.year - 1) * 12 + p.month - 1) + displacement;
-    if (monthIndex < BigInt.zero || monthIndex >= BigInt.from(9999 * 12)) {
-      return const Failure(_calendarRangeError);
-    }
-    final index = monthIndex.toInt();
-    final year = index ~/ 12 + 1;
-    final month = index % 12 + 1;
-    final lastDay = calendarDaysInMonth(year, month);
-    final clamped = p.copyWith(year: year, month: month, day: p.day > lastDay ? lastDay : p.day);
+    final monthIndex =
+        BigInt.from(p.year) * BigInt.from(12) + BigInt.from(p.month - 1) + displacement;
+    final monthRemainder = monthIndex % BigInt.from(12);
+    final year = (monthIndex - monthRemainder) ~/ BigInt.from(12);
+    final month = monthRemainder.toInt() + 1;
+    final lastDay = calendarDaysInMonth((year % BigInt.from(400)).toInt(), month);
+    final clampedMicros = encodeCalendarParts(
+      p,
+      year: year,
+      month: month,
+      day: p.day > lastDay ? lastDay : p.day,
+    );
     final calendarDays = (BigInt.from(weeks) * BigInt.from(7) + BigInt.from(days)) * sign;
-    final wallMicros =
-        BigInt.from(encodeParts(clamped).microsecondsSinceEpoch) +
-        calendarDays * BigInt.from(Duration.microsecondsPerDay);
+    final wallMicros = clampedMicros + calendarDays * BigInt.from(Duration.microsecondsPerDay);
     if (wallMicros < BigInt.from(minimumMomentMicros) ||
         wallMicros > BigInt.from(maximumMomentMicros)) {
       return const Failure(_calendarRangeError);
@@ -110,8 +111,9 @@ extension MomentCalendar on Moment {
     var p = parts;
     if (unit == MomentUnit.week) {
       final shift = end ? 7 - weekday : 1 - weekday;
-      final date = DateTime.utc(p.year, p.month, p.day + shift);
-      p = p.copyWith(year: date.year, month: date.month, day: date.day);
+      final surrogateYear = 2000 + p.year % 400;
+      final date = DateTime.utc(surrogateYear, p.month, p.day + shift);
+      p = p.copyWith(year: p.year + date.year - surrogateYear, month: date.month, day: date.day);
     }
     if (unit == MomentUnit.year) p = p.copyWith(month: end ? 12 : 1);
     if (unit == MomentUnit.year || unit == MomentUnit.month) {
@@ -130,7 +132,11 @@ extension MomentCalendar on Moment {
   /// Local day of the year, starting at 1; unaffected by offset changes.
   int get dayOfYear {
     final p = parts;
-    return DateTime.utc(p.year, p.month, p.day).difference(DateTime.utc(p.year)).inDays + 1;
+    var days = p.day;
+    for (var month = 1; month < p.month; month++) {
+      days += calendarDaysInMonth(p.year, month);
+    }
+    return days;
   }
 
   /// Number of calendar days in the local month.
@@ -145,14 +151,22 @@ extension MomentCalendar on Moment {
   /// ISO week-year and week number, with Monday weeks containing January 4.
   ({int year, int week}) get isoWeek {
     final p = parts;
-    final thursday = DateTime.utc(p.year, p.month, p.day + 4 - weekday);
-    final january4 = DateTime.utc(thursday.year, 1, 4);
-    final firstThursday = DateTime.utc(thursday.year, 1, 4 + 4 - january4.weekday);
-    return (year: thursday.year, week: thursday.difference(firstThursday).inDays ~/ 7 + 1);
+    final week = (dayOfYear - weekday + 10) ~/ 7;
+    if (week == 0) return (year: p.year - 1, week: _isoWeeksInYear(p.year - 1));
+    if (week > _isoWeeksInYear(p.year)) return (year: p.year + 1, week: 1);
+    return (year: p.year, week: week);
   }
+}
+
+// Gregorian weekdays repeat every 400 years, including at native range edges.
+int _isoWeeksInYear(int year) {
+  final januaryWeekday = DateTime.utc(2000 + year % 400).weekday;
+  return januaryWeekday == 4 || (januaryWeekday == 3 && calendarDaysInMonth(year, 2) == 29)
+      ? 53
+      : 52;
 }
 
 const _calendarRangeError = MomentError(
   MomentErrorKind.outOfRange,
-  'Calendar operation leaves years 1–9999.',
+  'Calendar operation is outside Dart DateTime’s range.',
 );

@@ -136,8 +136,14 @@ final class Schedule<I, O, E> {
           final now = execution.clock.wallTime();
           switch (cron.next(now)) {
             case Success<ZonedMoment, CronError>(:final value):
-              final delay = value.difference(now);
-              return Succeeded(ScheduleContinue(delay, delay));
+              return switch (value.difference(now)) {
+                Success<Duration, MomentError>(:final value) => Succeeded(
+                  ScheduleContinue(value, value),
+                ),
+                Failure<Duration, MomentError>(:final error) => Failed(
+                  Expected(CronError(error.message)),
+                ),
+              };
             case Failure<ZonedMoment, CronError>(:final error):
               return Failed(Expected(error));
           }

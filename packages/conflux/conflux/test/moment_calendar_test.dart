@@ -98,7 +98,7 @@ void main() {
       );
       final calendar = value(start.addCalendar(days: 1, disambiguation: reject));
       expect(calendar.formatIsoOffset(), '2025-03-10T00:00:00.000000-04:00');
-      expect(calendar.difference(start), const Duration(hours: 23));
+      expect(value(calendar.difference(start)), const Duration(hours: 23));
       expect(value(start.addDuration(const Duration(days: 1))).parts.hour, 1);
       expect((calendar as ZonedMoment).zone, start.zone);
     });
@@ -130,7 +130,7 @@ void main() {
       final beginning = value(ny.startOf(MomentUnit.day, disambiguation: reject));
       final end = value(ny.endOf(MomentUnit.day, disambiguation: reject));
       expect(
-        end.difference(beginning),
+        value(end.difference(beginning)),
         const Duration(hours: 22, minutes: 59, seconds: 59, milliseconds: 999, microseconds: 999),
       );
     });
@@ -189,8 +189,8 @@ void main() {
     });
 
     test('should return range failures for calendar and local boundary overflow', () {
-      final first = parse('0001-01-01T00:00:00Z');
-      final last = parse('9999-12-31T23:59:59.999999Z');
+      final first = parse('-271821-04-20T00:00:00Z');
+      final last = parse('+275760-09-13T00:00:00Z');
       for (final result in [
         first.subtractCalendar(days: 1, disambiguation: reject),
         first.subtractCalendar(months: 1, disambiguation: reject),
@@ -198,7 +198,7 @@ void main() {
         last.addCalendar(weeks: 9223372036854775807, disambiguation: reject),
         last.subtractCalendar(years: -9223372036854775808, disambiguation: reject),
         last.endOf(MomentUnit.week, disambiguation: reject),
-        parse('0001-01-01T08:00:00+08:00').startOf(MomentUnit.day, disambiguation: reject),
+        parse('-271821-04-20T08:00:00+08:00').startOf(MomentUnit.day, disambiguation: reject),
       ]) {
         expect(
           result,
@@ -209,8 +209,8 @@ void main() {
           ),
         );
       }
-      expect(value(last.endOf(MomentUnit.year, disambiguation: reject)), last);
-      expect(value(first.startOf(MomentUnit.year, disambiguation: reject)), first);
+      expect(value(last.startOf(MomentUnit.day, disambiguation: reject)), last);
+      expect(value(first.startOf(MomentUnit.day, disambiguation: reject)), first);
     });
   });
 }

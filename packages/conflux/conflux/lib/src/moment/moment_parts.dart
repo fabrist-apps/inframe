@@ -17,7 +17,7 @@ final class MomentParts {
     this.microsecond = 0,
   });
 
-  /// Calendar year, supported from 1 through 9999.
+  /// Proleptic Gregorian year, including year zero and negative years.
   final int year;
 
   /// Month from 1 through 12.
@@ -78,21 +78,23 @@ final class MomentParts {
   int get hashCode => Object.hash(year, month, day, hour, minute, second, millisecond, microsecond);
 }
 
-/// The inclusive epoch range shared by UTC and local calendar representations.
-const minimumMomentMicros = -62135596800000000;
+/// Dart DateTime's inclusive lower bound: 100 million days before the epoch.
+const minimumMomentMicros = -8640000000000000000;
 
-/// The last microsecond in year 9999.
-// The required microsecond range targets the Dart VM.
-// ignore: avoid_js_rounded_ints
-const maximumMomentMicros = 253402300799999999;
+/// Dart DateTime's inclusive upper bound: 100 million days after the epoch.
+const maximumMomentMicros = 8640000000000000000;
 
 /// Checks an epoch or a local-field encoding before native conversion.
 bool inMomentRange(int micros) => micros >= minimumMomentMicros && micros <= maximumMomentMicros;
 
 /// Validates without allowing the native constructor to normalize input.
 MomentError? validateParts(MomentParts parts) {
-  if (parts.year < 1 || parts.year > 9999) {
-    return const MomentError(MomentErrorKind.outOfRange, 'Years must be 1–9999.', field: 'year');
+  if (parts.year < -271821 || parts.year > 275760) {
+    return const MomentError(
+      MomentErrorKind.outOfRange,
+      'Year is outside Dart DateTime’s range.',
+      field: 'year',
+    );
   }
   final fields = [
     ('month', parts.month, 1, 12),
@@ -113,6 +115,13 @@ MomentError? validateParts(MomentParts parts) {
       return MomentError(MomentErrorKind.invalidField, '$field must be $min–$max.', field: field);
     }
   }
+  final micros = encodeCalendarParts(parts);
+  if (micros < BigInt.from(minimumMomentMicros) || micros > BigInt.from(maximumMomentMicros)) {
+    return const MomentError(
+      MomentErrorKind.outOfRange,
+      'Calendar fields are outside Dart DateTime’s range.',
+    );
+  }
   return null;
 }
 
@@ -123,17 +132,32 @@ int calendarDaysInMonth(int year, int month) => switch (month) {
   _ => 31,
 };
 
-/// Encodes calendar fields for arithmetic; this does not resolve a local instant.
-DateTime encodeParts(MomentParts p) => DateTime.utc(
-  p.year,
-  p.month,
-  p.day,
-  p.hour,
-  p.minute,
-  p.second,
-  p.millisecond,
-  p.microsecond,
-);
+/// Encodes Gregorian fields exactly, including intermediate out-of-range dates.
+///
+/// Gregorian dates repeat every 400 years (146097 days). A safe surrogate year
+/// lets native calendar logic handle the fields while BigInt retains the cycle
+/// displacement, without constructing a DateTime beyond its representable range.
+BigInt encodeCalendarParts(MomentParts parts, {BigInt? year, int? month, int? day}) {
+  final calendarYear = year ?? BigInt.from(parts.year);
+  final surrogateYear = (calendarYear % BigInt.from(400)).toInt() + 2000;
+  final cycles = (calendarYear - BigInt.from(surrogateYear)) ~/ BigInt.from(400);
+  final surrogate = DateTime.utc(
+    surrogateYear,
+    month ?? parts.month,
+    day ?? parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+    parts.millisecond,
+    parts.microsecond,
+  );
+  return BigInt.from(surrogate.microsecondsSinceEpoch) +
+      cycles * BigInt.from(146097) * BigInt.from(Duration.microsecondsPerDay);
+}
+
+/// Encodes already validated calendar fields, without resolving a local instant.
+DateTime encodeParts(MomentParts parts) =>
+    DateTime.fromMicrosecondsSinceEpoch(encodeCalendarParts(parts).toInt(), isUtc: true);
 
 /// Extracts fields at an explicit native implementation boundary.
 MomentParts decodeParts(DateTime d) => MomentParts(

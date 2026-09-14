@@ -24,7 +24,7 @@ enum MomentErrorKind {
   /// A calendar field is invalid, rather than normalized.
   invalidField,
 
-  /// UTC or local fields leave years 1–9999.
+  /// A date-time or elapsed difference exceeds its native representable range.
   outOfRange,
 
   /// An offset has fractional seconds or magnitude at least 24 hours.

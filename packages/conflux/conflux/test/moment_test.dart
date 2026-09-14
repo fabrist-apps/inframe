@@ -108,7 +108,7 @@ void main() {
         expect(result, fails(MomentErrorKind.invalidField));
         expect((result as Failure<UtcMoment, MomentError>).error.field, isNotNull);
       }
-      expect(Moment.utc(parts.copyWith(year: 0)), fails(MomentErrorKind.outOfRange));
+      expect(Moment.utc(parts.copyWith(year: 275761)), fails(MomentErrorKind.outOfRange));
       expect(parts.hashCode, parts.copyWith().hashCode);
     });
 
@@ -126,14 +126,14 @@ void main() {
       for (final other in [zero, named, alias]) {
         expect(utc.compareTo(other), 0);
         expect(utc.isAtSameMomentAs(other), isTrue);
-        expect(utc.difference(other), Duration.zero);
+        expect(value(utc.difference(other)), Duration.zero);
         expect(identical(Moment.min(other, utc), other), isTrue);
         expect(identical(Moment.max(other, utc), other), isTrue);
       }
       final later = value(utc.addDuration(const Duration(microseconds: 1)));
       expect(utc.isBefore(later), isTrue);
       expect(later.isAfter(utc), isTrue);
-      expect(utc.difference(later), const Duration(microseconds: -1));
+      expect(value(utc.difference(later)), const Duration(microseconds: -1));
       expect(utc.isBetween(utc, later), isTrue);
       expect(later.isBetween(utc, later), isTrue);
       expect(utc.isBetween(later, utc), isFalse);
@@ -176,32 +176,32 @@ void main() {
       final end = value(start.addDuration(const Duration(days: 1)));
       expect(end.formatIsoOffset(), '2025-03-10T01:00:00.123456-04:00');
       expect((end as ZonedMoment).zone, start.zone);
-      expect(end.difference(start), const Duration(days: 1));
+      expect(value(end.difference(start)), const Duration(days: 1));
       expect(value(end.subtractDuration(const Duration(days: 1))), start);
       expect(value(end.addDuration(const Duration(days: -1))), start);
       expect(value(start.subtractDuration(const Duration(days: -1))), end);
     });
 
     test('should reject UTC and local overflow before integer arithmetic wraps', () {
-      final first = parse('0001-01-01T00:00:00Z');
-      final last = parse('9999-12-31T23:59:59.999999Z');
+      final first = parse('-271821-04-20T00:00:00Z');
+      final last = parse('+275760-09-13T00:00:00Z');
       expect(
         first.subtractDuration(const Duration(microseconds: 1)),
         fails(MomentErrorKind.outOfRange),
       );
       expect(last.addDuration(const Duration(microseconds: 1)), fails(MomentErrorKind.outOfRange));
       expect(
-        first.addDuration(const Duration(microseconds: 9223372036854775807)),
+        last.addDuration(const Duration(microseconds: 9223372036854775807)),
         fails(MomentErrorKind.outOfRange),
       );
       expect(
         last.subtractDuration(const Duration(microseconds: -9223372036854775808)),
         fails(MomentErrorKind.outOfRange),
       );
-      expect(Moment.fromEpochMicroseconds(-62135596800000001), fails(MomentErrorKind.outOfRange));
-      expect(Moment.fromEpochMicroseconds(253402300800000000), fails(MomentErrorKind.outOfRange));
-      expect(Moment.parse('0001-01-01T00:00:00+00:01'), fails(MomentErrorKind.outOfRange));
-      expect(Moment.parse('9999-12-31T23:59:59-00:01'), fails(MomentErrorKind.outOfRange));
+      expect(Moment.fromEpochMicroseconds(-8640000000000000001), fails(MomentErrorKind.outOfRange));
+      expect(Moment.fromEpochMicroseconds(8640000000000000001), fails(MomentErrorKind.outOfRange));
+      expect(Moment.parse('-271821-04-20T00:00:00+00:01'), fails(MomentErrorKind.outOfRange));
+      expect(Moment.parse('+275760-09-13T00:00:00-00:01'), fails(MomentErrorKind.outOfRange));
       expect(
         first.setZone(value(TimeZone.fixed(const Duration(seconds: -1)))),
         fails(MomentErrorKind.outOfRange),
@@ -210,7 +210,7 @@ void main() {
         last.setZone(value(TimeZone.fixed(const Duration(seconds: 1)))),
         fails(MomentErrorKind.outOfRange),
       );
-      final localLast = parse('9999-12-31T23:59:59.999999+01:00');
+      final localLast = parse('+275760-09-13T00:00:00+01:00');
       expect(
         localLast.addDuration(const Duration(microseconds: 1)),
         fails(MomentErrorKind.outOfRange),

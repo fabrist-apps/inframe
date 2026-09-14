@@ -147,6 +147,7 @@ final class Cron {
     if (converted case Failure<ZonedMoment, MomentError>()) return false;
     final zoned = (converted as Success<ZonedMoment, MomentError>).value;
     final local = zoned.parts;
+    if (!_supportedYear(local.year) || !_supportedYear(instant.partsUtc.year)) return false;
     if (!_seconds.values.contains(local.second) ||
         !_minutes.values.contains(local.minute) ||
         !_hours.values.contains(local.hour) ||
@@ -201,8 +202,13 @@ final class Cron {
   }
 
   Result<ZonedMoment, CronError> _find(Moment instant, {required bool forward}) {
-    if (instant.setZone(_zone) case Failure<ZonedMoment, MomentError>(:final error)) {
+    final local = instant.setZone(_zone);
+    if (local case Failure<ZonedMoment, MomentError>(:final error)) {
       return Failure(CronError(error.message));
+    }
+    if (!_supportedYear(instant.partsUtc.year) ||
+        !_supportedYear((local as Success<ZonedMoment, MomentError>).value.parts.year)) {
+      return const Failure(_searchRangeError);
     }
     final boundaryMicros = instant.microsecondsSinceEpoch;
     final offsets = location.zones.isEmpty
@@ -321,6 +327,10 @@ final class Cron {
               continue;
             }
             final candidate = (result as Success<ZonedMoment, MomentError>).value;
+            if (!_supportedYear(candidate.partsUtc.year)) {
+              rangeError = _searchRangeError;
+              continue;
+            }
             if (best == null || (forward ? candidate.isBefore(best) : candidate.isAfter(best))) {
               best = candidate;
             }
@@ -332,6 +342,9 @@ final class Cron {
     return Success(best);
   }
 }
+
+bool _supportedYear(int year) => year >= _minimumYear && year <= _maximumYear;
+const _searchRangeError = CronError('Cron searches require UTC and local years 1–9999.');
 
 const _searchBudget = 10000;
 const _minimumYear = 1;

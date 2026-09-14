@@ -208,7 +208,7 @@ void main() {
         }
         expect(
           Moment.zoned(
-            const MomentParts(year: 1, month: 1, day: 1),
+            const MomentParts(year: -271821, month: 4, day: 20),
             zone,
             disambiguation: Disambiguation.reject,
           ),
@@ -219,7 +219,7 @@ void main() {
           ),
         );
         expect(
-          utc.withParts(parts.copyWith(year: 10000), disambiguation: Disambiguation.reject),
+          utc.withParts(parts.copyWith(year: 275761), disambiguation: Disambiguation.reject),
           isA<Failure<Moment, MomentError>>().having(
             (r) => r.error.kind,
             'kind',

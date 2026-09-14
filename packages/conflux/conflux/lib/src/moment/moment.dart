@@ -11,7 +11,7 @@ import 'package:conflux/src/moment/time_zone.dart';
 /// An immutable instant with exact microseconds and explicit zone identity.
 ///
 /// Equality includes representation and zone; [compareTo] compares instants only.
-/// UTC and derived local fields are supported in years 1–9999.
+/// UTC and derived local fields use Dart DateTime’s native representable range.
 sealed class Moment implements Comparable<Moment> {
   const Moment._(this.microsecondsSinceEpoch);
 
@@ -46,7 +46,9 @@ sealed class Moment implements Comparable<Moment> {
   /// Parses strict ISO timestamps with 1–6 fractional digits and a required offset.
   ///
   /// `Z` yields UTC; numeric offsets retain fixed identity, including negative zero.
-  /// Whitespace, leap seconds, calendar overflow and offset-free input fail.
+  /// Years use Dart's ISO spelling: `0000`, `-0001`, or signed six digits
+  /// outside -9999–9999, such as `+010000`. Noncanonical year spellings,
+  /// whitespace, leap seconds, calendar overflow and offset-free input fail.
   static Result<Moment, MomentError> parse(String input) => parseTimestamp(input).flatMap((parsed) {
     final wallMicros = encodeParts(parsed.parts).microsecondsSinceEpoch;
     final offset = parsed.offset;
@@ -134,8 +136,21 @@ sealed class Moment implements Comparable<Moment> {
   bool isAtSameMomentAs(Moment other) => compareTo(other) == 0;
 
   /// Signed elapsed time: this instant minus [other].
-  Duration difference(Moment other) =>
-      Duration(microseconds: microsecondsSinceEpoch - other.microsecondsSinceEpoch);
+  ///
+  /// Returns outOfRange when the difference exceeds Dart Duration's signed
+  /// 64-bit microseconds, even though both date-times are representable.
+  Result<Duration, MomentError> difference(Moment other) {
+    final micros = BigInt.from(microsecondsSinceEpoch) - BigInt.from(other.microsecondsSinceEpoch);
+    if (micros < -(BigInt.one << 63) || micros > (BigInt.one << 63) - BigInt.one) {
+      return const Failure(
+        MomentError(
+          MomentErrorKind.outOfRange,
+          'The elapsed difference is outside Dart Duration’s range.',
+        ),
+      );
+    }
+    return Success(Duration(microseconds: micros.toInt()));
+  }
 
   /// Inclusive instant bounds; inverted bounds contain no values.
   bool isBetween(Moment start, Moment end) => !isBefore(start) && !isAfter(end);
@@ -149,13 +164,13 @@ sealed class Moment implements Comparable<Moment> {
       _shift(duration.inMicroseconds, subtract: true);
 
   Result<Moment, MomentError> _shift(int amount, {required bool subtract}) {
-    // Compare before adding so even extreme native integers cannot wrap into range.
-    final lower = minimumMomentMicros - microsecondsSinceEpoch;
-    final upper = maximumMomentMicros - microsecondsSinceEpoch;
-    if (subtract ? amount < -upper || amount > -lower : amount < lower || amount > upper) {
+    // BigInt intermediates prevent overflow across the full native date range.
+    final delta = BigInt.from(amount);
+    final shifted = BigInt.from(microsecondsSinceEpoch) + (subtract ? -delta : delta);
+    if (shifted < BigInt.from(minimumMomentMicros) || shifted > BigInt.from(maximumMomentMicros)) {
       return const Failure(_rangeError);
     }
-    final micros = subtract ? microsecondsSinceEpoch - amount : microsecondsSinceEpoch + amount;
+    final micros = shifted.toInt();
     final utc = UtcMoment._(micros);
     return switch (this) {
       UtcMoment() => Success(utc),
@@ -166,7 +181,7 @@ sealed class Moment implements Comparable<Moment> {
   /// UTC timestamp with six fractional digits and `Z`.
   String formatIso() => '${formatParts(partsUtc)}Z';
 
-  /// Local calendar date as `YYYY-MM-DD`.
+  /// Local calendar date with the same ISO year spelling as [formatIso].
   String formatIsoDate() => formatParts(parts, dateOnly: true);
 
   /// Local timestamp and numeric offset, including historical nonzero seconds.
@@ -203,4 +218,7 @@ final class ZonedMoment extends Moment {
   final TimeZone zone;
 }
 
-const _rangeError = MomentError(MomentErrorKind.outOfRange, 'UTC and local years must be 1–9999.');
+const _rangeError = MomentError(
+  MomentErrorKind.outOfRange,
+  'UTC or local fields are outside Dart DateTime’s range.',
+);
