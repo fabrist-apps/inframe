@@ -418,17 +418,26 @@ abstract final class VoxelDatabaseRuntime {
         'must not be negative',
       );
     }
-    if (schemaStorage.isNotEmpty || schemaEncryption.isNotEmpty) {
-      throw UnsupportedError(
-        'Per-schema storage and encryption require attached-file support.',
+    final checked = VoxelMigrationPlan.validate(schema: schema, bundle: bundle);
+    final namedSchemas = <String>{...checked.schemaNames.where((name) => name != 'main')};
+    final unknownStorage = schemaStorage.keys.where((name) => !namedSchemas.contains(name));
+    final unknownEncryption = schemaEncryption.keys.where((name) => !namedSchemas.contains(name));
+    if (unknownStorage.isNotEmpty || unknownEncryption.isNotEmpty) {
+      final unknownSchemas = <String>{...unknownStorage, ...unknownEncryption};
+      throw ArgumentError(
+        'Unknown Voxel schema configuration: '
+        '${unknownSchemas.join(', ')}.',
       );
     }
-
-    final checked = VoxelMigrationPlan.validate(schema: schema, bundle: bundle);
     final selectedStorage = storage;
     if (selectedStorage is VoxelMemoryStorage) {
-      if (encryption != null) {
+      if (encryption != null || schemaEncryption.values.any((value) => value != null)) {
         throw UnsupportedError('Memory storage does not support encryption.');
+      }
+      if (schemaStorage.values.any((value) => value is! VoxelMemoryStorage)) {
+        throw UnsupportedError(
+          'A memory main database supports only memory schema storage.',
+        );
       }
       return _openMemory(schema, checked);
     }
@@ -440,13 +449,34 @@ abstract final class VoxelDatabaseRuntime {
       null => null,
       _ => throw UnsupportedError('Unsupported Voxel storage selection.'),
     };
-    final database = await openVoxelPersistentMain(
+    final schemaDirectories = <String, String?>{};
+    final schemaEncryptionCiphers = <String, String?>{};
+    final schemaEncryptionKeys = <String, Uint8List?>{};
+    for (final schemaName in namedSchemas) {
+      final override = schemaStorage[schemaName];
+      schemaDirectories[schemaName] = switch (override) {
+        VoxelDirectoryStorage(:final path) => path,
+        null => null,
+        _ => throw UnsupportedError(
+          'Native persistent databases require directory storage for schema `$schemaName`.',
+        ),
+      };
+      final selectedEncryption = schemaEncryption.containsKey(schemaName)
+          ? schemaEncryption[schemaName]
+          : encryption;
+      schemaEncryptionCiphers[schemaName] = selectedEncryption?.cipher.name;
+      schemaEncryptionKeys[schemaName] = selectedEncryption?.key;
+    }
+    final database = await openVoxelPersistentDatabase(
       databaseName: schema.name,
       directory: directory,
       migrations: checked,
       lockTimeout: migrations.lockTimeout,
       encryptionCipher: encryption?.cipher.name,
       encryptionKey: encryption?.key,
+      schemaDirectories: schemaDirectories,
+      schemaEncryptionCiphers: schemaEncryptionCiphers,
+      schemaEncryptionKeys: schemaEncryptionKeys,
     );
     return VoxelDb._(database, schema.name, schema.tables);
   }

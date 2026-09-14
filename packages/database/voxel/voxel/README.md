@@ -73,6 +73,29 @@ encryption; opening with a wrong key fails and never falls back to plaintext.
 Changing encryption on an existing file is not an implicit re-encryption
 operation.
 
+Each named schema uses a separate persistent file whose identity is recorded in
+the main database. Unlisted schemas inherit the main directory and encryption.
+Override either setting by schema name when a file needs separate storage or
+key material; an explicit `null` encryption override selects plaintext:
+
+```dart
+final database = await MyAppDatabase().open(
+  storage: const VoxelStorage.directory('/application-owned/data'),
+  encryption: defaultEncryption,
+  schemaStorage: {
+    'auth': const VoxelStorage.directory('/application-owned/private'),
+  },
+  schemaEncryption: {
+    'auth': authEncryption,
+    'cache': null,
+  },
+);
+```
+
+Moving an initialized schema requires relocating its database, WAL, and SHM
+files together. Voxel accepts the new directory only when the attached file's
+recorded identity matches; it does not create a replacement at a changed path.
+
 SQLite transactions are atomic within one physical database file. Work that
 spans independently attached files cannot commit atomically across those files;
 Voxel records and verifies completion in each affected file.
