@@ -31,3 +31,12 @@ doc/api/
 
 .flutter-plugins
 .flutter-plugins-dependencies
+
+# Generated Dart source
+*.g.dart
+*.freezed.dart
+*.mapper.dart
+*.rivet.dart
+*.voxel.dart
+*.voxel_migrations.dart
+*_generated.dart

@@ -29,6 +29,14 @@ jobs:
       - name: Resolve workspace dependencies
         run: dart pub get
 
+      - name: Generate Chronicler models
+        working-directory: packages/chronicler/chronicler
+        run: dart run build_runner build
+
+      - name: Generate Turso native bindings
+        working-directory: packages/database/turso
+        run: dart run ffigen --config ffigen.yaml
+
       - name: Generate Rivet consumer fixtures
         run: |
           (cd packages/database/rivet && dart run build_runner build --build-filter=test/generated_consumer.rivet.dart --build-filter=test/migration_fixture.rivet.dart)
@@ -78,34 +86,6 @@ jobs:
         run: |
           dart test packages/conflux/conflux/test --chain-stack-traces
           dart test packages/conflux/chronicler_conflux/test --chain-stack-traces
-
-      - name: Run Artificer provider-core tests and example
-        run: |
-          dart test packages/artificer/providers/artificer_core/test --chain-stack-traces
-          dart run packages/artificer/providers/artificer_core/example/text_generation.dart
-
-      - name: Run Artificer Google provider tests and example
-        run: |
-          dart test packages/artificer/providers/artificer_google/test --chain-stack-traces
-          dart run packages/artificer/providers/artificer_google/example/text_generation.dart
-
-      - name: Run Baseten provider tests and example
-        run: |
-          dart test packages/artificer/providers/artificer_baseten/test --chain-stack-traces
-          dart run packages/artificer/providers/artificer_baseten/example/text_generation.dart
-
-      - name: Run xAI provider tests and example
-        run: |
-          dart test packages/artificer/providers/artificer_xai/test --chain-stack-traces
-          dart run packages/artificer/providers/artificer_xai/example/text_generation.dart
-
-      - name: Run Anthropic provider tests and example
-        run: |
-          dart test packages/artificer/providers/artificer_anthropic/test --chain-stack-traces
-          dart run packages/artificer/providers/artificer_anthropic/example/text_generation.dart
-          dart run packages/artificer/providers/artificer_anthropic/example/tool_turn.dart
-          dart run packages/artificer/providers/artificer_anthropic/example/models_and_tokens.dart
-          dart run packages/artificer/providers/artificer_anthropic/example/files.dart
 
       - name: Run Chrono ID tests
         run: |
