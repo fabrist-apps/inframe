@@ -39,6 +39,49 @@ void main() {
       await expectLater(migrator.migrate(), throwsA(isA<FormatException>()));
     });
 
+    test('should reject transaction-control SQL before opening a connection', () async {
+      final migrationId = await const RivetMigrationGenerator().generate(
+        schema: MigrationFixtureDatabaseRivetSchema.build(),
+        directory: directory,
+        name: 'initial',
+      );
+      final journal =
+          jsonDecode(
+                File('${directory.path}/journal.json').readAsStringSync(),
+              )!
+              as Map<String, Object?>;
+      final entry = (journal['entries']! as List<Object?>).single! as Map<String, Object?>;
+      final artifactDirectory = '${directory.path}/${entry['directory']}';
+      final migration =
+          jsonDecode(
+                File('$artifactDirectory/migration.json').readAsStringSync(),
+              )!
+              as Map<String, Object?>;
+      final phase = (migration['phases']! as List<Object?>).first! as Map<String, Object?>;
+      final statement = (phase['statements']! as List<Object?>).first! as Map<String, Object?>;
+      final start = statement['startByte']! as int;
+      final end = statement['endByte']! as int;
+      final sqlFile = File('$artifactDirectory/migration.sql');
+      final bytes = sqlFile.readAsBytesSync().toList(growable: true);
+      const transactionControl = 'START/**/TRANSACTION';
+      final padding = List.filled(end - start - transactionControl.length - 1, ' ').join();
+      final replacement = utf8.encode('$transactionControl$padding;');
+      bytes.replaceRange(start, end, replacement);
+      sqlFile.writeAsBytesSync(bytes);
+      await RivetArtifactSealer().seal(directory: directory, migrationId: migrationId!);
+
+      await expectLater(
+        RivetMigrator(
+          connection: RivetConnection.url(
+            'postgresql://invalid:invalid@127.0.0.1:1/unreachable',
+            sslMode: RivetSslMode.disable,
+          ),
+          directory: directory,
+        ).migrate(),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
     test('should reject a negative lock timeout', () {
       expect(
         () => RivetMigrator(
@@ -462,6 +505,42 @@ void main() {
           )).single.single,
           'completed',
         );
+
+        await fixture.execute('DROP INDEX recovery.users_name_idx');
+        await fixture.execute(
+          'CREATE INDEX users_name_idx ON recovery.users (name text_pattern_ops)',
+        );
+        await fixture.execute(
+          pg.Sql.named('''
+            UPDATE _rivet.phase_receipts
+            SET status = 'started', evidence = CAST(@evidence AS jsonb)
+            WHERE "migrationId" = @migrationId
+          '''),
+          parameters: {
+            'migrationId': migrationId,
+            'evidence': jsonEncode(evidence['before']),
+          },
+        );
+        await expectLater(
+          RivetMigrator(connection: connection, directory: directory).migrate(),
+          throwsA(isA<RivetMigrationException>()),
+        );
+        expect(
+          (await fixture.execute(
+            "SELECT pg_get_indexdef('recovery.users_name_idx'::regclass)",
+          )).single.single,
+          contains('text_pattern_ops'),
+        );
+
+        await fixture.execute('DROP TABLE recovery.users CASCADE');
+        await fixture.execute('''
+          CREATE TABLE recovery.users (id bigint PRIMARY KEY, name text NOT NULL)
+        ''');
+        await fixture.execute('CREATE INDEX users_name_idx ON recovery.users (name)');
+        await expectLater(
+          RivetMigrator(connection: connection, directory: directory).migrate(),
+          throwsA(isA<RivetMigrationException>()),
+        );
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
@@ -811,6 +890,14 @@ void main() {
             "SELECT to_regclass('recovery.manual_retry') IS NOT NULL",
           )).single.single,
           isTrue,
+        );
+        await fixture.execute('DROP TABLE recovery.manual_retry');
+        await expectLater(recovery.migrator.migrate(), throwsA(isA<RivetMigrationException>()));
+        expect(
+          (await fixture.execute(
+            "SELECT to_regclass('recovery.manual_retry') IS NOT NULL",
+          )).single.single,
+          isFalse,
         );
         await recovery.migrator.resolve(
           migrationId: recovery.migrationId,

@@ -150,7 +150,13 @@ List<RivetMigrationPhase> _readPhases(Map<String, Object?> migration, String sql
           parsedRanges[parsedIndex]['endByte'] != end) {
         throw FormatException('Phase $phaseId contains an invalid complete-statement byte range.');
       }
-      statements.add(utf8.decode(sqlBytes.sublist(start, end)));
+      final sqlStatement = utf8.decode(sqlBytes.sublist(start, end));
+      if (_isTransactionControl(sqlStatement)) {
+        throw FormatException(
+          'Phase $phaseId contains transaction-control SQL; Rivet owns transaction boundaries.',
+        );
+      }
+      statements.add(sqlStatement);
       previousEnd = end;
       parsedIndex++;
     }
@@ -171,6 +177,65 @@ List<RivetMigrationPhase> _readPhases(Map<String, Object?> migration, String sql
     throw const FormatException('Migration phases do not cover every SQL statement.');
   }
   return List.unmodifiable(result);
+}
+
+bool _isTransactionControl(String statement) {
+  final first = _nextSqlWord(statement, 0);
+  if (first.word == null) return false;
+  if (const {
+    'begin',
+    'commit',
+    'end',
+    'rollback',
+    'abort',
+    'savepoint',
+  }.contains(first.word)) {
+    return true;
+  }
+  final second = _nextSqlWord(statement, first.end);
+  if ((first.word == 'start' || first.word == 'prepare') && second.word == 'transaction') {
+    return true;
+  }
+  if (first.word == 'release' && second.word == 'savepoint') return true;
+  if (first.word != 'set') return false;
+  if (second.word == 'transaction') return true;
+  return second.word == 'local' && _nextSqlWord(statement, second.end).word == 'transaction';
+}
+
+({String? word, int end}) _nextSqlWord(String statement, int start) {
+  var index = start;
+  while (index < statement.length) {
+    while (index < statement.length && RegExp(r'\s').hasMatch(statement[index])) {
+      index++;
+    }
+    if (statement.startsWith('--', index)) {
+      final newline = statement.indexOf('\n', index + 2);
+      index = newline < 0 ? statement.length : newline + 1;
+      continue;
+    }
+    if (statement.startsWith('/*', index)) {
+      var depth = 1;
+      index += 2;
+      while (index < statement.length && depth > 0) {
+        if (statement.startsWith('/*', index)) {
+          depth++;
+          index += 2;
+        } else if (statement.startsWith('*/', index)) {
+          depth--;
+          index += 2;
+        } else {
+          index++;
+        }
+      }
+      continue;
+    }
+    break;
+  }
+  final match = RegExp('^[A-Za-z]+').firstMatch(statement.substring(index));
+  return (
+    word: match?[0]?.toLowerCase(),
+    end: match == null ? statement.length : index + match.end,
+  );
 }
 
 void _validateSnapshot(Map<String, Object?> snapshot) {

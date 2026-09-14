@@ -527,6 +527,16 @@ Future<void> _applyNontransactionalPhase(
         'Migration ${migration.id} phase ${phase.id} has a partial or uncertain outcome.',
       );
     }
+    if (phase.recovery!['kind'] == 'manual' && beforeEvidence['manualRetryApproved'] == true) {
+      beforeEvidence = await _consumeManualRetry(
+        connection,
+        databaseId,
+        migration,
+        phase,
+        attemptId!,
+        beforeEvidence,
+      );
+    }
   }
 
   for (final statement in phase.statements) {
@@ -547,6 +557,42 @@ Future<void> _applyNontransactionalPhase(
     beforeEvidence,
     after.evidence,
   );
+}
+
+Future<Map<String, Object?>> _consumeManualRetry(
+  pg.Connection connection,
+  String databaseId,
+  RivetMigrationArtifact migration,
+  RivetMigrationPhase phase,
+  String attemptId,
+  Map<String, Object?> evidence,
+) async {
+  final consumed = <String, Object?>{
+    ...evidence,
+    'manualRetryApproved': false,
+    'manualRetryConsumed': true,
+  };
+  final result = await connection.execute(
+    pg.Sql.named('''
+      UPDATE _rivet.phase_receipts
+      SET evidence = CAST(@evidence AS jsonb)
+      WHERE "databaseId" = @databaseId AND "migrationId" = @migrationId
+        AND "phaseId" = @phaseId AND checksum = @checksum
+        AND "attemptId" = @attemptId AND status = 'started'
+    '''),
+    parameters: {
+      'databaseId': databaseId,
+      'migrationId': migration.id,
+      'phaseId': phase.id,
+      'checksum': migration.checksum,
+      'attemptId': attemptId,
+      'evidence': jsonEncode(consumed),
+    },
+  );
+  if (result.affectedRows != 1) {
+    throw const RivetMigrationException('The approved manual retry changed before execution.');
+  }
+  return consumed;
 }
 
 Future<void> _recordStartedPhase(
@@ -787,7 +833,8 @@ Future<_RecoveryResult> _inspectIndex(
       SELECT i.oid::bigint, i.relowner::bigint, am.amname,
              x.indisunique, x.indisvalid, x.indisready,
              pg_get_expr(x.indpred, x.indrelid), i.reloptions,
-             x.indnkeyatts, pg_get_indexdef(i.oid)
+             x.indnkeyatts, pg_get_indexdef(i.oid), x.indnatts,
+             x.indnullsnotdistinct
       FROM pg_class i
       JOIN pg_namespace n ON n.oid = i.relnamespace
       JOIN pg_index x ON x.indexrelid = i.oid
@@ -818,11 +865,15 @@ Future<_RecoveryResult> _inspectIndex(
   final row = indexRows.single;
   final termRows = await connection.execute(
     pg.Sql.named('''
-      SELECT a.attname, (keys.option & 1) = 1, opc.opcname
+      SELECT a.attname, (keys.option & 1) = 1, (keys.option & 2) = 2,
+             opc.opcname, opc.opcdefault,
+             keys.collation_oid = a.attcollation, keys.option
       FROM pg_index x
+      JOIN pg_class i ON i.oid = x.indexrelid
       CROSS JOIN LATERAL unnest(
-        x.indkey::smallint[], x.indoption::smallint[], x.indclass::oid[]
-      ) WITH ORDINALITY AS keys(attnum, option, opclass_oid, ordinal)
+        x.indkey::smallint[], x.indoption::smallint[], x.indclass::oid[],
+        x.indcollation::oid[]
+      ) WITH ORDINALITY AS keys(attnum, option, opclass_oid, collation_oid, ordinal)
       LEFT JOIN pg_attribute a
         ON a.attrelid = x.indrelid AND a.attnum = keys.attnum
       JOIN pg_opclass opc ON opc.oid = keys.opclass_oid
@@ -833,7 +884,15 @@ Future<_RecoveryResult> _inspectIndex(
   );
   final terms = [
     for (final term in termRows)
-      {'column': term[0], 'descending': term[1], 'operatorClass': term[2]},
+      {
+        'column': term[0],
+        'descending': term[1],
+        'nullsFirst': term[2],
+        'operatorClass': term[3],
+        'defaultOperatorClass': term[4],
+        'defaultCollation': term[5],
+        'options': term[6],
+      },
   ];
   final expectedTerms = (expected['terms']! as List<Object?>).cast<Map<String, Object?>>();
   final termsMatch =
@@ -841,7 +900,11 @@ Future<_RecoveryResult> _inspectIndex(
       terms.indexed.every(
         (entry) =>
             entry.$2['column'] == expectedTerms[entry.$1]['column'] &&
-            entry.$2['descending'] == expectedTerms[entry.$1]['descending'],
+            entry.$2['descending'] == expectedTerms[entry.$1]['descending'] &&
+            entry.$2['nullsFirst'] == expectedTerms[entry.$1]['descending'] &&
+            entry.$2['defaultOperatorClass'] == true &&
+            entry.$2['defaultCollation'] == true &&
+            entry.$2['options'] == (expectedTerms[entry.$1]['descending'] == true ? 3 : 0),
       );
   final options = row[7] as List<Object?>?;
   final expectedOptions = expected['options']! as Map<String, Object?>;
@@ -858,8 +921,16 @@ Future<_RecoveryResult> _inspectIndex(
     'options': options ?? <Object?>[],
     'terms': terms,
     'definition': row[9],
+    'attributeCount': row[10],
+    'nullsNotDistinct': row[11],
   };
+  final recordedTableMatches =
+      recordedBefore != null &&
+      recordedBefore['tableOid'] == tableEvidence['tableOid'] &&
+      recordedBefore['tableOwnerOid'] == tableEvidence['tableOwnerOid'] &&
+      recordedBefore['indexAbsent'] == true;
   final matches =
+      recordedTableMatches &&
       row[1] == tableEvidence['tableOwnerOid'] &&
       row[2] == expected['method'] &&
       row[3] == expected['unique'] &&
@@ -868,6 +939,8 @@ Future<_RecoveryResult> _inspectIndex(
       _normalizedSql(row[6] as String?) == _normalizedSql(expected['predicate'] as String?) &&
       (options == null || options.isEmpty) &&
       expectedOptions.isEmpty &&
+      row[8] == row[10] &&
+      row[11] == false &&
       termsMatch;
   return _RecoveryResult(
     matches ? _RecoveryClassification.completed : _RecoveryClassification.uncertain,
@@ -904,7 +977,66 @@ String _newAttemptId() {
   ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
 }
 
-String? _normalizedSql(String? value) => value?.replaceAll(RegExp(r'\s+'), ' ').trim();
+String? _normalizedSql(String? value) {
+  if (value == null) return null;
+  final normalized = StringBuffer();
+  var index = 0;
+  var quote = 0;
+  String? dollarTag;
+  var pendingSpace = false;
+  while (index < value.length) {
+    if (dollarTag != null) {
+      if (value.startsWith(dollarTag, index)) {
+        normalized.write(dollarTag);
+        index += dollarTag.length;
+        dollarTag = null;
+      } else {
+        normalized.write(value[index++]);
+      }
+      continue;
+    }
+    if (quote != 0) {
+      final unit = value.codeUnitAt(index);
+      normalized.write(value[index++]);
+      if (unit == quote) {
+        if (index < value.length && value.codeUnitAt(index) == quote) {
+          normalized.write(value[index++]);
+        } else {
+          quote = 0;
+        }
+      }
+      continue;
+    }
+    final unit = value.codeUnitAt(index);
+    if (RegExp(r'\s').hasMatch(value[index])) {
+      pendingSpace = normalized.isNotEmpty;
+      index++;
+      continue;
+    }
+    if (pendingSpace) {
+      normalized.write(' ');
+      pendingSpace = false;
+    }
+    if (unit == 0x27 || unit == 0x22) {
+      quote = unit;
+      normalized.write(value[index++]);
+      continue;
+    }
+    if (unit == 0x24) {
+      final match = RegExp(r'^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$').firstMatch(
+        value.substring(index),
+      );
+      if (match != null) {
+        dollarTag = match[0]!;
+        normalized.write(dollarTag);
+        index += dollarTag.length;
+        continue;
+      }
+    }
+    normalized.write(value[index++]);
+  }
+  return normalized.toString();
+}
 
 enum _RecoveryClassification { completed, notStarted, uncertain }
 
