@@ -131,13 +131,25 @@ final class VoxelArtifactChecker {
         phase,
         'migration phase',
         required: const {'id', 'scopeId', 'mode', 'platforms', 'statements', 'recovery'},
-        optional: const {'rebuild'},
+        optional: const {'writeScopeIds', 'rebuild'},
       );
       final phaseId = phase['id'];
       if (phaseId is! String || !RegExp(r'^(0|[1-9][0-9]*)$').hasMatch(phaseId)) {
         throw const FormatException('migration phase id must be a decimal string.');
       }
       _id(phase['scopeId'], 'migration phase scopeId');
+      if (phase.containsKey('writeScopeIds')) {
+        final writeScopeIds = _stringList(
+          phase['writeScopeIds'],
+          'migration phase writeScopeIds',
+        );
+        if (writeScopeIds.isEmpty) {
+          throw const FormatException('migration phase writeScopeIds must not be empty.');
+        }
+        for (final scopeId in writeScopeIds) {
+          _id(scopeId, 'migration phase write scope');
+        }
+      }
       _oneOf(phase['mode'], const {'transactional', 'nontransactional'}, 'phase mode');
       _stringList(phase['platforms'], 'phase platforms');
       for (final rawStatement in _list(phase['statements'], 'phase statements')) {
@@ -212,9 +224,61 @@ final class VoxelArtifactChecker {
   }
 
   void _validateRebuildRecord(Map<String, Object?> rebuild) {
-    _record(rebuild, 'phase rebuild', required: const {'foreignKeys', 'validations'});
+    _record(
+      rebuild,
+      'phase rebuild',
+      required: const {'foreignKeys', 'validations'},
+      optional: const {'tables'},
+    );
     if (rebuild['foreignKeys'] != 'offOutsideTransaction') {
       throw const FormatException('rebuild foreignKeys mode is unsupported.');
+    }
+    if (rebuild.containsKey('tables')) {
+      final tables = _list(rebuild['tables'], 'rebuild tables');
+      if (tables.isEmpty) throw const FormatException('rebuild tables must not be empty.');
+      for (final rawTable in tables) {
+        final table = _map(rawTable, 'rebuilt table');
+        _record(
+          table,
+          'rebuilt table',
+          required: const {
+            'tableId',
+            'oldName',
+            'replacementName',
+            'finalName',
+            'managedDependencies',
+            'expectedBefore',
+          },
+        );
+        _id(table['tableId'], 'rebuilt table tableId');
+        _nonemptyString(table['oldName'], 'rebuilt table oldName');
+        _nonemptyString(table['replacementName'], 'rebuilt table replacementName');
+        _nonemptyString(table['finalName'], 'rebuilt table finalName');
+        for (final rawDependency in _list(
+          table['managedDependencies'],
+          'rebuilt table managed dependencies',
+        )) {
+          final dependency = _map(rawDependency, 'rebuilt table managed dependency');
+          _record(
+            dependency,
+            'rebuilt table managed dependency',
+            required: const {'kind', 'objectId', 'name'},
+          );
+          _oneOf(dependency['kind'], const {'index'}, 'managed dependency kind');
+          _id(dependency['objectId'], 'managed dependency objectId');
+          _nonemptyString(dependency['name'], 'managed dependency name');
+        }
+        final expectedBefore = _map(table['expectedBefore'], 'rebuilt table expectedBefore');
+        _record(
+          expectedBefore,
+          'rebuilt table expectedBefore',
+          required: const {'id', 'schemaId', 'name', 'columns', 'indexes', 'constraints'},
+        );
+        _id(expectedBefore['id'], 'rebuilt table expectedBefore id');
+        _id(expectedBefore['schemaId'], 'rebuilt table expectedBefore schemaId');
+        _nonemptyString(expectedBefore['name'], 'rebuilt table expectedBefore name');
+        _validateTableRecord(expectedBefore);
+      }
     }
     for (final rawValidation in _list(rebuild['validations'], 'rebuild validations')) {
       final validation = _map(rawValidation, 'rebuild validation');
@@ -369,65 +433,7 @@ final class VoxelArtifactChecker {
       _nonemptyString(schema['name'], 'schema name');
     }
     for (final rawTable in _list(snapshot['tables'], '$source tables')) {
-      final table = _map(rawTable, 'snapshot table');
-      _record(
-        table,
-        'snapshot table',
-        required: const {'id', 'schemaId', 'name', 'columns', 'indexes', 'constraints'},
-      );
-      _id(table['id'], 'table identity');
-      _id(table['schemaId'], 'table schemaId');
-      _nonemptyString(table['name'], 'table name');
-      for (final rawColumn in _list(table['columns'], 'table columns')) {
-        final column = _map(rawColumn, 'table column');
-        _record(
-          column,
-          'table column',
-          required: const {'id', 'tableId', 'name', 'storage', 'primaryKey'},
-          optional: const {'default'},
-        );
-        _id(column['id'], 'column identity');
-        _id(column['tableId'], 'column tableId');
-        _nonemptyString(column['name'], 'column name');
-        if (column['primaryKey'] is! bool) {
-          throw const FormatException('column primaryKey must be a boolean.');
-        }
-        _validateStorage(_map(column['storage'], 'column storage'));
-        if (column.containsKey('default')) {
-          _validateExpressionRecord(_map(column['default'], 'column default'));
-        }
-      }
-      for (final rawIndex in _list(table['indexes'], 'table indexes')) {
-        final index = _map(rawIndex, 'table index');
-        _record(
-          index,
-          'table index',
-          required: const {'id', 'tableId', 'name', 'unique', 'terms', 'options', 'platforms'},
-          optional: const {'predicate'},
-        );
-        _id(index['id'], 'index identity');
-        _id(index['tableId'], 'index tableId');
-        _nonemptyString(index['name'], 'index name');
-        if (index['unique'] is! bool) throw const FormatException('index unique must be boolean.');
-        final terms = _list(index['terms'], 'index terms');
-        if (terms.isEmpty) throw const FormatException('index terms must not be empty.');
-        for (final rawTerm in terms) {
-          final term = _map(rawTerm, 'index term');
-          _record(term, 'index term', required: const {'columnId', 'descending'});
-          _id(term['columnId'], 'index term columnId');
-          if (term['descending'] is! bool) {
-            throw const FormatException('index term descending must be boolean.');
-          }
-        }
-        if (index.containsKey('predicate')) {
-          _validateExpressionRecord(_map(index['predicate'], 'index predicate'));
-        }
-        _map(index['options'], 'index options');
-        _stringList(index['platforms'], 'index platforms');
-      }
-      for (final rawConstraint in _list(table['constraints'], 'table constraints')) {
-        _validateConstraintRecord(_map(rawConstraint, 'table constraint'));
-      }
+      _validateTableRecord(_map(rawTable, 'snapshot table'));
     }
     for (final rawEnum in _list(snapshot['enums'], '$source enums')) {
       final value = _map(rawEnum, 'snapshot enum');
@@ -451,6 +457,67 @@ final class VoxelArtifactChecker {
     }
     for (final requirement in _list(snapshot['requirements'], '$source requirements')) {
       _map(requirement, 'snapshot requirement');
+    }
+  }
+
+  void _validateTableRecord(Map<String, Object?> table) {
+    _record(
+      table,
+      'snapshot table',
+      required: const {'id', 'schemaId', 'name', 'columns', 'indexes', 'constraints'},
+    );
+    _id(table['id'], 'table identity');
+    _id(table['schemaId'], 'table schemaId');
+    _nonemptyString(table['name'], 'table name');
+    for (final rawColumn in _list(table['columns'], 'table columns')) {
+      final column = _map(rawColumn, 'table column');
+      _record(
+        column,
+        'table column',
+        required: const {'id', 'tableId', 'name', 'storage', 'primaryKey'},
+        optional: const {'default'},
+      );
+      _id(column['id'], 'column identity');
+      _id(column['tableId'], 'column tableId');
+      _nonemptyString(column['name'], 'column name');
+      if (column['primaryKey'] is! bool) {
+        throw const FormatException('column primaryKey must be a boolean.');
+      }
+      _validateStorage(_map(column['storage'], 'column storage'));
+      if (column.containsKey('default')) {
+        _validateExpressionRecord(_map(column['default'], 'column default'));
+      }
+    }
+    for (final rawIndex in _list(table['indexes'], 'table indexes')) {
+      final index = _map(rawIndex, 'table index');
+      _record(
+        index,
+        'table index',
+        required: const {'id', 'tableId', 'name', 'unique', 'terms', 'options', 'platforms'},
+        optional: const {'predicate'},
+      );
+      _id(index['id'], 'index identity');
+      _id(index['tableId'], 'index tableId');
+      _nonemptyString(index['name'], 'index name');
+      if (index['unique'] is! bool) throw const FormatException('index unique must be boolean.');
+      final terms = _list(index['terms'], 'index terms');
+      if (terms.isEmpty) throw const FormatException('index terms must not be empty.');
+      for (final rawTerm in terms) {
+        final term = _map(rawTerm, 'index term');
+        _record(term, 'index term', required: const {'columnId', 'descending'});
+        _id(term['columnId'], 'index term columnId');
+        if (term['descending'] is! bool) {
+          throw const FormatException('index term descending must be boolean.');
+        }
+      }
+      if (index.containsKey('predicate')) {
+        _validateExpressionRecord(_map(index['predicate'], 'index predicate'));
+      }
+      _map(index['options'], 'index options');
+      _stringList(index['platforms'], 'index platforms');
+    }
+    for (final rawConstraint in _list(table['constraints'], 'table constraints')) {
+      _validateConstraintRecord(_map(rawConstraint, 'table constraint'));
     }
   }
 
@@ -628,6 +695,20 @@ final class VoxelArtifactChecker {
       if (scopeName == null) {
         throw FormatException('Phase $phaseId references an unknown file scope.');
       }
+      if (phase['writeScopeIds'] case final List<Object?> rawWriteScopeIds) {
+        final writeScopeIds = rawWriteScopeIds.cast<String>();
+        if (writeScopeIds.toSet().length != writeScopeIds.length) {
+          throw FormatException('Phase $phaseId contains a duplicate declared write scope.');
+        }
+        if (writeScopeIds.any((scopeId) => !schemaNames.containsKey(scopeId))) {
+          throw FormatException('Phase $phaseId contains an unknown declared write scope.');
+        }
+        if (writeScopeIds.length != 1 || writeScopeIds.single != phase['scopeId']) {
+          throw FormatException(
+            'Phase $phaseId must write exactly its receipt scope.',
+          );
+        }
+      }
       final platforms = _list(phase['platforms'], 'phase platforms');
       if (platforms.isEmpty ||
           platforms.any((value) => value != 'native' && value != 'browser') ||
@@ -637,7 +718,6 @@ final class VoxelArtifactChecker {
       if (phase['mode'] == 'transactional' && phase['recovery'] != null) {
         throw FormatException('Transactional phase $phaseId cannot have recovery metadata.');
       }
-      _validateRebuild(phase, snapshot);
       final phaseSql = <String>[];
       for (final rawStatement in _list(phase['statements'], 'phase statements')) {
         final statement = _map(rawStatement, 'statement range');
@@ -660,6 +740,7 @@ final class VoxelArtifactChecker {
         phaseSql.add(utf8.decode(bytes.sublist(start, end)));
         previousEnd = end;
       }
+      _validateRebuild(phase, snapshot, phaseSql, scopeName);
       validateVoxelRecovery(phase, phaseSql, scopeName: scopeName);
     }
     if (parsedIndex != parsedRanges.length) {
@@ -670,6 +751,8 @@ final class VoxelArtifactChecker {
   void _validateRebuild(
     Map<String, Object?> phase,
     Map<String, Object?> snapshot,
+    List<String> phaseSql,
+    String scopeName,
   ) {
     final rawRebuild = phase['rebuild'];
     if (rawRebuild == null) return;
@@ -683,6 +766,55 @@ final class VoxelArtifactChecker {
       for (final rawTable in _list(snapshot['tables'], 'snapshot tables'))
         (_map(rawTable, 'snapshot table')['id']! as String): _map(rawTable, 'snapshot table'),
     };
+    if (rebuild['tables'] case final List<Object?> rawRebuiltTables) {
+      final rebuiltTableIds = <String>{};
+      for (final rawRebuiltTable in rawRebuiltTables) {
+        final rebuiltTable = _map(rawRebuiltTable, 'rebuilt table');
+        final tableId = rebuiltTable['tableId']! as String;
+        if (!rebuiltTableIds.add(tableId)) {
+          throw const FormatException('A rebuild names the same table more than once.');
+        }
+        final finalTable = tables[tableId];
+        final expectedBefore = _map(rebuiltTable['expectedBefore'], 'rebuilt table expectedBefore');
+        if (finalTable == null ||
+            finalTable['schemaId'] != phase['scopeId'] ||
+            finalTable['name'] != rebuiltTable['finalName'] ||
+            expectedBefore['id'] != tableId ||
+            expectedBefore['schemaId'] != phase['scopeId'] ||
+            expectedBefore['name'] != rebuiltTable['oldName'] ||
+            rebuiltTable['replacementName'] != '__voxel_rebuild_${tableId.substring(0, 12)}') {
+          throw const FormatException('A rebuilt table is inconsistent with its phase scope.');
+        }
+        final sql = phaseSql.join('\n');
+        final quotedScope = _quoteIdentifier(scopeName);
+        final quotedOldName = _quoteIdentifier(rebuiltTable['oldName']! as String);
+        final quotedReplacementName = _quoteIdentifier(
+          rebuiltTable['replacementName']! as String,
+        );
+        final quotedFinalName = _quoteIdentifier(rebuiltTable['finalName']! as String);
+        if (!sql.contains('$quotedScope.$quotedReplacementName') ||
+            !sql.contains('$quotedScope.$quotedOldName') ||
+            !sql.contains('RENAME TO $quotedFinalName')) {
+          throw const FormatException(
+            'A rebuilt table does not match its reviewed SQL statements.',
+          );
+        }
+        final expectedIndexes = _list(
+          expectedBefore['indexes'],
+          'rebuilt table expected indexes',
+        ).map((value) => _map(value, 'rebuilt table expected index'));
+        final expectedDependencies = [
+          for (final index in expectedIndexes)
+            {'kind': 'index', 'objectId': index['id'], 'name': index['name']},
+        ];
+        if (canonicalJson(rebuiltTable['managedDependencies']) !=
+            canonicalJson(expectedDependencies)) {
+          throw const FormatException(
+            'A rebuilt table must identify every managed dependent index.',
+          );
+        }
+      }
+    }
     for (final rawValidation in _list(rebuild['validations'], 'rebuild validations')) {
       final validation = _map(rawValidation, 'rebuild validation');
       if (validation['kind'] != 'foreignKeyAntiJoin' && validation['kind'] != 'enumArrayLabels') {
@@ -726,6 +858,8 @@ final class VoxelArtifactChecker {
       }
     }
   }
+
+  String _quoteIdentifier(String value) => '"${value.replaceAll('"', '""')}"';
 
   Map<String, Object?> _physicalSnapshot(Map<String, Object?> snapshot) {
     final schemaNames = <String, String>{

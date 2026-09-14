@@ -2,6 +2,7 @@ import {
   AttachmentRegistry,
   AttachmentRegistryError,
 } from './turso_attachment_registry.js';
+import { normalizeOpfsFilePath, opfsFileExists } from './turso_opfs_paths.js';
 
 const upstreamVersion = '0.8.0-pre.10';
 const testFault = new URL(import.meta.url).searchParams.get('__turso_test_fault');
@@ -36,6 +37,8 @@ async function dispatch(operation, payload) {
   switch (operation) {
     case 'open':
       return open(payload);
+    case 'exists':
+      return inspectFileExistence(payload);
     case 'query':
       return query(payload);
     case 'execute':
@@ -45,6 +48,21 @@ async function dispatch(operation, payload) {
     default:
       throw new Error(`Unknown Turso worker operation: ${operation}.`);
   }
+}
+
+async function inspectFileExistence({ path }) {
+  if (!globalThis.isSecureContext) {
+    throw new UnsupportedError('Turso web requires a secure browser context.');
+  }
+  if (typeof navigator.storage?.getDirectory !== 'function') {
+    throw new UnsupportedError('Origin-private file storage is unavailable.');
+  }
+  const normalizedPath = normalizeOpfsFilePath(path);
+  const root = await navigator.storage.getDirectory();
+  return {
+    upstreamVersion,
+    exists: await opfsFileExists(root, normalizedPath),
+  };
 }
 
 async function open({ path, persistent, encryption }) {
@@ -357,8 +375,7 @@ function boundArgument(argument, parameters) {
 
 function browserStorageFilename(filename) {
   if (filename.startsWith('file:')) return browserFileUri(filename);
-  validateBrowserFilename(filename);
-  return filename;
+  return normalizeBrowserStoragePath(filename);
 }
 
 function browserFileUri(uri) {
@@ -374,7 +391,7 @@ function browserFileUri(uri) {
   const encodedPath = queryIndex < 0 ? withoutScheme : withoutScheme.slice(0, queryIndex);
   const query = queryIndex < 0 ? '' : withoutScheme.slice(queryIndex + 1);
   const filename = decodePercent(encodedPath);
-  validateBrowserFilename(filename);
+  const normalizedFilename = normalizeBrowserStoragePath(filename);
 
   let cipher;
   let hexkey;
@@ -410,20 +427,21 @@ function browserFileUri(uri) {
   if (hexkey !== undefined && !/^[0-9a-fA-F]{64}$/.test(hexkey)) {
     throw new InputError('A browser attachment hexkey must contain exactly 64 hexadecimal digits.');
   }
-  return filename;
+  return normalizedFilename;
 }
 
-function validateBrowserFilename(filename) {
-  if (
-    filename.length === 0 ||
-    filename.includes('/') ||
-    filename.includes('\\') ||
-    filename.includes('\0') ||
-    filename.startsWith('file:')
-  ) {
-    throw new UnsupportedError(
-      'A browser attachment filename must be one nonempty OPFS filename.',
-    );
+function normalizeBrowserStoragePath(path) {
+  if (path.startsWith('file:')) {
+    throw new UnsupportedError('A browser attachment path cannot start with file:.');
+  }
+  try {
+    const normalized = normalizeOpfsFilePath(path);
+    if (normalized !== path) {
+      throw new Error('An OPFS file path must already be normalized.');
+    }
+    return normalized;
+  } catch (error) {
+    throw new UnsupportedError(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -686,7 +704,7 @@ function encodeError(error, operation) {
   if (error instanceof UnsupportedError) return { kind: 'unsupported', message };
   if (error instanceof SqlError) return { kind: 'database', message, code: null };
   if (error instanceof IntegrationError) return { kind: 'platform', message };
-  if (operation === 'open') return { kind: 'platform', message };
+  if (operation === 'open' || operation === 'exists') return { kind: 'platform', message };
   return {
     kind: 'database',
     message,

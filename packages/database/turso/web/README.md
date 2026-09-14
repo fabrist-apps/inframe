@@ -15,7 +15,7 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-The bridge, upstream bundle, and SQL parser adapter execute in a dedicated application worker.
+The bridge, OPFS path adapter, upstream bundle, and SQL parser adapter execute in a dedicated application worker.
 Upstream Turso creates its own worker for OPFS access.
 
 ATTACH and DETACH are enabled by the bridge for ordinary and encrypted opens. In-memory attachments
@@ -25,11 +25,11 @@ OPFS registration and executes the original SQL and bindings without interpolati
 retain their supplied spelling, so callers should use a stable lowercase alias in later statements.
 Computed attachment arguments are unsupported.
 
-A persistent filename may be a plain single-file name or a lowercase `file:` URI containing one
-percent-encoded filename, optional `mode=rwc`, and paired `cipher` and `hexkey` options. Supported
+A persistent path may be a normalized relative path or a lowercase `file:` URI containing one
+percent-encoded relative path, optional `mode=rwc`, and paired `cipher` and `hexkey` options. Supported
 ciphers are `aegis256` and `aes256gcm`; the key must be exactly 64 hexadecimal characters.
-Authorities, fragments, path separators, other modes, and other options are rejected before file
-acquisition. The original URI reaches Turso unchanged while its decoded filename identifies the
+Authorities, fragments, absolute or escaping paths, other modes, and other options are rejected before file
+acquisition. Nested directories are created during open. The original URI reaches Turso unchanged while its decoded path identifies the
 OPFS registration. URI keys remain scoped to the current operation and are redacted from bridge
 errors. They are not inherited or restored after reload.
 
@@ -45,17 +45,22 @@ engine, and then releases attachment registrations. An uncertain execution, fina
 protocol outcome retires the connection before cleanup, so queued and future operations fail.
 
 Persistent attachments from an in-memory browser main are rejected before acquiring OPFS handles.
-Browser attachment names cannot contain a path separator or NUL. An attachment database and its
+Browser attachment paths cannot contain backslashes, NUL, empty segments, or escape the OPFS root. An attachment database and its
 `-wal` file must not overlap another database/WAL pair owned by the same connection. A competing
 browser worker or tab that owns the same OPFS file causes an explicit open failure; the bridge does not steal the handle or
 fall back to memory. Re-run the installer whenever these assets change.
+
+The public existence inspection traverses directories and requests the final file with
+`create: false`. It never creates a directory or file and never opens a database or synchronous
+access handle. The bridge remains version checked for this operation.
 
 ## Provenance
 
 | Asset | Source | SHA-256 |
 | --- | --- | --- |
 | `turso_attachment_registry.js` | Package-owned retryable alias and registration ownership state | `4572d1a01b09d9a6402bc8e3862630898da9af6baf282e2afb1e921de5374a14` |
-| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `819d31bc2fa9063676a0e7f32b72b621372b7bdd3532d414eda5dbe8118515db` |
+| `turso_opfs_paths.js` | Package-owned normalized traversal and read-only inspection | `e3716ec5d1785360b2395997d15b87c87fde6660efeacfc5af54ae7ec1e4fd5e` |
+| `turso_upstream.js` | `tool/web_bundle`: pinned npm modules plus the package-owned ATTACH IO adapter | `4efbb83f461463864d9a0ffb71f8b2b578ad007a96a7798640f00e3b5c192518` |
 | `turso_sql_guard.wasm` | `tool/sql_guard`, using `turso_parser` at `342dfbe267ebdb9141c434c499ce31e10bb46f27` | `53befd5b351189a382af748f7148525d39ed0681d636d4664c8d1775dae66297` |
 
 The npm tarball integrity is

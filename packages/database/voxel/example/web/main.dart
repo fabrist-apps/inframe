@@ -1,8 +1,19 @@
-import 'dart:convert';
+import 'dart:async';
+import 'dart:js_interop';
 import 'dart:typed_data';
 
 import 'package:turso/turso.dart';
+import 'package:voxel/src/migration.dart';
+import 'package:voxel/src/platform_web.dart'
+    show
+        openVoxelPersistentDatabase,
+        resolveVoxelWebAttachmentResource,
+        resolveVoxelWebMainResource;
+import 'package:voxel/src/web_migration_lock_core.dart' show voxelWebMigrationLockName;
 import 'package:voxel/voxel.dart';
+import 'package:voxel_fixture_app/app_database.dart';
+import 'package:voxel_fixture_app/browser_cyclic_rebuild_fixture.dart';
+import 'package:voxel_fixture_app/browser_nontransactional_fixture.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
 import 'package:voxel_fixture_app/posts.dart';
 import 'package:voxel_fixture_schema/authors.dart';
@@ -12,78 +23,687 @@ import '../../test/generated_consumer.dart';
 
 Future<void> main() async {
   try {
+    final role = Uri.base.queryParameters['role'];
+    if (role == 'lock-holder') {
+      await _runLockHolder();
+      return;
+    }
+    if (role == 'lock-setup') {
+      final database = await FixtureAppDatabase().open(
+        storage: const VoxelStorage.opfs(directory: _lockFixtureDirectory),
+      );
+      await database.close();
+      web.document.body!.textContent = 'PASS\nLOCK FIXTURE READY';
+      return;
+    }
+    if (role == 'lock-contender') {
+      await _runLockContender(Uri.base.queryParameters['case'] ?? 'queued');
+      return;
+    }
     await _verifyGeneratedTextStorage();
     await _verifyScalarStorage();
     await _verifyEnumStorage();
     await _verifyVectorStorage();
     await _verifyArrayStorage();
     await _verifyMigrationBundle();
-    web.document.body!.textContent = 'PASS\nVoxel browser codec fixture';
+    await _verifyPersistentOpfs();
+    await _verifyBrowserRebuild();
+    await _verifyBrowserCyclicRebuild();
+    await _verifyBrowserMaintenance();
+    web.document.body!.textContent = 'PASS\nVoxel browser OPFS fixture';
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
   }
 }
 
-Future<void> _verifyMigrationBundle() async {
-  const bundle = FixtureAppDatabaseVoxelMigrations.bundle;
+Future<void> _verifyBrowserRebuild() async {
+  final schema = FixtureAppDatabaseVoxelSchema.build();
+  const fullBundle = FixtureAppDatabaseVoxelMigrations.bundle;
+  final prefixBundle = VoxelMigrationBundle(
+    databaseId: fullBundle.databaseId,
+    migrations: fullBundle.migrations.take(2).toList(),
+  );
+  final run = DateTime.now().microsecondsSinceEpoch;
+
+  final repairDirectory = 'voxel-fixtures/review-5/rebuild-repair-$run';
+  var database = await _openFixtureBundle(schema, prefixBundle, repairDirectory);
+  await database.execute('PRAGMA foreign_keys=OFF');
+  await database.execute(
+    "INSERT INTO content.posts VALUES ('bad-post', 'missing-author', 'published')",
+  );
+  await database.execute('PRAGMA foreign_keys=ON');
+  await database.close();
+
+  await _expectAsyncFailure(
+    () => _openFixtureBundle(schema, fullBundle, repairDirectory),
+    'invalid rebuild unexpectedly committed',
+  );
+  database = await _openFixtureBundle(schema, prefixBundle, repairDirectory);
+  _expect(
+    (await database.query(
+          "SELECT COUNT(*) AS value FROM content.sqlite_schema WHERE name = 'posts'",
+        )).rows.single.getInt('value') ==
+        1,
+    'failed rebuild did not restore the original table',
+  );
+  _expect(
+    (await database.query(
+          "SELECT COUNT(*) AS value FROM content.sqlite_schema WHERE name LIKE '__voxel_rebuild_%'",
+        )).rows.single.getInt('value') ==
+        0,
+    'failed rebuild left a replacement table',
+  );
+  _expect(
+    (await database.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys') == 1,
+    'failed rebuild did not restore foreign keys',
+  );
+  await database.execute("DELETE FROM content.posts WHERE id = 'bad-post'");
+  await database.execute("INSERT INTO content.authors VALUES ('valid-author', 'Valid Author')");
+  await database.execute(
+    "INSERT INTO content.posts VALUES ('valid-post', 'valid-author', 'published')",
+  );
+  await database.close();
+
+  database = await _openFixtureBundle(schema, fullBundle, repairDirectory);
+  _expect(
+    (await database.query(
+          "SELECT status FROM content.posts WHERE id = 'valid-post'",
+        )).rows.single.getString('status') ==
+        'live',
+    'repaired rebuild did not transform stored enum text',
+  );
+  await database.close();
+
+  await _verifyRebuildCrash(
+    schema,
+    prefixBundle,
+    fullBundle,
+    'voxel-fixtures/review-5/rebuild-before-$run',
+    VoxelMigrationInterruptionPoint.beforePhaseCommit,
+  );
+  await _verifyRebuildCrash(
+    schema,
+    prefixBundle,
+    fullBundle,
+    'voxel-fixtures/review-5/rebuild-after-$run',
+    VoxelMigrationInterruptionPoint.afterPhaseCommit,
+  );
+}
+
+Future<void> _verifyBrowserCyclicRebuild() async {
+  final column = VoxelColumn<String>(VoxelTextCodec(), declaredName: 'id');
+  final schema = VoxelDatabaseSchema(
+    name: 'browser_cyclic_rebuild',
+    tables: [
+      VoxelTableSchema<Object?, Object?>(
+        schemaName: 'content',
+        tableName: 'runtime_registration',
+        definition: Object(),
+        columns: [column as VoxelColumn<Object?>],
+        columnNames: const ['id'],
+        decode: (_, _) => Object(),
+        definitionType: Object,
+        rowType: Object,
+      ),
+    ],
+  );
+  final prefix = VoxelMigrationBundle(
+    databaseId: browserCyclicRebuildBundle.databaseId,
+    migrations: [browserCyclicRebuildBundle.migrations.first],
+  );
+  final directory =
+      'voxel-fixtures/review-6/cyclic-rebuild-${DateTime.now().microsecondsSinceEpoch}';
+  var database = await _openFixtureBundle(schema, prefix, directory);
+  await database.execute(
+    "INSERT INTO content.parents VALUES ('acme', 'p1', '7', NULL, NULL)",
+  );
+  await database.execute(
+    "INSERT INTO content.children VALUES ('acme', 'c1', 'acme', 'p1')",
+  );
+  await database.execute(
+    "UPDATE content.parents SET favoriteChildTenant = 'acme', favoriteChildId = 'c1' "
+    "WHERE tenant = 'acme' AND id = 'p1'",
+  );
+  await database.close();
+
+  database = await _openFixtureBundle(schema, browserCyclicRebuildBundle, directory);
+  final parent = (await database.query(
+    "SELECT name, favoriteChildId FROM content.parents WHERE tenant = 'acme' AND id = 'p1'",
+  )).rows.single;
+  _expect(parent.getInt('name') == 7, 'browser composite rebuild did not transform the row');
+  _expect(
+    parent.getString('favoriteChildId') == 'c1',
+    'browser rebuild did not preserve its incoming cyclic reference',
+  );
+  _expect(
+    (await database.query('PRAGMA content.foreign_key_check')).rows.isEmpty,
+    'browser cyclic composite rebuild left a foreign-key violation',
+  );
+  await database.close();
+}
+
+Future<void> _verifyRebuildCrash(
+  VoxelDatabaseSchema schema,
+  VoxelMigrationBundle prefixBundle,
+  VoxelMigrationBundle fullBundle,
+  String directory,
+  VoxelMigrationInterruptionPoint point,
+) async {
+  var database = await _openFixtureBundle(schema, prefixBundle, directory);
+  await database.execute("INSERT INTO content.authors VALUES ('crash-author', 'Crash Author')");
+  await database.execute(
+    "INSERT INTO content.posts VALUES ('crash-post', 'crash-author', 'published')",
+  );
+  await database.close();
+  final rebuild = fullBundle.migrations.last;
+  var interrupted = false;
+  await _expectAsyncFailure(
+    () => _openFixtureBundle(
+      schema,
+      fullBundle,
+      directory,
+      interrupt: (event) async {
+        if (!interrupted &&
+            event.point == point &&
+            event.migrationId == rebuild.id &&
+            event.phaseId == '0') {
+          interrupted = true;
+          throw _SimulatedReload(point);
+        }
+      },
+    ),
+    'rebuild did not stop at ${point.name}',
+  );
+  _expect(interrupted, 'rebuild interruption missed ${point.name}');
+
+  if (point == VoxelMigrationInterruptionPoint.beforePhaseCommit) {
+    database = await _openFixtureBundle(schema, prefixBundle, directory);
+    _expect(
+      (await database.query(
+            "SELECT status FROM content.posts WHERE id = 'crash-post'",
+          )).rows.single.getString('status') ==
+          'published',
+      'pre-commit rebuild interruption did not roll back',
+    );
+    await database.close();
+  }
+  database = await _openFixtureBundle(schema, fullBundle, directory);
+  _expect(
+    (await database.query(
+          "SELECT status FROM content.posts WHERE id = 'crash-post'",
+        )).rows.single.getString('status') ==
+        'live',
+    'rebuild did not recover after ${point.name}',
+  );
+  await database.close();
+}
+
+Future<TursoDatabase> _openFixtureBundle(
+  VoxelDatabaseSchema schema,
+  VoxelMigrationBundle bundle,
+  String directory, {
+  Future<void> Function(VoxelMigrationInterruption interruption)? interrupt,
+}) => openVoxelPersistentDatabase(
+  databaseName: schema.name,
+  directory: directory,
+  migrations: VoxelMigrationPlan.validate(schema: schema, bundle: bundle),
+  lockTimeout: const Duration(seconds: 30),
+  encryptionCipher: null,
+  encryptionKey: null,
+  schemaDirectories: const {'content': null},
+  schemaEncryptionCiphers: const {'content': null},
+  schemaEncryptionKeys: const {'content': null},
+  interrupt: interrupt,
+);
+
+Future<void> _verifyBrowserMaintenance() async {
+  final run = DateTime.now().microsecondsSinceEpoch;
+  await _verifyMaintenanceRetry('voxel-fixtures/review-5/maintenance-retry-$run');
+  await _verifyMaintenanceCompleted('voxel-fixtures/review-5/maintenance-completed-$run');
+  await _verifyMaintenanceUncertain('voxel-fixtures/review-5/maintenance-uncertain-$run');
+}
+
+Future<void> _verifyMaintenanceRetry(String directory) async {
+  await _interruptRecoveryOpen(
+    directory,
+    VoxelMigrationInterruptionPoint.afterPhaseStarted,
+  );
+  var phase = await _recoveryPhaseStatus(directory);
+  _expect(
+    phase.state == VoxelMigrationPhaseState.started && !phase.completionRecorded,
+    'maintenance did not report a retryable started attempt',
+  );
+  await _resolveRecovery(directory, phase, VoxelMigrationResolution.retry);
+  final database = await VoxelDatabaseRuntime.open(
+    schema: browserRecoverySchema,
+    bundle: browserRecoveryBundle,
+    storage: VoxelStorage.opfs(directory: directory),
+  );
+  _expect(
+    await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content._voxel_migration_resolutions WHERE resolution = 'retry'",
+        ) ==
+        1,
+    'retry resolution was not audited',
+  );
+  await database.close();
+  phase = await _recoveryPhaseStatus(directory);
+  _expect(
+    phase.state == VoxelMigrationPhaseState.completed && phase.completionRecorded,
+    'retried maintenance phase did not complete',
+  );
+}
+
+Future<void> _verifyMaintenanceCompleted(String directory) async {
+  await _interruptRecoveryOpen(
+    directory,
+    VoxelMigrationInterruptionPoint.beforePhaseCommit,
+  );
+  final phase = await _recoveryPhaseStatus(directory);
+  _expect(
+    phase.state == VoxelMigrationPhaseState.completed && !phase.completionRecorded,
+    'maintenance did not classify the completed catalog effect',
+  );
+  await _expectAsyncFailure(
+    () => _resolveRecovery(
+      directory,
+      phase,
+      VoxelMigrationResolution.completed,
+      attemptId: 'stale-attempt',
+    ),
+    'maintenance accepted a stale attempt ID',
+  );
+  await _resolveRecovery(directory, phase, VoxelMigrationResolution.completed);
+  final completed = await _recoveryPhaseStatus(directory);
+  _expect(
+    completed.state == VoxelMigrationPhaseState.completed && completed.completionRecorded,
+    'completed resolution did not record durable phase history',
+  );
+}
+
+Future<void> _verifyMaintenanceUncertain(String directory) async {
+  await _interruptRecoveryOpen(
+    directory,
+    VoxelMigrationInterruptionPoint.afterPhaseStarted,
+  );
+  final plan = VoxelMigrationPlan.validate(
+    schema: browserRecoverySchema,
+    bundle: browserRecoveryBundle,
+  );
+  final content = plan.scopes.singleWhere((scope) => scope.name == 'content');
+  final attachment = resolveVoxelWebAttachmentResource(
+    databaseName: browserRecoverySchema.name,
+    schemaId: content.id,
+    directory: directory,
+  );
   final database = await TursoDatabase.open(
-    TursoLocation.memory(),
+    TursoLocation.browser(attachment.path),
     web: TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js')),
   );
+  await database.execute('CREATE TABLE authors (different TEXT)');
+  await database.close();
+  final phase = await _recoveryPhaseStatus(directory);
+  _expect(
+    phase.state == VoxelMigrationPhaseState.uncertain && !phase.completionRecorded,
+    'maintenance did not report mixed catalog evidence as uncertain',
+  );
+  await _expectAsyncFailure(
+    () => _resolveRecovery(directory, phase, VoxelMigrationResolution.retry),
+    'maintenance allowed retry for uncertain evidence',
+  );
+  await _expectAsyncFailure(
+    () => _resolveRecovery(directory, phase, VoxelMigrationResolution.completed),
+    'maintenance allowed completion for uncertain evidence',
+  );
+}
+
+Future<void> _interruptRecoveryOpen(
+  String directory,
+  VoxelMigrationInterruptionPoint point,
+) async {
+  var interrupted = false;
+  final failure = await _expectAsyncFailure(
+    () => _openFixtureBundle(
+      browserRecoverySchema,
+      browserRecoveryBundle,
+      directory,
+      interrupt: (event) async {
+        if (!interrupted && event.point == point) {
+          interrupted = true;
+          throw _SimulatedReload(point);
+        }
+      },
+    ),
+    'nontransactional phase did not stop at ${point.name}',
+  );
+  _expect(
+    interrupted,
+    'nontransactional interruption missed ${point.name}: $failure',
+  );
+}
+
+Future<VoxelMigrationPhaseStatus> _recoveryPhaseStatus(String directory) async {
+  final status = await VoxelDatabaseRuntime.migrationStatus(
+    schema: browserRecoverySchema,
+    bundle: browserRecoveryBundle,
+    storage: VoxelStorage.opfs(directory: directory),
+  );
+  return status.migrations.single.phases.single;
+}
+
+Future<void> _resolveRecovery(
+  String directory,
+  VoxelMigrationPhaseStatus phase,
+  VoxelMigrationResolution resolution, {
+  String? attemptId,
+}) => VoxelDatabaseRuntime.resolveMigration(
+  schema: browserRecoverySchema,
+  bundle: browserRecoveryBundle,
+  migrationId: browserRecoveryBundle.migrations.single.id,
+  phaseId: phase.id,
+  expectedChecksum: browserRecoveryBundle.migrations.single.checksum,
+  attemptId: attemptId ?? phase.attemptId!,
+  reason: 'browser fixture inspected exact catalog evidence',
+  resolution: resolution,
+  storage: VoxelStorage.opfs(directory: directory),
+);
+
+Future<Object> _expectAsyncFailure(
+  Future<Object?> Function() operation,
+  String message,
+) async {
   try {
-    await database.execute("ATTACH DATABASE ':memory:' AS content");
-    for (final (index, migration) in bundle.migrations.indexed) {
-      await _executeMigration(database, migration);
-      if (index == 0) {
-        await database.execute("INSERT INTO content.authors VALUES ('author-1', 'Ada')");
-        await database.execute(
-          "INSERT INTO content.articles VALUES ('post-1', 'author-1', 'published')",
-        );
-      }
-    }
-    final row = (await database.query('SELECT authorID, status FROM content.posts')).rows.single;
-    _expect(
-      row.getString('authorID') == 'author-1' && row.getString('status') == 'live',
-      'bundled migration row mismatch',
+    final value = await operation();
+    if (value is TursoDatabase) await value.close();
+  } on Object catch (error) {
+    return error;
+  }
+  throw StateError(message);
+}
+
+const _lockChannelName = 'voxel-fbr-205-lock-fixture-v1';
+const _lockFixtureDirectory = 'voxel-fixtures/fbr-205/two-tab-v1';
+
+Future<void> _runLockHolder() async {
+  final resources = _lockFixtureResources();
+  final release = Completer<void>();
+  final channel = web.BroadcastChannel(_lockChannelName)
+    ..onmessage = ((web.Event event) {
+      final message = (event as web.MessageEvent).data.dartify();
+      if (message == 'release' && !release.isCompleted) release.complete();
+    }).toJS;
+  final options = web.LockOptions(mode: 'exclusive');
+  await web.window.navigator.locks
+      .request(
+        resources.mainLock,
+        options,
+        ((web.Lock lock) => _holdFixtureLock(lock, release).toJS).toJS,
+      )
+      .toDart;
+  channel.close();
+  web.document.body!.textContent = 'PASS\nHOLDER RELEASED';
+}
+
+Future<JSAny?> _holdFixtureLock(web.Lock lock, Completer<void> release) async {
+  web.document.body!.textContent = 'HOLDER READY\n${lock.name}';
+  await release.future;
+  return null;
+}
+
+Future<void> _runLockContender(String testCase) async {
+  final timeout = switch (testCase) {
+    'zero' => Duration.zero,
+    'timeout' => const Duration(milliseconds: 250),
+    _ => const Duration(seconds: 30),
+  };
+  web.document.body!.textContent = 'CONTENDER QUEUED\n$testCase';
+  try {
+    final database = await FixtureAppDatabase().open(
+      storage: const VoxelStorage.opfs(directory: _lockFixtureDirectory),
+      migrations: VoxelMigrationOptions(lockTimeout: timeout),
     );
-  } finally {
+    if (testCase != 'queued') {
+      await database.close();
+      throw StateError('$testCase contender unexpectedly acquired every lock');
+    }
+    _expect(
+      await VoxelTesting.scalarInt(
+            database,
+            'SELECT COUNT(*) AS value FROM main._voxel_phase_summaries',
+          ) ==
+          3,
+      'queued contender did not reread durable migration history',
+    );
     await database.close();
+    web.document.body!.textContent = 'PASS\nQUEUED CONTENDER SERIALIZED\nHISTORY REREAD';
+  } on TimeoutException {
+    if (testCase == 'queued') rethrow;
+    await _expectTimedOutLocksSettled();
+    web.document.body!.textContent =
+        'PASS\n${testCase.toUpperCase()} TIMEOUT CANCELLED\nPARTIAL LOCK RELEASED';
   }
 }
 
-Future<void> _executeMigration(
-  TursoDatabase database,
-  VoxelBundledMigration migration,
-) async {
-  final bytes = utf8.encode(migration.sql);
-  for (final rawPhase in migration.metadata['phases']! as List<Object?>) {
-    final phase = rawPhase! as Map<String, Object?>;
-    final rebuild = phase['rebuild'] as Map<String, Object?>?;
-    if (rebuild != null) await database.execute('PRAGMA foreign_keys=OFF');
-    try {
-      await database.transaction<void>((transaction) async {
-        for (final rawRange in phase['statements']! as List<Object?>) {
-          final range = rawRange! as Map<String, Object?>;
-          await transaction.execute(
-            utf8.decode(
-              bytes.sublist(range['startByte']! as int, range['endByte']! as int),
-            ),
-          );
-        }
-        if (rebuild != null) {
-          for (final rawValidation in rebuild['validations']! as List<Object?>) {
-            final validation = rawValidation! as Map<String, Object?>;
-            final row = (await transaction.query(validation['sql']! as String)).rows.single;
-            if (row.getInt('valid') != 1) {
-              throw StateError('Bundled migration validation failed.');
-            }
-          }
-        }
-      });
-    } finally {
-      if (rebuild != null) await database.execute('PRAGMA foreign_keys=ON');
-    }
+Future<void> _expectTimedOutLocksSettled() async {
+  final resources = _lockFixtureResources();
+  final snapshot = await web.window.navigator.locks.query().toDart;
+  final held = snapshot.held.toDart.map((lock) => lock.name).toList();
+  final pending = snapshot.pending.toDart.map((lock) => lock.name).toList();
+  _expect(
+    !held.contains(resources.attachmentLock),
+    'timed-out contender retained its partially acquired attachment lock',
+  );
+  _expect(
+    !pending.contains(resources.mainLock) && !pending.contains(resources.attachmentLock),
+    'timed-out contender left a pending Web Locks request',
+  );
+}
+
+({String mainLock, String attachmentLock}) _lockFixtureResources() {
+  final plan = VoxelMigrationPlan.validate(
+    schema: FixtureAppDatabaseVoxelSchema.build(),
+    bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+  );
+  final attachment = plan.scopes.singleWhere((scope) => scope.name == 'content');
+  final mainPath = resolveVoxelWebMainResource(
+    databaseName: 'fixture_app',
+    directory: _lockFixtureDirectory,
+  ).path;
+  final attachmentPath = resolveVoxelWebAttachmentResource(
+    databaseName: 'fixture_app',
+    schemaId: attachment.id,
+    directory: _lockFixtureDirectory,
+  ).path;
+  final origin = web.window.location.origin;
+  return (
+    mainLock: voxelWebMigrationLockName(origin, mainPath),
+    attachmentLock: voxelWebMigrationLockName(origin, attachmentPath),
+  );
+}
+
+Future<void> _verifyPersistentOpfs() async {
+  final defaultDatabase = await FixtureAppDatabase().open();
+  await defaultDatabase.close();
+  final reopenedDefault = await FixtureAppDatabase().open();
+  await reopenedDefault.close();
+
+  const storage = VoxelStorage.opfs(directory: 'voxel-fixtures/fbr-205/runtime-v1');
+  var database = await FixtureAppDatabase().open(storage: storage);
+  await VoxelTesting.execute(
+    database,
+    "INSERT OR IGNORE INTO content.authors VALUES ('browser-author', 'Browser Ada')",
+  );
+  _expect(
+    await VoxelTesting.scalarInt(
+          database,
+          'SELECT COUNT(*) AS value FROM content._voxel_phases',
+        ) ==
+        3,
+    'browser attachment migration receipts missing',
+  );
+
+  var competingOpenFailed = false;
+  try {
+    final competing = await FixtureAppDatabase().open(
+      storage: storage,
+      migrations: const VoxelMigrationOptions(lockTimeout: Duration.zero),
+    );
+    await competing.close();
+  } on Object {
+    competingOpenFailed = true;
   }
+  _expect(competingOpenFailed, 'competing OPFS owner unexpectedly opened the database');
+  await database.close();
+
+  database = await FixtureAppDatabase().open(storage: storage);
+  _expect(
+    await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.authors WHERE id = 'browser-author'",
+        ) ==
+        1,
+    'browser attachment data did not survive reopen',
+  );
+  _expect(
+    await VoxelTesting.scalarText(
+          database,
+          "SELECT state AS value FROM main._voxel_files WHERE schema_id != 'main'",
+        ) ==
+        'initialized',
+    'browser attachment registry was not initialized',
+  );
+  await database.close();
+
+  await _verifyEncryptedOpfs();
+  await _verifyInterruptedOpfsMigrations();
+}
+
+Future<void> _verifyInterruptedOpfsMigrations() async {
+  final run = DateTime.now().microsecondsSinceEpoch;
+  final plan = VoxelMigrationPlan.validate(
+    schema: FixtureAppDatabaseVoxelSchema.build(),
+    bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+  );
+  for (final point in [
+    VoxelMigrationInterruptionPoint.afterCreationPrepared,
+    VoxelMigrationInterruptionPoint.afterFileBootstrap,
+    VoxelMigrationInterruptionPoint.afterRegistryInitialized,
+    VoxelMigrationInterruptionPoint.afterPhaseCommit,
+    VoxelMigrationInterruptionPoint.beforeMainSummary,
+    VoxelMigrationInterruptionPoint.afterMainSummary,
+  ]) {
+    var interrupted = false;
+    final directory = 'voxel-fixtures/fbr-205/interrupt-${point.name}-$run';
+    try {
+      final unexpectedlyOpened = await _openPersistentPlan(
+        plan,
+        directory,
+        interrupt: (event) async {
+          if (!interrupted && event.point == point) {
+            interrupted = true;
+            throw _SimulatedReload(point);
+          }
+        },
+      );
+      await unexpectedlyOpened.close();
+      throw StateError('migration did not stop at ${point.name}');
+    } on _SimulatedReload catch (error) {
+      _expect(
+        error.point == point,
+        'unexpected interruption failure at ${point.name}: $error',
+      );
+    }
+
+    final recovered = await _openPersistentPlan(plan, directory);
+    _expect(
+      (await recovered.query(
+            'SELECT COUNT(*) AS value FROM content._voxel_phases',
+          )).rows.single.getInt('value') ==
+          3,
+      'browser migration did not recover after ${point.name}',
+    );
+    await recovered.close();
+  }
+}
+
+Future<TursoDatabase> _openPersistentPlan(
+  VoxelMigrationPlan plan,
+  String directory, {
+  Future<void> Function(VoxelMigrationInterruption interruption)? interrupt,
+}) => openVoxelPersistentDatabase(
+  databaseName: 'fixture_app',
+  directory: directory,
+  migrations: plan,
+  lockTimeout: const Duration(seconds: 30),
+  encryptionCipher: null,
+  encryptionKey: null,
+  schemaDirectories: const {},
+  schemaEncryptionCiphers: const {},
+  schemaEncryptionKeys: const {},
+  interrupt: interrupt,
+);
+
+Future<void> _verifyEncryptedOpfs() async {
+  const storage = VoxelStorage.opfs(directory: 'voxel-fixtures/fbr-205/encrypted-v1');
+  final mainKey = Uint8List.fromList(List<int>.generate(32, (index) => index + 1));
+  final contentKey = Uint8List.fromList(List<int>.generate(32, (index) => index + 33));
+  final encryption = VoxelEncryption(cipher: VoxelCipher.aes256gcm, key: mainKey);
+  final contentEncryption = VoxelEncryption(
+    cipher: VoxelCipher.aegis256,
+    key: contentKey,
+  );
+  var database = await FixtureAppDatabase().open(
+    storage: storage,
+    encryption: encryption,
+    schemaEncryption: {'content': contentEncryption},
+  );
+  await database.close();
+
+  final wrongKey = Uint8List.fromList(contentKey)..[0] ^= 0xff;
+  var wrongKeyFailure = '';
+  try {
+    final incorrectlyOpened = await FixtureAppDatabase().open(
+      storage: storage,
+      encryption: encryption,
+      schemaEncryption: {
+        'content': VoxelEncryption(cipher: VoxelCipher.aegis256, key: wrongKey),
+      },
+    );
+    await incorrectlyOpened.close();
+  } on Object catch (error) {
+    wrongKeyFailure = error.toString();
+  }
+  _expect(wrongKeyFailure.isNotEmpty, 'wrong attachment encryption key was accepted');
+  _expect(
+    !wrongKeyFailure.contains(_hex(wrongKey)),
+    'attachment encryption key leaked in an error',
+  );
+
+  database = await FixtureAppDatabase().open(
+    storage: storage,
+    encryption: encryption,
+    schemaEncryption: {'content': contentEncryption},
+  );
+  await database.close();
+}
+
+String _hex(Uint8List bytes) => bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+
+final class _SimulatedReload implements Exception {
+  const _SimulatedReload(this.point);
+
+  final VoxelMigrationInterruptionPoint point;
+
+  @override
+  String toString() => 'simulated ${point.name} reload';
+}
+
+Future<void> _verifyMigrationBundle() async {
+  final database = await FixtureAppDatabase().open(
+    storage: const VoxelStorage.memory(),
+  );
+  await database.close();
 }
 
 Future<void> _verifyArrayStorage() async {

@@ -185,6 +185,79 @@ void main() {
       );
     });
 
+    test('should reject write scopes that cannot share the phase receipt', () async {
+      final migrationId = await const VoxelMigrationGenerator().generateDeclaration(
+        declaration: _declaration(secondScope: true),
+        directory: directory,
+        name: 'multi file',
+      );
+      final artifacts = _artifacts(directory);
+      final migration = jsonDecode(artifacts.migration.readAsStringSync()) as Map<String, Object?>;
+      final phases = (migration['phases']! as List<Object?>).cast<Map<String, Object?>>();
+      final firstScope = phases.first['scopeId'];
+      final secondScope = phases.last['scopeId'];
+      phases.first['writeScopeIds'] = [firstScope, secondScope];
+      artifacts.migration.writeAsStringSync(jsonEncode(migration));
+
+      await expectLater(
+        VoxelArtifactSealer().seal(directory: directory, migrationId: migrationId!),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('exactly its receipt scope'),
+          ),
+        ),
+      );
+    });
+
+    test('should reject duplicate or unknown declared write scopes', () async {
+      final migrationId = await _generate(directory);
+      final artifacts = _artifacts(directory);
+      final migration = jsonDecode(artifacts.migration.readAsStringSync()) as Map<String, Object?>;
+      final phase = (migration['phases']! as List<Object?>).single! as Map<String, Object?>;
+      phase['writeScopeIds'] = [phase['scopeId'], phase['scopeId']];
+      artifacts.migration.writeAsStringSync(jsonEncode(migration));
+
+      await expectLater(
+        VoxelArtifactSealer().seal(directory: directory, migrationId: migrationId),
+        throwsA(
+          isA<FormatException>().having((error) => error.message, 'message', contains('duplicate')),
+        ),
+      );
+
+      phase['writeScopeIds'] = ['ffffffffffffffffffffffffffffffff'];
+      artifacts.migration.writeAsStringSync(jsonEncode(migration));
+      await expectLater(
+        VoxelArtifactSealer().seal(directory: directory, migrationId: migrationId),
+        throwsA(
+          isA<FormatException>().having((error) => error.message, 'message', contains('unknown')),
+        ),
+      );
+    });
+
+    test('should reject reviewed rebuild SQL that diverges from its table metadata', () async {
+      final migrationId = await _generateRebuild(directory);
+      final artifacts = _artifacts(directory);
+      artifacts.sql.writeAsStringSync(
+        artifacts.sql.readAsStringSync().replaceAll(
+          '__voxel_rebuild_',
+          '__reviewed_rebuild_',
+        ),
+      );
+
+      await expectLater(
+        VoxelArtifactSealer().seal(directory: directory, migrationId: migrationId),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('reviewed SQL statements'),
+          ),
+        ),
+      );
+    });
+
     test('should allow an explicitly manual nontransactional recovery contract', () async {
       final migrationId = await _generate(directory);
       final artifacts = _artifacts(directory);
@@ -269,6 +342,26 @@ Future<String> _generate(Directory directory) async {
     name: 'initial',
   );
   return id!;
+}
+
+Future<String> _generateRebuild(Directory directory) async {
+  const generator = VoxelMigrationGenerator();
+  final initial = _declaration();
+  await generator.generateDeclaration(
+    declaration: initial,
+    directory: directory,
+    name: 'initial',
+  );
+  final changed = jsonDecode(jsonEncode(initial)) as Map<String, Object?>;
+  final table = (changed['tables']! as List<Object?>).single! as Map<String, Object?>;
+  final id = (table['columns']! as List<Object?>).single! as Map<String, Object?>;
+  id['storage'] = {'kind': 'text', 'nullable': false, 'codecVersion': 1};
+  return (await generator.generateDeclaration(
+    declaration: changed,
+    directory: directory,
+    name: 'rebuild users',
+    storageTransforms: {'auth.users.id': 'CAST("id" AS TEXT)'},
+  ))!;
 }
 
 Map<String, Object?> _declaration({bool secondScope = false}) => {

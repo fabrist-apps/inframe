@@ -5,6 +5,7 @@ import 'package:turso/src/internal/backend.dart';
 import 'package:turso/src/internal/backend_native.dart'
     if (dart.library.js_interop) 'package:turso/src/internal/backend_web.dart'
     as platform;
+import 'package:turso/src/internal/browser_file_inspection.dart' as browser_inspection;
 import 'package:turso/src/internal/parameters.dart';
 import 'package:turso/src/turso_exception.dart';
 import 'package:turso/src/turso_location.dart';
@@ -38,6 +39,16 @@ final class TursoDatabase {
     final backend = await platform.openBackend(location, encryption: encryption, web: web);
     return TursoDatabase._(backend);
   }
+
+  /// Reports whether [location] identifies an existing browser OPFS file.
+  ///
+  /// This read-only check does not create a file, open a database connection,
+  /// or acquire the driver's exclusive file ownership. Callers must coordinate
+  /// it with any migration or recovery work whose result depends on the answer.
+  static Future<bool> browserFileExists(
+    TursoBrowserLocation location, {
+    required TursoWebOptions web,
+  }) => browser_inspection.browserFileExists(location, web: web);
 
   /// Features verified for this opened backend.
   TursoCapabilities get capabilities => _backend.capabilities;

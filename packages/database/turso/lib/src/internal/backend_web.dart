@@ -35,6 +35,27 @@ Future<TursoBackend> openBackend(
   );
 }
 
+/// Checks for a browser file without creating it or acquiring a sync access handle.
+Future<bool> browserFileExists(
+  TursoBrowserLocation location, {
+  required TursoWebOptions webOptions,
+}) async {
+  final worker = web.Worker(
+    webOptions.moduleUri.toString().toJS,
+    web.WorkerOptions(type: 'module', name: 'Turso OPFS inspection'),
+  );
+  final backend = _WebBackend._(worker);
+  try {
+    final result = await backend._request('exists', {'path': location.path});
+    final inspection = result! as Map<Object?, Object?>;
+    _verifyBridgeVersion(inspection['upstreamVersion']! as String);
+    return inspection['exists']! as bool;
+  } finally {
+    backend._closed = true;
+    worker.terminate();
+  }
+}
+
 /// Owns one browser bridge worker and its request lifecycle.
 final class _WebBackend implements TursoBackend {
   _WebBackend._(this._worker) {
@@ -75,12 +96,7 @@ final class _WebBackend implements TursoBackend {
               },
       });
       final handshake = result! as Map<Object?, Object?>;
-      final version = handshake['upstreamVersion']! as String;
-      if (version != '0.8.0-pre.10') {
-        throw TursoPlatformException(
-          'Expected Turso web 0.8.0-pre.10, but loaded $version.',
-        );
-      }
+      _verifyBridgeVersion(handshake['upstreamVersion']! as String);
       final advertised = handshake['capabilities']! as Map<Object?, Object?>;
       backend.capabilities = TursoCapabilities(
         fts: advertised['fts']! as bool,
@@ -172,6 +188,12 @@ final class _WebBackend implements TursoBackend {
     }
     _pending.clear();
     _worker.terminate();
+  }
+}
+
+void _verifyBridgeVersion(String version) {
+  if (version != '0.8.0-pre.10') {
+    throw TursoPlatformException('Expected Turso web 0.8.0-pre.10, but loaded $version.');
   }
 }
 

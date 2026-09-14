@@ -4,9 +4,168 @@ import 'dart:io';
 import 'package:test/test.dart';
 import 'package:turso/turso.dart';
 import 'package:voxel/voxel.dart';
+import 'package:voxel_fixture_app/app_database.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
 
 void main() {
+  group('FixtureAppDatabase', () {
+    test('should reject a malformed bundle before opening', () async {
+      const source = FixtureAppDatabaseVoxelMigrations.bundle;
+      final first = source.migrations.first;
+      final malformed = VoxelMigrationBundle(
+        databaseId: source.databaseId,
+        migrations: [
+          VoxelBundledMigration(
+            directory: first.directory,
+            sql: first.sql,
+            metadata: {...first.metadata, 'parentId': 'ffffffffffffffffffffffffffffffff'},
+            snapshot: first.snapshot,
+          ),
+          ...source.migrations.skip(1),
+        ],
+      );
+
+      await expectLater(
+        VoxelDatabaseRuntime.open(
+          schema: FixtureAppDatabaseVoxelSchema.build(),
+          bundle: malformed,
+          storage: const VoxelStorage.memory(),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('should open independent migrated memory databases', () async {
+      final first = await FixtureAppDatabase().open(storage: const VoxelStorage.memory());
+      final second = await FixtureAppDatabase().open(storage: const VoxelStorage.memory());
+      addTearDown(first.close);
+      addTearDown(second.close);
+
+      await VoxelTesting.execute(first, "INSERT INTO content.authors VALUES ('1', 'Ada')");
+      final firstCount = await VoxelTesting.scalarInt(
+        first,
+        'SELECT COUNT(*) AS value FROM content.authors',
+      );
+      final secondCount = await VoxelTesting.scalarInt(
+        second,
+        'SELECT COUNT(*) AS value FROM content.authors',
+      );
+
+      expect(firstCount, 1);
+      expect(secondCount, 0);
+    });
+
+    test('should enforce generated indexes, checks, keys, and foreign keys', () async {
+      final database = await FixtureAppDatabase().open(
+        storage: const VoxelStorage.memory(),
+      );
+      addTearDown(database.close);
+
+      await VoxelTesting.execute(
+        database,
+        "INSERT INTO content.authors VALUES ('author-1', 'Ada')",
+      );
+      await expectLater(
+        VoxelTesting.execute(
+          database,
+          "INSERT INTO content.authors VALUES ('author-2', 'Ada')",
+        ),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.authors WHERE name = 'Ada'",
+        ),
+        1,
+      );
+      await expectLater(
+        VoxelTesting.execute(
+          database,
+          "INSERT INTO content.authors VALUES ('author-3', '')",
+        ),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.authors WHERE id = 'author-3'",
+        ),
+        0,
+      );
+      await expectLater(
+        VoxelTesting.execute(
+          database,
+          "INSERT INTO content.posts VALUES ('post-1', 'missing', 'draft')",
+        ),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.posts WHERE id = 'post-1'",
+        ),
+        0,
+      );
+      await VoxelTesting.execute(
+        database,
+        "INSERT INTO content.locales VALUES ('en', 'title')",
+      );
+      await expectLater(
+        VoxelTesting.execute(
+          database,
+          "INSERT INTO content.locales VALUES ('en', 'title')",
+        ),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.locales WHERE language = 'en' AND key = 'title'",
+        ),
+        1,
+      );
+      await expectLater(
+        VoxelTesting.execute(
+          database,
+          "INSERT INTO content.translations VALUES ('en', 'missing', 'Title')",
+        ),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.translations WHERE language = 'en' AND key = 'missing'",
+        ),
+        0,
+      );
+
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          'SELECT COUNT(*) AS value FROM content.sqlite_master '
+          "WHERE type = 'index' AND name = 'authors_name'",
+        ),
+        1,
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          'SELECT COUNT(*) AS value FROM content._voxel_migrations',
+        ),
+        3,
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          'SELECT COUNT(*) AS value FROM content._voxel_phases '
+          "WHERE status = 'completed'",
+        ),
+        3,
+      );
+    });
+  });
+
   test('generated migration bundle should preserve and execute checked history', () async {
     const bundle = FixtureAppDatabaseVoxelMigrations.bundle;
     final sourceDirectory = [

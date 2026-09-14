@@ -1,6 +1,7 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
 import 'package:voxel/voxel.dart';
+import 'package:voxel_fixture_app/app_database.dart';
 
 /// Checked migration history for `FixtureAppDatabase`.
 abstract final class FixtureAppDatabaseVoxelMigrations {
@@ -1263,5 +1264,71 @@ abstract final class FixtureAppDatabaseVoxelMigrations {
         },
       ),
     ],
+  );
+}
+
+/// Opens [FixtureAppDatabase] through its checked migration bundle.
+extension FixtureAppDatabaseVoxelOpen on FixtureAppDatabase {
+  /// Opens and owns a fully initialized Voxel database.
+  Future<VoxelDb> open({
+    VoxelStorage? storage,
+    Map<String, VoxelStorage> schemaStorage = const {},
+    VoxelEncryption? encryption,
+    Map<String, VoxelEncryption?> schemaEncryption = const {},
+    VoxelMigrationOptions migrations = const VoxelMigrationOptions(),
+  }) => VoxelDatabaseRuntime.open(
+    schema: schema,
+    bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+    storage: storage,
+    schemaStorage: schemaStorage,
+    encryption: encryption,
+    schemaEncryption: schemaEncryption,
+    migrations: migrations,
+  );
+
+  /// Reads checked migration and phase state without changing database files.
+  Future<VoxelMigrationStatus> migrationStatus({
+    VoxelStorage? storage,
+    Map<String, VoxelStorage> schemaStorage = const {},
+    VoxelEncryption? encryption,
+    Map<String, VoxelEncryption?> schemaEncryption = const {},
+    VoxelMigrationOptions migrations = const VoxelMigrationOptions(),
+  }) => VoxelDatabaseRuntime.migrationStatus(
+    schema: schema,
+    bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+    storage: storage,
+    schemaStorage: schemaStorage,
+    encryption: encryption,
+    schemaEncryption: schemaEncryption,
+    migrations: migrations,
+  );
+
+  /// Records an audited decision for one interrupted migration attempt.
+  Future<void> resolveMigration({
+    required String migrationId,
+    required String phaseId,
+    required String expectedChecksum,
+    required String attemptId,
+    required String reason,
+    required VoxelMigrationResolution resolution,
+    VoxelStorage? storage,
+    Map<String, VoxelStorage> schemaStorage = const {},
+    VoxelEncryption? encryption,
+    Map<String, VoxelEncryption?> schemaEncryption = const {},
+    VoxelMigrationOptions migrations = const VoxelMigrationOptions(),
+  }) => VoxelDatabaseRuntime.resolveMigration(
+    schema: schema,
+    bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+    migrationId: migrationId,
+    phaseId: phaseId,
+    expectedChecksum: expectedChecksum,
+    attemptId: attemptId,
+    reason: reason,
+    resolution: resolution,
+    storage: storage,
+    schemaStorage: schemaStorage,
+    encryption: encryption,
+    schemaEncryption: schemaEncryption,
+    migrations: migrations,
   );
 }

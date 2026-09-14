@@ -121,13 +121,13 @@ await database.execute('DETACH DATABASE auxiliary');
 ```
 
 Native parent directories must already exist. `':memory:'` creates an in-memory attachment on
-native and web. A persistent browser main accepts a single OPFS filename and alias as direct SQL
+native and web. A persistent browser main accepts a normalized relative OPFS path and alias as direct SQL
 arguments or positional and named parameters. Bound aliases retain the supplied spelling, so use a
 stable lowercase alias when later statements refer to it. Computed attachment arguments are
 unsupported. An attachment database and its `-wal` file must not overlap another database/WAL pair
 owned by the same connection. A browser memory main supports memory attachments only.
 
-Browser filenames may also use a lowercase `file:` URI with one percent-encoded filename, optional
+Browser paths may also use a lowercase `file:` URI with a percent-encoded relative path, optional
 `mode=rwc`, and paired `cipher` and `hexkey` options:
 
 ```dart
@@ -140,10 +140,14 @@ await database.execute(
 ```
 
 Supported ciphers are `aegis256` and `aes256gcm`; `hexkey` must contain exactly 64 hexadecimal
-characters. Authorities, fragments, path separators, other modes, and other URI options are
-rejected. The original URI reaches Turso unchanged while the bridge uses its decoded filename for
+characters. Authorities, fragments, absolute or escaping paths, other modes, and other URI options are
+rejected. Nested directories are created when a database opens. The original URI reaches Turso unchanged while the bridge uses its decoded path for
 OPFS ownership. Encryption keys remain scoped to the operation and are redacted from bridge errors.
 They are not inherited from the main database or restored after a reload.
+
+`TursoDatabase.browserFileExists` checks a normalized `TursoBrowserLocation` without creating the
+file, opening a database connection, or acquiring an exclusive OPFS access handle. Coordinate the
+check with migration and recovery locks when its result controls a subsequent write.
 
 An alias belongs to one connection: DETACH or close releases it, and reopening the main database
 does not restore it. The attached database contents persist independently, so callers can explicitly

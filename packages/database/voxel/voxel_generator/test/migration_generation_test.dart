@@ -64,6 +64,8 @@ void main() {
       expect(migration['parentId'], isNull);
       expect(migration['checksum'], entry['checksum']);
       expect(migration['phases']! as List<Object?>, hasLength(1));
+      final phase = (migration['phases']! as List<Object?>).single! as Map<String, Object?>;
+      expect(phase['writeScopeIds'], [phase['scopeId']]);
     });
 
     test('should reject a covered SQL edit during offline checking', () async {
@@ -285,12 +287,24 @@ void main() {
       final generator = VoxelMigrationGenerator(
         createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
       );
+      final initial = _declaration(table: 'users', columns: ['id', 'name']);
+      ((initial['tables']! as List<Object?>).single! as Map<String, Object?>)['indexes'] = [
+        {
+          'name': 'users_name_unique',
+          'unique': true,
+          'terms': [
+            {'column': 'name', 'descending': false},
+          ],
+          'options': <String, Object?>{},
+          'platforms': ['native', 'browser'],
+        },
+      ];
       await generator.generateDeclaration(
-        declaration: _declaration(table: 'users', columns: ['id', 'name']),
+        declaration: initial,
         directory: directory,
         name: 'initial',
       );
-      final changed = _declaration(table: 'users', columns: ['id', 'name']);
+      final changed = jsonDecode(jsonEncode(initial)) as Map<String, Object?>;
       final table = (changed['tables']! as List<Object?>).single! as Map<String, Object?>;
       final name = (table['columns']! as List<Object?>).last! as Map<String, Object?>;
       name['storage'] = {'kind': 'integer', 'nullable': false, 'codecVersion': 1};
@@ -308,7 +322,30 @@ void main() {
       expect(sql, contains('DROP TABLE "auth"."users";'));
       final migration = _finalMigration(directory);
       final phase = (migration['phases']! as List<Object?>).single! as Map<String, Object?>;
-      expect(phase['rebuild'], isA<Map<String, Object?>>());
+      final rebuild = phase['rebuild']! as Map<String, Object?>;
+      final rebuiltTable = (rebuild['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final expectedBefore = rebuiltTable['expectedBefore']! as Map<String, Object?>;
+      expect(rebuiltTable['tableId'], expectedBefore['id']);
+      expect(rebuiltTable['oldName'], 'users');
+      expect(rebuiltTable['replacementName'], startsWith('__voxel_rebuild_'));
+      expect(rebuiltTable['finalName'], 'users');
+      expect(
+        rebuiltTable['managedDependencies'],
+        [
+          {
+            'kind': 'index',
+            'objectId': isA<String>(),
+            'name': 'users_name_unique',
+          },
+        ],
+      );
+      expect(
+        (expectedBefore['columns']! as List<Object?>).cast<Map<String, Object?>>().map(
+          (column) => column['name'],
+        ),
+        ['id', 'name'],
+      );
+      expect(expectedBefore['constraints'], isNotEmpty);
     });
 
     test('should reject an incompatible rebuild without a storage transform', () async {

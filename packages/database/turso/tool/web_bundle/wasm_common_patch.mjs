@@ -12,6 +12,8 @@ import {
   instantiateNapiModuleSync,
 } from '@napi-rs/wasm-runtime';
 
+import { resolveOpfsFile } from '../../web/turso_opfs_paths.js';
+
 export * from './node_modules/@tursodatabase/database-wasm-common/dist/index.js';
 
 const workerStates = new WeakMap();
@@ -202,6 +204,7 @@ export async function runWithSynchronousIo(action) {
 export function setupWebWorker() {
   const opfs = new OpfsDirectory();
   assertOpfsDirectoryCompatibility(opfs);
+  opfs.registerFile = (path) => registerWorkerFile(opfs, path).then(() => undefined);
   let memory = null;
   let mutationTail = Promise.resolve();
   const handler = new MessageHandler({
@@ -352,7 +355,7 @@ async function registerWorkerFile(opfs, path) {
     return { handle: existing.handle, size: existing.sync.getSize() };
   }
   const root = await navigator.storage.getDirectory();
-  const file = await root.getFileHandle(path, { create: true });
+  const file = await resolveOpfsFile(root, path, { create: true });
   const sync = await file.createSyncAccessHandle();
   const handle = opfs.fileHandleNo + 1;
   opfs.fileHandleNo = handle;

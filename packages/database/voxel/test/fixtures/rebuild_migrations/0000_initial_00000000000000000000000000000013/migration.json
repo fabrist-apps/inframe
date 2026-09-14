@@ -1,0 +1,37 @@
+{
+  "checksum": "98c9b8e457e3fad63e491007db8cfc29505b50b2bfb3b368a106e91bd40adb80",
+  "databaseId": "00000000000000000000000000000001",
+  "dialect": "voxel",
+  "formatVersion": 1,
+  "id": "00000000000000000000000000000013",
+  "parentId": null,
+  "phases": [
+    {
+      "id": "0",
+      "mode": "transactional",
+      "platforms": [
+        "native",
+        "browser"
+      ],
+      "recovery": null,
+      "scopeId": "00000000000000000000000000000002",
+      "statements": [
+        {
+          "endByte": 396,
+          "startByte": 0
+        },
+        {
+          "endByte": 753,
+          "startByte": 397
+        },
+        {
+          "endByte": 864,
+          "startByte": 754
+        }
+      ],
+      "writeScopeIds": [
+        "00000000000000000000000000000002"
+      ]
+    }
+  ]
+}
