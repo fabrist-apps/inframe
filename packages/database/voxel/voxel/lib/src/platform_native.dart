@@ -478,6 +478,16 @@ Future<T?> withVoxelPersistentMaintenance<T>({
         attachment.resource.path,
         attachment.encryption,
       );
+      if (registered.state == 'prepared') {
+        final objects = (await database.query(
+          '''
+SELECT name
+FROM ${_quoteIdentifier(attachment.scope.name)}.sqlite_master
+WHERE name NOT LIKE 'sqlite_%'
+''',
+        )).rows;
+        if (objects.isEmpty) continue;
+      }
       await _verifyAttachedIdentity(
         database,
         scope: attachment.scope.name,

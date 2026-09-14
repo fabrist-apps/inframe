@@ -2,3 +2,4 @@
 library;
 
 export 'connection.dart' show VoxelTesting;
+export 'migration.dart' show rewriteVoxelMigrationScopeForTesting;

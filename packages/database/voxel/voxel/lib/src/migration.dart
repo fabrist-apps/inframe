@@ -1589,8 +1589,75 @@ Future<void> _setForeignKeys(TursoDatabase database, {required bool enabled}) as
 
 String _rewriteScope(String sql, String? sourceScope, String targetScope) {
   if (sourceScope == null || sourceScope == targetScope) return sql;
-  return sql.replaceAll('${_quote(sourceScope)}.', '${_quote(targetScope)}.');
+  final rewritten = StringBuffer();
+  var index = 0;
+  while (index < sql.length) {
+    final character = sql[index];
+    if (character == "'") {
+      index = _copyQuotedSqlToken(sql, index, "'", rewritten);
+      continue;
+    }
+    if (character == '-' && index + 1 < sql.length && sql[index + 1] == '-') {
+      final end = sql.indexOf('\n', index + 2);
+      if (end == -1) {
+        rewritten.write(sql.substring(index));
+        break;
+      }
+      rewritten.write(sql.substring(index, end));
+      index = end;
+      continue;
+    }
+    if (character == '/' && index + 1 < sql.length && sql[index + 1] == '*') {
+      final end = sql.indexOf('*/', index + 2);
+      if (end == -1) {
+        rewritten.write(sql.substring(index));
+        break;
+      }
+      rewritten.write(sql.substring(index, end + 2));
+      index = end + 2;
+      continue;
+    }
+    if (character == '"') {
+      final token = StringBuffer();
+      final next = _copyQuotedSqlToken(sql, index, '"', token);
+      final quoted = token.toString();
+      final identifier = quoted.substring(1, quoted.length - 1).replaceAll('""', '"');
+      if (identifier == sourceScope && next < sql.length && sql[next] == '.') {
+        rewritten.write(_quote(targetScope));
+      } else {
+        rewritten.write(quoted);
+      }
+      index = next;
+      continue;
+    }
+    rewritten.write(character);
+    index++;
+  }
+  return rewritten.toString();
 }
+
+int _copyQuotedSqlToken(String sql, int start, String quote, StringBuffer output) {
+  var index = start;
+  output.write(sql[index++]);
+  while (index < sql.length) {
+    final character = sql[index++];
+    output.write(character);
+    if (character != quote) continue;
+    if (index < sql.length && sql[index] == quote) {
+      output.write(sql[index++]);
+      continue;
+    }
+    break;
+  }
+  return index;
+}
+
+/// Rewrites a checked migration scope for focused runtime tests.
+String rewriteVoxelMigrationScopeForTesting(
+  String sql,
+  String sourceScope,
+  String targetScope,
+) => _rewriteScope(sql, sourceScope, targetScope);
 
 Future<List<Map<String, Object?>>> _catalogRows(Future<TursoQueryResult> result) async {
   final resolved = await result;

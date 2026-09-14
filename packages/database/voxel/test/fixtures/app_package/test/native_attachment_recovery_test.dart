@@ -314,6 +314,20 @@ void main() {
         everyElement(VoxelMigrationPhaseState.pending),
       );
       expect(File(attachment.path).existsSync(), isFalse);
+
+      await File(attachment.path).create();
+      final emptyFileStatus = await VoxelDatabaseRuntime.migrationStatus(
+        schema: FixtureAppDatabaseVoxelSchema.build(),
+        bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+        storage: VoxelStorage.directory(storage.path),
+      );
+      expect(
+        emptyFileStatus.migrations
+            .expand((migration) => migration.phases)
+            .where((phase) => phase.scopeId == content.id)
+            .map((phase) => phase.state),
+        everyElement(VoxelMigrationPhaseState.pending),
+      );
     });
 
     test('should recover attachment commit and main-summary interruptions', () async {

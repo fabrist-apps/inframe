@@ -13,6 +13,7 @@ import 'package:voxel/src/platform_web.dart'
 import 'package:voxel/src/web_migration_lock_core.dart' show voxelWebMigrationLockName;
 import 'package:voxel/voxel.dart';
 import 'package:voxel_fixture_app/app_database.dart';
+import 'package:voxel_fixture_app/browser_cyclic_rebuild_fixture.dart';
 import 'package:voxel_fixture_app/browser_nontransactional_fixture.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
 import 'package:voxel_fixture_app/posts.dart';
@@ -48,6 +49,7 @@ Future<void> main() async {
     await _verifyMigrationBundle();
     await _verifyPersistentOpfs();
     await _verifyBrowserRebuild();
+    await _verifyBrowserCyclicRebuild();
     await _verifyBrowserMaintenance();
     web.document.body!.textContent = 'PASS\nVoxel browser OPFS fixture';
   } on Object catch (error, stackTrace) {
@@ -127,6 +129,58 @@ Future<void> _verifyBrowserRebuild() async {
     'voxel-fixtures/review-5/rebuild-after-$run',
     VoxelMigrationInterruptionPoint.afterPhaseCommit,
   );
+}
+
+Future<void> _verifyBrowserCyclicRebuild() async {
+  final column = VoxelColumn<String>(VoxelTextCodec(), declaredName: 'id');
+  final schema = VoxelDatabaseSchema(
+    name: 'browser_cyclic_rebuild',
+    tables: [
+      VoxelTableSchema<Object?, Object?>(
+        schemaName: 'content',
+        tableName: 'runtime_registration',
+        definition: Object(),
+        columns: [column as VoxelColumn<Object?>],
+        columnNames: const ['id'],
+        decode: (_, _) => Object(),
+        definitionType: Object,
+        rowType: Object,
+      ),
+    ],
+  );
+  final prefix = VoxelMigrationBundle(
+    databaseId: browserCyclicRebuildBundle.databaseId,
+    migrations: [browserCyclicRebuildBundle.migrations.first],
+  );
+  final directory =
+      'voxel-fixtures/review-6/cyclic-rebuild-${DateTime.now().microsecondsSinceEpoch}';
+  var database = await _openFixtureBundle(schema, prefix, directory);
+  await database.execute(
+    "INSERT INTO content.parents VALUES ('acme', 'p1', '7', NULL, NULL)",
+  );
+  await database.execute(
+    "INSERT INTO content.children VALUES ('acme', 'c1', 'acme', 'p1')",
+  );
+  await database.execute(
+    "UPDATE content.parents SET favoriteChildTenant = 'acme', favoriteChildId = 'c1' "
+    "WHERE tenant = 'acme' AND id = 'p1'",
+  );
+  await database.close();
+
+  database = await _openFixtureBundle(schema, browserCyclicRebuildBundle, directory);
+  final parent = (await database.query(
+    "SELECT name, favoriteChildId FROM content.parents WHERE tenant = 'acme' AND id = 'p1'",
+  )).rows.single;
+  _expect(parent.getInt('name') == 7, 'browser composite rebuild did not transform the row');
+  _expect(
+    parent.getString('favoriteChildId') == 'c1',
+    'browser rebuild did not preserve its incoming cyclic reference',
+  );
+  _expect(
+    (await database.query('PRAGMA content.foreign_key_check')).rows.isEmpty,
+    'browser cyclic composite rebuild left a foreign-key violation',
+  );
+  await database.close();
 }
 
 Future<void> _verifyRebuildCrash(
