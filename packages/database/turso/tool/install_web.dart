@@ -3,6 +3,7 @@ import 'dart:io';
 const _assets = [
   'turso_attachment_registry.js',
   'turso_bridge.js',
+  'turso_opfs_paths.js',
   'turso_upstream.js',
   'turso_sql_guard.wasm',
   'UPSTREAM_LICENSE.md',

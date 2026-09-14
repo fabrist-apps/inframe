@@ -37,18 +37,44 @@ const _networkSchemes = {'http', 'https', 'libsql', 'ws', 'wss'};
 /// A browser origin-private filesystem database location.
 final class TursoBrowserLocation extends TursoLocation {
   /// Creates a validated browser storage location.
-  TursoBrowserLocation(this.name) {
-    if (name.trim().isEmpty || name == ':memory:' || name.contains('/') || name.contains(r'\')) {
-      throw ArgumentError.value(
-        name,
-        'name',
-        'Must identify persistent storage and contain no path separators.',
-      );
-    }
+  TursoBrowserLocation(String path) : path = _normalizeBrowserPath(path);
+
+  /// The normalized path beneath the origin-private storage root.
+  final String path;
+
+  /// The normalized browser storage path.
+  ///
+  /// Retained for source compatibility with the original single-file API.
+  String get name => path;
+}
+
+String _normalizeBrowserPath(String path) {
+  if (path.trim().isEmpty ||
+      path == ':memory:' ||
+      path.startsWith('/') ||
+      path.endsWith('/') ||
+      path.contains('//') ||
+      path.contains(r'\') ||
+      path.contains('\u0000')) {
+    throw ArgumentError.value(path, 'path', 'Must be a normalized relative OPFS file path.');
   }
 
-  /// The browser storage name.
-  final String name;
+  final normalized = <String>[];
+  for (final segment in path.split('/')) {
+    if (segment == '.') continue;
+    if (segment == '..') {
+      if (normalized.isEmpty) {
+        throw ArgumentError.value(path, 'path', 'Must not escape the OPFS root.');
+      }
+      normalized.removeLast();
+      continue;
+    }
+    normalized.add(segment);
+  }
+  if (normalized.isEmpty) {
+    throw ArgumentError.value(path, 'path', 'Must identify an OPFS file.');
+  }
+  return normalized.join('/');
 }
 
 /// An in-memory database location.

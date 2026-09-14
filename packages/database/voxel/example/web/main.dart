@@ -1,6 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:turso/turso.dart';
+import 'package:voxel/src/connection.dart' show VoxelTesting;
+import 'package:voxel/src/migration.dart';
+import 'package:voxel/src/platform_web.dart' show openVoxelPersistentDatabase;
 import 'package:voxel/voxel.dart';
 import 'package:voxel_fixture_app/app_database.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
@@ -18,10 +21,187 @@ Future<void> main() async {
     await _verifyVectorStorage();
     await _verifyArrayStorage();
     await _verifyMigrationBundle();
-    web.document.body!.textContent = 'PASS\nVoxel browser codec fixture';
+    await _verifyPersistentOpfs();
+    web.document.body!.textContent = 'PASS\nVoxel browser OPFS fixture';
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
   }
+}
+
+Future<void> _verifyPersistentOpfs() async {
+  final defaultDatabase = await FixtureAppDatabase().open();
+  await defaultDatabase.close();
+  final reopenedDefault = await FixtureAppDatabase().open();
+  await reopenedDefault.close();
+
+  const storage = VoxelStorage.opfs(directory: 'voxel-fixtures/fbr-205/runtime-v1');
+  var database = await FixtureAppDatabase().open(storage: storage);
+  await VoxelTesting.execute(
+    database,
+    "INSERT OR IGNORE INTO content.authors VALUES ('browser-author', 'Browser Ada')",
+  );
+  _expect(
+    await VoxelTesting.scalarInt(
+          database,
+          'SELECT COUNT(*) AS value FROM content._voxel_phases',
+        ) ==
+        3,
+    'browser attachment migration receipts missing',
+  );
+
+  var competingOpenFailed = false;
+  try {
+    final competing = await FixtureAppDatabase().open(
+      storage: storage,
+      migrations: const VoxelMigrationOptions(lockTimeout: Duration.zero),
+    );
+    await competing.close();
+  } on Object {
+    competingOpenFailed = true;
+  }
+  _expect(competingOpenFailed, 'competing OPFS owner unexpectedly opened the database');
+  await database.close();
+
+  database = await FixtureAppDatabase().open(storage: storage);
+  _expect(
+    await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.authors WHERE id = 'browser-author'",
+        ) ==
+        1,
+    'browser attachment data did not survive reopen',
+  );
+  _expect(
+    await VoxelTesting.scalarText(
+          database,
+          "SELECT state AS value FROM main._voxel_files WHERE schema_id != 'main'",
+        ) ==
+        'initialized',
+    'browser attachment registry was not initialized',
+  );
+  await database.close();
+
+  await _verifyEncryptedOpfs();
+  await _verifyInterruptedOpfsMigrations();
+}
+
+Future<void> _verifyInterruptedOpfsMigrations() async {
+  final plan = VoxelMigrationPlan.validate(
+    schema: FixtureAppDatabaseVoxelSchema.build(),
+    bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+  );
+  for (final point in [
+    VoxelMigrationInterruptionPoint.afterCreationPrepared,
+    VoxelMigrationInterruptionPoint.afterFileBootstrap,
+    VoxelMigrationInterruptionPoint.afterRegistryInitialized,
+    VoxelMigrationInterruptionPoint.afterPhaseCommit,
+    VoxelMigrationInterruptionPoint.beforeMainSummary,
+    VoxelMigrationInterruptionPoint.afterMainSummary,
+  ]) {
+    var interrupted = false;
+    final directory = 'voxel-fixtures/fbr-205/interrupt-${point.name}-v1';
+    try {
+      final unexpectedlyOpened = await _openPersistentPlan(
+        plan,
+        directory,
+        interrupt: (event) async {
+          if (!interrupted && event.point == point) {
+            interrupted = true;
+            throw _SimulatedReload(point);
+          }
+        },
+      );
+      await unexpectedlyOpened.close();
+      throw StateError('migration did not stop at ${point.name}');
+    } on _SimulatedReload catch (error) {
+      _expect(
+        error.point == point,
+        'unexpected interruption failure at ${point.name}: $error',
+      );
+    }
+
+    final recovered = await _openPersistentPlan(plan, directory);
+    _expect(
+      (await recovered.query(
+            'SELECT COUNT(*) AS value FROM content._voxel_phases',
+          )).rows.single.getInt('value') ==
+          3,
+      'browser migration did not recover after ${point.name}',
+    );
+    await recovered.close();
+  }
+}
+
+Future<TursoDatabase> _openPersistentPlan(
+  VoxelMigrationPlan plan,
+  String directory, {
+  Future<void> Function(VoxelMigrationInterruption interruption)? interrupt,
+}) => openVoxelPersistentDatabase(
+  databaseName: 'fixture_app',
+  directory: directory,
+  migrations: plan,
+  lockTimeout: const Duration(seconds: 30),
+  encryptionCipher: null,
+  encryptionKey: null,
+  schemaDirectories: const {},
+  schemaEncryptionCiphers: const {},
+  schemaEncryptionKeys: const {},
+  interrupt: interrupt,
+);
+
+Future<void> _verifyEncryptedOpfs() async {
+  const storage = VoxelStorage.opfs(directory: 'voxel-fixtures/fbr-205/encrypted-v1');
+  final mainKey = Uint8List.fromList(List<int>.generate(32, (index) => index + 1));
+  final contentKey = Uint8List.fromList(List<int>.generate(32, (index) => index + 33));
+  final encryption = VoxelEncryption(cipher: VoxelCipher.aes256gcm, key: mainKey);
+  final contentEncryption = VoxelEncryption(
+    cipher: VoxelCipher.aegis256,
+    key: contentKey,
+  );
+  var database = await FixtureAppDatabase().open(
+    storage: storage,
+    encryption: encryption,
+    schemaEncryption: {'content': contentEncryption},
+  );
+  await database.close();
+
+  final wrongKey = Uint8List.fromList(contentKey)..[0] ^= 0xff;
+  var wrongKeyFailure = '';
+  try {
+    final incorrectlyOpened = await FixtureAppDatabase().open(
+      storage: storage,
+      encryption: encryption,
+      schemaEncryption: {
+        'content': VoxelEncryption(cipher: VoxelCipher.aegis256, key: wrongKey),
+      },
+    );
+    await incorrectlyOpened.close();
+  } on Object catch (error) {
+    wrongKeyFailure = error.toString();
+  }
+  _expect(wrongKeyFailure.isNotEmpty, 'wrong attachment encryption key was accepted');
+  _expect(
+    !wrongKeyFailure.contains(_hex(wrongKey)),
+    'attachment encryption key leaked in an error',
+  );
+
+  database = await FixtureAppDatabase().open(
+    storage: storage,
+    encryption: encryption,
+    schemaEncryption: {'content': contentEncryption},
+  );
+  await database.close();
+}
+
+String _hex(Uint8List bytes) => bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+
+final class _SimulatedReload implements Exception {
+  const _SimulatedReload(this.point);
+
+  final VoxelMigrationInterruptionPoint point;
+
+  @override
+  String toString() => 'simulated ${point.name} reload';
 }
 
 Future<void> _verifyMigrationBundle() async {

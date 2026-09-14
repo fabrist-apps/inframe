@@ -39,7 +39,7 @@ Mobile browsers are excluded; Android and iOS use their native Flutter targets.
 | Native encryption, FTS rollback/reopen, and vector functions | `test/feature_test.dart` on desktop native targets and both ciphers in the mobile integration suite |
 | Native ATTACH, caller-controlled foreign keys, detach/re-attach persistence, and file release | `test/native_database_test.dart` on desktop native targets and the attachment scenario in `tool/flutter_native_runtime_test.dart.template` on Android and iOS; Windows Flutter CI remains disabled as recorded above |
 | Flutter native artifact loading | Release Flutter application on Linux, Android emulator plus ARM64 APK, and iOS simulator plus device build; Windows is temporarily disabled as described above |
-| Browser persistence/reload, storage lock release, failed-open cleanup, and memory opening | `example/web/main.dart` in Chrome, Firefox, and Safari |
+| Browser persistence/reload, nested OPFS main and attachment paths, read-only file inspection, storage lock release, failed-open cleanup, and memory opening | `example/web/main.dart` in Chrome, Firefox, and Safari; focused path traversal tests in `tool/web_bundle/attachment_registry.test.mjs` |
 | Browser bindings, exact integers, immutable results, transactions, lifecycle, encryption, and vectors | `example/web/main.dart` in Chrome, Firefox, and Safari |
 | Browser memory ATTACH/DETACH, explicit foreign-key policy, attached-schema rollback, and encrypted connections | The memory attachment scenarios in `example/web/main.dart` through the installed bridge in Chrome, Firefox, and Safari |
 | Browser persistent ATTACH/DETACH, bound-parameter snapshots, encrypted and percent-encoded file URIs, OPFS ownership/contention, injected registration/finalization failures, retirement, explicit re-attach after reload, file release, and memory-main rejection | The persistent attachment scenarios in `example/web/main.dart` through the installed bridge in Chrome, Firefox, and Safari; focused registry boundary tests in `tool/web_bundle/attachment_registry.test.mjs` |
@@ -52,9 +52,10 @@ therefore exercises the required worker, WASM, OPFS, COOP, and COEP setup rather
 contract against a substitute backend.
 
 A local macOS Chromium 152.0.7977.65 run passed the installed-asset persistent attachment, reload,
-bound/encrypted URI, multiple-alias, main-file, failed ATTACH/DETACH, cross-worker contention,
-close-drain, injected WAL-registration/finalization, retirement, rollback-failure, file-reuse, and
-memory-main rejection scenarios on 2026-09-11.
+normalized nested main and attachment paths, read-only existence inspection, bound/encrypted URI,
+multiple-alias, main-file, failed ATTACH/DETACH, cross-worker contention, close-drain, injected
+WAL-registration/finalization, retirement, rollback-failure, file-reuse, and memory-main rejection
+scenarios on 2026-09-14.
 
 ## Representative memory observations
 

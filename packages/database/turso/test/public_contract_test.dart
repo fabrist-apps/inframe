@@ -12,7 +12,12 @@ void main() {
       expect(() => TursoLocation.file('libsql://example.com/database'), throwsArgumentError);
       expect(() => TursoLocation.file('database\u0000ignored.db'), throwsArgumentError);
       expect(TursoLocation.file(r'C:\data\app.db'), isA<TursoFileLocation>());
-      expect(() => TursoLocation.browser('nested/database'), throwsArgumentError);
+      final nested = TursoLocation.browser('apps/./example/../example/database.db');
+      expect((nested as TursoBrowserLocation).path, 'apps/example/database.db');
+      expect(nested.name, 'apps/example/database.db');
+      expect(() => TursoLocation.browser('../database.db'), throwsArgumentError);
+      expect(() => TursoLocation.browser('nested//database.db'), throwsArgumentError);
+      expect(() => TursoLocation.browser('/nested/database.db'), throwsArgumentError);
       expect(() => TursoLocation.browser(r'nested\database'), throwsArgumentError);
       expect(() => TursoLocation.browser(':memory:'), throwsArgumentError);
     });

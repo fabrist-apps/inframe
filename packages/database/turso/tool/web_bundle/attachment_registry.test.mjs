@@ -7,6 +7,11 @@ import {
   assertOpfsDirectoryCompatibility,
   respondToAsyncOperation,
 } from './wasm_common_patch.mjs';
+import {
+  normalizeOpfsFilePath,
+  opfsFileExists,
+  resolveOpfsFile,
+} from '../../web/turso_opfs_paths.js';
 
 const source = await readFile(new URL('../../web/turso_attachment_registry.js', import.meta.url));
 const { AttachmentRegistry, AttachmentRegistryError } = await import(
@@ -182,6 +187,50 @@ test('the pinned OPFS directory exposes the fields used by registration', () => 
   );
 });
 
+test('nested OPFS paths traverse directories and preserve the filename', async () => {
+  const calls = [];
+  const root = fakeDirectory({ calls });
+
+  const file = await resolveOpfsFile(root, 'apps/example/main.db', { create: true });
+
+  assert.equal(file.name, 'main.db');
+  assert.deepEqual(calls, [
+    ['directory', 'apps', true],
+    ['directory', 'example', true],
+    ['file', 'main.db', true],
+  ]);
+});
+
+test('existence inspection never creates or opens an access handle', async () => {
+  const calls = [];
+  const root = fakeDirectory({ calls, existingFile: 'main.db' });
+
+  assert.equal(await opfsFileExists(root, 'apps/example/main.db'), true);
+  assert.deepEqual(calls, [
+    ['directory', 'apps', false],
+    ['directory', 'example', false],
+    ['file', 'main.db', false],
+  ]);
+
+  calls.length = 0;
+  assert.equal(await opfsFileExists(root, 'apps/example/missing.db'), false);
+  assert.deepEqual(calls, [
+    ['directory', 'apps', false],
+    ['directory', 'example', false],
+    ['file', 'missing.db', false],
+  ]);
+});
+
+test('OPFS path normalization rejects ambiguous and escaping paths', () => {
+  assert.equal(
+    normalizeOpfsFilePath('apps/./example/../example/main.db'),
+    'apps/example/main.db',
+  );
+  for (const path of ['', '/main.db', 'apps//main.db', '../main.db', 'apps/', 'apps\\main.db']) {
+    assert.throws(() => normalizeOpfsFilePath(path), /OPFS file path/);
+  }
+});
+
 function registryWith({
   calls = [],
   mainDatabasePath = 'main.db',
@@ -189,4 +238,21 @@ function registryWith({
   unregisterFile = async (path) => calls.push(['unregister', path]),
 }) {
   return new AttachmentRegistry({ mainDatabasePath, registerFile, unregisterFile });
+}
+
+function fakeDirectory({ calls, existingFile }) {
+  const directory = {
+    async getDirectoryHandle(name, options) {
+      calls.push(['directory', name, options.create]);
+      return directory;
+    },
+    async getFileHandle(name, options) {
+      calls.push(['file', name, options.create]);
+      if (!options.create && name !== existingFile) {
+        throw new DOMException('Missing', 'NotFoundError');
+      }
+      return { name };
+    },
+  };
+  return directory;
 }

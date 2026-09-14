@@ -441,13 +441,15 @@ abstract final class VoxelDatabaseRuntime {
       }
       return _openMemory(schema, checked);
     }
-    if (selectedStorage is VoxelOpfsStorage) {
-      throw UnsupportedError('Browser OPFS storage is not available yet.');
-    }
     final directory = switch (selectedStorage) {
-      VoxelDirectoryStorage(:final path) => path,
+      VoxelDirectoryStorage(:final path) when voxelPlatform == 'native' => path,
+      VoxelOpfsStorage(:final directory) when voxelPlatform == 'browser' => directory,
       null => null,
-      _ => throw UnsupportedError('Unsupported Voxel storage selection.'),
+      _ => throw UnsupportedError(
+        voxelPlatform == 'browser'
+            ? 'Browser persistent databases require OPFS storage.'
+            : 'Native persistent databases require directory storage.',
+      ),
     };
     final schemaDirectories = <String, String?>{};
     final schemaEncryptionCiphers = <String, String?>{};
@@ -455,10 +457,13 @@ abstract final class VoxelDatabaseRuntime {
     for (final schemaName in namedSchemas) {
       final override = schemaStorage[schemaName];
       schemaDirectories[schemaName] = switch (override) {
-        VoxelDirectoryStorage(:final path) => path,
+        VoxelDirectoryStorage(:final path) when voxelPlatform == 'native' => path,
+        VoxelOpfsStorage(:final directory) when voxelPlatform == 'browser' => directory,
         null => null,
         _ => throw UnsupportedError(
-          'Native persistent databases require directory storage for schema `$schemaName`.',
+          voxelPlatform == 'browser'
+              ? 'Browser persistent databases require OPFS storage for schema `$schemaName`.'
+              : 'Native persistent databases require directory storage for schema `$schemaName`.',
         ),
       };
       final selectedEncryption = schemaEncryption.containsKey(schemaName)

@@ -2,7 +2,7 @@
 
 Voxel generates typed Dart rows, mutation companions, connection-free schema metadata, and checked
 migration bundles for embedded Turso databases. Generated applications can open isolated memory
-databases or persistent native databases; executable typed reads and mutations, watches, and search
+databases or persistent native and browser databases; executable typed reads and mutations, watches, and search
 are delivered by later Voxel changes.
 
 ```dart
@@ -73,6 +73,25 @@ encryption; opening with a wrong key fails and never falls back to plaintext.
 Changing encryption on an existing file is not an implicit re-encryption
 operation.
 
+On browsers, omitting `storage` places the database files at the root of the
+origin-private file system (OPFS). Use an OPFS directory to namespace them:
+
+```dart
+final database = await MyAppDatabase().open(
+  storage: const VoxelStorage.opfs(directory: 'apps/my-app'),
+  encryption: defaultEncryption,
+  schemaStorage: {
+    'auth': const VoxelStorage.opfs(directory: 'apps/my-app/private'),
+  },
+);
+```
+
+OPFS directories are normalized relative paths. Absolute paths, backslashes,
+empty segments, and paths that escape the origin root are rejected. Voxel
+coordinates each main and attachment path with exclusive Web Locks before it
+inspects or opens any file. A zero migration lock timeout makes one immediate
+attempt. Browsers without Web Locks fail before Voxel accesses OPFS.
+
 Each named schema uses a separate persistent file whose identity is recorded in
 the main database. Unlisted schemas inherit the main directory and encryption.
 Override either setting by schema name when a file needs separate storage or
@@ -115,7 +134,10 @@ transactions, and callbacks, then releases the single owned Turso connection.
 Calling `close` from this database's transaction or after-commit callback is
 rejected before shutdown begins.
 
-On web, host the version-matched Turso bridge files under `turso/`; generated open code resolves
-`turso/turso_bridge.js`. Memory open validates the complete bundle before acquiring the driver,
-attaches each registered named schema as an independent memory database, applies applicable phases
-with their receipts, and verifies foreign-key enforcement before returning.
+On web, host the version-matched Turso bridge files under `turso/`; generated
+open code resolves `turso/turso_bridge.js`. Persistent and memory opens validate
+the complete bundle before acquiring the driver. Browser persistent opens use
+separate OPFS files for registered schemas, apply browser-applicable phases with
+durable per-file receipts, and verify foreign-key enforcement before returning.
+Keep the returned database open only while it is in use: the Turso worker owns
+exclusive OPFS access until `close` completes.

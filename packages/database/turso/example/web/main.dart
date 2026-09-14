@@ -17,6 +17,8 @@ const _failedAttachmentName = 'turso-dart-web-failed-attached.db';
 const _contentionMainName = 'turso-dart-web-contention-main.db';
 const _uncertainMainName = 'turso-dart-web-uncertain-main.db';
 const _uncertainAttachmentName = 'turso-dart-web-uncertain-attached.db';
+const _nestedMainName = 'turso-dart/nested/main.db';
+const _nestedAttachmentName = 'turso-dart/nested/attached.db';
 final _bridge = TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js'));
 
 Future<void> main() async {
@@ -37,6 +39,7 @@ Future<void> main() async {
     for (final verification in <(String, Future<void> Function())>[
       ('reloaded data', _verifyReloadedData),
       ('persistent attachment', _verifyPersistentAttachment),
+      ('nested OPFS paths', _verifyNestedOpfsPaths),
       ('bound attachments', _verifyBoundPersistentAttachments),
       ('encrypted attachment', _verifyEncryptedPersistentAttachment),
       ('attachment ownership failures', _verifyAttachmentOwnershipFailures),
@@ -61,6 +64,60 @@ Future<void> main() async {
     web.document.body!.textContent = 'PASS\n${web.window.navigator.userAgent}';
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$stage\n$error\n$stackTrace';
+  }
+}
+
+Future<void> _verifyNestedOpfsPaths() async {
+  final mainLocation = TursoLocation.browser(_nestedMainName) as TursoBrowserLocation;
+  final attachmentLocation = TursoLocation.browser(_nestedAttachmentName) as TursoBrowserLocation;
+  final database = await TursoDatabase.open(mainLocation, web: _bridge);
+  try {
+    await database.execute('CREATE TABLE IF NOT EXISTS values_table (value TEXT)');
+    await database.execute('DELETE FROM values_table');
+    await database.execute("INSERT INTO values_table VALUES ('nested main')");
+    await database.execute(
+      'ATTACH DATABASE ? AS nested_attachment',
+      parameters: [attachmentLocation.path],
+    );
+    await database.execute(
+      'CREATE TABLE IF NOT EXISTS nested_attachment.values_table (value TEXT)',
+    );
+    await database.execute('DELETE FROM nested_attachment.values_table');
+    await database.execute(
+      "INSERT INTO nested_attachment.values_table VALUES ('nested attachment')",
+    );
+  } finally {
+    await database.close();
+  }
+
+  _expect(
+    await TursoDatabase.browserFileExists(mainLocation, web: _bridge),
+    'Nested main file was not found after close.',
+  );
+  _expect(
+    await TursoDatabase.browserFileExists(attachmentLocation, web: _bridge),
+    'Nested attachment file was not found after close.',
+  );
+
+  final reopened = await TursoDatabase.open(mainLocation, web: _bridge);
+  try {
+    await reopened.execute(
+      'ATTACH DATABASE ? AS nested_attachment',
+      parameters: [attachmentLocation.path],
+    );
+    _expect(
+      (await reopened.query('SELECT value FROM values_table')).rows.single.getString('value') ==
+          'nested main',
+      'Nested main data did not persist.',
+    );
+    _expect(
+      (await reopened.query('SELECT value FROM nested_attachment.values_table')).rows.single
+              .getString('value') ==
+          'nested attachment',
+      'Nested attachment data did not persist.',
+    );
+  } finally {
+    await reopened.close();
   }
 }
 
@@ -370,7 +427,7 @@ Future<void> _writePersistentAttachment() async {
       () => database.execute("ATTACH DATABASE upper('computed.db') AS computed"),
     );
     await _expectFailure<TursoUnsupportedException>(
-      () => database.execute("ATTACH DATABASE 'invalid/path.db' AS invalid_path"),
+      () => database.execute("ATTACH DATABASE '../invalid.db' AS invalid_path"),
     );
   } finally {
     await database.close();
@@ -599,7 +656,7 @@ Future<void> _verifyEncryptedPersistentAttachment() async {
       () => database.execute("ATTACH DATABASE 'file:readonly.db?mode=ro' AS readonly"),
     );
     await _expectFailure<TursoUnsupportedException>(
-      () => database.execute("ATTACH DATABASE 'file:nested%2Fpath.db' AS nested"),
+      () => database.execute("ATTACH DATABASE 'file:..%2Fpath.db' AS escaping"),
     );
     await _expectFailure<TursoUnsupportedException>(
       () => database.execute("ATTACH DATABASE 'file://localhost/absolute.db' AS absolute"),
