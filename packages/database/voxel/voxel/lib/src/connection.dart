@@ -1,10 +1,41 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:turso/turso.dart';
 
+import 'package:voxel/src/errors.dart';
 import 'package:voxel/src/migration.dart';
 import 'package:voxel/src/platform.dart';
 import 'package:voxel/src/schema.dart';
+
+/// A validated SQL statement prepared by a generated Voxel operation.
+///
+/// Application code ordinarily receives statements through generated query and
+/// mutation builders. The executor boundary keeps those plans independent from
+/// whether they run on a database or its active transaction.
+final class VoxelCompiledQuery {
+  /// Creates a statement with positional [parameters].
+  VoxelCompiledQuery(this.sql, List<Object?> parameters)
+    : parameters = List.unmodifiable(parameters);
+
+  /// SQL sent to the embedded database.
+  final String sql;
+
+  /// Positional values bound to [sql].
+  final List<Object?> parameters;
+}
+
+/// Execution boundary accepted by generated query and mutation terminals.
+abstract interface class VoxelExecutor {
+  /// Executes [statement] and decodes every result row.
+  Future<List<Row>> execute<Row>(
+    VoxelCompiledQuery statement,
+    VoxelRowDecoder<Row> decode,
+  );
+
+  /// Executes [statement] and returns the number of changed rows.
+  Future<int> executeAffected(VoxelCompiledQuery statement);
+}
 
 /// Selects how a generated Voxel database stores its files.
 sealed class VoxelStorage {
@@ -85,10 +116,14 @@ final class VoxelMigrationOptions {
 /// returned handle has all memory schemas attached, bundled migrations applied,
 /// and foreign-key enforcement enabled. Call [close] when the application no
 /// longer needs it.
-final class VoxelDb {
+final class VoxelDb implements VoxelExecutor {
   VoxelDb._(this._database, this.name, this.tables);
 
   final TursoDatabase _database;
+  bool _closing = false;
+  int _acceptedWork = 0;
+  Completer<void>? _drained;
+  Future<void>? _closeFuture;
 
   /// The database name declared by `@VoxelDatabase`.
   final String name;
@@ -96,8 +131,261 @@ final class VoxelDb {
   /// Connection-free schemas registered by the generated application database.
   final List<VoxelTableSchema<Object?, Object?>> tables;
 
-  /// Drains accepted driver work and releases the owned connection.
-  Future<void> close() => _database.close();
+  @override
+  Future<List<Row>> execute<Row>(
+    VoxelCompiledQuery statement,
+    VoxelRowDecoder<Row> decode,
+  ) async {
+    _rejectUseInsideOwnTransaction();
+    _acceptWork();
+    try {
+      return await _executeQuery(
+        (sql, parameters) => _database.query(sql, parameters: parameters),
+        statement,
+        decode,
+      );
+    } finally {
+      _finishWork();
+    }
+  }
+
+  @override
+  Future<int> executeAffected(VoxelCompiledQuery statement) async {
+    _rejectUseInsideOwnTransaction();
+    _acceptWork();
+    try {
+      return await _executeAffected(
+        (sql, parameters) => _database.execute(sql, parameters: parameters),
+        statement,
+      );
+    } finally {
+      _finishWork();
+    }
+  }
+
+  /// Runs [callback] in one transaction on this database's connection.
+  ///
+  /// Use only the supplied executor during [callback]. It expires when the
+  /// callback finishes. A callback failure rolls back and preserves its error;
+  /// callbacks registered with [VoxelTransaction.afterCommit] run only after a
+  /// successful commit and after the connection reservation is released.
+  Future<T> transaction<T>(
+    Future<T> Function(VoxelTransaction transaction) callback,
+  ) async {
+    _rejectUseInsideOwnTransaction();
+    _acceptWork();
+    Object? callbackFailure;
+    late VoxelTransaction transaction;
+    try {
+      final result = await _database.transaction((driverTransaction) async {
+        transaction = VoxelTransaction._(driverTransaction);
+        try {
+          return await runZoned(
+            () async {
+              try {
+                return await callback(transaction);
+              } catch (error) {
+                callbackFailure = error;
+                rethrow;
+              }
+            },
+            zoneValues: {_transactionDatabaseZoneKey: this},
+          );
+        } finally {
+          transaction._expire();
+        }
+      });
+      await _runAfterCommitCallbacks(this, transaction._callbacks);
+      return result;
+    } on VoxelException {
+      rethrow;
+    } on Object catch (error) {
+      if (identical(error, callbackFailure)) rethrow;
+      throw VoxelDatabaseException('Turso transaction failed.', error);
+    } finally {
+      _finishWork();
+    }
+  }
+
+  /// Runs process-local work immediately when no transaction is associated.
+  ///
+  /// Inside this database's transaction callback, register through
+  /// [VoxelTransaction.afterCommit]. The callback is not persisted or replayed
+  /// after a crash.
+  Future<void> afterCommit(FutureOr<void> Function() callback) async {
+    if (Zone.current[_transactionDatabaseZoneKey] == this) {
+      throw const VoxelExecutorClosedException(
+        'Use transaction.afterCommit inside this database transaction.',
+      );
+    }
+    _acceptWork();
+    try {
+      await runZoned(
+        () => Future<void>.sync(callback),
+        zoneValues: {_afterCommitDatabaseZoneKey: this},
+      );
+    } finally {
+      _finishWork();
+    }
+  }
+
+  void _rejectUseInsideOwnTransaction() {
+    if (Zone.current[_transactionDatabaseZoneKey] == this) {
+      throw const VoxelExecutorClosedException(
+        'Use the transaction executor inside this database transaction.',
+      );
+    }
+  }
+
+  void _acceptWork() {
+    if (_closing) {
+      throw const VoxelExecutorClosedException(
+        'The database is closing or closed.',
+      );
+    }
+    _acceptedWork++;
+  }
+
+  void _finishWork() {
+    _acceptedWork--;
+    if (_closing && _acceptedWork == 0) _drained?.complete();
+  }
+
+  /// Drains accepted SQL, transactions, and callbacks, then closes the owned
+  /// connection. New work is rejected once shutdown begins.
+  Future<void> close() {
+    if (Zone.current[_transactionDatabaseZoneKey] == this ||
+        Zone.current[_afterCommitDatabaseZoneKey] == this) {
+      throw const VoxelExecutorClosedException(
+        'Cannot close a database from its own transaction or after-commit callback.',
+      );
+    }
+    return _closeFuture ??= _drainAndClose();
+  }
+
+  Future<void> _drainAndClose() async {
+    _closing = true;
+    if (_acceptedWork > 0) {
+      _drained = Completer<void>();
+      await _drained!.future;
+    }
+    await _database.close();
+  }
+}
+
+/// A database-bound executor valid only during its transaction callback.
+///
+/// Register process-local post-commit work synchronously with [afterCommit].
+/// The callbacks run in order after commit and are discarded on rollback.
+final class VoxelTransaction implements VoxelExecutor {
+  VoxelTransaction._(this._transaction);
+
+  final TursoTransaction _transaction;
+  bool _active = true;
+  final List<FutureOr<void> Function()> _callbacks = [];
+
+  /// Registers [callback] to run after this transaction commits.
+  void afterCommit(FutureOr<void> Function() callback) {
+    _ensureActive();
+    _callbacks.add(callback);
+  }
+
+  @override
+  Future<List<Row>> execute<Row>(
+    VoxelCompiledQuery statement,
+    VoxelRowDecoder<Row> decode,
+  ) async {
+    _ensureActive();
+    return _executeQuery(
+      (sql, parameters) => _transaction.query(sql, parameters: parameters),
+      statement,
+      decode,
+    );
+  }
+
+  @override
+  Future<int> executeAffected(VoxelCompiledQuery statement) async {
+    _ensureActive();
+    return _executeAffected(
+      (sql, parameters) => _transaction.execute(sql, parameters: parameters),
+      statement,
+    );
+  }
+
+  void _ensureActive() {
+    if (!_active) {
+      throw const VoxelExecutorClosedException(
+        'The transaction executor has expired.',
+      );
+    }
+  }
+
+  void _expire() => _active = false;
+}
+
+final _transactionDatabaseZoneKey = Object();
+final _afterCommitDatabaseZoneKey = Object();
+
+Future<void> _runAfterCommitCallbacks(
+  VoxelDb database,
+  List<FutureOr<void> Function()> callbacks,
+) async {
+  final failures = <AfterCommitFailure>[];
+  for (final callback in callbacks) {
+    try {
+      await runZoned(
+        () => Future<void>.sync(callback),
+        zoneValues: {_afterCommitDatabaseZoneKey: database},
+      );
+    } on Object catch (error, stackTrace) {
+      failures.add(AfterCommitFailure(error, stackTrace));
+    }
+  }
+  if (failures.isNotEmpty) {
+    throw AfterCommitException(
+      List.unmodifiable(failures),
+      alreadyCommitted: true,
+    );
+  }
+}
+
+Future<List<Row>> _executeQuery<Row>(
+  Future<TursoQueryResult> Function(String sql, List<Object?> parameters) query,
+  VoxelCompiledQuery statement,
+  VoxelRowDecoder<Row> decode,
+) async {
+  try {
+    final result = await query(statement.sql, statement.parameters);
+    return [
+      for (final row in result.rows)
+        decode(
+          [
+            for (var index = 0; index < result.columns.length; index++) row.valueAt(index),
+          ],
+          [
+            for (var index = 0; index < result.columns.length; index++) row.valueAt(index) == null,
+          ],
+        ),
+    ];
+  } on VoxelException {
+    rethrow;
+  } on Object catch (error) {
+    throw VoxelDatabaseException('Turso query failed.', error);
+  }
+}
+
+Future<int> _executeAffected(
+  Future<TursoExecuteResult> Function(String sql, List<Object?> parameters) execute,
+  VoxelCompiledQuery statement,
+) async {
+  try {
+    final result = await execute(statement.sql, statement.parameters);
+    return result.rowsAffected.toInt();
+  } on VoxelException {
+    rethrow;
+  } on Object catch (error) {
+    throw VoxelDatabaseException('Turso mutation failed.', error);
+  }
 }
 
 /// Runtime entry point used only by generated database extensions.
@@ -177,14 +465,24 @@ String _quote(String identifier) => '"${identifier.replaceAll('"', '""')}"';
 
 /// Internal driver inspection used by Voxel integration fixtures.
 abstract final class VoxelTesting {
-  /// Executes trusted fixture SQL against [database].
-  static Future<void> execute(VoxelDb database, String sql) async {
-    await database._database.execute(sql);
+  /// Executes trusted fixture SQL through [executor].
+  static Future<void> execute(VoxelExecutor executor, String sql) async {
+    await executor.executeAffected(VoxelCompiledQuery(sql, const []));
   }
 
   /// Reads one integer column named `value` from trusted fixture SQL.
-  static Future<int> scalarInt(VoxelDb database, String sql) async {
-    final row = (await database._database.query(sql)).rows.single;
-    return row.getInt('value');
+  static Future<int> scalarInt(VoxelExecutor executor, String sql) async {
+    return (await executor.execute<int>(
+      VoxelCompiledQuery(sql, const []),
+      (values, sqlNulls) => (values.single! as BigInt).toInt(),
+    )).single;
+  }
+
+  /// Reads one text column named `value` from trusted fixture SQL.
+  static Future<String> scalarText(VoxelExecutor executor, String sql) async {
+    return (await executor.execute<String>(
+      VoxelCompiledQuery(sql, const []),
+      (values, sqlNulls) => values.single! as String,
+    )).single;
   }
 }

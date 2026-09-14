@@ -5,11 +5,14 @@ export 'src/annotations.dart';
 export 'src/connection.dart'
     show
         VoxelCipher,
+        VoxelCompiledQuery,
         VoxelDatabaseRuntime,
         VoxelDb,
         VoxelEncryption,
+        VoxelExecutor,
         VoxelMigrationOptions,
-        VoxelStorage;
+        VoxelStorage,
+        VoxelTransaction;
 export 'src/errors.dart';
 export 'src/migration.dart' show VoxelBundledMigration, VoxelMigrationBundle;
 export 'src/migration_schema.dart';

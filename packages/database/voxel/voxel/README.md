@@ -31,11 +31,31 @@ final database = await MyAppDatabase().open(
   storage: const VoxelStorage.memory(),
 );
 try {
-  // Typed query terminals are added by the Voxel reads package.
+  await database.transaction((transaction) async {
+    // Pass transaction to typed query and mutation terminals.
+    transaction.afterCommit(() {
+      // Refresh process-local state after the transaction commits.
+    });
+  });
 } finally {
   await database.close();
 }
 ```
+
+Transaction executors are bound to their database and expire when their
+callback finishes. Use the transaction executor for all work inside the
+callback; root database work is rejected there. A callback failure rolls the
+transaction back and is rethrown. Registered `afterCommit` callbacks run only
+after a successful commit, outside the expired transaction context and in
+registration order. If any fail, Voxel continues the queue and throws an
+`AfterCommitException` whose `alreadyCommitted` value is true.
+
+`database.afterCommit` runs its callback immediately when called outside a
+transaction. These callbacks are process-local and are not persisted or
+replayed after a crash. Closing rejects new work, waits for accepted SQL,
+transactions, and callbacks, then releases the single owned Turso connection.
+Calling `close` from this database's transaction or after-commit callback is
+rejected before shutdown begins.
 
 On web, host the version-matched Turso bridge files under `turso/`; generated open code resolves
 `turso/turso_bridge.js`. Memory open validates the complete bundle before acquiring the driver,
