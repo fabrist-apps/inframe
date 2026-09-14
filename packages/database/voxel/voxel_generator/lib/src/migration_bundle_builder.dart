@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:build/build.dart';
 import 'package:voxel_generator/src/generator_utils.dart';
 import 'package:voxel_generator/src/migration/checker.dart';
@@ -59,10 +61,10 @@ final class VoxelMigrationBundleBuilder implements Builder {
     );
     try {
       final declaration = readDeclaration == null
-          ? await readVoxelSchemaDeclaration(
+          ? await _readBuildDeclaration(
+              buildStep,
               source['library']! as String,
               className,
-              workingDirectory: packageRoot,
             )
           : await readDeclaration!(
               source['library']! as String,
@@ -187,6 +189,87 @@ VoxelBundledMigration(
           await buildStep.readAsBytes(id);
         }
       }
+    }
+  }
+
+  // A subprocess cannot see build_runner's pending source outputs. Evaluate the
+  // same assets the resolver sees in an isolated package tree, never the checkout.
+  Future<Map<String, Object?>> _readBuildDeclaration(
+    BuildStep buildStep,
+    String sourceLibrary,
+    String className,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('voxel_schema_');
+    try {
+      final packages = <String, Map<String, Object?>>{};
+      final roots = <String, Directory>{};
+      final buildRoot = await _packageRoot(buildStep.inputId.package);
+      final copied = <AssetId>{};
+      Future<void> copy(AssetId id) async {
+        if (!copied.add(id) || buildStep.allowedOutputs.contains(id)) return;
+        var input = id;
+        // Nested workspace packages may be generated as assets of the enclosing
+        // package. Their package: URI aliases do not expose those pending outputs.
+        if (id.package != buildStep.inputId.package) {
+          final packageUri = await Isolate.resolvePackageUri(Uri.parse('package:${id.package}/'));
+          if (packageUri != null && packageUri.isScheme('file')) {
+            final root = roots[id.package] ??= Directory.fromUri(packageUri).parent;
+            final uri = root.uri.resolve(id.path);
+            if (uri.path.startsWith(buildRoot.uri.path)) {
+              final candidate = AssetId(
+                buildStep.inputId.package,
+                uri.path.substring(buildRoot.uri.path.length),
+              );
+              if (await buildStep.canRead(candidate)) input = candidate;
+            }
+          }
+        }
+        final content = await buildStep.readAsString(input);
+        File('${directory.path}/${id.package}/${id.path}')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(content);
+        // Missing generated parts are absent from analyzer library fragments.
+        // Read their declared URIs explicitly through the build asset graph.
+        final unit = parseString(content: content, throwIfDiagnostics: false).unit;
+        for (final part in unit.directives.whereType<PartDirective>()) {
+          final uri = part.uri.stringValue;
+          if (uri != null) await copy(AssetId.resolve(Uri.parse(uri), from: id));
+        }
+      }
+
+      await for (final library in buildStep.resolver.libraries) {
+        for (final fragment in library.fragments) {
+          final uri = fragment.source.uri;
+          if (uri.scheme != 'package') continue;
+          final id = AssetId.resolve(uri);
+          await copy(id);
+          packages.putIfAbsent(
+            id.package,
+            () => {
+              'name': id.package,
+              'rootUri': '../${id.package}/',
+              'packageUri': 'lib/',
+              'languageVersion':
+                  '${library.languageVersion.package.major}.${library.languageVersion.package.minor}',
+            },
+          );
+        }
+      }
+      File('${directory.path}/.dart_tool/package_config.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'configVersion': 2,
+            'packages': packages.values.toList(),
+          }),
+        );
+      return await readVoxelSchemaDeclaration(
+        sourceLibrary,
+        className,
+        workingDirectory: directory,
+      );
+    } finally {
+      directory.deleteSync(recursive: true);
     }
   }
 

@@ -39,7 +39,7 @@ jobs:
 
       - name: Generate Rivet consumer fixtures
         run: |
-          (cd packages/database/rivet && dart run build_runner build --build-filter=test/generated_consumer.rivet.dart --build-filter=test/migration_fixture.rivet.dart)
+          (cd packages/database/rivet && dart run build_runner build)
           dart format packages/database/rivet/test/generated_consumer.rivet.dart packages/database/rivet/test/migration_fixture.rivet.dart
           (cd packages/database/rivet/test/fixtures/schema_package && dart run build_runner build)
           dart format packages/database/rivet/test/fixtures/schema_package/lib/package_users.rivet.dart
