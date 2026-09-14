@@ -6,6 +6,8 @@ import 'package:crypto/crypto.dart';
 import 'package:voxel/voxel.dart';
 
 import 'package:voxel_generator/src/migration/canonical_json.dart';
+import 'package:voxel_generator/src/migration/checker.dart';
+import 'package:voxel_generator/src/migration/schema_expression.dart';
 
 // This coordinator is internal to VoxelMigrationGenerator's public operation.
 // ignore_for_file: public_member_api_docs, unnecessary_cast, use_null_aware_elements
@@ -35,14 +37,20 @@ final class VoxelArtifactGenerator {
     Map<String, String>? source,
   }) async {
     _validateLabel(name);
+    final physicalDeclaration = normalizeDeclaration(declaration);
     directory.createSync(recursive: true);
     final journalFile = File('${directory.path}/journal.json');
     if (journalFile.existsSync()) {
-      throw UnsupportedError('Successive Voxel migrations are not implemented yet.');
+      return _generateNext(
+        declaration: physicalDeclaration,
+        directory: directory,
+        name: name,
+        source: source,
+      );
     }
 
     final databaseId = _nextId();
-    final snapshot = _initialSnapshot(declaration, databaseId);
+    final snapshot = _initialSnapshot(physicalDeclaration, databaseId);
     final migrationId = _nextId();
     snapshot['migrationId'] = migrationId;
     final sql = _initialSql(snapshot);
@@ -50,20 +58,9 @@ final class VoxelArtifactGenerator {
       'formatVersion': 1,
       'dialect': 'voxel',
       'databaseId': databaseId,
-      if (source != null) 'source': source,
       'id': migrationId,
       'parentId': null,
-      'phases': [
-        {
-          'id': '0',
-          'scopeId':
-              ((snapshot['schemas']! as List<Object?>).single! as Map<String, Object?>)['id'],
-          'mode': 'transactional',
-          'platforms': ['native', 'browser'],
-          'statements': _statementRanges(sql),
-          'recovery': null,
-        },
-      ],
+      'phases': _phases(snapshot, sql),
     };
     final checksum = _checksum(metadata, snapshot, sql);
     final migration = {...metadata, 'checksum': checksum};
@@ -72,28 +69,185 @@ final class VoxelArtifactGenerator {
       'formatVersion': 1,
       'dialect': 'voxel',
       'databaseId': databaseId,
+      if (source != null) 'source': source,
       'entries': [
         {'id': migrationId, 'directory': directoryName, 'checksum': checksum},
       ],
     };
 
-    final staging = Directory('${directory.path}/.voxel-staging-$migrationId');
-    if (staging.existsSync()) {
-      throw StateError('Staging directory already exists: ${staging.path}');
-    }
-    staging.createSync();
-    try {
-      _writeText(File('${staging.path}/migration.sql'), sql);
-      _writeJson(File('${staging.path}/snapshot.json'), snapshot);
-      _writeJson(File('${staging.path}/migration.json'), migration);
-      staging.renameSync('${directory.path}/$directoryName');
+    _publish(
+      directory: directory,
+      directoryName: directoryName,
+      migrationId: migrationId,
+      sql: sql,
+      snapshot: snapshot,
+      migration: migration,
+      journal: journal,
+    );
+    return migrationId;
+  }
 
-      final temporaryJournal = File('${directory.path}/.journal-$migrationId.tmp');
-      _writeJson(temporaryJournal, journal);
-      temporaryJournal.renameSync(journalFile.path);
-    } finally {
-      if (staging.existsSync()) staging.deleteSync(recursive: true);
+  Map<String, Object?> _nextSnapshot(
+    Map<String, Object?> declaration,
+    Map<String, Object?> previous,
+    String databaseId,
+  ) {
+    final previousSchemas = (previous['schemas']! as List<Object?>).cast<Map<String, Object?>>();
+    final previousSchemaNames = {
+      for (final schema in previousSchemas) schema['id']!: schema['name']! as String,
+    };
+    final schemaIds = {
+      for (final schema in previousSchemas) schema['name']! as String: schema['id']! as String,
+    };
+    final declaredTables = (declaration['tables']! as List<Object?>).cast<Map<String, Object?>>();
+    for (final table in declaredTables) {
+      schemaIds.putIfAbsent(table['schema']! as String, _nextId);
     }
+    final previousTables = (previous['tables']! as List<Object?>).cast<Map<String, Object?>>();
+    final usedTableIds = <String>{};
+    final tables = <Map<String, Object?>>[];
+    for (final declaredTable in declaredTables) {
+      final schemaName = declaredTable['schema']! as String;
+      final tableName = declaredTable['name']! as String;
+      final exact = previousTables.where(
+        (table) =>
+            previousSchemaNames[table['schemaId']] == schemaName && table['name'] == tableName,
+      );
+      var oldTable = exact.singleOrNull;
+      if (oldTable == null) {
+        final renamedFrom = declaredTable['renamedFrom'];
+        if (renamedFrom is String) {
+          final candidates = previousTables.where(
+            (table) =>
+                previousSchemaNames[table['schemaId']] == schemaName &&
+                table['name'] == renamedFrom &&
+                !usedTableIds.contains(table['id']),
+          );
+          if (candidates.length != 1) {
+            throw FormatException(
+              'Table rename $schemaName.$renamedFrom -> $tableName has no unique source.',
+            );
+          }
+          oldTable = candidates.single;
+        }
+      }
+      if (oldTable != null && !usedTableIds.add(oldTable['id']! as String)) {
+        throw FormatException('Several table declarations resolve to ${oldTable['name']}.');
+      }
+      final tableId = oldTable?['id'] as String? ?? _nextId();
+      final oldColumns = oldTable == null
+          ? const <Map<String, Object?>>[]
+          : (oldTable['columns']! as List<Object?>).cast<Map<String, Object?>>();
+      final usedColumnIds = <String>{};
+      final columns = <Map<String, Object?>>[];
+      for (final rawColumn in declaredTable['columns']! as List<Object?>) {
+        final declaredColumn = rawColumn! as Map<String, Object?>;
+        final columnName = declaredColumn['name']! as String;
+        var oldColumn = oldColumns.where((column) => column['name'] == columnName).singleOrNull;
+        if (oldColumn == null) {
+          final renamedFrom = declaredColumn['renamedFrom'];
+          if (renamedFrom is String) {
+            final candidates = oldColumns.where(
+              (column) => column['name'] == renamedFrom && !usedColumnIds.contains(column['id']),
+            );
+            if (candidates.length != 1) {
+              throw FormatException(
+                'Column rename $schemaName.$tableName.$renamedFrom -> $columnName has no unique source.',
+              );
+            }
+            oldColumn = candidates.single;
+          }
+        }
+        if (oldColumn != null && !usedColumnIds.add(oldColumn['id']! as String)) {
+          throw FormatException('Several columns resolve to ${oldColumn['name']}.');
+        }
+        columns.add({
+          'id': oldColumn?['id'] as String? ?? _nextId(),
+          'tableId': tableId,
+          ..._withoutKey(declaredColumn, 'renamedFrom'),
+        });
+      }
+      tables.add({
+        'id': tableId,
+        'schemaId': schemaIds[schemaName],
+        'name': tableName,
+        'columns': columns,
+        'indexes': declaredTable['indexes'],
+        'constraints': declaredTable['constraints'],
+      });
+    }
+    tables.sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
+    final schemas = [
+      for (final entry in schemaIds.entries) {'id': entry.value, 'name': entry.key},
+    ]..sort((left, right) => (left['id']! as String).compareTo(right['id']! as String));
+    return {
+      'formatVersion': 1,
+      'dialect': 'voxel',
+      'databaseId': databaseId,
+      'migrationId': '',
+      'schemas': schemas,
+      'tables': tables,
+      'enums': previous['enums'],
+      'requirements': declaration['requirements'],
+    };
+  }
+
+  Future<String?> _generateNext({
+    required Map<String, Object?> declaration,
+    required Directory directory,
+    required String name,
+    Map<String, String>? source,
+  }) async {
+    await VoxelArtifactChecker().check(directory: directory);
+    final journalFile = File('${directory.path}/journal.json');
+    final journal = jsonDecode(journalFile.readAsStringSync()) as Map<String, Object?>;
+    final entries = (journal['entries']! as List<Object?>).cast<Map<String, Object?>>();
+    final previousEntry = entries.last;
+    final previousDirectory = previousEntry['directory']! as String;
+    final previousSnapshot = jsonDecode(
+      File('${directory.path}/$previousDirectory/snapshot.json').readAsStringSync(),
+    ) as Map<String, Object?>;
+    final databaseId = journal['databaseId']! as String;
+    final snapshot = _nextSnapshot(declaration, previousSnapshot, databaseId);
+    if (_fingerprint(snapshot) == _fingerprint(previousSnapshot)) return null;
+
+    final migrationId = _nextId();
+    snapshot['migrationId'] = migrationId;
+    final sql = _diffSql(previousSnapshot, snapshot);
+    if (sql.isEmpty) {
+      throw UnsupportedError(
+        'The composed schema changed, but Voxel cannot generate its Turso DDL.',
+      );
+    }
+    final metadata = <String, Object?>{
+      'formatVersion': 1,
+      'dialect': 'voxel',
+      'databaseId': databaseId,
+      'id': migrationId,
+      'parentId': previousEntry['id'],
+      'phases': _phases(snapshot, sql),
+    };
+    final checksum = _checksum(metadata, snapshot, sql);
+    final migration = {...metadata, 'checksum': checksum};
+    final directoryName =
+        '${entries.length.toString().padLeft(4, '0')}_${_slug(name)}_$migrationId';
+    final updatedJournal = <String, Object?>{
+      ...journal,
+      if (source != null) 'source': source,
+      'entries': [
+        ...entries,
+        {'id': migrationId, 'directory': directoryName, 'checksum': checksum},
+      ],
+    };
+    _publish(
+      directory: directory,
+      directoryName: directoryName,
+      migrationId: migrationId,
+      sql: sql,
+      snapshot: snapshot,
+      migration: migration,
+      journal: updatedJournal,
+    );
     return migrationId;
   }
 
@@ -102,6 +256,16 @@ final class VoxelArtifactGenerator {
     String databaseId,
   ) {
     final declaredTables = (declaration['tables']! as List<Object?>).cast<Map<String, Object?>>();
+    for (final table in declaredTables) {
+      if (table['renamedFrom'] != null ||
+          (table['columns']! as List<Object?>).any(
+            (column) => (column! as Map<String, Object?>)['renamedFrom'] != null,
+          )) {
+        throw const FormatException(
+          'Rename hints require a previous Voxel snapshot with a matching source.',
+        );
+      }
+    }
     final schemaIds = <String, String>{};
     for (final table in declaredTables) {
       schemaIds.putIfAbsent(table['schema']! as String, _nextId);
@@ -174,12 +338,9 @@ final class VoxelArtifactGenerator {
   }
 
   String _tursoType(Map<String, Object?> storage) => switch (storage['kind']) {
-    'text' => 'TEXT',
-    'integer' => 'INTEGER',
+    'text' || 'json' || 'array' || 'enum' => 'TEXT',
+    'integer' || 'boolean' || 'dateTime' => 'INTEGER',
     'real' => 'REAL',
-    'boolean' => 'INTEGER',
-    'dateTime' => 'INTEGER',
-    'json' || 'array' || 'enum' => 'TEXT',
     'vector' => 'F32_BLOB',
     final kind => throw UnsupportedError('Voxel migrations do not support $kind columns yet.'),
   };
@@ -187,7 +348,229 @@ final class VoxelArtifactGenerator {
   String _defaultSql(Map<String, Object?> column) {
     final expression = column['default'];
     if (expression is! Map<String, Object?>) return '';
-    return ' DEFAULT ${expression['sql']}';
+    return ' DEFAULT ${renderSchemaExpression(expression)}';
+  }
+
+  String _fingerprint(Map<String, Object?> snapshot) => canonicalJson(
+    _withoutKeysRecursively(snapshot, {'id', 'tableId', 'schemaId', 'migrationId', 'renamedFrom'}),
+  );
+
+  String _diffSql(Map<String, Object?> previous, Map<String, Object?> next) {
+    final previousSchemas = {
+      for (final value in (previous['schemas']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value['name']! as String,
+    };
+    final nextSchemas = {
+      for (final value in (next['schemas']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value['name']! as String,
+    };
+    final previousTables = {
+      for (final value in (previous['tables']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value,
+    };
+    final nextTables = {
+      for (final value in (next['tables']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value,
+    };
+    final buffer = StringBuffer();
+    for (final entry in previousTables.entries) {
+      if (!nextTables.containsKey(entry.key)) {
+        buffer.writeln(
+          'DROP TABLE ${_quote(previousSchemas[entry.value['schemaId']]!)}.'
+          '${_quote(entry.value['name']! as String)};',
+        );
+      }
+    }
+    for (final entry in nextTables.entries) {
+      final nextTable = entry.value;
+      final previousTable = previousTables[entry.key];
+      if (previousTable == null) {
+        buffer.write(_createTableSql(nextTable, nextSchemas));
+        continue;
+      }
+      final oldSchema = previousSchemas[previousTable['schemaId']]!;
+      final newSchema = nextSchemas[nextTable['schemaId']]!;
+      if (oldSchema != newSchema) {
+        throw UnsupportedError('Moving a Voxel table between schemas is not supported.');
+      }
+      var qualifiedTable = '${_quote(oldSchema)}.${_quote(previousTable['name']! as String)}';
+      if (previousTable['name'] != nextTable['name']) {
+        buffer.writeln(
+          'ALTER TABLE $qualifiedTable RENAME TO ${_quote(nextTable['name']! as String)};',
+        );
+        qualifiedTable = '${_quote(newSchema)}.${_quote(nextTable['name']! as String)}';
+      }
+      _writeColumnDiff(buffer, qualifiedTable, previousTable, nextTable);
+    }
+    return buffer.toString();
+  }
+
+  void _writeColumnDiff(
+    StringBuffer buffer,
+    String qualifiedTable,
+    Map<String, Object?> previousTable,
+    Map<String, Object?> nextTable,
+  ) {
+    final previousColumns = {
+      for (final value in (previousTable['columns']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value,
+    };
+    final nextColumns = {
+      for (final value in (nextTable['columns']! as List<Object?>).cast<Map<String, Object?>>())
+        value['id']! as String: value,
+    };
+    for (final entry in nextColumns.entries) {
+      final nextColumn = entry.value;
+      final previousColumn = previousColumns[entry.key];
+      if (previousColumn == null) {
+        final storage = nextColumn['storage']! as Map<String, Object?>;
+        buffer.writeln(
+          'ALTER TABLE $qualifiedTable ADD COLUMN ${_quote(nextColumn['name']! as String)} '
+          '${_tursoType(storage)}${_defaultSql(nextColumn)}'
+          '${storage['nullable'] == true ? '' : ' NOT NULL'};',
+        );
+        continue;
+      }
+      var columnName = previousColumn['name']! as String;
+      if (columnName != nextColumn['name']) {
+        buffer.writeln(
+          'ALTER TABLE $qualifiedTable RENAME COLUMN ${_quote(columnName)} '
+          'TO ${_quote(nextColumn['name']! as String)};',
+        );
+        columnName = nextColumn['name']! as String;
+      }
+      final oldStorage = previousColumn['storage']! as Map<String, Object?>;
+      final newStorage = nextColumn['storage']! as Map<String, Object?>;
+      if (canonicalJson(_withoutKey(oldStorage, 'nullable')) !=
+          canonicalJson(_withoutKey(newStorage, 'nullable'))) {
+        throw UnsupportedError(
+          'Changing Voxel column storage requires an explicit table rebuild transform.',
+        );
+      }
+      if (oldStorage['nullable'] != newStorage['nullable']) {
+        throw UnsupportedError(
+          'Changing Voxel column nullability requires a table rebuild.',
+        );
+      }
+      if (canonicalJson(previousColumn['default']) != canonicalJson(nextColumn['default'])) {
+        throw UnsupportedError(
+          'Changing a Voxel column default requires a table rebuild.',
+        );
+      }
+      if (previousColumn['primaryKey'] != nextColumn['primaryKey']) {
+        throw UnsupportedError('Changing an existing primary key is not supported.');
+      }
+    }
+    for (final entry in previousColumns.entries) {
+      if (!nextColumns.containsKey(entry.key)) {
+        throw UnsupportedError(
+          'Dropping a Voxel column requires an explicit table rebuild.',
+        );
+      }
+    }
+  }
+
+  String _createTableSql(
+    Map<String, Object?> table,
+    Map<String, String> schemaNames,
+  ) {
+    final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
+    final buffer = StringBuffer()
+      ..writeln(
+        'CREATE TABLE ${_quote(schemaNames[table['schemaId']]!)}.'
+        '${_quote(table['name']! as String)} (',
+      );
+    for (var index = 0; index < columns.length; index++) {
+      final column = columns[index];
+      final storage = column['storage']! as Map<String, Object?>;
+      buffer.writeln(
+        '  ${_quote(column['name']! as String)} ${_tursoType(storage)}'
+        '${storage['nullable'] == true ? '' : ' NOT NULL'}'
+        '${column['primaryKey'] == true ? ' PRIMARY KEY' : ''}'
+        '${_defaultSql(column)}${index == columns.length - 1 ? '' : ','}',
+      );
+    }
+    return (buffer..writeln(');')).toString();
+  }
+
+  Map<String, Object?> _withoutKey(Map<String, Object?> value, String key) => {
+    for (final entry in value.entries)
+      if (entry.key != key) entry.key: entry.value,
+  };
+
+  Object? _withoutKeysRecursively(Object? value, Set<String> keys) => switch (value) {
+    final Map<String, Object?> map => {
+      for (final entry in map.entries)
+        if (!keys.contains(entry.key)) entry.key: _withoutKeysRecursively(entry.value, keys),
+    },
+    final List<Object?> list => [
+      for (final item in list) _withoutKeysRecursively(item, keys),
+    ],
+    _ => value,
+  };
+
+  void _publish({
+    required Directory directory,
+    required String directoryName,
+    required String migrationId,
+    required String sql,
+    required Map<String, Object?> snapshot,
+    required Map<String, Object?> migration,
+    required Map<String, Object?> journal,
+  }) {
+    final staging = Directory('${directory.path}/.voxel-staging-$migrationId');
+    if (staging.existsSync()) {
+      throw StateError('Staging directory already exists: ${staging.path}');
+    }
+    staging.createSync();
+    try {
+      _writeText(File('${staging.path}/migration.sql'), sql);
+      _writeJson(File('${staging.path}/snapshot.json'), snapshot);
+      _writeJson(File('${staging.path}/migration.json'), migration);
+      staging.renameSync('${directory.path}/$directoryName');
+      final temporaryJournal = File('${directory.path}/.journal-$migrationId.tmp');
+      _writeJson(temporaryJournal, journal);
+      temporaryJournal.renameSync('${directory.path}/journal.json');
+    } finally {
+      if (staging.existsSync()) staging.deleteSync(recursive: true);
+    }
+  }
+
+  List<Map<String, Object?>> _phases(
+    Map<String, Object?> snapshot,
+    String sql,
+  ) {
+    final ranges = _statementRanges(sql);
+    final bytes = utf8.encode(sql);
+    final schemas = (snapshot['schemas']! as List<Object?>).cast<Map<String, Object?>>();
+    final phases = <Map<String, Object?>>[];
+    for (final range in ranges) {
+      final statement = utf8.decode(
+        bytes.sublist(range['startByte']!, range['endByte']),
+      );
+      final matchingSchemas = schemas
+          .where(
+            (schema) => statement.contains('${_quote(schema['name']! as String)}.'),
+          )
+          .toList(growable: false);
+      if (matchingSchemas.length != 1) {
+        throw StateError('Generated Voxel SQL statement has no unique file scope.');
+      }
+      final scopeId = matchingSchemas.single['id'];
+      if (phases.isNotEmpty && phases.last['scopeId'] == scopeId) {
+        (phases.last['statements']! as List<Map<String, int>>).add(range);
+        continue;
+      }
+      phases.add({
+        'id': '${phases.length}',
+        'scopeId': scopeId,
+        'mode': 'transactional',
+        'platforms': ['native', 'browser'],
+        'statements': <Map<String, int>>[range],
+        'recovery': null,
+      });
+    }
+    return phases;
   }
 
   List<Map<String, int>> _statementRanges(String sql) {

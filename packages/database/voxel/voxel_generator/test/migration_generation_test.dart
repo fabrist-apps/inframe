@@ -5,6 +5,9 @@ import 'package:test/test.dart';
 import 'package:voxel/voxel.dart';
 import 'package:voxel_generator/voxel_generator.dart';
 
+// Fixture maps spell out optional migration metadata for readability.
+// ignore_for_file: use_null_aware_elements
+
 void main() {
   group('VoxelMigrationGenerator', () {
     late Directory directory;
@@ -160,7 +163,128 @@ void main() {
 
       await const VoxelMigrationChecker().check(directory: directory);
     });
+
+    test('should append ordinary changes and preserve renamed identities', () async {
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generateDeclaration(
+        declaration: _declaration(table: 'users', columns: ['id', 'name']),
+        directory: directory,
+        name: 'create users',
+      );
+      final first = _finalSnapshot(directory);
+      final firstTable = (first['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final firstColumns = (firstTable['columns']! as List<Object?>).cast<Map<String, Object?>>();
+
+      final migrationId = await generator.generateDeclaration(
+        declaration: _declaration(
+          table: 'members',
+          tableRenamedFrom: 'users',
+          columns: ['id', 'displayName', 'nickname'],
+          columnRenames: {'displayName': 'name'},
+          nullable: {'nickname'},
+        ),
+        directory: directory,
+        name: 'rename users',
+      );
+      final second = _finalSnapshot(directory);
+      final secondTable = (second['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final secondColumns = (secondTable['columns']! as List<Object?>).cast<Map<String, Object?>>();
+      final sql = _finalSql(directory);
+
+      expect(migrationId, isNotNull);
+      expect(secondTable['id'], firstTable['id']);
+      expect(
+        secondColumns.firstWhere((column) => column['name'] == 'displayName')['id'],
+        firstColumns.firstWhere((column) => column['name'] == 'name')['id'],
+      );
+      expect(sql, contains('ALTER TABLE "auth"."users" RENAME TO "members";'));
+      expect(sql, contains('RENAME COLUMN "name" TO "displayName";'));
+      expect(sql, contains('ADD COLUMN "nickname" TEXT;'));
+      expect(
+        (jsonDecode(File('${directory.path}/journal.json').readAsStringSync())
+                as Map<String, Object?>)['entries']!
+            as List<Object?>,
+        hasLength(2),
+      );
+    });
+
+    test('should emit no migration for runtime-only declaration changes', () async {
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _declaration(table: 'users', columns: ['id', 'name']);
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'create users',
+      );
+
+      expect(
+        await generator.generateDeclaration(
+          declaration: {...declaration, 'rowName': 'Account'},
+          directory: directory,
+          name: 'runtime only',
+        ),
+        isNull,
+      );
+    });
   });
+}
+
+Map<String, Object?> _declaration({
+  required String table,
+  required List<String> columns,
+  String? tableRenamedFrom,
+  Map<String, String> columnRenames = const {},
+  Set<String> nullable = const {},
+}) => {
+  'formatVersion': 1,
+  'dialect': 'voxel',
+  'name': 'accounts',
+  'tables': [
+    {
+      'schema': 'auth',
+      'name': table,
+      if (tableRenamedFrom != null) 'renamedFrom': tableRenamedFrom,
+      'columns': [
+        for (final column in columns)
+          {
+            'name': column,
+            if (columnRenames[column] case final previous?) 'renamedFrom': previous,
+            'storage': {
+              'kind': column == 'id' ? 'integer' : 'text',
+              'nullable': nullable.contains(column),
+              'codecVersion': 1,
+            },
+            'primaryKey': column == 'id',
+          },
+      ],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+  ],
+  'enums': <Object?>[],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _finalSnapshot(Directory directory) {
+  final journal =
+      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  return jsonDecode(
+    File('${directory.path}/${entry['directory']}/snapshot.json').readAsStringSync(),
+  ) as Map<String, Object?>;
+}
+
+String _finalSql(Directory directory) {
+  final journal =
+      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  return File('${directory.path}/${entry['directory']}/migration.sql').readAsStringSync();
 }
 
 @VoxelTable(schema: 'auth', name: 'renamedUsers')
