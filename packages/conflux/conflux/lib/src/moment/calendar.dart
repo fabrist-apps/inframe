@@ -62,6 +62,7 @@ extension MomentCalendar on Moment {
     required Disambiguation policy,
   }) {
     final p = parts;
+
     // Combine before narrowing: large signed amounts must not wrap or lose
     // cancellation between years/months or weeks/days.
     final sign = BigInt.from(subtract ? -1 : 1);
@@ -71,22 +72,26 @@ extension MomentCalendar on Moment {
     final monthRemainder = monthIndex % BigInt.from(12);
     final year = (monthIndex - monthRemainder) ~/ BigInt.from(12);
     final month = monthRemainder.toInt() + 1;
+
     final lastDay = calendarDaysInMonth((year % BigInt.from(400)).toInt(), month);
-    final clampedMicros = encodeCalendarParts(
-      p,
+    final clampedMicros = p.encodeCalendar(
       year: year,
       month: month,
       day: p.day > lastDay ? lastDay : p.day,
     );
+
     final calendarDays = (BigInt.from(weeks) * BigInt.from(7) + BigInt.from(days)) * sign;
     final wallMicros = clampedMicros + calendarDays * BigInt.from(Duration.microsecondsPerDay);
     if (wallMicros < BigInt.from(minimumMomentMicros) ||
         wallMicros > BigInt.from(maximumMomentMicros)) {
-      return const Failure(_calendarRangeError);
+      return const Failure(MomentError.calenderRange);
     }
-    final finalParts = decodeParts(
-      DateTime.fromMicrosecondsSinceEpoch(wallMicros.toInt(), isUtc: true),
-    );
+
+    final finalParts = DateTime.fromMicrosecondsSinceEpoch(
+      wallMicros.toInt(),
+      isUtc: true,
+    ).toMomentParts();
+
     return withParts(finalParts, disambiguation: policy);
   }
 
@@ -115,19 +120,22 @@ extension MomentCalendar on Moment {
       final date = DateTime.utc(surrogateYear, p.month, p.day + shift);
       p = p.copyWith(year: p.year + date.year - surrogateYear, month: date.month, day: date.day);
     }
+
     if (unit == MomentUnit.year) p = p.copyWith(month: end ? 12 : 1);
     if (unit == MomentUnit.year || unit == MomentUnit.month) {
       p = p.copyWith(day: end ? calendarDaysInMonth(p.year, p.month) : 1);
     }
+
     if (unit.index <= MomentUnit.day.index) p = p.copyWith(hour: end ? 23 : 0);
     if (unit.index <= MomentUnit.hour.index) p = p.copyWith(minute: end ? 59 : 0);
     if (unit.index <= MomentUnit.minute.index) p = p.copyWith(second: end ? 59 : 0);
     p = p.copyWith(millisecond: end ? 999 : 0, microsecond: end ? 999 : 0);
+
     return withParts(p, disambiguation: policy);
   }
 
   /// Local weekday, Monday=1 through Sunday=7.
-  int get weekday => encodeParts(parts).weekday;
+  int get weekday => parts.encode().weekday;
 
   /// Local day of the year, starting at 1; unaffected by offset changes.
   int get dayOfYear {
@@ -136,6 +144,7 @@ extension MomentCalendar on Moment {
     for (var month = 1; month < p.month; month++) {
       days += calendarDaysInMonth(p.year, month);
     }
+
     return days;
   }
 
@@ -154,19 +163,15 @@ extension MomentCalendar on Moment {
     final week = (dayOfYear - weekday + 10) ~/ 7;
     if (week == 0) return (year: p.year - 1, week: _isoWeeksInYear(p.year - 1));
     if (week > _isoWeeksInYear(p.year)) return (year: p.year + 1, week: 1);
+
     return (year: p.year, week: week);
   }
-}
 
-// Gregorian weekdays repeat every 400 years, including at native range edges.
-int _isoWeeksInYear(int year) {
-  final januaryWeekday = DateTime.utc(2000 + year % 400).weekday;
-  return januaryWeekday == 4 || (januaryWeekday == 3 && calendarDaysInMonth(year, 2) == 29)
-      ? 53
-      : 52;
+  // Gregorian weekdays repeat every 400 years, including at native range edges.
+  static int _isoWeeksInYear(int year) {
+    final januaryWeekday = DateTime.utc(2000 + year % 400).weekday;
+    return januaryWeekday == 4 || (januaryWeekday == 3 && calendarDaysInMonth(year, 2) == 29)
+        ? 53
+        : 52;
+  }
 }
-
-const _calendarRangeError = MomentError(
-  MomentErrorKind.outOfRange,
-  'Calendar operation is outside Dart DateTime’s range.',
-);

@@ -87,44 +87,6 @@ const maximumMomentMicros = 8640000000000000000;
 /// Checks an epoch or a local-field encoding before native conversion.
 bool inMomentRange(int micros) => micros >= minimumMomentMicros && micros <= maximumMomentMicros;
 
-/// Validates without allowing the native constructor to normalize input.
-MomentError? validateParts(MomentParts parts) {
-  if (parts.year < -271821 || parts.year > 275760) {
-    return const MomentError(
-      MomentErrorKind.outOfRange,
-      'Year is outside Dart DateTime’s range.',
-      field: 'year',
-    );
-  }
-  final fields = [
-    ('month', parts.month, 1, 12),
-    (
-      'day',
-      parts.day,
-      1,
-      parts.month >= 1 && parts.month <= 12 ? calendarDaysInMonth(parts.year, parts.month) : 31,
-    ),
-    ('hour', parts.hour, 0, 23),
-    ('minute', parts.minute, 0, 59),
-    ('second', parts.second, 0, 59),
-    ('millisecond', parts.millisecond, 0, 999),
-    ('microsecond', parts.microsecond, 0, 999),
-  ];
-  for (final (field, value, min, max) in fields) {
-    if (value < min || value > max) {
-      return MomentError(MomentErrorKind.invalidField, '$field must be $min–$max.', field: field);
-    }
-  }
-  final micros = encodeCalendarParts(parts);
-  if (micros < BigInt.from(minimumMomentMicros) || micros > BigInt.from(maximumMomentMicros)) {
-    return const MomentError(
-      MomentErrorKind.outOfRange,
-      'Calendar fields are outside Dart DateTime’s range.',
-    );
-  }
-  return null;
-}
-
 /// Gregorian month length, independent of elapsed time or a timezone.
 int calendarDaysInMonth(int year, int month) => switch (month) {
   2 => year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) ? 29 : 28,
@@ -132,41 +94,89 @@ int calendarDaysInMonth(int year, int month) => switch (month) {
   _ => 31,
 };
 
-/// Encodes Gregorian fields exactly, including intermediate out-of-range dates.
-///
-/// Gregorian dates repeat every 400 years (146097 days). A safe surrogate year
-/// lets native calendar logic handle the fields while BigInt retains the cycle
-/// displacement, without constructing a DateTime beyond its representable range.
-BigInt encodeCalendarParts(MomentParts parts, {BigInt? year, int? month, int? day}) {
-  final calendarYear = year ?? BigInt.from(parts.year);
-  final surrogateYear = (calendarYear % BigInt.from(400)).toInt() + 2000;
-  final cycles = (calendarYear - BigInt.from(surrogateYear)) ~/ BigInt.from(400);
-  final surrogate = DateTime.utc(
-    surrogateYear,
-    month ?? parts.month,
-    day ?? parts.day,
-    parts.hour,
-    parts.minute,
-    parts.second,
-    parts.millisecond,
-    parts.microsecond,
-  );
-  return BigInt.from(surrogate.microsecondsSinceEpoch) +
-      cycles * BigInt.from(146097) * BigInt.from(Duration.microsecondsPerDay);
+/// Internal validation and native calendar encoding, excluded from the public entrypoint.
+extension MomentPartsEncoding on MomentParts {
+  /// Validates without allowing the native constructor to normalize input.
+  MomentError? validate() {
+    if (year < -271821 || year > 275760) {
+      return const MomentError(
+        MomentErrorKind.outOfRange,
+        'Year is outside Dart DateTime’s range.',
+        field: 'year',
+      );
+    }
+
+    final fields = [
+      ('month', month, 1, 12),
+      (
+        'day',
+        day,
+        1,
+        month >= 1 && month <= 12 ? calendarDaysInMonth(year, month) : 31,
+      ),
+      ('hour', hour, 0, 23),
+      ('minute', minute, 0, 59),
+      ('second', second, 0, 59),
+      ('millisecond', millisecond, 0, 999),
+      ('microsecond', microsecond, 0, 999),
+    ];
+
+    for (final (field, value, min, max) in fields) {
+      if (value < min || value > max) {
+        return MomentError(MomentErrorKind.invalidField, '$field must be $min–$max.', field: field);
+      }
+    }
+
+    final micros = encodeCalendar();
+    if (micros < BigInt.from(minimumMomentMicros) || micros > BigInt.from(maximumMomentMicros)) {
+      return const MomentError(
+        MomentErrorKind.outOfRange,
+        'Calendar fields are outside Dart DateTime’s range.',
+      );
+    }
+
+    return null;
+  }
+
+  /// Encodes Gregorian fields exactly, including intermediate out-of-range dates.
+  ///
+  /// Gregorian dates repeat every 400 years (146097 days). A safe surrogate year
+  /// lets native calendar logic handle the fields while BigInt retains the cycle
+  /// displacement, without constructing a DateTime beyond its representable range.
+  BigInt encodeCalendar({BigInt? year, int? month, int? day}) {
+    final calendarYear = year ?? BigInt.from(this.year);
+    final surrogateYear = (calendarYear % BigInt.from(400)).toInt() + 2000;
+    final cycles = (calendarYear - BigInt.from(surrogateYear)) ~/ BigInt.from(400);
+    final surrogate = DateTime.utc(
+      surrogateYear,
+      month ?? this.month,
+      day ?? this.day,
+      hour,
+      minute,
+      second,
+      millisecond,
+      microsecond,
+    );
+
+    return BigInt.from(surrogate.microsecondsSinceEpoch) +
+        cycles * BigInt.from(146097) * BigInt.from(Duration.microsecondsPerDay);
+  }
+
+  /// Encodes already validated calendar fields, without resolving a local instant.
+  DateTime encode() => DateTime.fromMicrosecondsSinceEpoch(encodeCalendar().toInt(), isUtc: true);
 }
 
-/// Encodes already validated calendar fields, without resolving a local instant.
-DateTime encodeParts(MomentParts parts) =>
-    DateTime.fromMicrosecondsSinceEpoch(encodeCalendarParts(parts).toInt(), isUtc: true);
-
-/// Extracts fields at an explicit native implementation boundary.
-MomentParts decodeParts(DateTime d) => MomentParts(
-  year: d.year,
-  month: d.month,
-  day: d.day,
-  hour: d.hour,
-  minute: d.minute,
-  second: d.second,
-  millisecond: d.millisecond,
-  microsecond: d.microsecond,
-);
+/// Extracts native calendar fields without changing their timezone.
+extension DateTimeMomentParts on DateTime {
+  /// Extracts fields at an explicit native implementation boundary.
+  MomentParts toMomentParts() => MomentParts(
+    year: year,
+    month: month,
+    day: day,
+    hour: hour,
+    minute: minute,
+    second: second,
+    millisecond: millisecond,
+    microsecond: microsecond,
+  );
+}

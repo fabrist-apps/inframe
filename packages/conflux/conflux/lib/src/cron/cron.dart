@@ -3,7 +3,6 @@ import 'dart:collection';
 import 'package:conflux/moment.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/moment/calendar_date.dart';
-import 'package:conflux/src/moment/time_zone.dart' show zoneOffset;
 import 'package:timezone/timezone.dart' show Location;
 
 /// A validation or calendar-search failure produced by [Cron].
@@ -154,6 +153,7 @@ final class Cron {
         !_months.values.contains(local.month)) {
       return false;
     }
+
     return _matchesDay(local.day, zoned.weekday % 7);
   }
 
@@ -206,14 +206,17 @@ final class Cron {
     if (local case Failure<ZonedMoment, MomentError>(:final error)) {
       return Failure(CronError(error.message));
     }
+
     if (!_supportedYear(instant.partsUtc.year) ||
         !_supportedYear((local as Success<ZonedMoment, MomentError>).value.parts.year)) {
       return const Failure(_searchRangeError);
     }
+
     final boundaryMicros = instant.microsecondsSinceEpoch;
     final offsets = location.zones.isEmpty
         ? const [Duration.zero]
         : SplayTreeSet<Duration>.of(location.zones.map((zone) => zone.offset)).toList();
+
     // A rollback can revisit the previous calendar date. Start with every date
     // that could contain an eligible instant under any offset in this location.
     final wallBoundary = boundaryMicros + (forward ? offsets.first : offsets.last).inMicroseconds;
@@ -230,6 +233,7 @@ final class Cron {
           rangeError ?? const CronError('The search reached the supported date range.'),
         );
       }
+
       if (_matchesDate(date)) {
         final found = _findOnDate(
           date,
@@ -247,7 +251,9 @@ final class Cron {
             }
         }
       }
+
       date = date.addDays(forward ? 1 : -1);
+
       // Calendar-date order is not necessarily instant order across a rollback.
       // Return only once no candidate on this or a later searched date can win.
       final dateLimit = forward
@@ -260,6 +266,7 @@ final class Cron {
         return Success(best);
       }
     }
+
     return const Failure(
       CronError('The search exhausted its 10,000 candidate-iteration budget.'),
     );
@@ -267,6 +274,7 @@ final class Cron {
 
   bool _matchesDate(CalendarDate date) {
     if (!_months.values.contains(date.month)) return false;
+
     return _matchesDay(date.day, date.weekday % 7);
   }
 
@@ -276,6 +284,7 @@ final class Cron {
     if (!_days.startsWithWildcard && !_weekdays.startsWithWildcard) {
       return dayMatches || weekdayMatches;
     }
+
     return dayMatches && weekdayMatches;
   }
 
@@ -314,9 +323,11 @@ final class Cron {
             if (forward ? candidateMicros <= boundaryMicros : candidateMicros >= boundaryMicros) {
               continue;
             }
+
             // Only a currently applicable offset reproduces the local fields.
             // This skips gaps and keeps both actual overlap occurrences.
-            if (zoneOffset(_zone, candidateMicros) != offset) continue;
+            if (_zone.offsetAt(candidateMicros) != offset) continue;
+
             final result = Moment.fromEpochMicroseconds(candidateMicros)
                 .flatMap((utc) => utc.setZone(_zone));
             if (result case Failure<ZonedMoment, MomentError>(:final error)) {
@@ -326,11 +337,13 @@ final class Cron {
               rangeError = CronError(error.message);
               continue;
             }
+
             final candidate = (result as Success<ZonedMoment, MomentError>).value;
             if (!_supportedYear(candidate.partsUtc.year)) {
               rangeError = _searchRangeError;
               continue;
             }
+
             if (best == null || (forward ? candidate.isBefore(best) : candidate.isAfter(best))) {
               best = candidate;
             }
@@ -338,12 +351,15 @@ final class Cron {
         }
       }
     }
+
     if (best == null && rangeError != null) return Failure(rangeError);
+
     return Success(best);
   }
 }
 
 bool _supportedYear(int year) => year >= _minimumYear && year <= _maximumYear;
+
 const _searchRangeError = CronError('Cron searches require UTC and local years 1–9999.');
 
 const _searchBudget = 10000;

@@ -9,6 +9,9 @@ import 'package:timezone/timezone.dart' as tz;
 sealed class TimeZone {
   const TimeZone._();
 
+  /// Reads the offset east of UTC at an epoch-microsecond instant.
+  Duration offsetAt(int microsecondsSinceEpoch);
+
   /// Looks up an exact identifier in the caller-initialized IANA database.
   static Result<NamedTimeZone, MomentError> named(String id) {
     if (!tz.timeZoneDatabase.isInitialized) {
@@ -19,10 +22,12 @@ sealed class TimeZone {
         ),
       );
     }
+
     final location = tz.timeZoneDatabase.locations[id];
     if (location == null) {
       return Failure(MomentError(MomentErrorKind.unknownTimeZone, 'Unknown timezone: $id.'));
     }
+
     return Success(NamedTimeZone._(location, id));
   }
 
@@ -44,6 +49,7 @@ sealed class TimeZone {
         ),
       );
     }
+
     return Success(FixedTimeZone._(offset));
   }
 }
@@ -59,7 +65,15 @@ final class NamedTimeZone extends TimeZone {
   final String id;
 
   @override
+  Duration offsetAt(int microsecondsSinceEpoch) {
+    // Floor negative sub-millisecond instants to retain transition precision.
+    final milliseconds = (microsecondsSinceEpoch - microsecondsSinceEpoch % 1000) ~/ 1000;
+    return location.timeZone(milliseconds).offset;
+  }
+
+  @override
   bool operator ==(Object other) => other is NamedTimeZone && id == other.id;
+
   @override
   int get hashCode => Object.hash(NamedTimeZone, id);
 }
@@ -72,16 +86,14 @@ final class FixedTimeZone extends TimeZone {
   final Duration offset;
 
   @override
+  Duration offsetAt(int microsecondsSinceEpoch) => offset;
+
+  @override
   bool operator ==(Object other) => other is FixedTimeZone && offset == other.offset;
+
   @override
   int get hashCode => Object.hash(FixedTimeZone, offset);
 }
-
-/// Reads the offset at an instant without losing negative sub-millisecond precision.
-Duration zoneOffset(TimeZone zone, int micros) => switch (zone) {
-  FixedTimeZone(:final offset) => offset,
-  NamedTimeZone(:final location) => location.timeZone((micros - micros % 1000) ~/ 1000).offset,
-};
 
 /// The required choice when supplied local fields are repeated or absent.
 enum Disambiguation {

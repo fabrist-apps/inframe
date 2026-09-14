@@ -12,6 +12,16 @@ final class MomentError {
   /// The offending input field, when known.
   final String? field;
 
+  static const range = MomentError(
+    MomentErrorKind.outOfRange,
+    'UTC or local fields are outside Dart DateTime’s range.',
+  );
+
+  static const calenderRange = MomentError(
+    MomentErrorKind.outOfRange,
+    'Calendar operation is outside Dart DateTime’s range.',
+  );
+
   @override
   String toString() => 'MomentError(${kind.name}: $message)';
 }

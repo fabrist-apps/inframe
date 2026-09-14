@@ -5,6 +5,7 @@
 final class CalendarDate {
   /// Creates a calendar date for internal enumeration.
   CalendarDate(int year, [int month = 1, int day = 1]) : _date = DateTime.utc(year, month, day);
+
   CalendarDate._(this._date);
 
   /// Selects the date of an encoded local-field coordinate.
