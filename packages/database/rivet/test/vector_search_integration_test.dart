@@ -269,8 +269,6 @@ void main() {
           ('diskann', 'vector_ip_ops', '<#>'),
         ];
         final query = Float32List.fromList([1, 0, 0]);
-        await fixture.execute('SET enable_seqscan = off');
-        addTearDown(() => fixture.execute('RESET enable_seqscan'));
 
         for (final (method, operatorClass, operator) in combinations) {
           final indexName = 'active_${method}_$operatorClass';
@@ -280,22 +278,6 @@ void main() {
             USING $method (embedding $operatorClass)$options
           ''');
           await fixture.execute('ANALYZE fbr195."vectorDocuments"');
-          final plan = await fixture.execute('''
-            EXPLAIN (COSTS OFF)
-            WITH candidates AS MATERIALIZED (
-              SELECT * FROM fbr195."vectorDocuments"
-              WHERE "categoryId" = 1
-              ORDER BY embedding $operator '[1,0,0]'::vector
-              LIMIT 5
-            )
-            SELECT * FROM candidates
-            ORDER BY embedding $operator '[1,0,0]'::vector, id DESC
-          ''');
-          expect(
-            plan.map((row) => row.first).join('\n'),
-            contains(indexName),
-            reason: '$method $operatorClass should be planner-eligible',
-          );
 
           RivetVectorDistanceExpression<double?> distance(
             VectorDocuments document,
@@ -306,24 +288,33 @@ void main() {
             _ => throw StateError('Unexpected vector operator $operator.'),
           };
           statements.clear();
-          final rows = await VectorDocuments.db
-              .find(
-                where: (document) => document.category.matches(
-                  (category) => category.name.equals('science'),
-                ),
-                orderBy: (document) => [
-                  distance(document).asc(),
-                  document.id.desc(),
-                ],
-                limit: 5,
-                include: (include) => [include.category()],
-                vectorSearch: VectorSearchMode.approximate,
-              )
-              .withScore(distance)
-              .get(database);
+          final rows = await database.transaction((transaction) async {
+            await transaction.executeAffected(
+              RivetCompiledQuery('SET LOCAL enable_seqscan = off', const []),
+            );
+            return VectorDocuments.db
+                .find(
+                  where: (document) => document.category.matches(
+                    (category) => category.name.equals('science'),
+                  ),
+                  orderBy: (document) => [
+                    distance(document).asc(),
+                    document.id.desc(),
+                  ],
+                  limit: 5,
+                  include: (include) => [include.category()],
+                  vectorSearch: VectorSearchMode.approximate,
+                )
+                .withScore(distance)
+                .get(_ExplainingExecutor(transaction, indexName));
+          });
 
-          expect(statements, hasLength(1));
-          expect(statements.single, startsWith('WITH "__rivet_candidates" AS MATERIALIZED'));
+          expect(
+            statements.where(
+              (sql) => sql.startsWith('WITH "__rivet_candidates" AS MATERIALIZED'),
+            ),
+            hasLength(1),
+          );
           expect(rows, isNotEmpty);
           expect(
             rows.map(
@@ -600,6 +591,37 @@ void main() {
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
   });
+}
+
+final class _ExplainingExecutor implements RivetExecutor {
+  const _ExplainingExecutor(this.transaction, this.expectedIndex);
+
+  final RivetTransaction transaction;
+  final String expectedIndex;
+
+  @override
+  Future<List<Row>> execute<Row>(
+    RivetCompiledQuery query,
+    RivetRowDecoder<Row> decode,
+  ) async {
+    final plan = await transaction.execute(
+      RivetCompiledQuery(
+        'EXPLAIN (COSTS OFF) ${query.sql}',
+        query.parameters,
+        requiredExtensions: query.requiredExtensions,
+      ),
+      (values, _) => values.single! as String,
+    );
+    expect(
+      plan.join('\n'),
+      contains(expectedIndex),
+      reason: '$expectedIndex should be planner-eligible for the compiled query',
+    );
+    return transaction.execute(query, decode);
+  }
+
+  @override
+  Future<int> executeAffected(RivetCompiledQuery query) => transaction.executeAffected(query);
 }
 
 File _capabilityManifest() {

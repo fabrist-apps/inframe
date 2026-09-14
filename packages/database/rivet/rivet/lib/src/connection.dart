@@ -399,10 +399,13 @@ final class RivetTransaction implements RivetExecutor {
     } on RivetException {
       rethrow;
     } on pg.ServerException catch (error) {
-      throw RivetCapabilityException(
-        'PostgreSQL rejected ${configuration.method} vector search tuning.',
-        error,
-      );
+      if (error.code == '42704') {
+        throw RivetCapabilityException(
+          'PostgreSQL rejected ${configuration.method} vector search tuning.',
+          error,
+        );
+      }
+      throw RivetDatabaseException('PostgreSQL vector search tuning failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL vector search tuning failed.', error);
     }

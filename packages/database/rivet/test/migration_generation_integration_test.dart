@@ -120,6 +120,10 @@ void main() {
         await connection.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
         await connection.execute('DROP EXTENSION IF EXISTS vectorscale');
         await connection.execute('DROP EXTENSION IF EXISTS vector');
+        addTearDown(() async {
+          await connection.execute('CREATE EXTENSION IF NOT EXISTS vector');
+          await connection.execute('CREATE EXTENSION IF NOT EXISTS vectorscale');
+        });
         final schema = RivetDatabaseSchema(
           name: 'vector_indexes',
           tables: [
@@ -149,8 +153,6 @@ void main() {
           "SELECT 1 FROM pg_namespace WHERE nspname = '_rivet'",
         );
         expect(historySchema, isEmpty);
-        await connection.execute('CREATE EXTENSION vector');
-        await connection.execute('CREATE EXTENSION vectorscale');
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
@@ -201,6 +203,9 @@ void main() {
       () async {
         await connection.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
         await connection.execute('DROP EXTENSION IF EXISTS vectorscale');
+        addTearDown(
+          () => connection.execute('CREATE EXTENSION IF NOT EXISTS vectorscale'),
+        );
         await connection.execute('CREATE EXTENSION IF NOT EXISTS vector');
         final schema = RivetDatabaseSchema(
           name: 'vector_indexes',
@@ -231,7 +236,6 @@ void main() {
           "SELECT 1 FROM pg_namespace WHERE nspname = '_rivet'",
         );
         expect(historySchema, isEmpty);
-        await connection.execute('CREATE EXTENSION vectorscale');
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
