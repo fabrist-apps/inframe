@@ -229,6 +229,9 @@ final class RivetDb implements RivetExecutor {
       ];
     } on RivetException {
       rethrow;
+    } on pg.ServerException catch (error) {
+      throw _vectorCapabilityError(query, error) ??
+          RivetDatabaseException('PostgreSQL query failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL query failed.', error);
     }
@@ -249,6 +252,9 @@ final class RivetDb implements RivetExecutor {
       return result.affectedRows;
     } on RivetException {
       rethrow;
+    } on pg.ServerException catch (error) {
+      throw _vectorCapabilityError(query, error) ??
+          RivetDatabaseException('PostgreSQL mutation failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL mutation failed.', error);
     }
@@ -335,6 +341,9 @@ final class RivetTransaction implements RivetExecutor {
       ];
     } on RivetException {
       rethrow;
+    } on pg.ServerException catch (error) {
+      throw _vectorCapabilityError(query, error) ??
+          RivetDatabaseException('PostgreSQL transaction query failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL transaction query failed.', error);
     }
@@ -354,12 +363,29 @@ final class RivetTransaction implements RivetExecutor {
       return result.affectedRows;
     } on RivetException {
       rethrow;
+    } on pg.ServerException catch (error) {
+      throw _vectorCapabilityError(query, error) ??
+          RivetDatabaseException('PostgreSQL transaction mutation failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL transaction mutation failed.', error);
     }
   }
 
   void _expire() => _active = false;
+}
+
+RivetCapabilityException? _vectorCapabilityError(
+  RivetCompiledQuery query,
+  pg.ServerException error,
+) {
+  if (query.requiredExtensions.contains('vector') &&
+      const {'42704', '42883'}.contains(error.code)) {
+    return RivetCapabilityException(
+      'Vector queries require a compatible pgvector extension and operator classes.',
+      error,
+    );
+  }
+  return null;
 }
 
 final class _PoolWaiter {

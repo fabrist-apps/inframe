@@ -142,3 +142,26 @@ Absent fields in the conflict update run their `onUpdate` callbacks once when th
 The column catalog is `chronoID`, `text`, `integer`, `real`, `boolean`, `dateTime`, `json`, `enumText`, and fixed-dimension `vector`. Add `.map(converter)` for domain values and `.array()` for one-dimensional native PostgreSQL arrays. Nullability before `.array()` applies to elements; nullability after it applies to the array column.
 
 The integration matrix pins `postgres` 3.5.12 and the Inframe image at `sha256:a29d81973c699fdf070b10f77bf5b91b1d94a59fcd7792f67410ba655761f871`: PostgreSQL 18.6, pgvector 0.8.6, pgvectorscale 0.9.1, and pg_textsearch 1.4.0.
+
+Vector distances are typed SQL expressions. They accept fixed-dimension
+`Float32List` query values and can be used in filters, ordering, and scores:
+
+```dart
+final nearest = await Books.db
+    .find(
+      orderBy: (book) => [
+        book.embedding.cosineDistance(queryEmbedding).asc(),
+      ],
+      limit: 10,
+    )
+    .withScore((book) => book.embedding.cosineDistance(queryEmbedding))
+    .get(db);
+```
+
+`find` defaults to `VectorSearchMode.exact`. Exact vector queries materialize
+the eligible root rows before distance ordering and pagination, so an installed
+HNSW, IVFFlat, or StreamingDiskANN index cannot narrow the result population.
+`cosineDistance` rejects a zero query vector and returns a nullable score because
+a stored zero vector has undefined cosine distance. `l2Distance` and
+`negativeInnerProduct` accept stored zero vectors; lower negative inner products
+represent larger dot products. Rivet never normalizes embeddings implicitly.

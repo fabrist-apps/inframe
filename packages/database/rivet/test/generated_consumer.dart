@@ -249,6 +249,29 @@ final class VectorValues extends RivetTableDefinition<VectorValues> {
   late final optionalEmbedding = vector(dimensions: 3).nullable()();
 }
 
+@RivetTable(schema: 'fbr195')
+final class VectorCategories extends RivetTableDefinition<VectorCategories> {
+  static const db = _$VectorCategoriesDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final documents = many<VectorDocuments>()();
+}
+
+@RivetTable(schema: 'fbr195')
+final class VectorDocuments extends RivetTableDefinition<VectorDocuments> {
+  static const db = _$VectorDocumentsDB();
+
+  late final id = integer().primaryKey()();
+  late final categoryId = integer()();
+  late final title = text()();
+  late final embedding = vector(dimensions: 3).nullable()();
+  late final category = one<VectorCategories>(
+    fields: [categoryId],
+    references: (category) => [category.id],
+  )();
+}
+
 @RivetTable(schema: 'fbr122')
 final class ArrayValues extends RivetTableDefinition<ArrayValues> {
   static const db = _$ArrayValuesDB();

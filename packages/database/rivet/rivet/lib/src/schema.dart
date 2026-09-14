@@ -1276,6 +1276,136 @@ abstract interface class RivetAliasedExpression<T> implements RivetExpression<T>
 
 abstract interface class RivetOrderableExpression<T> implements RivetExpression<T> {}
 
+/// A pgvector distance expression used by exact and approximate query planning.
+abstract interface class RivetVectorDistanceExpression<T extends double?>
+    implements RivetOrderableExpression<T> {}
+
+extension RivetVectorDistanceComparison<T extends double?> on RivetVectorDistanceExpression<T> {
+  RivetPredicate lessThan(double value) => (this as _RivetVectorDistance<T>)._compare('<', value);
+
+  RivetPredicate greaterThan(double value) =>
+      (this as _RivetVectorDistance<T>)._compare('>', value);
+}
+
+final class _RivetVectorDistance<T extends double?> implements RivetVectorDistanceExpression<T> {
+  _RivetVectorDistance(
+    this.source,
+    Float32List query,
+    this.operator,
+    this.codec, {
+    required this.nullStoredZero,
+    required bool rejectZeroQuery,
+  }) : parameters = [source.encodeValue(query)] {
+    if (rejectZeroQuery && query.every((component) => component == 0)) {
+      throw source._conversionError(
+        'encode',
+        const FormatException('cosine distance requires a non-zero query vector'),
+      );
+    }
+  }
+
+  final RivetColumn<dynamic> source;
+  final String operator;
+  @override
+  final RivetCodec<T> codec;
+  final bool nullStoredZero;
+
+  @override
+  final List<Object?> parameters;
+
+  @override
+  List<RivetColumn<dynamic>> get columns => [source];
+
+  @override
+  bool get referencesRows => true;
+
+  @override
+  String get sql => renderPlaceholders((_) => '@value');
+
+  @override
+  String renderPlaceholders(String Function(int index) placeholder) {
+    final distance = '(${source.sql} $operator ${placeholder(0)}::vector)';
+    return nullStoredZero
+        ? '(CASE WHEN vector_norm(${source.sql}) = 0 THEN NULL ELSE $distance END)'
+        : distance;
+  }
+
+  @override
+  String renderParameters({int startAt = 1}) =>
+      renderPlaceholders((index) => '\$${startAt + index}');
+
+  RivetPredicate _compare(String comparison, double value) => RivetPredicate._(
+    (placeholder, _) =>
+        '${renderPlaceholders(placeholder)} $comparison '
+        '${placeholder(parameters.length)}::float8',
+    [...parameters, value],
+    columns,
+    false,
+    null,
+    true,
+  );
+}
+
+extension RivetVectorColumnExpression on RivetColumn<Float32List> {
+  RivetVectorDistanceExpression<double?> cosineDistance(Float32List query) => _RivetVectorDistance(
+    this,
+    query,
+    '<=>',
+    RivetNullableCodec(RivetRealCodec()),
+    nullStoredZero: true,
+    rejectZeroQuery: true,
+  );
+
+  RivetVectorDistanceExpression<double> l2Distance(Float32List query) => _RivetVectorDistance(
+    this,
+    query,
+    '<->',
+    RivetRealCodec(),
+    nullStoredZero: false,
+    rejectZeroQuery: false,
+  );
+
+  RivetVectorDistanceExpression<double> negativeInnerProduct(Float32List query) =>
+      _RivetVectorDistance(
+        this,
+        query,
+        '<#>',
+        RivetRealCodec(),
+        nullStoredZero: false,
+        rejectZeroQuery: false,
+      );
+}
+
+extension RivetNullableVectorColumnExpression on RivetColumn<Float32List?> {
+  RivetVectorDistanceExpression<double?> cosineDistance(Float32List query) => _RivetVectorDistance(
+    this,
+    query,
+    '<=>',
+    RivetNullableCodec(RivetRealCodec()),
+    nullStoredZero: true,
+    rejectZeroQuery: true,
+  );
+
+  RivetVectorDistanceExpression<double?> l2Distance(Float32List query) => _RivetVectorDistance(
+    this,
+    query,
+    '<->',
+    RivetNullableCodec(RivetRealCodec()),
+    nullStoredZero: false,
+    rejectZeroQuery: false,
+  );
+
+  RivetVectorDistanceExpression<double?> negativeInnerProduct(Float32List query) =>
+      _RivetVectorDistance(
+        this,
+        query,
+        '<#>',
+        RivetNullableCodec(RivetRealCodec()),
+        nullStoredZero: false,
+        rejectZeroQuery: false,
+      );
+}
+
 final class _RivetBoundExpression<T> implements RivetExpression<T> {
   _RivetBoundExpression(this.source, T value) : parameters = [source.encodeValue(value)];
 
@@ -1448,6 +1578,14 @@ class RivetColumn<T> implements RivetExpression<T> {
       );
     }
   }
+
+  RivetConversionException _conversionError(String operation, Object cause) =>
+      RivetConversionException(
+        table: '${_table.schemaName}.${_table.tableName}',
+        column: physicalName,
+        message: 'Failed to $operation value.',
+        cause: cause,
+      );
 }
 
 Map<String, Object?> _schemaExpressionFor(RivetExpression<dynamic> expression) =>
@@ -1837,9 +1975,10 @@ final class RivetPredicate {
     List<Object?> parameters,
     List<RivetColumn<dynamic>> columns,
     this.usesRelations,
-    this._schemaExpression,
-  ) : parameters = List.unmodifiable(parameters),
-      columns = List.unmodifiable(columns);
+    this._schemaExpression, [
+    this.usesVectorDistance = false,
+  ]) : parameters = List.unmodifiable(parameters),
+       columns = List.unmodifiable(columns);
 
   RivetPredicate._raw(
     String Function() sql,
@@ -1921,6 +2060,7 @@ final class RivetPredicate {
   final List<Object?> parameters;
   final List<RivetColumn<dynamic>> columns;
   final bool usesRelations;
+  final bool usesVectorDistance;
   final Map<String, Object?> Function()? _schemaExpression;
 
   Map<String, Object?> schemaExpression() {
@@ -1956,6 +2096,7 @@ final class RivetPredicate {
       'operator': 'AND',
       'arguments': [schemaExpression(), other.schemaExpression()],
     },
+    usesVectorDistance || other.usesVectorDistance,
   );
 
   RivetPredicate operator |(RivetPredicate other) => RivetPredicate._(
@@ -1971,6 +2112,7 @@ final class RivetPredicate {
       'operator': 'OR',
       'arguments': [schemaExpression(), other.schemaExpression()],
     },
+    usesVectorDistance || other.usesVectorDistance,
   );
 
   RivetPredicate operator ~() => RivetPredicate._(
@@ -1984,6 +2126,7 @@ final class RivetPredicate {
       'operator': 'NOT',
       'arguments': [schemaExpression()],
     },
+    usesVectorDistance,
   );
 
   String renderWith(

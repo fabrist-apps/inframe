@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:rivet/rivet.dart';
 import 'package:test/test.dart';
 
@@ -8,6 +10,59 @@ void main() {
     late _RecordingExecutor executor;
 
     setUp(() => executor = _RecordingExecutor());
+
+    test('should compile validated vector distances through an exact root CTE', () async {
+      final query = Float32List.fromList([1, 2, 3]);
+
+      await VectorValues.db
+          .find(
+            where: (values) => values.embedding.l2Distance(query).lessThan(4),
+            orderBy: (values) => [
+              values.embedding.cosineDistance(query).asc(),
+              values.optionalEmbedding.negativeInnerProduct(query).desc(),
+            ],
+            limit: 5,
+          )
+          .withScore((values) => values.embedding.cosineDistance(query))
+          .get(executor);
+
+      final compiled = executor.queries.single;
+      expect(compiled.sql, startsWith('WITH "__rivet_roots" AS MATERIALIZED'));
+      expect(compiled.sql, contains('<->'));
+      expect(compiled.sql, contains('<=>'));
+      expect(compiled.sql, contains('<#>'));
+      expect(compiled.sql, contains('vector_norm'));
+      expect(compiled.sql, contains('ORDER BY'));
+      expect(compiled.sql, endsWith('LIMIT 5'));
+      expect(compiled.parameters, hasLength(5));
+    });
+
+    test('should validate vector query values before execution', () async {
+      expect(
+        () => VectorValues.db.find(
+          orderBy: (values) => [
+            values.embedding.cosineDistance(Float32List.fromList([0, 0, 0])).asc(),
+          ],
+        ),
+        throwsA(isA<RivetConversionException>()),
+      );
+      expect(
+        () => VectorValues.db.find(
+          orderBy: (values) => [
+            values.embedding.l2Distance(Float32List.fromList([1, 2])).asc(),
+          ],
+        ),
+        throwsA(isA<RivetConversionException>()),
+      );
+      expect(executor.queries, isEmpty);
+    });
+
+    test('should reject approximate vector search until its slice is implemented', () {
+      expect(
+        () => VectorValues.db.find(vectorSearch: VectorSearchMode.approximate),
+        throwsA(isA<RivetUnsupportedQueryException>()),
+      );
+    });
 
     test('should compile bound filters and nulls-last ordering', () async {
       executor.rows = [
