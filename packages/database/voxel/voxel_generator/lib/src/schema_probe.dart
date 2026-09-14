@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 // Shared by the CLI and migration bundle builder.
 // ignore_for_file: public_member_api_docs
@@ -12,7 +13,11 @@ Future<Map<String, Object?>> readVoxelSchemaDeclaration(
   final root = workingDirectory ?? Directory.current;
   final toolDirectory = Directory('${root.path}/.dart_tool/voxel_generator')
     ..createSync(recursive: true);
-  final probe = File('${toolDirectory.path}/schema_probe_$pid.dart');
+  final nonce = List.generate(
+    8,
+    (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
+  final probe = File('${toolDirectory.path}/schema_probe_${pid}_$nonce.dart');
   final importUri = library.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
   probe.writeAsStringSync('''
 import 'dart:convert';

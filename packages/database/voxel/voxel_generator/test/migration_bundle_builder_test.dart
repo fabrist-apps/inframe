@@ -61,6 +61,23 @@ void main() {
     );
     expect(missingResult.succeeded, isFalse);
     expect(missingResult.errors.single, contains('Missing journaled Voxel artifact'));
+
+    final duplicateJournal = Map<String, Object>.from(fixture.assets);
+    final journalKey = duplicateJournal.keys.singleWhere((id) => id.endsWith('journal.json'));
+    duplicateJournal[journalKey] = (duplicateJournal[journalKey]! as String).replaceFirst(
+      '"formatVersion": 1',
+      '"formatVersion": 1, "formatVersion": 1',
+    );
+    final duplicateResult = await testBuilder(
+      VoxelMigrationBundleBuilder(
+        readDeclaration: (_, _, _) async => fixture.declaration,
+        resolvePackageRoot: (_) async => Directory.current,
+      ),
+      duplicateJournal,
+      readerWriter: TestReaderWriter(rootPackage: 'voxel_generator'),
+    );
+    expect(duplicateResult.succeeded, isFalse);
+    expect(duplicateResult.errors.single, contains('Duplicate JSON key `formatVersion`'));
   });
 }
 

@@ -32,7 +32,8 @@ final class VoxelMigrationBundleBuilder implements Builder {
 
   @override
   Future<void> build(BuildStep buildStep) async {
-    final journal = jsonDecode(await buildStep.readAsString(buildStep.inputId));
+    final journalBytes = await buildStep.readAsBytes(buildStep.inputId);
+    final journal = jsonDecode(utf8.decode(journalBytes));
     if (journal is! Map<String, Object?>) {
       throw const FormatException('journal.json must contain one JSON object.');
     }
@@ -49,7 +50,11 @@ final class VoxelMigrationBundleBuilder implements Builder {
       throw FormatException('Invalid bundled database class `$className`.');
     }
     final packageRoot = await (resolvePackageRoot ?? _packageRoot)(buildStep.inputId.package);
-    final migrationDirectory = await _materializeArtifacts(buildStep, journal);
+    final migrationDirectory = await _materializeArtifacts(
+      buildStep,
+      journal,
+      journalBytes,
+    );
     try {
       final declaration = readDeclaration == null
           ? await readVoxelSchemaDeclaration(
@@ -112,13 +117,14 @@ VoxelBundledMigration(
   Future<Directory> _materializeArtifacts(
     BuildStep buildStep,
     Map<String, Object?> journal,
+    List<int> journalBytes,
   ) async {
     final sourceDirectory = buildStep.inputId.pathSegments
         .take(buildStep.inputId.pathSegments.length - 1)
         .join('/');
     final directory = Directory.systemTemp.createTempSync('voxel_bundle_');
     try {
-      File('${directory.path}/journal.json').writeAsStringSync(jsonEncode(journal));
+      File('${directory.path}/journal.json').writeAsBytesSync(journalBytes);
       for (final rawEntry in journal['entries']! as List<Object?>) {
         final entry = rawEntry! as Map<String, Object?>;
         for (final file in const ['migration.json', 'snapshot.json', 'migration.sql']) {
