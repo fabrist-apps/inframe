@@ -1,0 +1,30 @@
+{
+  "checksum": "ed0b7ba45cf318d72fdeaa602b20b2eb3d3422c606cad93077851c4f314396a4",
+  "databaseId": "00000000000000000000000000000001",
+  "dialect": "voxel",
+  "formatVersion": 1,
+  "id": "00000000000000000000000000000024",
+  "parentId": "00000000000000000000000000000023",
+  "phases": [
+    {
+      "id": "0",
+      "mode": "transactional",
+      "platforms": [
+        "native",
+        "browser"
+      ],
+      "recovery": null,
+      "scopeId": "00000000000000000000000000000002",
+      "statements": [
+        {
+          "endByte": 51,
+          "startByte": 0
+        },
+        {
+          "endByte": 121,
+          "startByte": 52
+        }
+      ]
+    }
+  ]
+}

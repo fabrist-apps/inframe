@@ -3,10 +3,11 @@ import 'dart:io';
 
 import 'package:voxel_generator/src/migration/checker.dart';
 import 'package:voxel_generator/src/migration/sealer.dart';
+import 'package:voxel_generator/src/schema_probe.dart';
 import 'package:voxel_generator/voxel_generator.dart';
 
 // This type is public only so the executable can keep argument handling testable.
-// ignore_for_file: public_member_api_docs, cascade_invocations
+// ignore_for_file: public_member_api_docs
 
 final class VoxelCli {
   VoxelCli({IOSink? stdout, IOSink? stderr})
@@ -51,7 +52,7 @@ final class VoxelCli {
     if (!RegExp(r'^[A-Za-z$][A-Za-z0-9_$]*$').hasMatch(className)) {
       throw FormatException('Invalid database class `$className`.');
     }
-    final declaration = await _readDeclaration(library, className);
+    final declaration = await readVoxelSchemaDeclaration(library, className);
     final transforms = options['transforms'] == null
         ? const <String, String>{}
         : _readTransforms(File(options['transforms']!));
@@ -92,7 +93,7 @@ final class VoxelCli {
       'library': final String library,
       'class': final String className,
     }) {
-      declaration = await _readDeclaration(library, className);
+      declaration = await readVoxelSchemaDeclaration(library, className);
     }
     if (declaration != null) {
       await checker.check(directory: directory, declaration: declaration);
@@ -114,42 +115,6 @@ final class VoxelCli {
     );
     _stdout.writeln('Sealed $migration.');
     return 0;
-  }
-
-  Future<Map<String, Object?>> _readDeclaration(
-    String library,
-    String className,
-  ) async {
-    final toolDirectory = Directory('${Directory.current.path}/.dart_tool/voxel_generator');
-    toolDirectory.createSync(recursive: true);
-    final probe = File('${toolDirectory.path}/schema_probe_$pid.dart');
-    final importUri = library.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
-    probe.writeAsStringSync('''
-import 'dart:convert';
-import 'dart:io';
-import '$importUri' as target;
-
-void main() {
-  stdout.write(jsonEncode(target.${className}VoxelSchema.toJson()));
-}
-''');
-    try {
-      final result = await Process.run(
-        Platform.resolvedExecutable,
-        [probe.path],
-        workingDirectory: Directory.current.path,
-      );
-      if (result.exitCode != 0) {
-        throw StateError('Could not load $library#$className:\n${result.stderr}');
-      }
-      final value = jsonDecode(result.stdout as String);
-      if (value is! Map<String, Object?>) {
-        throw const FormatException('Generated schema probe returned invalid JSON.');
-      }
-      return value;
-    } finally {
-      if (probe.existsSync()) probe.deleteSync();
-    }
   }
 
   Map<String, String> _options(List<String> arguments) {

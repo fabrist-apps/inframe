@@ -11,3 +11,5 @@ dependencies:
 
 dev_dependencies:
   test: ^1.26.3
+  turso: any
+  voxel_generator: any

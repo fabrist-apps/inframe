@@ -91,6 +91,7 @@ final class _$PostsDB extends VoxelTableAccessor<Posts, PostsRow> {
     return VoxelTableSchema<Posts, PostsRow>(
       schemaName: 'content',
       tableName: 'posts',
+      renamedFrom: 'articles',
       definition: definition,
       definitionType: Posts,
       rowType: PostsRow,

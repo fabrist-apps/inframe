@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:turso/turso.dart';
 import 'package:voxel/voxel.dart';
+import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
 import 'package:voxel_fixture_app/posts.dart';
 import 'package:voxel_fixture_schema/authors.dart';
 import 'package:web/web.dart' as web;
@@ -15,9 +17,75 @@ Future<void> main() async {
     await _verifyEnumStorage();
     await _verifyVectorStorage();
     await _verifyArrayStorage();
+    await _verifyMigrationBundle();
     web.document.body!.textContent = 'PASS\nVoxel browser codec fixture';
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
+  }
+}
+
+Future<void> _verifyMigrationBundle() async {
+  const bundle = FixtureAppDatabaseVoxelMigrations.bundle;
+  final database = await TursoDatabase.open(
+    TursoLocation.memory(),
+    web: TursoWebOptions(moduleUri: Uri.parse('turso/turso_bridge.js')),
+  );
+  try {
+    await database.execute("ATTACH DATABASE ':memory:' AS content");
+    for (final (index, migration) in bundle.migrations.indexed) {
+      await _executeMigration(database, migration);
+      if (index == 0) {
+        await database.execute("INSERT INTO content.authors VALUES ('author-1', 'Ada')");
+        await database.execute(
+          "INSERT INTO content.articles VALUES ('post-1', 'author-1', 'published')",
+        );
+      }
+    }
+    final row = (await database.query('SELECT authorID, status FROM content.posts')).rows.single;
+    _expect(
+      row.getString('authorID') == 'author-1' && row.getString('status') == 'live',
+      'bundled migration row mismatch',
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+Future<void> _executeMigration(
+  TursoDatabase database,
+  VoxelBundledMigration migration,
+) async {
+  final bytes = utf8.encode(migration.sql);
+  for (final rawPhase in migration.metadata['phases']! as List<Object?>) {
+    final phase = rawPhase! as Map<String, Object?>;
+    final rebuild = phase['rebuild'] as Map<String, Object?>?;
+    if (rebuild != null) await database.execute('PRAGMA foreign_keys=OFF');
+    await database.execute('BEGIN');
+    try {
+      for (final rawRange in phase['statements']! as List<Object?>) {
+        final range = rawRange! as Map<String, Object?>;
+        await database.execute(
+          utf8.decode(
+            bytes.sublist(range['startByte']! as int, range['endByte']! as int),
+          ),
+        );
+      }
+      if (rebuild != null) {
+        for (final rawValidation in rebuild['validations']! as List<Object?>) {
+          final validation = rawValidation! as Map<String, Object?>;
+          final row = (await database.query(validation['sql']! as String)).rows.single;
+          if (row.getInt('valid') != 1) {
+            throw StateError('Bundled migration validation failed.');
+          }
+        }
+      }
+      await database.execute('COMMIT');
+    } on Object {
+      await database.execute('ROLLBACK');
+      rethrow;
+    } finally {
+      if (rebuild != null) await database.execute('PRAGMA foreign_keys=ON');
+    }
   }
 }
 
