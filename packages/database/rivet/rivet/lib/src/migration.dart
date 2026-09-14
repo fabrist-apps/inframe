@@ -40,10 +40,11 @@ final class RivetMigrator {
   Future<void> migrate() async {
     final artifacts = RivetMigrationArtifacts.read(directory);
     for (final migration in artifacts.migrations) {
-      if (migration.phases.length != 1 ||
-          migration.phases.single.mode != RivetMigrationPhaseMode.transactional) {
+      if (migration.phases.any(
+        (phase) => phase.mode != RivetMigrationPhaseMode.transactional,
+      )) {
         throw const RivetMigrationException(
-          'This runner revision supports one transactional phase per migration.',
+          'This runner revision does not support nontransactional phases.',
         );
       }
     }
@@ -51,8 +52,19 @@ final class RivetMigrator {
       await _bootstrap(session);
       final history = await _readHistory(session, artifacts.databaseId);
       _validateHistory(artifacts, history);
-      for (final migration in artifacts.migrations.skip(history.length)) {
-        await _applyTransactionalMigration(session, artifacts.databaseId, migration);
+      for (final (migrationIndex, migration) in artifacts.migrations.indexed) {
+        final completedPhases = migrationIndex < history.length
+            ? history[migrationIndex].receipts.length
+            : 0;
+        for (var phaseIndex = completedPhases; phaseIndex < migration.phases.length; phaseIndex++) {
+          await _applyTransactionalPhase(
+            session,
+            artifacts.databaseId,
+            migration,
+            phaseIndex,
+            insertMigration: migrationIndex >= history.length && phaseIndex == 0,
+          );
+        }
       }
     });
   }
@@ -205,8 +217,9 @@ void _validateHistory(RivetMigrationArtifacts artifacts, List<_HistoryRecord> hi
         record.checksum != migration.checksum) {
       throw RivetMigrationException('Applied migration history differs at ordinal $index.');
     }
-    if (record.receipts.length != migration.phases.length) {
-      throw RivetMigrationException('Migration ${migration.id} has incomplete phase receipts.');
+    if (record.receipts.length > migration.phases.length ||
+        (index < history.length - 1 && record.receipts.length != migration.phases.length)) {
+      throw RivetMigrationException('Migration ${migration.id} has invalid phase receipt order.');
     }
     for (final (phaseIndex, receipt) in record.receipts.indexed) {
       final phase = migration.phases[phaseIndex];
@@ -224,30 +237,34 @@ void _validateHistory(RivetMigrationArtifacts artifacts, List<_HistoryRecord> hi
   }
 }
 
-Future<void> _applyTransactionalMigration(
+Future<void> _applyTransactionalPhase(
   pg.Connection connection,
   String databaseId,
   RivetMigrationArtifact migration,
-) async {
-  final phase = migration.phases.single;
+  int phaseIndex, {
+  required bool insertMigration,
+}) async {
+  final phase = migration.phases[phaseIndex];
   await connection.runTx((transaction) async {
     for (final statement in phase.statements) {
       await transaction.execute(statement, queryMode: pg.QueryMode.simple);
     }
-    await transaction.execute(
-      pg.Sql.named('''
-        INSERT INTO _rivet.migrations
-          ("databaseId", id, "parentId", checksum, ordinal)
-        VALUES (@databaseId, @id, @parentId, @checksum, @ordinal)
-      '''),
-      parameters: {
-        'databaseId': databaseId,
-        'id': migration.id,
-        'parentId': migration.parentId,
-        'checksum': migration.checksum,
-        'ordinal': migration.ordinal,
-      },
-    );
+    if (insertMigration) {
+      await transaction.execute(
+        pg.Sql.named('''
+          INSERT INTO _rivet.migrations
+            ("databaseId", id, "parentId", checksum, ordinal)
+          VALUES (@databaseId, @id, @parentId, @checksum, @ordinal)
+        '''),
+        parameters: {
+          'databaseId': databaseId,
+          'id': migration.id,
+          'parentId': migration.parentId,
+          'checksum': migration.checksum,
+          'ordinal': migration.ordinal,
+        },
+      );
+    }
     await transaction.execute(
       pg.Sql.named('''
         INSERT INTO _rivet.phase_receipts
