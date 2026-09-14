@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:build/build.dart';
-import 'package:glob/glob.dart';
 import 'package:voxel_generator/src/generator_utils.dart';
 import 'package:voxel_generator/src/migration/checker.dart';
 import 'package:voxel_generator/src/schema_probe.dart';
@@ -52,7 +51,7 @@ final class VoxelMigrationBundleBuilder implements Builder {
       throw FormatException('Invalid bundled database class `$className`.');
     }
     final packageRoot = await (resolvePackageRoot ?? _packageRoot)(buildStep.inputId.package);
-    await _trackModelInputs(buildStep);
+    await _trackModelInputs(buildStep, source['library']! as String);
     final migrationDirectory = await _materializeArtifacts(
       buildStep,
       journal,
@@ -109,10 +108,17 @@ VoxelBundledMigration(
     }
   }
 
-  Future<void> _trackModelInputs(BuildStep buildStep) async {
-    await for (final id in buildStep.findAssets(Glob('lib/**.dart'))) {
-      if (!buildStep.allowedOutputs.contains(id)) {
-        await buildStep.readAsBytes(id);
+  Future<void> _trackModelInputs(BuildStep buildStep, String sourceLibrary) async {
+    final sourceId = AssetId.resolve(Uri.parse(sourceLibrary), from: buildStep.inputId);
+    await buildStep.resolver.libraryFor(sourceId);
+    await for (final library in buildStep.resolver.libraries) {
+      for (final fragment in library.fragments) {
+        final uri = fragment.source.uri;
+        if (uri.scheme != 'package') continue;
+        final id = AssetId.resolve(uri);
+        if (!buildStep.allowedOutputs.contains(id) && await buildStep.canRead(id)) {
+          await buildStep.readAsBytes(id);
+        }
       }
     }
   }

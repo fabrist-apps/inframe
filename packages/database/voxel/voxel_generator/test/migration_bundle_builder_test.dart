@@ -111,11 +111,13 @@ void main() {
     expect(escaped.existsSync(), isFalse);
   });
 
-  test('should register Dart model files as bundle dependencies', () async {
+  test('should register imported Dart model files as bundle dependencies', () async {
     final fixture = await _fixture();
     addTearDown(() => fixture.directory.deleteSync(recursive: true));
     final assets = Map<String, Object>.from(fixture.assets)
-      ..['voxel_generator|lib/database.dart'] = 'final modelVersion = 1;';
+      ..['voxel_generator|lib/database.dart'] =
+          "import 'package:voxel/review_dependency.dart'; final modelVersion = dependencyVersion;"
+      ..['voxel|lib/review_dependency.dart'] = 'const dependencyVersion = 1;';
     final readerWriter = TestReaderWriter(rootPackage: 'voxel_generator');
 
     await testBuilder(
@@ -129,7 +131,7 @@ void main() {
 
     expect(
       readerWriter.testing.assetsRead,
-      contains(AssetId('voxel_generator', 'lib/database.dart')),
+      contains(AssetId('voxel', 'lib/review_dependency.dart')),
     );
   });
 }
@@ -171,7 +173,7 @@ _fixture() async {
     directory: directory,
     name: 'initial',
     source: const {
-      'library': 'package:example/database.dart',
+      'library': 'package:voxel_generator/database.dart',
       'class': 'AccountsDatabase',
     },
   ))!;
@@ -181,6 +183,7 @@ _fixture() async {
           as Map<String, Object?>;
   final artifactDirectory = '${entry['directory']}';
   final assets = <String, Object>{
+    'voxel_generator|lib/database.dart': 'const modelVersion = 1;',
     'voxel_generator|migrations/accounts/journal.json': journal,
     for (final name in const ['migration.json', 'snapshot.json', 'migration.sql'])
       'voxel_generator|migrations/accounts/$artifactDirectory/$name': File(
