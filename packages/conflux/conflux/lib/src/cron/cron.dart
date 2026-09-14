@@ -215,11 +215,14 @@ final class Cron {
     if (forward && date.year < _minimumYear) date = CalendarDate(_minimumYear);
     if (!forward && date.year > _maximumYear) date = CalendarDate(_maximumYear, 12, 31);
     ZonedMoment? best;
+    CronError? rangeError;
 
     for (var iteration = 0; iteration < _searchBudget; iteration += 1) {
       if (date.year < _minimumYear || date.year > _maximumYear) {
         if (best != null) return Success(best);
-        return const Failure(CronError('The search reached the supported date range.'));
+        return Failure(
+          rangeError ?? const CronError('The search reached the supported date range.'),
+        );
       }
       if (_matchesDate(date)) {
         final found = _findOnDate(
@@ -230,7 +233,7 @@ final class Cron {
         );
         switch (found) {
           case Failure<ZonedMoment?, CronError>(:final error):
-            return Failure(error);
+            rangeError = error;
           case Success<ZonedMoment?, CronError>(:final value):
             if (value != null &&
                 (best == null || (forward ? value.isBefore(best) : value.isAfter(best)))) {
@@ -282,6 +285,7 @@ final class Cron {
     final minimumOffset = offsets.first;
     final maximumOffset = offsets.last;
     ZonedMoment? best;
+    CronError? rangeError;
 
     for (final hour in orderedHours) {
       for (final minute in orderedMinutes) {
@@ -310,7 +314,11 @@ final class Cron {
             final result = Moment.fromEpochMicroseconds(candidateMicros)
                 .flatMap((utc) => utc.setZone(_zone));
             if (result case Failure<ZonedMoment, MomentError>(:final error)) {
-              return Failure(CronError(error.message));
+              // Conservative historical-offset bounds can enumerate beyond UTC
+              // range after finding a valid occurrence. Keep ordering the valid
+              // candidates; a range failure must not discard one already found.
+              rangeError = CronError(error.message);
+              continue;
             }
             final candidate = (result as Success<ZonedMoment, MomentError>).value;
             if (best == null || (forward ? candidate.isBefore(best) : candidate.isAfter(best))) {
@@ -320,6 +328,7 @@ final class Cron {
         }
       }
     }
+    if (best == null && rangeError != null) return Failure(rangeError);
     return Success(best);
   }
 }

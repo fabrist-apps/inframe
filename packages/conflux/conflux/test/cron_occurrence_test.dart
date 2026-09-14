@@ -158,6 +158,16 @@ void main() {
       expect((cron.previous(second) as Success<ZonedMoment, CronError>).value.toUtc(), first);
     });
 
+    test('should retain valid occurrences beside UTC range edges in named zones', () {
+      final end = utcMoment(9999, 12, 31, 23, 59, 58);
+      final ny = parse('* * * * * *', newYork);
+      expect(ny.next(end).getOrNull()?.toUtc(), utcMoment(9999, 12, 31, 23, 59, 59));
+      final east = parse('* * * * * *', tz.getLocation('Asia/Kolkata'));
+      expect(east.previous(utcMoment(1, 1, 1, 0, 0, 1)).getOrNull()?.toUtc(), utcMoment(1));
+      expect(ny.next(utcMoment(9999, 12, 31, 23, 59, 59)).isFailure, isTrue);
+      expect(east.previous(utcMoment(1)).isFailure, isTrue);
+    });
+
     test('should return typed search failures at budget and date limits', () {
       final impossible = parse('0 0 0 31 feb *', utc);
       final everySecond = parse('* * * * * *', utc);
