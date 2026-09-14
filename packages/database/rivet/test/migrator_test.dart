@@ -88,6 +88,45 @@ void main() {
     );
 
     test(
+      'should reject a resealed edit to applied migration history',
+      () async {
+        final migrationId = await const RivetMigrationGenerator().generate(
+          schema: MigrationFixtureDatabaseRivetSchema.build(),
+          directory: directory,
+          name: 'initial',
+        );
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        await fixture.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await fixture.execute('DROP SCHEMA IF EXISTS auth CASCADE');
+        final migrator = RivetMigrator(
+          connection: RivetConnection.url(databaseUrl, sslMode: RivetSslMode.disable),
+          directory: directory,
+        );
+        await migrator.migrate();
+        final journal =
+            jsonDecode(
+                  File('${directory.path}/journal.json').readAsStringSync(),
+                )!
+                as Map<String, Object?>;
+        final entry = (journal['entries']! as List<Object?>).single! as Map<String, Object?>;
+        final sql = File('${directory.path}/${entry['directory']}/migration.sql');
+        sql.writeAsStringSync('${sql.readAsStringSync()}\n-- edited after application\n');
+        await RivetArtifactSealer().seal(
+          directory: directory,
+          migrationId: migrationId!,
+        );
+
+        await expectLater(migrator.migrate(), throwsA(isA<RivetMigrationException>()));
+        expect(
+          (await fixture.execute('SELECT count(*) FROM _rivet.migrations')).single.single,
+          1,
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
       'should roll back migration effects and receipts when a statement fails',
       () async {
         await const RivetMigrationGenerator().generate(
@@ -789,6 +828,59 @@ void main() {
           [recovery.attemptId, 'retry'],
           [newAttempt, 'completed'],
         ]);
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should resolve an interrupted attempt through the deployment CLI process',
+      () async {
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        final recovery = await _prepareManualRecovery(
+          directory,
+          databaseUrl,
+          fixture,
+          tableName: 'manual_cli',
+        );
+
+        final result = await Process.run(
+          Platform.resolvedExecutable,
+          [
+            'run',
+            'rivet_generator:rivet',
+            'resolve',
+            '--dir',
+            directory.path,
+            '--connection-env',
+            'DEPLOY_DATABASE_URL',
+            '--migration',
+            recovery.migrationId,
+            '--phase',
+            '0',
+            '--checksum',
+            recovery.checksum,
+            '--attempt',
+            recovery.attemptId,
+            '--reason',
+            'Verified from the deployment CLI test.',
+            '--resolution',
+            'completed',
+          ],
+          workingDirectory: Directory.current.path,
+          environment: {
+            ...Platform.environment,
+            'DEPLOY_DATABASE_URL': databaseUrl,
+          },
+        );
+
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        expect(
+          (await fixture.execute(
+            'SELECT resolution, reason FROM _rivet.recovery_audits',
+          )).single,
+          ['completed', 'Verified from the deployment CLI test.'],
+        );
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

@@ -16,7 +16,8 @@ final int _migrationLockKey = int.parse('1151101229740241950');
 /// Each operation validates the complete artifact directory before opening a
 /// connection. Migration coordination covers history bootstrap, verification,
 /// and execution. The owned direct connection is always closed when the
-/// operation completes or fails.
+/// operation completes or fails. Transaction-pooling proxies are unsupported
+/// unless they preserve this dedicated session for the whole operation.
 final class RivetMigrator {
   /// Creates an explicit deployment migrator for [directory].
   RivetMigrator({
