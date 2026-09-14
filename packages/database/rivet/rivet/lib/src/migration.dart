@@ -79,6 +79,47 @@ final class RivetMigrator {
     });
   }
 
+  /// Reads checked migration and phase state without creating or changing it.
+  Future<RivetMigrationStatus> status() async {
+    final artifacts = RivetMigrationArtifacts.read(directory);
+    return _withLockedConnection((session) async {
+      final tables = await session.execute('''
+        SELECT to_regclass('_rivet.migrations'),
+               to_regclass('_rivet.phase_receipts')
+      ''');
+      final migrationsTable = tables.single[0] != null;
+      final receiptsTable = tables.single[1] != null;
+      if (migrationsTable != receiptsTable) {
+        throw const RivetMigrationException('Rivet migration history is incomplete.');
+      }
+      final history = migrationsTable
+          ? await _readHistory(session, artifacts.databaseId)
+          : const <_HistoryRecord>[];
+      _validateHistory(artifacts, history);
+      return RivetMigrationStatus(
+        databaseId: artifacts.databaseId,
+        migrations: [
+          for (final (migrationIndex, migration) in artifacts.migrations.indexed)
+            RivetMigrationStatusEntry(
+              id: migration.id,
+              checksum: migration.checksum,
+              ordinal: migration.ordinal,
+              phases: [
+                for (final (phaseIndex, phase) in migration.phases.indexed)
+                  _phaseStatus(
+                    phase,
+                    migrationIndex < history.length &&
+                            phaseIndex < history[migrationIndex].receipts.length
+                        ? history[migrationIndex].receipts[phaseIndex]
+                        : null,
+                  ),
+              ],
+            ),
+        ],
+      );
+    });
+  }
+
   Future<T> _withLockedConnection<T>(Future<T> Function(pg.Connection session) operation) async {
     pg.Connection? session;
     var locked = false;
@@ -133,6 +174,95 @@ final class RivetMigrator {
       );
     }
   }
+}
+
+/// A read-only view of one checked migration directory and its database state.
+final class RivetMigrationStatus {
+  /// Creates a status returned by [RivetMigrator.status].
+  const RivetMigrationStatus({required this.databaseId, required this.migrations});
+
+  /// Stable identity shared by the artifacts and durable history.
+  final String databaseId;
+
+  /// Journal-ordered migration states.
+  final List<RivetMigrationStatusEntry> migrations;
+}
+
+/// Status for one journaled migration.
+final class RivetMigrationStatusEntry {
+  /// Creates one immutable migration status entry.
+  const RivetMigrationStatusEntry({
+    required this.id,
+    required this.checksum,
+    required this.ordinal,
+    required this.phases,
+  });
+
+  /// Stable migration identity.
+  final String id;
+
+  /// Checked artifact checksum.
+  final String checksum;
+
+  /// Zero-based journal position.
+  final int ordinal;
+
+  /// Ordered states for every required phase.
+  final List<RivetMigrationPhaseStatus> phases;
+}
+
+/// Status for one migration phase and its durable attempt evidence.
+final class RivetMigrationPhaseStatus {
+  /// Creates one immutable phase status.
+  const RivetMigrationPhaseStatus({
+    required this.id,
+    required this.state,
+    required this.attemptId,
+    required this.evidence,
+  });
+
+  /// Migration-local phase identity.
+  final String id;
+
+  /// Current receipt-derived state.
+  final RivetMigrationPhaseState state;
+
+  /// Nontransactional attempt identity, when the phase has started.
+  final String? attemptId;
+
+  /// Immutable recovery evidence currently stored for the attempt.
+  final Map<String, Object?>? evidence;
+}
+
+/// Receipt-derived lifecycle of a migration phase.
+enum RivetMigrationPhaseState {
+  /// No durable receipt exists.
+  pending,
+
+  /// A nontransactional attempt may have been interrupted.
+  started,
+
+  /// The phase has a verified completion receipt.
+  completed,
+}
+
+RivetMigrationPhaseStatus _phaseStatus(RivetMigrationPhase phase, _Receipt? receipt) {
+  final evidence = receipt?.evidence;
+  return RivetMigrationPhaseStatus(
+    id: phase.id,
+    state: switch (receipt?.status) {
+      null => RivetMigrationPhaseState.pending,
+      'started' => RivetMigrationPhaseState.started,
+      'completed' => RivetMigrationPhaseState.completed,
+      _ => throw StateError('History validation accepted an unknown receipt state.'),
+    },
+    attemptId: receipt?.attemptId,
+    evidence: evidence is Map
+        ? Map<String, Object?>.unmodifiable(
+            evidence.map((key, value) => MapEntry(key! as String, value)),
+          )
+        : null,
+  );
 }
 
 Future<void> _bootstrap(pg.Connection session) async {

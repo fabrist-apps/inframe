@@ -594,6 +594,90 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should report an uninitialized database without bootstrapping history',
+      () async {
+        await const RivetMigrationGenerator().generate(
+          schema: MigrationFixtureDatabaseRivetSchema.build(),
+          directory: directory,
+          name: 'initial',
+        );
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        await fixture.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+
+        final status = await RivetMigrator(
+          connection: RivetConnection.url(databaseUrl, sslMode: RivetSslMode.disable),
+          directory: directory,
+        ).status();
+
+        expect(status.migrations.single.phases.single.state, RivetMigrationPhaseState.pending);
+        expect(
+          (await fixture.execute("SELECT to_regnamespace('_rivet')")).single.single,
+          isNull,
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should report completed and interrupted receipts without changing them',
+      () async {
+        final declaration = _indexMigrationDeclaration();
+        const generator = RivetMigrationGenerator();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial table',
+        );
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        await fixture.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await fixture.execute('DROP SCHEMA IF EXISTS recovery CASCADE');
+        final connection = RivetConnection.url(databaseUrl, sslMode: RivetSslMode.disable);
+        await RivetMigrator(connection: connection, directory: directory).migrate();
+        declaration['tables'] = [
+          ...(declaration['tables']! as List<Object?>),
+          _simpleTable('manual_status'),
+        ];
+        final migrationId = await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'manual status',
+        );
+        await _sealRecovery(directory, migrationId!, {
+          'kind': 'manual',
+          'operationId': '55555555555555555555555555555555',
+          'before': {'description': 'absent'},
+          'after': {'description': 'present'},
+        });
+        await expectLater(
+          RivetMigrator(connection: connection, directory: directory).migrate(),
+          throwsA(isA<RivetMigrationException>()),
+        );
+        final before = await fixture.execute(
+          'SELECT status, "attemptId", evidence FROM _rivet.phase_receipts '
+          'ORDER BY "migrationId", "phaseId"',
+        );
+
+        final status = await RivetMigrator(
+          connection: connection,
+          directory: directory,
+        ).status();
+        final after = await fixture.execute(
+          'SELECT status, "attemptId", evidence FROM _rivet.phase_receipts '
+          'ORDER BY "migrationId", "phaseId"',
+        );
+
+        expect(status.migrations.first.phases.single.state, RivetMigrationPhaseState.completed);
+        expect(status.migrations.last.phases.single.state, RivetMigrationPhaseState.started);
+        expect(status.migrations.last.phases.single.attemptId, isNotEmpty);
+        expect(status.migrations.last.phases.single.evidence, isNotEmpty);
+        expect(after.map((row) => row.toList()), before.map((row) => row.toList()));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }
 
