@@ -668,7 +668,7 @@ String _canonicalPathForComparison(String path) {
   var ancestor = absolute.parent;
   while (!ancestor.existsSync() && ancestor.parent.path != ancestor.path) {
     missing.add(
-      ancestor.path.split(RegExp(r'[\\/]')).where((component) => component.isNotEmpty).last,
+      ancestor.path.split(Platform.pathSeparator).where((component) => component.isNotEmpty).last,
     );
     ancestor = ancestor.parent;
   }
