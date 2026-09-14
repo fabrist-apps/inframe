@@ -49,12 +49,21 @@ final class VoxelDatabaseGenerator extends GeneratorForAnnotation<VoxelDatabase>
         .map((table) => '$table.db.buildSchema() as VoxelTableSchema<Object?, Object?>')
         .join(', ');
     return '''
-abstract class _\$$className {
-  /// Connection-free metadata composed for this application database.
-  VoxelDatabaseSchema get schema => VoxelDatabaseSchema(
+/// Connection-free physical schema metadata for [$className].
+abstract final class ${className}VoxelSchema {
+  /// Builds the composed schema used by offline migration tooling.
+  static VoxelDatabaseSchema build() => VoxelDatabaseSchema(
     name: ${literal(databaseName)},
     tables: [$descriptors],
   );
+
+  /// Serializes the composed schema for the migration command-line probe.
+  static Map<String, Object?> toJson() => voxelMigrationSchemaToJson(build());
+}
+
+abstract class _\$$className {
+  /// Connection-free metadata composed for this application database.
+  VoxelDatabaseSchema get schema => ${className}VoxelSchema.build();
 }
 ''';
   }
