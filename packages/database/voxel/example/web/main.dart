@@ -1,9 +1,16 @@
+import 'dart:async';
+import 'dart:js_interop';
 import 'dart:typed_data';
 
 import 'package:turso/turso.dart';
 import 'package:voxel/src/connection.dart' show VoxelTesting;
 import 'package:voxel/src/migration.dart';
-import 'package:voxel/src/platform_web.dart' show openVoxelPersistentDatabase;
+import 'package:voxel/src/platform_web.dart'
+    show
+        openVoxelPersistentDatabase,
+        resolveVoxelWebAttachmentResource,
+        resolveVoxelWebMainResource;
+import 'package:voxel/src/web_migration_lock_core.dart' show voxelWebMigrationLockName;
 import 'package:voxel/voxel.dart';
 import 'package:voxel_fixture_app/app_database.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
@@ -15,6 +22,23 @@ import '../../test/generated_consumer.dart';
 
 Future<void> main() async {
   try {
+    final role = Uri.base.queryParameters['role'];
+    if (role == 'lock-holder') {
+      await _runLockHolder();
+      return;
+    }
+    if (role == 'lock-setup') {
+      final database = await FixtureAppDatabase().open(
+        storage: const VoxelStorage.opfs(directory: _lockFixtureDirectory),
+      );
+      await database.close();
+      web.document.body!.textContent = 'PASS\nLOCK FIXTURE READY';
+      return;
+    }
+    if (role == 'lock-contender') {
+      await _runLockContender(Uri.base.queryParameters['case'] ?? 'queued');
+      return;
+    }
     await _verifyGeneratedTextStorage();
     await _verifyScalarStorage();
     await _verifyEnumStorage();
@@ -26,6 +50,106 @@ Future<void> main() async {
   } on Object catch (error, stackTrace) {
     web.document.body!.textContent = 'FAIL\n$error\n$stackTrace';
   }
+}
+
+const _lockChannelName = 'voxel-fbr-205-lock-fixture-v1';
+const _lockFixtureDirectory = 'voxel-fixtures/fbr-205/two-tab-v1';
+
+Future<void> _runLockHolder() async {
+  final resources = _lockFixtureResources();
+  final release = Completer<void>();
+  final channel = web.BroadcastChannel(_lockChannelName)
+    ..onmessage = ((web.Event event) {
+      final message = (event as web.MessageEvent).data.dartify();
+      if (message == 'release' && !release.isCompleted) release.complete();
+    }).toJS;
+  final options = web.LockOptions(mode: 'exclusive');
+  await web.window.navigator.locks
+      .request(
+        resources.mainLock,
+        options,
+        ((web.Lock lock) => _holdFixtureLock(lock, release).toJS).toJS,
+      )
+      .toDart;
+  channel.close();
+  web.document.body!.textContent = 'PASS\nHOLDER RELEASED';
+}
+
+Future<JSAny?> _holdFixtureLock(web.Lock lock, Completer<void> release) async {
+  web.document.body!.textContent = 'HOLDER READY\n${lock.name}';
+  await release.future;
+  return null;
+}
+
+Future<void> _runLockContender(String testCase) async {
+  final timeout = switch (testCase) {
+    'zero' => Duration.zero,
+    'timeout' => const Duration(milliseconds: 250),
+    _ => const Duration(seconds: 30),
+  };
+  web.document.body!.textContent = 'CONTENDER QUEUED\n$testCase';
+  try {
+    final database = await FixtureAppDatabase().open(
+      storage: const VoxelStorage.opfs(directory: _lockFixtureDirectory),
+      migrations: VoxelMigrationOptions(lockTimeout: timeout),
+    );
+    if (testCase != 'queued') {
+      await database.close();
+      throw StateError('$testCase contender unexpectedly acquired every lock');
+    }
+    _expect(
+      await VoxelTesting.scalarInt(
+            database,
+            'SELECT COUNT(*) AS value FROM main._voxel_phase_summaries',
+          ) ==
+          3,
+      'queued contender did not reread durable migration history',
+    );
+    await database.close();
+    web.document.body!.textContent = 'PASS\nQUEUED CONTENDER SERIALIZED\nHISTORY REREAD';
+  } on TimeoutException {
+    if (testCase == 'queued') rethrow;
+    await _expectTimedOutLocksSettled();
+    web.document.body!.textContent =
+        'PASS\n${testCase.toUpperCase()} TIMEOUT CANCELLED\nPARTIAL LOCK RELEASED';
+  }
+}
+
+Future<void> _expectTimedOutLocksSettled() async {
+  final resources = _lockFixtureResources();
+  final snapshot = await web.window.navigator.locks.query().toDart;
+  final held = snapshot.held.toDart.map((lock) => lock.name).toList();
+  final pending = snapshot.pending.toDart.map((lock) => lock.name).toList();
+  _expect(
+    !held.contains(resources.attachmentLock),
+    'timed-out contender retained its partially acquired attachment lock',
+  );
+  _expect(
+    !pending.contains(resources.mainLock) && !pending.contains(resources.attachmentLock),
+    'timed-out contender left a pending Web Locks request',
+  );
+}
+
+({String mainLock, String attachmentLock}) _lockFixtureResources() {
+  final plan = VoxelMigrationPlan.validate(
+    schema: FixtureAppDatabaseVoxelSchema.build(),
+    bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+  );
+  final attachment = plan.scopes.singleWhere((scope) => scope.name == 'content');
+  final mainPath = resolveVoxelWebMainResource(
+    databaseName: 'fixture_app',
+    directory: _lockFixtureDirectory,
+  ).path;
+  final attachmentPath = resolveVoxelWebAttachmentResource(
+    databaseName: 'fixture_app',
+    schemaId: attachment.id,
+    directory: _lockFixtureDirectory,
+  ).path;
+  final origin = web.window.location.origin;
+  return (
+    mainLock: voxelWebMigrationLockName(origin, mainPath),
+    attachmentLock: voxelWebMigrationLockName(origin, attachmentPath),
+  );
 }
 
 Future<void> _verifyPersistentOpfs() async {

@@ -68,12 +68,14 @@ final class _BrowserLockAttempt implements VoxelWebLockAttempt {
   }) {
     final controller = _AbortController();
     final attempt = _BrowserLockAttempt._(controller);
-    final options = _LockOptions(
-      mode: 'exclusive',
-      ifAvailable: ifAvailable,
-      steal: false,
-      signal: controller.signal,
-    );
+    final options = ifAvailable
+        ? _LockOptions(mode: 'exclusive', ifAvailable: true, steal: false)
+        : _LockOptions(
+            mode: 'exclusive',
+            ifAvailable: false,
+            steal: false,
+            signal: controller.signal,
+          );
     final request = manager.request(
       name,
       options,
