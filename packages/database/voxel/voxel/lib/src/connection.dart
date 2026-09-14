@@ -5,6 +5,7 @@ import 'package:turso/turso.dart';
 
 import 'package:voxel/src/errors.dart';
 import 'package:voxel/src/migration.dart';
+import 'package:voxel/src/migration_status.dart';
 import 'package:voxel/src/platform.dart';
 import 'package:voxel/src/schema.dart';
 
@@ -486,6 +487,97 @@ abstract final class VoxelDatabaseRuntime {
     return VoxelDb._(database, schema.name, schema.tables);
   }
 
+  /// Reads checked migration state without creating files or applying phases.
+  static Future<VoxelMigrationStatus> migrationStatus({
+    required VoxelDatabaseSchema schema,
+    required VoxelMigrationBundle bundle,
+    VoxelStorage? storage,
+    Map<String, VoxelStorage> schemaStorage = const {},
+    VoxelEncryption? encryption,
+    Map<String, VoxelEncryption?> schemaEncryption = const {},
+    VoxelMigrationOptions migrations = const VoxelMigrationOptions(),
+  }) async {
+    final configuration = _maintenanceConfiguration(
+      schema: schema,
+      bundle: bundle,
+      storage: storage,
+      schemaStorage: schemaStorage,
+      encryption: encryption,
+      schemaEncryption: schemaEncryption,
+      migrations: migrations,
+    );
+    if (configuration.memory) return configuration.plan.pendingStatus();
+    return await withVoxelPersistentMaintenance<VoxelMigrationStatus>(
+          databaseName: schema.name,
+          directory: configuration.directory,
+          migrations: configuration.plan,
+          lockTimeout: migrations.lockTimeout,
+          encryptionCipher: encryption?.cipher.name,
+          encryptionKey: encryption?.key,
+          schemaDirectories: configuration.schemaDirectories,
+          schemaEncryptionCiphers: configuration.schemaEncryptionCiphers,
+          schemaEncryptionKeys: configuration.schemaEncryptionKeys,
+          operation: configuration.plan.migrationStatus,
+        ) ??
+        configuration.plan.pendingStatus();
+  }
+
+  /// Records an audited operator resolution without requiring application open.
+  static Future<void> resolveMigration({
+    required VoxelDatabaseSchema schema,
+    required VoxelMigrationBundle bundle,
+    required String migrationId,
+    required String phaseId,
+    required String expectedChecksum,
+    required String attemptId,
+    required String reason,
+    required VoxelMigrationResolution resolution,
+    VoxelStorage? storage,
+    Map<String, VoxelStorage> schemaStorage = const {},
+    VoxelEncryption? encryption,
+    Map<String, VoxelEncryption?> schemaEncryption = const {},
+    VoxelMigrationOptions migrations = const VoxelMigrationOptions(),
+  }) async {
+    final configuration = _maintenanceConfiguration(
+      schema: schema,
+      bundle: bundle,
+      storage: storage,
+      schemaStorage: schemaStorage,
+      encryption: encryption,
+      schemaEncryption: schemaEncryption,
+      migrations: migrations,
+    );
+    if (configuration.memory) {
+      throw const FormatException('An in-memory database has no durable migration attempt.');
+    }
+    final result = await withVoxelPersistentMaintenance<bool>(
+      databaseName: schema.name,
+      directory: configuration.directory,
+      migrations: configuration.plan,
+      lockTimeout: migrations.lockTimeout,
+      encryptionCipher: encryption?.cipher.name,
+      encryptionKey: encryption?.key,
+      schemaDirectories: configuration.schemaDirectories,
+      schemaEncryptionCiphers: configuration.schemaEncryptionCiphers,
+      schemaEncryptionKeys: configuration.schemaEncryptionKeys,
+      operation: (database) async {
+        await configuration.plan.resolveMigration(
+          database,
+          migrationId: migrationId,
+          phaseId: phaseId,
+          expectedChecksum: expectedChecksum,
+          attemptId: attemptId,
+          reason: reason,
+          resolution: resolution,
+        );
+        return true;
+      },
+    );
+    if (result == null) {
+      throw const FormatException('The Voxel database has no durable migration history.');
+    }
+  }
+
   static Future<VoxelDb> _openMemory(
     VoxelDatabaseSchema schema,
     VoxelMigrationPlan checked,
@@ -516,6 +608,90 @@ abstract final class VoxelDatabaseRuntime {
       Error.throwWithStackTrace(error, stackTrace);
     }
   }
+}
+
+final class _VoxelMaintenanceConfiguration {
+  const _VoxelMaintenanceConfiguration({
+    required this.plan,
+    required this.memory,
+    required this.directory,
+    required this.schemaDirectories,
+    required this.schemaEncryptionCiphers,
+    required this.schemaEncryptionKeys,
+  });
+
+  final VoxelMigrationPlan plan;
+  final bool memory;
+  final String? directory;
+  final Map<String, String?> schemaDirectories;
+  final Map<String, String?> schemaEncryptionCiphers;
+  final Map<String, Uint8List?> schemaEncryptionKeys;
+}
+
+_VoxelMaintenanceConfiguration _maintenanceConfiguration({
+  required VoxelDatabaseSchema schema,
+  required VoxelMigrationBundle bundle,
+  required VoxelStorage? storage,
+  required Map<String, VoxelStorage> schemaStorage,
+  required VoxelEncryption? encryption,
+  required Map<String, VoxelEncryption?> schemaEncryption,
+  required VoxelMigrationOptions migrations,
+}) {
+  if (migrations.lockTimeout.isNegative) {
+    throw ArgumentError.value(
+      migrations.lockTimeout,
+      'migrations.lockTimeout',
+      'must not be negative',
+    );
+  }
+  final plan = VoxelMigrationPlan.validate(schema: schema, bundle: bundle);
+  final namedSchemas = <String>{...plan.schemaNames.where((name) => name != 'main')};
+  final unknown = <String>{
+    ...schemaStorage.keys.where((name) => !namedSchemas.contains(name)),
+    ...schemaEncryption.keys.where((name) => !namedSchemas.contains(name)),
+  };
+  if (unknown.isNotEmpty) {
+    throw ArgumentError('Unknown Voxel schema configuration: ${unknown.join(', ')}.');
+  }
+  final memory = storage is VoxelMemoryStorage;
+  if (memory &&
+      (encryption != null ||
+          schemaEncryption.values.any((value) => value != null) ||
+          schemaStorage.values.any((value) => value is! VoxelMemoryStorage))) {
+    throw UnsupportedError('Memory maintenance requires unencrypted memory schema storage.');
+  }
+  final directory = switch (storage) {
+    VoxelDirectoryStorage(:final path) when voxelPlatform == 'native' => path,
+    VoxelOpfsStorage(:final directory) when voxelPlatform == 'browser' => directory,
+    VoxelMemoryStorage() => null,
+    null => null,
+    _ => throw UnsupportedError('The selected Voxel storage is unavailable on this platform.'),
+  };
+  final schemaDirectories = <String, String?>{};
+  final ciphers = <String, String?>{};
+  final keys = <String, Uint8List?>{};
+  for (final name in namedSchemas) {
+    schemaDirectories[name] = switch (schemaStorage[name]) {
+      VoxelDirectoryStorage(:final path) when voxelPlatform == 'native' => path,
+      VoxelOpfsStorage(:final directory) when voxelPlatform == 'browser' => directory,
+      null || VoxelMemoryStorage() when memory => null,
+      null => null,
+      _ => throw UnsupportedError('The schema storage for `$name` is unavailable.'),
+    };
+    final selectedEncryption = schemaEncryption.containsKey(name)
+        ? schemaEncryption[name]
+        : encryption;
+    ciphers[name] = selectedEncryption?.cipher.name;
+    keys[name] = selectedEncryption?.key;
+  }
+  return _VoxelMaintenanceConfiguration(
+    plan: plan,
+    memory: memory,
+    directory: directory,
+    schemaDirectories: schemaDirectories,
+    schemaEncryptionCiphers: ciphers,
+    schemaEncryptionKeys: keys,
+  );
 }
 
 Future<void> _verifyForeignKeys(TursoDatabase database) async {

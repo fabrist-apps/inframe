@@ -73,6 +73,41 @@ encryption; opening with a wrong key fails and never falls back to plaintext.
 Changing encryption on an existing file is not an implicit re-encryption
 operation.
 
+The generated extension also exposes maintenance entry points that do not
+require application open to succeed:
+
+```dart
+final app = MyAppDatabase();
+final status = await app.migrationStatus(
+  storage: const VoxelStorage.directory('/application-owned/data'),
+);
+final phase = status.migrations.last.phases.single;
+
+await app.resolveMigration(
+  migrationId: status.migrations.last.id,
+  phaseId: phase.id,
+  expectedChecksum: status.migrations.last.checksum,
+  attemptId: phase.attemptId!,
+  reason: 'Verified the intended index definition and validity',
+  resolution: VoxelMigrationResolution.completed,
+  storage: const VoxelStorage.directory('/application-owned/data'),
+);
+```
+
+`migrationStatus` acquires migration coordination for existing files but never
+creates missing files or executes pending phases. It reports every phase as
+`pending`, `started`, `uncertain`, `skipped`, or `completed`.
+`completionRecorded` distinguishes a durable completion receipt from a
+postcondition observed after an interrupted attempt.
+
+Resolution is an operator assertion bound to the migration checksum and active
+attempt ID. Inspect or repair every affected file first and provide a durable,
+specific reason. Voxel reruns available recovery checks and rejects stale IDs or
+a decision contradicted by current evidence. It appends an audit record; it does
+not alter migration SQL, discard attempt evidence, automatically remove a
+conflicting object, or blindly retry uncertain work. A manual recovery phase
+remains `uncertain` after interruption until an operator explicitly resolves it.
+
 On browsers, omitting `storage` places the database files at the root of the
 origin-private file system (OPFS). Use an OPFS directory to namespace them:
 

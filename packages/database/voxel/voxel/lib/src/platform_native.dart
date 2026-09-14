@@ -400,6 +400,91 @@ WHERE schema_id = ? AND file_identity = ?
   }
 }
 
+Future<T?> withVoxelPersistentMaintenance<T>({
+  required String databaseName,
+  required String? directory,
+  required VoxelMigrationPlan migrations,
+  required Duration lockTimeout,
+  required String? encryptionCipher,
+  required Uint8List? encryptionKey,
+  required Map<String, String?> schemaDirectories,
+  required Map<String, String?> schemaEncryptionCiphers,
+  required Map<String, Uint8List?> schemaEncryptionKeys,
+  required Future<T> Function(TursoDatabase database) operation,
+}) async {
+  final selected = directory ?? await _resolveDefaultStorage();
+  final parent = Directory(selected).absolute;
+  if (!parent.existsSync()) return null;
+  final canonicalParent = parent.resolveSymbolicLinksSync();
+  final encodedName = base64Url.encode(utf8.encode(databaseName)).replaceAll('=', '');
+  final main = VoxelNativeResource(
+    '$canonicalParent${Platform.pathSeparator}voxel-$encodedName.db',
+  );
+  if (!File(main.path).existsSync()) return null;
+  final attachments = <String, _PlannedAttachment>{};
+  for (final scope in migrations.scopes.where((entry) => entry.name != 'main')) {
+    final selectedDirectory = schemaDirectories[scope.name];
+    final attachmentParent = selectedDirectory == null
+        ? canonicalParent
+        : Directory(selectedDirectory).absolute.path;
+    final resource = resolveVoxelNativeAttachmentResource(
+      databaseName: databaseName,
+      schemaId: scope.id,
+      directory: attachmentParent,
+    );
+    attachments[scope.name] = _PlannedAttachment(
+      scope: scope,
+      resource: resource,
+      encryption: _optionalEncryption(
+        schemaEncryptionCiphers[scope.name],
+        schemaEncryptionKeys[scope.name],
+      ),
+    );
+  }
+  final resources = [main, ...attachments.values.map((entry) => entry.resource)];
+  final lease = await VoxelNativeMigrationCoordinator.acquire(resources, timeout: lockTimeout);
+  TursoDatabase? database;
+  try {
+    if (!File(main.path).existsSync()) return null;
+    database = await _openMain(
+      main.path,
+      _optionalEncryption(encryptionCipher, encryptionKey),
+    );
+    final registry = await _readRegistry(database);
+    for (final attachment in attachments.values) {
+      final registered = registry[attachment.scope.id];
+      if (registered == null || registered.state != 'initialized') {
+        throw FormatException(
+          'Schema `${attachment.scope.name}` has no initialized persistent file.',
+        );
+      }
+      if (!_samePath(registered.locationIdentity, attachment.resource.path) ||
+          !File(attachment.resource.path).existsSync()) {
+        throw FormatException(
+          'Schema `${attachment.scope.name}` is missing or configured at another location.',
+        );
+      }
+      await _attach(
+        database,
+        attachment.scope.name,
+        attachment.resource.path,
+        attachment.encryption,
+      );
+      await _verifyAttachedIdentity(
+        database,
+        scope: attachment.scope.name,
+        databaseId: migrations.bundle.databaseId,
+        schemaId: attachment.scope.id,
+        fileIdentity: registered.fileIdentity,
+      );
+    }
+    return await operation(database);
+  } finally {
+    await database?.close();
+    lease.release();
+  }
+}
+
 Future<String> _resolveMainFileIdentity(
   TursoDatabase database, {
   required String databaseId,

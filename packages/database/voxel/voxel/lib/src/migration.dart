@@ -2,10 +2,13 @@
 // ignore_for_file: prefer_constructors_over_static_methods, public_member_api_docs
 
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:turso/turso.dart';
 
+import 'package:voxel/src/migration_recovery.dart';
+import 'package:voxel/src/migration_status.dart';
 import 'package:voxel/src/platform.dart';
 import 'package:voxel/src/rebuild_catalog_validator.dart';
 import 'package:voxel/src/schema.dart';
@@ -68,6 +71,35 @@ final class VoxelMigrationPlan {
 
   String get mainSchemaId =>
       scopes.where((scope) => scope.name == 'main').firstOrNull?.id ?? 'main';
+
+  /// Returns the checked history with every applicable phase pending.
+  VoxelMigrationStatus pendingStatus() => VoxelMigrationStatus(
+    databaseId: bundle.databaseId,
+    migrations: [
+      for (final (ordinal, migration) in bundle.migrations.indexed)
+        VoxelMigrationStatusEntry(
+          id: migration.id,
+          checksum: migration.checksum,
+          ordinal: ordinal,
+          phases: [
+            for (final rawPhase in _list(migration.metadata['phases'], 'migration phases'))
+              VoxelMigrationPhaseStatus(
+                id: _map(rawPhase, 'migration phase')['id']! as String,
+                scopeId: _map(rawPhase, 'migration phase')['scopeId']! as String,
+                state:
+                    (_map(rawPhase, 'migration phase')['platforms']! as List<Object?>).contains(
+                      voxelPlatform,
+                    )
+                    ? VoxelMigrationPhaseState.pending
+                    : VoxelMigrationPhaseState.skipped,
+                attemptId: null,
+                completionRecorded: false,
+                evidence: null,
+              ),
+          ],
+        ),
+    ],
+  );
 
   /// Validates every artifact before a database connection is acquired.
   static VoxelMigrationPlan validate({
@@ -401,6 +433,225 @@ ON CONFLICT (migration_id, phase_id) DO UPDATE SET
     }
     await _validatePersistentHistory(database, scope, expected);
   }
+
+  /// Reads receipt-derived state from already opened persistent scopes.
+  Future<VoxelMigrationStatus> migrationStatus(TursoDatabase database) async {
+    final phaseStates = <String, VoxelMigrationPhaseStatus>{};
+    for (final migration in bundle.migrations) {
+      for (final rawPhase in _list(migration.metadata['phases'], 'migration phases')) {
+        final phase = _map(rawPhase, 'migration phase');
+        final applies = (phase['platforms']! as List<Object?>).contains(voxelPlatform);
+        phaseStates['${migration.id}:${phase['id']}'] = VoxelMigrationPhaseStatus(
+          id: phase['id']! as String,
+          scopeId: phase['scopeId']! as String,
+          state: applies ? VoxelMigrationPhaseState.pending : VoxelMigrationPhaseState.skipped,
+          attemptId: null,
+          completionRecorded: false,
+          evidence: null,
+        );
+      }
+    }
+    for (final scope in scopes.map((entry) => entry.name)) {
+      await _validatePersistentHistoryForScope(database, scope);
+      final completed = (await database.query(
+        'SELECT migration_id, phase_id FROM ${_qualified(scope, '_voxel_phases')}',
+      )).rows;
+      final completedKeys = {
+        for (final row in completed)
+          '${row.getString('migration_id')}:${row.getString('phase_id')}',
+      };
+      final attempts = (await database.query(
+        'SELECT migration_id, phase_id, attempt_id, evidence '
+        'FROM ${_qualified(scope, '_voxel_phase_attempts')}',
+      )).rows;
+      final attemptsByKey = {
+        for (final row in attempts)
+          '${row.getString('migration_id')}:${row.getString('phase_id')}': row,
+      };
+      for (final migration in bundle.migrations) {
+        for (final rawPhase in _list(migration.metadata['phases'], 'migration phases')) {
+          final phase = _map(rawPhase, 'migration phase');
+          if (!(phase['platforms']! as List<Object?>).contains(voxelPlatform) ||
+              scopeName(phase['scopeId']! as String) != scope) {
+            continue;
+          }
+          final key = '${migration.id}:${phase['id']}';
+          final attempt = attemptsByKey[key];
+          final completionRecorded = completedKeys.contains(key);
+          final durableEvidence = attempt == null
+              ? null
+              : Map<String, Object?>.from(
+                  jsonDecode(attempt.getString('evidence'))! as Map,
+                );
+          _RecoveryInspection? current;
+          if (!completionRecorded && attempt != null && phase['mode'] == 'nontransactional') {
+            final recovery = _map(phase['recovery'], 'nontransactional recovery');
+            current = recovery['kind'] == 'manual'
+                ? const _RecoveryInspection(
+                    VoxelRecoveryClassification.uncertain,
+                    <bool>[],
+                  )
+                : await _inspectRecovery(
+                    database,
+                    VoxelRecoveryCheckPlan.parse(recovery['checks'], scopeName: scope),
+                  );
+          }
+          phaseStates[key] = VoxelMigrationPhaseStatus(
+            id: phase['id']! as String,
+            scopeId: phase['scopeId']! as String,
+            state: completionRecorded
+                ? VoxelMigrationPhaseState.completed
+                : attempt == null
+                ? VoxelMigrationPhaseState.pending
+                : switch (current!.classification) {
+                    VoxelRecoveryClassification.completed => VoxelMigrationPhaseState.completed,
+                    VoxelRecoveryClassification.notStarted => VoxelMigrationPhaseState.started,
+                    VoxelRecoveryClassification.uncertain => VoxelMigrationPhaseState.uncertain,
+                  },
+            attemptId: attempt?.getString('attempt_id'),
+            completionRecorded: completionRecorded,
+            evidence: durableEvidence == null
+                ? null
+                : {
+                    ...durableEvidence,
+                    if (current != null)
+                      'current': {
+                        'classification': current.classification.name,
+                        'observations': current.observations,
+                      },
+                  },
+          );
+        }
+      }
+    }
+    return VoxelMigrationStatus(
+      databaseId: bundle.databaseId,
+      migrations: [
+        for (final (ordinal, migration) in bundle.migrations.indexed)
+          VoxelMigrationStatusEntry(
+            id: migration.id,
+            checksum: migration.checksum,
+            ordinal: ordinal,
+            phases: [
+              for (final rawPhase in _list(migration.metadata['phases'], 'migration phases'))
+                phaseStates[_phaseKey(migration.id, rawPhase)]!,
+            ],
+          ),
+      ],
+    );
+  }
+
+  /// Appends an audited resolution for one active nontransactional attempt.
+  Future<void> resolveMigration(
+    TursoDatabase database, {
+    required String migrationId,
+    required String phaseId,
+    required String expectedChecksum,
+    required String attemptId,
+    required String reason,
+    required VoxelMigrationResolution resolution,
+  }) async {
+    final operatorReason = reason.trim();
+    if (operatorReason.isEmpty) {
+      throw ArgumentError.value(reason, 'reason', 'must not be empty');
+    }
+    final matches = bundle.migrations.indexed.where((entry) => entry.$2.id == migrationId);
+    if (matches.length != 1) {
+      throw const FormatException('Resolution migration ID is not in the checked history.');
+    }
+    final migrationEntry = matches.single;
+    final migration = migrationEntry.$2;
+    if (migration.checksum != expectedChecksum) {
+      throw const FormatException('Resolution checksum does not match checked history.');
+    }
+    final phaseMatches = _list(
+      migration.metadata['phases'],
+      'migration phases',
+    ).map((value) => _map(value, 'migration phase')).where((phase) => phase['id'] == phaseId);
+    if (phaseMatches.length != 1) {
+      throw const FormatException('Resolution phase ID is not in the migration.');
+    }
+    final phase = phaseMatches.single;
+    if (phase['mode'] != 'nontransactional' ||
+        !(phase['platforms']! as List<Object?>).contains(voxelPlatform)) {
+      throw const FormatException('Resolution phase is not an applicable nontransactional phase.');
+    }
+    final scope = scopeName(phase['scopeId']! as String);
+    await _validatePersistentHistoryForScope(database, scope);
+    final rows = (await database.query(
+      '''
+SELECT attempt_id, evidence
+FROM ${_qualified(scope, '_voxel_phase_attempts')}
+WHERE migration_id = ? AND phase_id = ? AND checksum = ? AND platform = ?
+''',
+      parameters: [migrationId, phaseId, expectedChecksum, voxelPlatform],
+    )).rows;
+    if (rows.length != 1 || rows.single.getString('attempt_id') != attemptId) {
+      throw const FormatException('Resolution attempt is not the active started attempt.');
+    }
+    final recovery = _map(phase['recovery'], 'nontransactional recovery');
+    final manual = recovery['kind'] == 'manual';
+    final inspected = manual
+        ? const _RecoveryInspection(VoxelRecoveryClassification.uncertain, <bool>[])
+        : await _inspectRecovery(
+            database,
+            VoxelRecoveryCheckPlan.parse(recovery['checks'], scopeName: scope),
+          );
+    final agrees =
+        manual ||
+        switch (resolution) {
+          VoxelMigrationResolution.completed =>
+            inspected.classification == VoxelRecoveryClassification.completed,
+          VoxelMigrationResolution.retry =>
+            inspected.classification == VoxelRecoveryClassification.notStarted,
+        };
+    if (!agrees) {
+      throw FormatException(
+        'Current recovery evidence contradicts resolution `${resolution.name}`.',
+      );
+    }
+    await database.transaction<void>((transaction) async {
+      await transaction.execute(
+        '''
+INSERT INTO ${_qualified(scope, '_voxel_migration_resolutions')}
+  (migration_id, phase_id, checksum, attempt_id, resolution, reason, evidence)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+''',
+        parameters: [
+          migrationId,
+          phaseId,
+          expectedChecksum,
+          attemptId,
+          resolution.name,
+          operatorReason,
+          jsonEncode({'observations': inspected.observations}),
+        ],
+      );
+      if (resolution == VoxelMigrationResolution.completed) {
+        await _recordCompletedPhaseOn(
+          transaction,
+          scope,
+          migrationEntry.$1,
+          migration,
+          phase,
+        );
+      } else {
+        await transaction.execute(
+          '''
+UPDATE ${_qualified(scope, '_voxel_phase_attempts')}
+SET attempt_id = ?, evidence = ?
+WHERE migration_id = ? AND phase_id = ?
+''',
+          parameters: [
+            _newAttemptId(),
+            jsonEncode({'before': inspected.observations}),
+            migrationId,
+            phaseId,
+          ],
+        );
+      }
+    });
+  }
 }
 
 final class VoxelMigrationScope {
@@ -421,6 +672,7 @@ enum VoxelMigrationInterruptionPoint {
   afterCreationPrepared,
   afterFileBootstrap,
   afterRegistryInitialized,
+  afterPhaseStarted,
   beforePhaseCommit,
   afterPhaseCommit,
   beforeMainSummary,
@@ -517,10 +769,18 @@ void _validatePhases(VoxelBundledMigration migration, Map<String, String> scopes
     if (phase['mode'] == 'transactional' && phase['recovery'] != null) {
       throw FormatException('Transactional migration phase $phaseId has recovery metadata.');
     }
-    if (phase['mode'] == 'nontransactional' && platforms.contains(voxelPlatform)) {
-      throw UnsupportedError(
-        'Applicable nontransactional migration phase $phaseId is not supported yet.',
-      );
+    if (phase['mode'] == 'nontransactional') {
+      final recovery = _map(phase['recovery'], 'nontransactional recovery');
+      if (recovery['kind'] == 'catalog' && recovery['checks'] != null) {
+        VoxelRecoveryCheckPlan.parse(
+          recovery['checks'],
+          scopeName: scopes[phase['scopeId']]!,
+        );
+      } else if (recovery['kind'] != 'manual') {
+        throw const FormatException(
+          'Voxel catalog recovery requires portable read-only checks.',
+        );
+      }
     }
     for (final rawRange in _list(phase['statements'], 'phase statements')) {
       final range = _map(rawRange, 'statement range');
@@ -661,7 +921,21 @@ CREATE TABLE IF NOT EXISTS ${_qualified(scope, '_voxel_phase_attempts')} (
   phase_id TEXT NOT NULL,
   checksum TEXT NOT NULL,
   platform TEXT NOT NULL,
+  attempt_id TEXT NOT NULL,
+  evidence TEXT NOT NULL,
   PRIMARY KEY (migration_id, phase_id)
+)
+''');
+    await transaction.execute('''
+CREATE TABLE IF NOT EXISTS ${_qualified(scope, '_voxel_migration_resolutions')} (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  migration_id TEXT NOT NULL,
+  phase_id TEXT NOT NULL,
+  checksum TEXT NOT NULL,
+  attempt_id TEXT NOT NULL,
+  resolution TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  evidence TEXT NOT NULL
 )
 ''');
     if (scope == 'main') {
@@ -767,7 +1041,7 @@ ORDER BY ordinal
 
   final attempts = (await database.query(
     '''
-SELECT migration_id, phase_id, checksum, platform
+SELECT migration_id, phase_id, checksum, platform, attempt_id, evidence
 FROM ${_qualified(scope, '_voxel_phase_attempts')}
 ''',
   )).rows;
@@ -805,7 +1079,9 @@ FROM ${_qualified(scope, '_voxel_phases')}
     if (bundled == null ||
         !bundled.phaseIds.contains(phaseId) ||
         attempt.getString('checksum') != bundled.checksum ||
-        attempt.getString('platform') != voxelPlatform) {
+        attempt.getString('platform') != voxelPlatform ||
+        attempt.getString('attempt_id').isEmpty ||
+        !_isEvidence(attempt.getString('evidence'))) {
       throw FormatException('Started migration $migrationId has changed in the bundle.');
     }
   }
@@ -821,21 +1097,19 @@ Future<void> _applyPersistentPhase(
   required Map<String, Object?>? previousSnapshot,
   String? sourceScope,
 }) async {
-  if (phase['mode'] != 'transactional') {
-    throw UnsupportedError(
-      'Persistent native migration does not support ${phase['mode']} phases yet.',
-    );
-  }
   if (await _phaseCompleted(database, scope, migration, phase)) return;
-  await database.execute(
-    '''
-INSERT INTO ${_qualified(scope, '_voxel_phase_attempts')}
-  (migration_id, phase_id, checksum, platform)
-VALUES (?, ?, ?, ?)
-ON CONFLICT (migration_id, phase_id) DO NOTHING
-''',
-    parameters: [migration.id, phase['id'], migration.checksum, voxelPlatform],
-  );
+  if (phase['mode'] == 'nontransactional') {
+    await _runNontransactionalPhase(
+      database,
+      scope,
+      ordinal,
+      migration,
+      phase,
+      sourceScope: sourceScope,
+      interrupt: interrupt,
+    );
+    return;
+  }
   await _runTransactionalPhase(
     database,
     scope,
@@ -847,6 +1121,227 @@ ON CONFLICT (migration_id, phase_id) DO NOTHING
     interrupt: interrupt,
   );
 }
+
+Future<void> _runNontransactionalPhase(
+  TursoDatabase database,
+  String scope,
+  int ordinal,
+  VoxelBundledMigration migration,
+  Map<String, Object?> phase, {
+  String? sourceScope,
+  Future<void> Function(VoxelMigrationInterruption interruption)? interrupt,
+}) async {
+  final recovery = _map(phase['recovery'], 'nontransactional recovery');
+  final plan = recovery['kind'] == 'catalog'
+      ? VoxelRecoveryCheckPlan.parse(recovery['checks'], scopeName: scope)
+      : null;
+  final existing = (await database.query(
+    '''
+SELECT attempt_id, evidence
+FROM ${_qualified(scope, '_voxel_phase_attempts')}
+WHERE migration_id = ? AND phase_id = ?
+''',
+    parameters: [migration.id, phase['id']],
+  )).rows;
+  if (plan == null) {
+    if (existing.isNotEmpty) {
+      throw FormatException(
+        'Migration ${migration.id} phase ${phase['id']} requires manual recovery.',
+      );
+    }
+    await _recordStartedAttempt(
+      database,
+      scope,
+      migration,
+      phase,
+      jsonEncode({'before': recovery['before']}),
+    );
+  } else if (existing.isEmpty) {
+    final inspected = await _inspectRecovery(database, plan);
+    if (inspected.classification != VoxelRecoveryClassification.notStarted) {
+      throw FormatException(
+        'Migration ${migration.id} phase ${phase['id']} has conflicting preexisting state.',
+      );
+    }
+    await _recordStartedAttempt(
+      database,
+      scope,
+      migration,
+      phase,
+      jsonEncode({'before': inspected.observations}),
+    );
+  } else {
+    final inspected = await _inspectRecovery(database, plan);
+    if (inspected.classification == VoxelRecoveryClassification.completed) {
+      await _recordCompletedPhase(database, scope, ordinal, migration, phase);
+      return;
+    }
+    if (inspected.classification != VoxelRecoveryClassification.notStarted) {
+      throw FormatException(
+        'Migration ${migration.id} phase ${phase['id']} has an uncertain outcome.',
+      );
+    }
+  }
+  await interrupt?.call(
+    VoxelMigrationInterruption(
+      point: VoxelMigrationInterruptionPoint.afterPhaseStarted,
+      migrationId: migration.id,
+      phaseId: phase['id']! as String,
+    ),
+  );
+
+  final bytes = utf8.encode(migration.sql);
+  for (final rawRange in _list(phase['statements'], 'phase statements')) {
+    final range = _map(rawRange, 'statement range');
+    await database.execute(
+      _rewriteScope(
+        utf8.decode(bytes.sublist(range['startByte']! as int, range['endByte']! as int)),
+        sourceScope,
+        scope,
+      ),
+    );
+  }
+  await interrupt?.call(
+    VoxelMigrationInterruption(
+      point: VoxelMigrationInterruptionPoint.beforePhaseCommit,
+      migrationId: migration.id,
+      phaseId: phase['id']! as String,
+    ),
+  );
+  if (plan != null) {
+    final after = await _inspectRecovery(database, plan);
+    if (after.classification != VoxelRecoveryClassification.completed) {
+      throw FormatException(
+        'Migration ${migration.id} phase ${phase['id']} did not establish its postcondition.',
+      );
+    }
+  }
+  await _recordCompletedPhase(database, scope, ordinal, migration, phase);
+  await interrupt?.call(
+    VoxelMigrationInterruption(
+      point: VoxelMigrationInterruptionPoint.afterPhaseCommit,
+      migrationId: migration.id,
+      phaseId: phase['id']! as String,
+    ),
+  );
+}
+
+Future<void> _recordStartedAttempt(
+  TursoDatabase database,
+  String scope,
+  VoxelBundledMigration migration,
+  Map<String, Object?> phase,
+  String evidence,
+) => database.execute(
+  '''
+INSERT INTO ${_qualified(scope, '_voxel_phase_attempts')}
+  (migration_id, phase_id, checksum, platform, attempt_id, evidence)
+VALUES (?, ?, ?, ?, ?, ?)
+''',
+  parameters: [
+    migration.id,
+    phase['id'],
+    migration.checksum,
+    voxelPlatform,
+    _newAttemptId(),
+    evidence,
+  ],
+);
+
+final class _RecoveryInspection {
+  const _RecoveryInspection(this.classification, this.observations);
+
+  final VoxelRecoveryClassification classification;
+  final List<bool> observations;
+}
+
+Future<_RecoveryInspection> _inspectRecovery(
+  TursoDatabase database,
+  VoxelRecoveryCheckPlan plan,
+) async {
+  final raw = <Object?>[];
+  final observations = <bool>[];
+  for (final check in plan.checks) {
+    final result = await database.query(check.sql, parameters: check.parameters);
+    if (result.rows.length != 1 || result.columns.length != 1) {
+      return const _RecoveryInspection(VoxelRecoveryClassification.uncertain, <bool>[]);
+    }
+    final value = result.rows.single.valueAt(0);
+    raw.add(value);
+    switch (value) {
+      case final bool value:
+        observations.add(value);
+      case final int value when value == 0 || value == 1:
+        observations.add(value == 1);
+      case final BigInt value when value == BigInt.zero || value == BigInt.one:
+        observations.add(value == BigInt.one);
+      default:
+        return const _RecoveryInspection(VoxelRecoveryClassification.uncertain, <bool>[]);
+    }
+  }
+  return _RecoveryInspection(plan.classify(raw), List.unmodifiable(observations));
+}
+
+Future<void> _recordCompletedPhase(
+  TursoDatabase database,
+  String scope,
+  int ordinal,
+  VoxelBundledMigration migration,
+  Map<String, Object?> phase,
+) => database.transaction<void>(
+  (transaction) => _recordCompletedPhaseOn(
+    transaction,
+    scope,
+    ordinal,
+    migration,
+    phase,
+  ),
+);
+
+Future<void> _recordCompletedPhaseOn(
+  TursoTransaction transaction,
+  String scope,
+  int ordinal,
+  VoxelBundledMigration migration,
+  Map<String, Object?> phase,
+) async {
+  await transaction.execute(
+    '''
+INSERT INTO ${_qualified(scope, '_voxel_migrations')}
+  (migration_id, parent_id, checksum, ordinal)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (migration_id) DO NOTHING
+''',
+    parameters: [migration.id, migration.parentId, migration.checksum, ordinal],
+  );
+  await transaction.execute(
+    '''
+INSERT INTO ${_qualified(scope, '_voxel_phases')}
+  (migration_id, phase_id, checksum, platform, status)
+VALUES (?, ?, ?, ?, 'completed')
+''',
+    parameters: [migration.id, phase['id'], migration.checksum, voxelPlatform],
+  );
+}
+
+String _newAttemptId() {
+  final random = Random.secure();
+  return List<int>.generate(
+    16,
+    (_) => random.nextInt(256),
+  ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+}
+
+bool _isEvidence(String value) {
+  try {
+    return jsonDecode(value) is Map;
+  } on FormatException {
+    return false;
+  }
+}
+
+String _phaseKey(String migrationId, Object? rawPhase) =>
+    '$migrationId:${(rawPhase! as Map<String, Object?>)['id']}';
 
 Future<void> _runTransactionalPhase(
   TursoDatabase database,

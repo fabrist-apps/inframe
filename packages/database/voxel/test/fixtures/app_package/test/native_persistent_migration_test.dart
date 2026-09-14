@@ -2,12 +2,68 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 import 'package:turso/turso.dart';
-import 'package:voxel/src/connection.dart' show VoxelStorage, VoxelTesting;
+import 'package:voxel/src/connection.dart' show VoxelDatabaseRuntime, VoxelStorage, VoxelTesting;
 import 'package:voxel/src/migration.dart';
+import 'package:voxel/src/migration_status.dart';
 import 'package:voxel_fixture_app/app_database.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
 
 void main() {
+  test('migration status should not create files and should report durable receipts', () async {
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'voxel-generated-status-',
+    );
+    addTearDown(() => temporaryDirectory.delete(recursive: true));
+    final schema = FixtureAppDatabaseVoxelSchema.build();
+    final storage = VoxelStorage.directory(temporaryDirectory.path);
+
+    final missing = await VoxelDatabaseRuntime.migrationStatus(
+      schema: schema,
+      bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+      storage: storage,
+    );
+    expect(
+      missing.migrations.expand((migration) => migration.phases).map((phase) => phase.state),
+      everyElement(VoxelMigrationPhaseState.pending),
+    );
+    expect(temporaryDirectory.listSync(), isEmpty);
+
+    final database = await FixtureAppDatabase().open(storage: storage);
+    await database.close();
+    final applied = await VoxelDatabaseRuntime.migrationStatus(
+      schema: schema,
+      bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+      storage: storage,
+    );
+    expect(
+      applied.migrations.expand((migration) => migration.phases).map((phase) => phase.state),
+      everyElement(VoxelMigrationPhaseState.completed),
+    );
+  });
+
+  test('resolve migration should reject a database without an active attempt', () async {
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'voxel-generated-resolve-',
+    );
+    addTearDown(() => temporaryDirectory.delete(recursive: true));
+
+    await expectLater(
+      VoxelDatabaseRuntime.resolveMigration(
+        schema: FixtureAppDatabaseVoxelSchema.build(),
+        bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+        migrationId: FixtureAppDatabaseVoxelMigrations.bundle.migrations.first.id,
+        phaseId: '0',
+        expectedChecksum: FixtureAppDatabaseVoxelMigrations.bundle.migrations.first.checksum,
+        attemptId: 'missing',
+        reason: 'operator verified state',
+        resolution: VoxelMigrationResolution.completed,
+        storage: VoxelStorage.directory(temporaryDirectory.path),
+      ),
+      throwsA(isA<FormatException>()),
+    );
+    expect(temporaryDirectory.listSync(), isEmpty);
+  });
+
   test('generated open creates and reopens its persistent main file', () async {
     final temporaryDirectory = await Directory.systemTemp.createTemp(
       'voxel-generated-persistent-',

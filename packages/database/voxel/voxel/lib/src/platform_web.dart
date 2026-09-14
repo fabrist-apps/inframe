@@ -295,6 +295,89 @@ WHERE schema_id = ? AND file_identity = ?
   }
 }
 
+Future<T?> withVoxelPersistentMaintenance<T>({
+  required String databaseName,
+  required String? directory,
+  required VoxelMigrationPlan migrations,
+  required Duration lockTimeout,
+  required String? encryptionCipher,
+  required Uint8List? encryptionKey,
+  required Map<String, String?> schemaDirectories,
+  required Map<String, String?> schemaEncryptionCiphers,
+  required Map<String, Uint8List?> schemaEncryptionKeys,
+  required Future<T> Function(TursoDatabase database) operation,
+}) async {
+  final options = voxelWebOptions();
+  final main = resolveVoxelWebMainResource(
+    databaseName: databaseName,
+    directory: directory,
+  );
+  if (!await _exists(main, options)) return null;
+  final attachments = <String, _PlannedAttachment>{};
+  for (final scope in migrations.scopes.where((entry) => entry.name != 'main')) {
+    final resource = resolveVoxelWebAttachmentResource(
+      databaseName: databaseName,
+      schemaId: scope.id,
+      directory: schemaDirectories[scope.name] ?? main.parentDirectory,
+    );
+    attachments[scope.name] = _PlannedAttachment(
+      scope: scope,
+      resource: resource,
+      encryption: _optionalEncryption(
+        schemaEncryptionCiphers[scope.name],
+        schemaEncryptionKeys[scope.name],
+      ),
+    );
+  }
+  final paths = [main.path, ...attachments.values.map((entry) => entry.resource.path)];
+  final coordinator = VoxelWebMigrationCoordinator(
+    requester: createVoxelBrowserLockRequester(),
+    lockName: (path) => voxelWebMigrationLockName(_browserOrigin, path),
+  );
+  final lease = await coordinator.acquire(paths, VoxelWebMigrationDeadline.start(lockTimeout));
+  TursoDatabase? database;
+  try {
+    if (!await _exists(main, options)) return null;
+    database = await _openMain(
+      main.path,
+      _optionalEncryption(encryptionCipher, encryptionKey),
+      options,
+    );
+    final registry = await _readRegistry(database);
+    for (final attachment in attachments.values) {
+      final registered = registry[attachment.scope.id];
+      if (registered == null || registered.state != 'initialized') {
+        throw FormatException(
+          'Schema `${attachment.scope.name}` has no initialized persistent file.',
+        );
+      }
+      if (_canonicalRegisteredPath(registered.locationIdentity) != attachment.resource.path ||
+          !await _exists(attachment.resource, options)) {
+        throw FormatException(
+          'Schema `${attachment.scope.name}` is missing or configured at another location.',
+        );
+      }
+      await _attach(
+        database,
+        attachment.scope.name,
+        attachment.resource.path,
+        attachment.encryption,
+      );
+      await _verifyAttachedIdentity(
+        database,
+        scope: attachment.scope.name,
+        databaseId: migrations.bundle.databaseId,
+        schemaId: attachment.scope.id,
+        fileIdentity: registered.fileIdentity,
+      );
+    }
+    return await operation(database);
+  } finally {
+    await database?.close();
+    await lease.release();
+  }
+}
+
 final class VoxelWebResource {
   VoxelWebResource(String path) : path = TursoBrowserLocation(path).path {
     if (this.path != path) {
