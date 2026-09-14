@@ -172,24 +172,35 @@ void _validateIndex(RivetIndex index, String path) {
     }
     return;
   }
-  if (method case final Hnsw hnsw) {
-    if (index.unique || index.terms.length != 1) {
-      throw ArgumentError('HNSW index $path must be non-unique with one vector operand.');
-    }
-    final term = index.terms.single;
-    final vector = _vectorCodec(term.column.codec);
-    if (vector == null || term.operatorClass == null || term.descending) {
-      throw ArgumentError('HNSW index $path requires one scalar vector operator-class operand.');
-    }
-    if (vector.dimensions > 2000) {
-      throw ArgumentError('HNSW index $path supports at most 2000 vector dimensions.');
-    }
-    if (hnsw.m case final value? when value < 2 || value > 100) {
-      throw RangeError.range(value, 2, 100, 'm');
-    }
-    if (hnsw.efConstruction case final value? when value < 4 || value > 1000) {
-      throw RangeError.range(value, 4, 1000, 'efConstruction');
-    }
+  _validateVectorIndexOperand(index, path, method.sql.toUpperCase());
+  switch (method) {
+    case Hnsw(:final m, :final efConstruction):
+      if (m case final value? when value < 2 || value > 100) {
+        throw RangeError.range(value, 2, 100, 'm');
+      }
+      if (efConstruction case final value? when value < 4 || value > 1000) {
+        throw RangeError.range(value, 4, 1000, 'efConstruction');
+      }
+    case IvfFlat(:final lists):
+      if (lists case final value? when value < 1 || value > 32768) {
+        throw RangeError.range(value, 1, 32768, 'lists');
+      }
+  }
+}
+
+void _validateVectorIndexOperand(RivetIndex index, String path, String method) {
+  if (index.unique || index.terms.length != 1) {
+    throw ArgumentError('$method index $path must be non-unique with one vector operand.');
+  }
+  final term = index.terms.single;
+  final vector = _vectorCodec(term.column.codec);
+  if (vector == null || term.operatorClass == null || term.descending) {
+    throw ArgumentError(
+      '$method index $path requires one scalar vector operator-class operand.',
+    );
+  }
+  if (vector.dimensions > 2000) {
+    throw ArgumentError('$method index $path supports at most 2000 vector dimensions.');
   }
 }
 
@@ -378,6 +389,24 @@ final class Hnsw extends RivetIndexMethod {
     if (m != null) 'm': m,
     if (efConstruction != null) 'efConstruction': efConstruction,
   };
+}
+
+/// Builds a pgvector IVFFlat index.
+///
+/// An omitted [lists] value remains omitted so pgvector supplies its pinned
+/// default.
+final class IvfFlat extends RivetIndexMethod {
+  /// Creates IVFFlat build metadata.
+  const IvfFlat({this.lists});
+
+  /// Number of inverted lists, from 1 through 32768 when supplied.
+  final int? lists;
+
+  @override
+  String get sql => 'ivfflat';
+
+  @override
+  Map<String, Object?> get options => {if (lists != null) 'lists': lists};
 }
 
 final class RivetIndexBuilder {

@@ -129,13 +129,17 @@ final class RivetDatabaseSchema {
       });
     }
 
-    final hnswOperatorClasses = <String>{
-      for (final table in tables)
-        for (final index in table.indexes)
-          if (index.method is Hnsw)
-            for (final term in index.terms)
-              if (term.operatorClass case final operatorClass?) operatorClass.sql,
-    }.toList()..sort();
+    final vectorIndexMethods = <String, List<String>>{
+      for (final method in ['hnsw', 'ivfflat'])
+        if (tables.any((table) => table.indexes.any((index) => index.method?.sql == method)))
+          method: (<String>{
+            for (final table in tables)
+              for (final index in table.indexes)
+                if (index.method?.sql == method)
+                  for (final term in index.terms)
+                    if (term.operatorClass case final operatorClass?) operatorClass.sql,
+          }.toList()..sort()),
+    };
 
     return {
       'formatVersion': 1,
@@ -162,13 +166,15 @@ final class RivetDatabaseSchema {
       ],
       'requirements': [
         if (tables.any(
-          (table) => table.indexes.any((index) => index.method is Hnsw),
+          (table) => table.indexes.any(
+            (index) => index.method is Hnsw || index.method is IvfFlat,
+          ),
         ))
           {
             'kind': 'extension',
             'name': 'vector',
             'minimumVersion': '0.8.6',
-            'operatorClasses': hnswOperatorClasses,
+            'indexMethods': vectorIndexMethods,
           },
       ],
     };

@@ -322,7 +322,7 @@ void main() {
       expect(table.code.storage.asc(), isA<RivetOrder>());
     });
 
-    test('should expose validated HNSW metadata without filling omitted defaults', () {
+    test('should expose validated vector-index metadata without filling omitted defaults', () {
       final schema = VectorDocuments.db.buildSchema();
       final declaration = RivetDatabaseSchema(
         name: 'vector_indexes',
@@ -331,14 +331,17 @@ void main() {
       final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
       final indexes = (table['indexes']! as List<Object?>).cast<Map<String, Object?>>();
 
-      expect(indexes.map((index) => index['method']), everyElement('hnsw'));
+      expect(indexes.take(3).map((index) => index['method']), everyElement('hnsw'));
       expect(indexes.first['options'], {'m': 8, 'efConstruction': 32});
       expect(indexes[1]['options'], isEmpty);
       expect(
-        indexes.map(
-          (index) =>
-              ((index['terms']! as List<Object?>).single! as Map<String, Object?>)['operatorClass'],
-        ),
+        indexes
+            .take(3)
+            .map(
+              (index) =>
+                  ((index['terms']! as List<Object?>).single!
+                      as Map<String, Object?>)['operatorClass'],
+            ),
         ['vector_cosine_ops', 'vector_l2_ops', 'vector_ip_ops'],
       );
       expect(declaration['requirements'], [
@@ -346,13 +349,25 @@ void main() {
           'kind': 'extension',
           'name': 'vector',
           'minimumVersion': '0.8.6',
-          'operatorClasses': [
-            'vector_cosine_ops',
-            'vector_ip_ops',
-            'vector_l2_ops',
-          ],
+          'indexMethods': {
+            'hnsw': ['vector_cosine_ops', 'vector_ip_ops', 'vector_l2_ops'],
+            'ivfflat': ['vector_cosine_ops', 'vector_ip_ops', 'vector_l2_ops'],
+          },
         },
       ]);
+      expect(indexes.skip(3).map((index) => index['method']), everyElement('ivfflat'));
+      expect(indexes[3]['options'], {'lists': 4});
+      expect(indexes[4]['options'], isEmpty);
+      expect(
+        indexes
+            .skip(3)
+            .map(
+              (index) =>
+                  ((index['terms']! as List<Object?>).single!
+                      as Map<String, Object?>)['operatorClass'],
+            ),
+        ['vector_cosine_ops', 'vector_l2_ops', 'vector_ip_ops'],
+      );
     });
 
     test('should compose one native enum declaration for scalar and array storage', () {

@@ -1321,8 +1321,12 @@ final class RivetArtifactGenerator {
       }
       return;
     }
-    if (method != 'hnsw' || index['unique'] == true || terms.length != 1) {
-      throw UnsupportedError('Index ${index['name']} has an unsupported HNSW declaration.');
+    if (!const {'hnsw', 'ivfflat'}.contains(method) ||
+        index['unique'] == true ||
+        terms.length != 1) {
+      throw UnsupportedError(
+        'Index ${index['name']} has an unsupported vector-index declaration.',
+      );
     }
     final term = terms.single;
     if (term['descending'] == true ||
@@ -1331,7 +1335,7 @@ final class RivetArtifactGenerator {
           'vector_l2_ops',
           'vector_ip_ops',
         }.contains(term['operatorClass'])) {
-      throw UnsupportedError('Index ${index['name']} has an unsupported HNSW operand.');
+      throw UnsupportedError('Index ${index['name']} has an unsupported vector-index operand.');
     }
     final column = (table['columns']! as List<Object?>).cast<Map<String, Object?>>().singleWhere(
       (column) => column['id'] == term['columnId'],
@@ -1344,10 +1348,18 @@ final class RivetArtifactGenerator {
         'Index ${index['name']} requires a scalar vector up to 2000 dimensions.',
       );
     }
-    if (options.keys.any((key) => !const {'m', 'efConstruction'}.contains(key)) ||
-        !_integerOption(options['m'], minimum: 2, maximum: 100) ||
-        !_integerOption(options['efConstruction'], minimum: 4, maximum: 1000)) {
-      throw UnsupportedError('Index ${index['name']} has unsupported HNSW options.');
+    final validOptions = switch (method) {
+      'hnsw' =>
+        !options.keys.any((key) => !const {'m', 'efConstruction'}.contains(key)) &&
+            _integerOption(options['m'], minimum: 2, maximum: 100) &&
+            _integerOption(options['efConstruction'], minimum: 4, maximum: 1000),
+      'ivfflat' =>
+        !options.keys.any((key) => key != 'lists') &&
+            _integerOption(options['lists'], minimum: 1, maximum: 32768),
+      _ => false,
+    };
+    if (!validOptions) {
+      throw UnsupportedError('Index ${index['name']} has unsupported $method options.');
     }
   }
 
@@ -1389,25 +1401,47 @@ final class RivetArtifactGenerator {
   }
 
   void _validateRequirements(Map<String, Object?> declaration) {
-    final requiredOperatorClasses = <String>{
-      for (final table in (declaration['tables']! as List<Object?>).cast<Map<String, Object?>>())
-        for (final index in (table['indexes']! as List<Object?>).cast<Map<String, Object?>>())
-          if (index['method'] == 'hnsw')
-            for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>())
-              if (term['operatorClass'] case final String value) value,
-    };
+    final requiredIndexMethods = <String, Set<String>>{};
+    for (final table in (declaration['tables']! as List<Object?>).cast<Map<String, Object?>>()) {
+      for (final index in (table['indexes']! as List<Object?>).cast<Map<String, Object?>>()) {
+        final method = index['method'];
+        if (!const {'hnsw', 'ivfflat'}.contains(method)) continue;
+        final operatorClasses = requiredIndexMethods.putIfAbsent(
+          method! as String,
+          () => <String>{},
+        );
+        for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>()) {
+          if (term['operatorClass'] case final String value) operatorClasses.add(value);
+        }
+      }
+    }
     final requirements = declaration['requirements']! as List<Object?>;
-    if (requiredOperatorClasses.isEmpty && requirements.isEmpty) return;
+    if (requiredIndexMethods.isEmpty && requirements.isEmpty) return;
     if (requirements.length != 1) {
       throw UnsupportedError('Rivet does not support the declared backend requirement.');
     }
     for (final raw in requirements) {
-      final operatorClasses = raw is Map<String, Object?> ? raw['operatorClasses'] : null;
+      final indexMethods = raw is Map<String, Object?> ? raw['indexMethods'] : null;
       if (raw is! Map<String, Object?> ||
           raw['kind'] != 'extension' ||
           raw['name'] != 'vector' ||
           raw['minimumVersion'] != '0.8.6' ||
-          operatorClasses is! List<Object?> ||
+          indexMethods is! Map<String, Object?> ||
+          indexMethods.length != requiredIndexMethods.length ||
+          !_matchesIndexMethods(indexMethods, requiredIndexMethods) ||
+          raw.length != 4) {
+        throw UnsupportedError('Rivet does not support the declared backend requirement.');
+      }
+    }
+  }
+
+  bool _matchesIndexMethods(
+    Map<String, Object?> actual,
+    Map<String, Set<String>> required,
+  ) {
+    for (final entry in required.entries) {
+      final operatorClasses = actual[entry.key];
+      if (operatorClasses is! List<Object?> ||
           !operatorClasses.every(
             const {
               'vector_cosine_ops',
@@ -1416,12 +1450,12 @@ final class RivetArtifactGenerator {
             }.contains,
           ) ||
           operatorClasses.whereType<String>().toSet().length != operatorClasses.length ||
-          operatorClasses.length != requiredOperatorClasses.length ||
-          !requiredOperatorClasses.containsAll(operatorClasses.whereType<String>()) ||
-          raw.length != 4) {
-        throw UnsupportedError('Rivet does not support the declared backend requirement.');
+          operatorClasses.length != entry.value.length ||
+          !entry.value.containsAll(operatorClasses.whereType<String>())) {
+        return false;
       }
     }
+    return true;
   }
 
   String _snakeCase(String value) => value.replaceAllMapped(

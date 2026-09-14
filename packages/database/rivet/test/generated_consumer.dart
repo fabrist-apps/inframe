@@ -276,6 +276,11 @@ final class VectorDocuments extends RivetTableDefinition<VectorDocuments> {
         .on([embedding.cosineOps()]),
     index('vector_documents_l2_hnsw').using(const Hnsw()).on([embedding.l2Ops()]),
     index('vector_documents_ip_hnsw').using(const Hnsw()).on([embedding.innerProductOps()]),
+    index('vector_documents_cosine_ivfflat')
+        .using(const IvfFlat(lists: 4))
+        .on([embedding.cosineOps()]),
+    index('vector_documents_l2_ivfflat').using(const IvfFlat()).on([embedding.l2Ops()]),
+    index('vector_documents_ip_ivfflat').using(const IvfFlat()).on([embedding.innerProductOps()]),
   ];
 }
 

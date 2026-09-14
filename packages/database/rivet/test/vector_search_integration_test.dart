@@ -60,6 +60,21 @@ void main() {
         CREATE INDEX vector_documents_ip_idx
         ON fbr195."vectorDocuments" USING hnsw (embedding vector_ip_ops)
       ''');
+      await fixture.execute('''
+        CREATE INDEX vector_documents_cosine_ivf_idx
+        ON fbr195."vectorDocuments" USING ivfflat (embedding vector_cosine_ops)
+        WITH (lists = 1)
+      ''');
+      await fixture.execute('''
+        CREATE INDEX vector_documents_l2_ivf_idx
+        ON fbr195."vectorDocuments" USING ivfflat (embedding vector_l2_ops)
+        WITH (lists = 1)
+      ''');
+      await fixture.execute('''
+        CREATE INDEX vector_documents_ip_ivf_idx
+        ON fbr195."vectorDocuments" USING ivfflat (embedding vector_ip_ops)
+        WITH (lists = 1)
+      ''');
       statements = [];
       database = await RivetTestDatabase().open(
         connection: RivetConnection.url(databaseUrl, onStatement: statements.add),
@@ -198,6 +213,7 @@ void main() {
         final extensions = manifest['extensions']! as Map<String, Object?>;
         final indexes = manifest['indexes']! as Map<String, Object?>;
         final hnsw = indexes['hnsw']! as Map<String, Object?>;
+        final ivfflat = indexes['ivfflat']! as Map<String, Object?>;
         final server = await fixture.execute("SELECT current_setting('server_version')");
         final vector = await fixture.execute(
           "SELECT extversion FROM pg_extension WHERE extname = 'vector'",
@@ -208,6 +224,14 @@ void main() {
           JOIN pg_am AS access_method
             ON access_method.oid = operator_class.opcmethod
           WHERE access_method.amname = 'hnsw'
+          ORDER BY operator_class.opcname
+        ''');
+        final ivfflatOperatorClasses = await fixture.execute('''
+          SELECT operator_class.opcname
+          FROM pg_opclass AS operator_class
+          JOIN pg_am AS access_method
+            ON access_method.oid = operator_class.opcmethod
+          WHERE access_method.amname = 'ivfflat'
           ORDER BY operator_class.opcname
         ''');
 
@@ -224,6 +248,16 @@ void main() {
           'efConstruction': {'minimum': 4, 'maximum': 1000},
         });
         expect(hnsw['concurrentBuild'], isFalse);
+        expect(ivfflat['extension'], 'vector');
+        expect(ivfflat['maximumDimensions'], 2000);
+        expect(
+          ivfflatOperatorClasses.map((row) => row.first),
+          containsAll(ivfflat['operatorClasses']! as List<Object?>),
+        );
+        expect(ivfflat['buildOptions'], {
+          'lists': {'minimum': 1, 'maximum': 32768, 'default': 100},
+        });
+        expect(ivfflat['concurrentBuild'], isFalse);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

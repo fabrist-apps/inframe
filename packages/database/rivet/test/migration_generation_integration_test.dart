@@ -178,15 +178,70 @@ void main() {
         final indexes = await connection.execute('''
           SELECT indexdef FROM pg_indexes
           WHERE schemaname = 'fbr195' AND tablename = 'vectorDocuments'
+            AND indexdef LIKE '% USING hnsw %'
           ORDER BY indexname
         ''');
-        expect(indexes, hasLength(4));
+        expect(indexes, hasLength(3));
         expect(
           indexes.map((row) => row.first! as String),
           containsAll([
             contains('USING hnsw (embedding vector_cosine_ops)'),
             contains('USING hnsw (embedding vector_l2_ops)'),
             contains('USING hnsw (embedding vector_ip_ops)'),
+          ]),
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should apply checked IVFFlat indexes after extension preflight',
+      () async {
+        await connection.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await connection.execute('CREATE EXTENSION IF NOT EXISTS vector');
+        final schema = RivetDatabaseSchema(
+          name: 'vector_indexes',
+          tables: [
+            VectorDocuments.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+          ],
+        );
+        await const RivetMigrationGenerator().generate(
+          schema: schema,
+          directory: directory,
+          name: 'ivfflat indexes',
+        );
+        final generatedSql = directory
+            .listSync(recursive: true)
+            .whereType<File>()
+            .singleWhere((file) => file.path.endsWith('migration.sql'))
+            .readAsStringSync();
+        expect(
+          generatedSql,
+          allOf(
+            contains('USING ivfflat ("embedding" vector_cosine_ops) WITH (lists = 4)'),
+            contains('USING ivfflat ("embedding" vector_l2_ops)'),
+            contains('USING ivfflat ("embedding" vector_ip_ops)'),
+          ),
+        );
+
+        await RivetMigrator(
+          connection: RivetConnection.url(databaseUrl!),
+          directory: directory,
+        ).migrate();
+
+        final indexes = await connection.execute('''
+          SELECT indexdef FROM pg_indexes
+          WHERE schemaname = 'fbr195' AND tablename = 'vectorDocuments'
+            AND indexdef LIKE '% USING ivfflat %'
+          ORDER BY indexname
+        ''');
+        expect(indexes, hasLength(3));
+        expect(
+          indexes.map((row) => row.first! as String),
+          containsAll([
+            contains("USING ivfflat (embedding vector_cosine_ops) WITH (lists='4')"),
+            contains('USING ivfflat (embedding)'),
+            contains('USING ivfflat (embedding vector_ip_ops)'),
           ]),
         );
       },

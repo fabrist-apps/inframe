@@ -275,23 +275,25 @@ Future<void> _verifyRequirements(
         '${requirement.minimumVersion}, but found $installed.',
       );
     }
-    for (final operatorClass in requirement.operatorClasses) {
-      final operatorClassResult = await session.execute(
-        pg.Sql.named('''
-          SELECT 1
-          FROM pg_opclass AS operator_class
-          JOIN pg_am AS access_method
-            ON access_method.oid = operator_class.opcmethod
-          WHERE access_method.amname = 'hnsw'
-            AND operator_class.opcname = @operatorClass
-        '''),
-        parameters: {'operatorClass': operatorClass},
-      );
-      if (operatorClassResult.isEmpty) {
-        throw RivetMigrationException(
-          'Migration requires HNSW operator class `$operatorClass` from '
-          'extension `${requirement.name}`, but it is unavailable.',
+    for (final entry in requirement.indexMethods.entries) {
+      for (final operatorClass in entry.value) {
+        final operatorClassResult = await session.execute(
+          pg.Sql.named('''
+            SELECT 1
+            FROM pg_opclass AS operator_class
+            JOIN pg_am AS access_method
+              ON access_method.oid = operator_class.opcmethod
+            WHERE access_method.amname = @method
+              AND operator_class.opcname = @operatorClass
+          '''),
+          parameters: {'method': entry.key, 'operatorClass': operatorClass},
         );
+        if (operatorClassResult.isEmpty) {
+          throw RivetMigrationException(
+            'Migration requires ${entry.key} operator class `$operatorClass` '
+            'from extension `${requirement.name}`, but it is unavailable.',
+          );
+        }
       }
     }
   }

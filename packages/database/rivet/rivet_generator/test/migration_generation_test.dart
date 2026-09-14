@@ -397,7 +397,9 @@ void main() {
           'kind': 'extension',
           'minimumVersion': '0.8.6',
           'name': 'vector',
-          'operatorClasses': ['vector_cosine_ops'],
+          'indexMethods': {
+            'hnsw': ['vector_cosine_ops'],
+          },
         },
       ]);
       await const RivetMigrationChecker().check(directory: directory);
@@ -501,6 +503,70 @@ void main() {
         (declaration) => term(declaration)['operatorClass'] = 'vector_l1_ops',
       );
       await rejects((declaration) => index(declaration)['unique'] = true);
+    });
+
+    test('should preserve, diff, and validate checked IVFFlat declarations', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generateDeclaration(
+        declaration: _vectorIndexDeclaration(
+          method: 'ivfflat',
+          options: const {'lists': 32},
+        ),
+        directory: directory,
+        name: 'ivfflat',
+      );
+      final initialSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      expect(
+        initialSql,
+        contains(
+          'USING ivfflat ("embedding" vector_cosine_ops) WITH (lists = 32);',
+        ),
+      );
+      await const RivetMigrationChecker().check(directory: directory);
+
+      await generator.generateDeclaration(
+        declaration: _vectorIndexDeclaration(method: 'ivfflat', options: const {}),
+        directory: directory,
+        name: 'remove ivfflat lists',
+      );
+      final omittedSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      expect(omittedSql, contains('DROP INDEX "search"."documents_embedding_hnsw";'));
+      expect(
+        omittedSql,
+        contains('USING ivfflat ("embedding" vector_cosine_ops);'),
+      );
+      final snapshot = _lastArtifact(directory, 'snapshot.json');
+      final table = (snapshot['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final index = (table['indexes']! as List<Object?>).single! as Map<String, Object?>;
+      expect(index['options'], isEmpty);
+
+      for (final lists in [0, 32769]) {
+        await expectLater(
+          const RivetMigrationGenerator().generateDeclaration(
+            declaration: _vectorIndexDeclaration(
+              method: 'ivfflat',
+              options: {'lists': lists},
+            ),
+            directory: Directory('${directory.path}/invalid-ivfflat-$lists'),
+            name: 'invalid ivfflat',
+          ),
+          throwsA(isA<UnsupportedError>()),
+        );
+      }
+      await expectLater(
+        const RivetMigrationGenerator().generateDeclaration(
+          declaration: _vectorIndexDeclaration(
+            method: 'ivfflat',
+            options: {'m': 8},
+          ),
+          directory: Directory('${directory.path}/invalid-ivfflat-option'),
+          name: 'invalid ivfflat option',
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
     });
 
     test('should create one shared native enum before scalar and array columns', () async {
@@ -1007,6 +1073,7 @@ Map<String, Object?> _constraintDeclaration() => {
 Map<String, Object?> _vectorIndexDeclaration({
   Map<String, Object?> options = const {'m': 8, 'efConstruction': 32},
   String operatorClass = 'vector_cosine_ops',
+  String method = 'hnsw',
 }) => {
   'formatVersion': 1,
   'dialect': 'rivet',
@@ -1032,7 +1099,7 @@ Map<String, Object?> _vectorIndexDeclaration({
         {
           'name': 'documents_embedding_hnsw',
           'unique': false,
-          'method': 'hnsw',
+          'method': method,
           'terms': [
             {
               'column': 'embedding',
@@ -1053,7 +1120,9 @@ Map<String, Object?> _vectorIndexDeclaration({
       'kind': 'extension',
       'name': 'vector',
       'minimumVersion': '0.8.6',
-      'operatorClasses': [operatorClass],
+      'indexMethods': {
+        method: [operatorClass],
+      },
     },
   ],
 };

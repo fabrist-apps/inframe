@@ -187,3 +187,17 @@ the index declaration. HNSW declarations require pgvector 0.8.6 or newer, one
 non-null or nullable scalar vector with at most 2,000 dimensions, `m` from 2 to
 100, and `efConstruction` from 4 to 1,000. Concurrent HNSW builds are not yet
 exposed.
+
+IVFFlat uses the same scalar operands with a separate method declaration:
+
+```dart
+index('books_embedding_ivfflat')
+    .using(const IvfFlat(lists: 100))
+    .on([embedding.l2Ops()]);
+```
+
+Omit `lists` to use pgvector's default without recording a value in the
+snapshot or DDL. On the pinned pgvector version, explicit values range from 1
+through 32,768 and scalar vectors can have at most 2,000 dimensions. `lists`
+is an index build option; transaction-scoped `probes` tuning belongs to query
+execution. Concurrent IVFFlat builds are not yet exposed.

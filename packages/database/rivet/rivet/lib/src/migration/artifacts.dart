@@ -84,12 +84,12 @@ final class RivetExtensionRequirement {
   const RivetExtensionRequirement({
     required this.name,
     required this.minimumVersion,
-    required this.operatorClasses,
+    required this.indexMethods,
   });
 
   final String name;
   final String minimumVersion;
-  final List<String> operatorClasses;
+  final Map<String, List<String>> indexMethods;
 }
 
 List<RivetExtensionRequirement> _readRequirements(Map<String, Object?> snapshot) => [
@@ -99,18 +99,26 @@ List<RivetExtensionRequirement> _readRequirements(Map<String, Object?> snapshot)
         'kind': 'extension',
         'name': final String name,
         'minimumVersion': final String version,
-        'operatorClasses': final List<Object?> operatorClasses,
+        'indexMethods': final Map<String, Object?> indexMethods,
       } =>
         RivetExtensionRequirement(
           name: name,
           minimumVersion: version,
-          operatorClasses: [
-            for (final operatorClass in operatorClasses)
-              if (operatorClass case final String value)
-                value
-              else
-                throw const FormatException('Extension operator classes must be strings.'),
-          ],
+          indexMethods: {
+            for (final entry in indexMethods.entries)
+              entry.key: [
+                for (final operatorClass in _list(
+                  entry.value,
+                  'extension index operator classes',
+                ))
+                  if (operatorClass case final String value)
+                    value
+                  else
+                    throw const FormatException(
+                      'Extension operator classes must be strings.',
+                    ),
+              ],
+          },
         ),
       _ => throw const FormatException('Snapshot contains an unsupported backend requirement.'),
     },
