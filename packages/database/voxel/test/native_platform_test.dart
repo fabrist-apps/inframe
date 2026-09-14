@@ -68,7 +68,15 @@ void main() {
         ),
         isTrue,
       );
+      expect(
+        sameVoxelNativePathForTesting(
+          '${real.path}/missing/database.db',
+          '${real.path}/other/database.db',
+        ),
+        isFalse,
+      );
       expect(missingParent.existsSync(), isFalse);
+      expect(Directory('${real.path}/other').existsSync(), isFalse);
     });
 
     test('should safely namespace names inside a canonical explicit directory', () async {
