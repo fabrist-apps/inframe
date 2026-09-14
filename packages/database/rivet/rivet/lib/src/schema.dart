@@ -172,7 +172,7 @@ void _validateIndex(RivetIndex index, String path) {
     }
     return;
   }
-  _validateVectorIndexOperand(index, path, method.sql.toUpperCase());
+  final vector = _validateVectorIndexOperand(index, path, method.sql.toUpperCase());
   switch (method) {
     case Hnsw(:final m, :final efConstruction):
       if (m case final value? when value < 2 || value > 100) {
@@ -185,10 +185,53 @@ void _validateIndex(RivetIndex index, String path) {
       if (lists case final value? when value < 1 || value > 32768) {
         throw RangeError.range(value, 1, 32768, 'lists');
       }
+    case DiskAnn(
+      :final storageLayout,
+      :final numNeighbors,
+      :final searchListSize,
+      :final maxAlpha,
+      :final numDimensions,
+      :final numBitsPerDimension,
+    ):
+      if (numNeighbors case final value? when value < 10 || value > 1000) {
+        throw RangeError.range(value, 10, 1000, 'numNeighbors');
+      }
+      if (searchListSize case final value? when value < 10 || value > 1000) {
+        throw RangeError.range(value, 10, 1000, 'searchListSize');
+      }
+      if (maxAlpha case final value? when !value.isFinite || value < 1 || value > 5) {
+        throw RangeError.range(value, 1, 5, 'maxAlpha');
+      }
+      if (numDimensions case final value? when value < 1 || value > vector.dimensions) {
+        throw RangeError.range(value, 1, vector.dimensions, 'numDimensions');
+      }
+      if (numBitsPerDimension case final value? when value < 1 || value > 32) {
+        throw RangeError.range(value, 1, 32, 'numBitsPerDimension');
+      }
+      final indexedDimensions = numDimensions ?? vector.dimensions;
+      if (storageLayout == DiskAnnStorageLayout.plain && indexedDimensions > 2000) {
+        throw ArgumentError('Plain DiskANN index $path supports at most 2000 dimensions.');
+      }
+      if (storageLayout == DiskAnnStorageLayout.plain &&
+          index.terms.single.operatorClass == RivetVectorOperatorClass.innerProduct) {
+        throw ArgumentError('Plain DiskANN index $path does not support inner product.');
+      }
+      if (storageLayout == DiskAnnStorageLayout.plain &&
+          numBitsPerDimension != null &&
+          numBitsPerDimension > 1) {
+        throw ArgumentError(
+          'DiskANN numBitsPerDimension above 1 requires memoryOptimized storage.',
+        );
+      }
+      if (numBitsPerDimension != null && numBitsPerDimension > 1 && indexedDimensions > 930) {
+        throw ArgumentError(
+          'DiskANN numBitsPerDimension above 1 supports at most 930 indexed dimensions.',
+        );
+      }
   }
 }
 
-void _validateVectorIndexOperand(RivetIndex index, String path, String method) {
+RivetVectorCodec _validateVectorIndexOperand(RivetIndex index, String path, String method) {
   if (index.unique || index.terms.length != 1) {
     throw ArgumentError('$method index $path must be non-unique with one vector operand.');
   }
@@ -200,8 +243,14 @@ void _validateVectorIndexOperand(RivetIndex index, String path, String method) {
     );
   }
   if (vector.dimensions > 2000) {
-    throw ArgumentError('$method index $path supports at most 2000 vector dimensions.');
+    if (index.method is! DiskAnn || vector.dimensions > 16000) {
+      throw ArgumentError(
+        '$method index $path supports at most '
+        '${index.method is DiskAnn ? 16000 : 2000} vector dimensions.',
+      );
+    }
   }
+  return vector;
 }
 
 RivetVectorCodec? _vectorCodec(RivetCodec<dynamic> codec) => switch (codec) {
@@ -407,6 +456,64 @@ final class IvfFlat extends RivetIndexMethod {
 
   @override
   Map<String, Object?> get options => {if (lists != null) 'lists': lists};
+}
+
+/// Physical storage used by a StreamingDiskANN index.
+enum DiskAnnStorageLayout {
+  /// Statistical binary quantization storage.
+  memoryOptimized('memory_optimized'),
+
+  /// Uncompressed vector storage.
+  plain('plain');
+
+  const DiskAnnStorageLayout(this.sql);
+
+  /// PostgreSQL option spelling.
+  final String sql;
+}
+
+/// Builds a pgvectorscale StreamingDiskANN index.
+final class DiskAnn extends RivetIndexMethod {
+  /// Creates DiskANN build metadata while preserving omitted extension defaults.
+  const DiskAnn({
+    this.storageLayout,
+    this.numNeighbors,
+    this.searchListSize,
+    this.maxAlpha,
+    this.numDimensions,
+    this.numBitsPerDimension,
+  });
+
+  /// Compressed or plain index storage.
+  final DiskAnnStorageLayout? storageLayout;
+
+  /// Maximum graph neighbors per node.
+  final int? numNeighbors;
+
+  /// Build-time greedy-search candidate count.
+  final int? searchListSize;
+
+  /// Build-time pruning alpha.
+  final double? maxAlpha;
+
+  /// Leading vector dimensions to index, or all dimensions when omitted.
+  final int? numDimensions;
+
+  /// Bits used for each indexed dimension in compressed storage.
+  final int? numBitsPerDimension;
+
+  @override
+  String get sql => 'diskann';
+
+  @override
+  Map<String, Object?> get options => {
+    if (storageLayout != null) 'storageLayout': storageLayout!.sql,
+    if (numNeighbors != null) 'numNeighbors': numNeighbors,
+    if (searchListSize != null) 'searchListSize': searchListSize,
+    if (maxAlpha != null) 'maxAlpha': maxAlpha,
+    if (numDimensions != null) 'numDimensions': numDimensions,
+    if (numBitsPerDimension != null) 'numBitsPerDimension': numBitsPerDimension,
+  };
 }
 
 final class RivetIndexBuilder {

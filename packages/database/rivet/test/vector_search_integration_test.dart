@@ -21,6 +21,7 @@ void main() {
       await fixture.execute('DROP SCHEMA IF EXISTS fbr195 CASCADE');
       await fixture.execute('CREATE SCHEMA fbr195');
       await fixture.execute('CREATE EXTENSION IF NOT EXISTS vector');
+      await fixture.execute('CREATE EXTENSION IF NOT EXISTS vectorscale');
       await fixture.execute('''
         CREATE TABLE fbr195."vectorCategories" (
           id integer PRIMARY KEY,
@@ -74,6 +75,18 @@ void main() {
         CREATE INDEX vector_documents_ip_ivf_idx
         ON fbr195."vectorDocuments" USING ivfflat (embedding vector_ip_ops)
         WITH (lists = 1)
+      ''');
+      await fixture.execute('''
+        CREATE INDEX vector_documents_cosine_diskann_idx
+        ON fbr195."vectorDocuments" USING diskann (embedding vector_cosine_ops)
+      ''');
+      await fixture.execute('''
+        CREATE INDEX vector_documents_l2_diskann_idx
+        ON fbr195."vectorDocuments" USING diskann (embedding vector_l2_ops)
+      ''');
+      await fixture.execute('''
+        CREATE INDEX vector_documents_ip_diskann_idx
+        ON fbr195."vectorDocuments" USING diskann (embedding vector_ip_ops)
       ''');
       statements = [];
       database = await RivetTestDatabase().open(
@@ -214,9 +227,13 @@ void main() {
         final indexes = manifest['indexes']! as Map<String, Object?>;
         final hnsw = indexes['hnsw']! as Map<String, Object?>;
         final ivfflat = indexes['ivfflat']! as Map<String, Object?>;
+        final diskann = indexes['diskann']! as Map<String, Object?>;
         final server = await fixture.execute("SELECT current_setting('server_version')");
         final vector = await fixture.execute(
           "SELECT extversion FROM pg_extension WHERE extname = 'vector'",
+        );
+        final vectorscale = await fixture.execute(
+          "SELECT extversion FROM pg_extension WHERE extname = 'vectorscale'",
         );
         final hnswOperatorClasses = await fixture.execute('''
           SELECT operator_class.opcname
@@ -234,9 +251,18 @@ void main() {
           WHERE access_method.amname = 'ivfflat'
           ORDER BY operator_class.opcname
         ''');
+        final diskannOperatorClasses = await fixture.execute('''
+          SELECT operator_class.opcname
+          FROM pg_opclass AS operator_class
+          JOIN pg_am AS access_method
+            ON access_method.oid = operator_class.opcmethod
+          WHERE access_method.amname = 'diskann'
+          ORDER BY operator_class.opcname
+        ''');
 
         expect(server.single.first, startsWith(manifest['postgresql']! as String));
         expect(vector.single.first, extensions['vector']);
+        expect(vectorscale.single.first, extensions['vectorscale']);
         expect(hnsw['extension'], 'vector');
         expect(hnsw['maximumDimensions'], 2000);
         expect(
@@ -258,6 +284,31 @@ void main() {
           'lists': {'minimum': 1, 'maximum': 32768, 'default': 100},
         });
         expect(ivfflat['concurrentBuild'], isFalse);
+        expect(diskann['extension'], 'vectorscale');
+        expect(diskann['maximumDimensions'], 16000);
+        expect(diskann['plainMaximumDimensions'], 2000);
+        expect(diskann['multiBitMaximumDimensions'], 930);
+        expect(
+          diskannOperatorClasses.map((row) => row.first),
+          containsAll(diskann['operatorClasses']! as List<Object?>),
+        );
+        expect(diskann['storageLayouts'], ['memory_optimized', 'plain']);
+        expect(diskann['buildOptions'], {
+          'numNeighbors': {'minimum': 10, 'maximum': 1000, 'default': 50},
+          'searchListSize': {'minimum': 10, 'maximum': 1000, 'default': 100},
+          'maxAlpha': {'minimum': 1.0, 'maximum': 5.0, 'default': 1.2},
+          'numDimensions': {
+            'minimum': 1,
+            'maximum': 'storedDimensions',
+            'default': 'all',
+          },
+          'numBitsPerDimension': {
+            'minimum': 1,
+            'maximum': 32,
+            'default': 'backendSelected',
+          },
+        });
+        expect(diskann['concurrentBuild'], isFalse);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

@@ -129,8 +129,8 @@ final class RivetDatabaseSchema {
       });
     }
 
-    final vectorIndexMethods = <String, List<String>>{
-      for (final method in ['hnsw', 'ivfflat'])
+    Map<String, List<String>> indexMethods(Iterable<String> methods) => {
+      for (final method in methods)
         if (tables.any((table) => table.indexes.any((index) => index.method?.sql == method)))
           method: (<String>{
             for (final table in tables)
@@ -140,6 +140,8 @@ final class RivetDatabaseSchema {
                     if (term.operatorClass case final operatorClass?) operatorClass.sql,
           }.toList()..sort()),
     };
+    final pgvectorIndexMethods = indexMethods(['hnsw', 'ivfflat']);
+    final vectorscaleIndexMethods = indexMethods(['diskann']);
 
     return {
       'formatVersion': 1,
@@ -165,16 +167,19 @@ final class RivetDatabaseSchema {
           },
       ],
       'requirements': [
-        if (tables.any(
-          (table) => table.indexes.any(
-            (index) => index.method is Hnsw || index.method is IvfFlat,
-          ),
-        ))
+        if (pgvectorIndexMethods.isNotEmpty)
           {
             'kind': 'extension',
             'name': 'vector',
             'minimumVersion': '0.8.6',
-            'indexMethods': vectorIndexMethods,
+            'indexMethods': pgvectorIndexMethods,
+          },
+        if (vectorscaleIndexMethods.isNotEmpty)
+          {
+            'kind': 'extension',
+            'name': 'vectorscale',
+            'minimumVersion': '0.9.1',
+            'indexMethods': vectorscaleIndexMethods,
           },
       ],
     };

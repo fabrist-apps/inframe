@@ -281,6 +281,22 @@ final class VectorDocuments extends RivetTableDefinition<VectorDocuments> {
         .on([embedding.cosineOps()]),
     index('vector_documents_l2_ivfflat').using(const IvfFlat()).on([embedding.l2Ops()]),
     index('vector_documents_ip_ivfflat').using(const IvfFlat()).on([embedding.innerProductOps()]),
+    index('vector_documents_cosine_diskann')
+        .using(
+          const DiskAnn(
+            storageLayout: DiskAnnStorageLayout.memoryOptimized,
+            numNeighbors: 20,
+            searchListSize: 30,
+            maxAlpha: 1.4,
+            numDimensions: 2,
+            numBitsPerDimension: 2,
+          ),
+        )
+        .on([embedding.cosineOps()]),
+    index('vector_documents_l2_diskann')
+        .using(const DiskAnn(storageLayout: DiskAnnStorageLayout.plain))
+        .on([embedding.l2Ops()]),
+    index('vector_documents_ip_diskann').using(const DiskAnn()).on([embedding.innerProductOps()]),
   ];
 }
 

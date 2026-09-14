@@ -354,13 +354,46 @@ void main() {
             'ivfflat': ['vector_cosine_ops', 'vector_ip_ops', 'vector_l2_ops'],
           },
         },
+        {
+          'kind': 'extension',
+          'name': 'vectorscale',
+          'minimumVersion': '0.9.1',
+          'indexMethods': {
+            'diskann': ['vector_cosine_ops', 'vector_ip_ops', 'vector_l2_ops'],
+          },
+        },
       ]);
-      expect(indexes.skip(3).map((index) => index['method']), everyElement('ivfflat'));
+      expect(
+        indexes.skip(3).take(3).map((index) => index['method']),
+        everyElement('ivfflat'),
+      );
       expect(indexes[3]['options'], {'lists': 4});
       expect(indexes[4]['options'], isEmpty);
       expect(
         indexes
             .skip(3)
+            .take(3)
+            .map(
+              (index) =>
+                  ((index['terms']! as List<Object?>).single!
+                      as Map<String, Object?>)['operatorClass'],
+            ),
+        ['vector_cosine_ops', 'vector_l2_ops', 'vector_ip_ops'],
+      );
+      expect(indexes.skip(6).map((index) => index['method']), everyElement('diskann'));
+      expect(indexes[6]['options'], {
+        'storageLayout': 'memory_optimized',
+        'numNeighbors': 20,
+        'searchListSize': 30,
+        'maxAlpha': 1.4,
+        'numDimensions': 2,
+        'numBitsPerDimension': 2,
+      });
+      expect(indexes[7]['options'], {'storageLayout': 'plain'});
+      expect(indexes[8]['options'], isEmpty);
+      expect(
+        indexes
+            .skip(6)
             .map(
               (index) =>
                   ((index['terms']! as List<Object?>).single!

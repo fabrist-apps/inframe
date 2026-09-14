@@ -1321,7 +1321,7 @@ final class RivetArtifactGenerator {
       }
       return;
     }
-    if (!const {'hnsw', 'ivfflat'}.contains(method) ||
+    if (!const {'hnsw', 'ivfflat', 'diskann'}.contains(method) ||
         index['unique'] == true ||
         terms.length != 1) {
       throw UnsupportedError(
@@ -1341,11 +1341,12 @@ final class RivetArtifactGenerator {
       (column) => column['id'] == term['columnId'],
     );
     final storage = column['storage']! as Map<String, Object?>;
-    if (storage['kind'] != 'vector' ||
-        storage['dimensions'] is! int ||
-        (storage['dimensions']! as int) > 2000) {
+    final dimensions = storage['dimensions'];
+    final maximumDimensions = method == 'diskann' ? 16000 : 2000;
+    if (storage['kind'] != 'vector' || dimensions is! int || dimensions > maximumDimensions) {
       throw UnsupportedError(
-        'Index ${index['name']} requires a scalar vector up to 2000 dimensions.',
+        'Index ${index['name']} requires a scalar vector up to '
+        '$maximumDimensions dimensions.',
       );
     }
     final validOptions = switch (method) {
@@ -1356,6 +1357,7 @@ final class RivetArtifactGenerator {
       'ivfflat' =>
         !options.keys.any((key) => key != 'lists') &&
             _integerOption(options['lists'], minimum: 1, maximum: 32768),
+      'diskann' => _validDiskAnnOptions(options, dimensions, term['operatorClass']),
       _ => false,
     };
     if (!validOptions) {
@@ -1365,6 +1367,46 @@ final class RivetArtifactGenerator {
 
   bool _integerOption(Object? value, {required int minimum, required int maximum}) =>
       value == null || (value is int && value >= minimum && value <= maximum);
+
+  bool _validDiskAnnOptions(
+    Map<String, Object?> options,
+    int dimensions,
+    Object? operatorClass,
+  ) {
+    if (options.keys.any(
+      (key) => !const {
+        'storageLayout',
+        'numNeighbors',
+        'searchListSize',
+        'maxAlpha',
+        'numDimensions',
+        'numBitsPerDimension',
+      }.contains(key),
+    )) {
+      return false;
+    }
+    final storageLayout = options['storageLayout'] ?? 'memory_optimized';
+    final maxAlpha = options['maxAlpha'];
+    final numDimensions = options['numDimensions'];
+    final numBits = options['numBitsPerDimension'];
+    if (!const {'memory_optimized', 'plain'}.contains(storageLayout) ||
+        !_integerOption(options['numNeighbors'], minimum: 10, maximum: 1000) ||
+        !_integerOption(options['searchListSize'], minimum: 10, maximum: 1000) ||
+        (maxAlpha != null &&
+            (maxAlpha is! num || !maxAlpha.toDouble().isFinite || maxAlpha < 1 || maxAlpha > 5)) ||
+        !_integerOption(numDimensions, minimum: 1, maximum: dimensions) ||
+        !_integerOption(numBits, minimum: 1, maximum: 32)) {
+      return false;
+    }
+    final indexedDimensions = numDimensions as int? ?? dimensions;
+    if (storageLayout == 'plain' &&
+        (indexedDimensions > 2000 ||
+            operatorClass == 'vector_ip_ops' ||
+            (numBits is int && numBits > 1))) {
+      return false;
+    }
+    return numBits == null || numBits is! int || numBits <= 1 || indexedDimensions <= 930;
+  }
 
   String _createIndexSql(
     String qualified,
@@ -1401,11 +1443,20 @@ final class RivetArtifactGenerator {
   }
 
   void _validateRequirements(Map<String, Object?> declaration) {
-    final requiredIndexMethods = <String, Set<String>>{};
+    final requiredByExtension = <String, Map<String, Set<String>>>{};
     for (final table in (declaration['tables']! as List<Object?>).cast<Map<String, Object?>>()) {
       for (final index in (table['indexes']! as List<Object?>).cast<Map<String, Object?>>()) {
         final method = index['method'];
-        if (!const {'hnsw', 'ivfflat'}.contains(method)) continue;
+        final extension = switch (method) {
+          'hnsw' || 'ivfflat' => 'vector',
+          'diskann' => 'vectorscale',
+          _ => null,
+        };
+        if (extension == null) continue;
+        final requiredIndexMethods = requiredByExtension.putIfAbsent(
+          extension,
+          () => <String, Set<String>>{},
+        );
         final operatorClasses = requiredIndexMethods.putIfAbsent(
           method! as String,
           () => <String>{},
@@ -1416,16 +1467,22 @@ final class RivetArtifactGenerator {
       }
     }
     final requirements = declaration['requirements']! as List<Object?>;
-    if (requiredIndexMethods.isEmpty && requirements.isEmpty) return;
-    if (requirements.length != 1) {
+    if (requiredByExtension.isEmpty && requirements.isEmpty) return;
+    if (requirements.length != requiredByExtension.length) {
       throw UnsupportedError('Rivet does not support the declared backend requirement.');
     }
+    final seenExtensions = <String>{};
     for (final raw in requirements) {
       final indexMethods = raw is Map<String, Object?> ? raw['indexMethods'] : null;
+      final name = raw is Map<String, Object?> ? raw['name'] : null;
+      final requiredIndexMethods = requiredByExtension[name];
+      final requiredVersion = name == 'vector' ? '0.8.6' : '0.9.1';
       if (raw is! Map<String, Object?> ||
           raw['kind'] != 'extension' ||
-          raw['name'] != 'vector' ||
-          raw['minimumVersion'] != '0.8.6' ||
+          name is! String ||
+          !seenExtensions.add(name) ||
+          requiredIndexMethods == null ||
+          raw['minimumVersion'] != requiredVersion ||
           indexMethods is! Map<String, Object?> ||
           indexMethods.length != requiredIndexMethods.length ||
           !_matchesIndexMethods(indexMethods, requiredIndexMethods) ||

@@ -201,3 +201,28 @@ snapshot or DDL. On the pinned pgvector version, explicit values range from 1
 through 32,768 and scalar vectors can have at most 2,000 dimensions. `lists`
 is an index build option; transaction-scoped `probes` tuning belongs to query
 execution. Concurrent IVFFlat builds are not yet exposed.
+
+StreamingDiskANN uses pgvectorscale and keeps all extension defaults omitted:
+
+```dart
+index('books_embedding_diskann')
+    .using(
+      const DiskAnn(
+        storageLayout: DiskAnnStorageLayout.memoryOptimized,
+        numNeighbors: 50,
+        searchListSize: 100,
+        maxAlpha: 1.2,
+        numDimensions: 768,
+        numBitsPerDimension: 2,
+      ),
+    )
+    .on([embedding.cosineOps()]);
+```
+
+`memoryOptimized` indexes vectors up to 16,000 dimensions. `plain` stores
+uncompressed vectors, is limited to 2,000 indexed dimensions, and cannot use
+`innerProductOps()`. `numDimensions` can index a leading subset of the stored
+embedding. Multi-bit compression requires `memoryOptimized` storage and at
+most 930 indexed dimensions on pgvectorscale 0.9.1. The pinned manifest records
+the accepted ranges for all six build fields. Concurrent DiskANN builds and
+label-array operands are not exposed.

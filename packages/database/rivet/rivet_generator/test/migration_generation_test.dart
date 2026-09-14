@@ -569,6 +569,139 @@ void main() {
       );
     });
 
+    test('should preserve, diff, and validate checked DiskANN declarations', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      const options = <String, Object?>{
+        'storageLayout': 'memory_optimized',
+        'numNeighbors': 20,
+        'searchListSize': 30,
+        'maxAlpha': 1.4,
+        'numDimensions': 2,
+        'numBitsPerDimension': 2,
+      };
+      await generator.generateDeclaration(
+        declaration: _vectorIndexDeclaration(method: 'diskann', options: options),
+        directory: directory,
+        name: 'diskann',
+      );
+      final initialSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      expect(
+        initialSql,
+        contains(
+          'USING diskann ("embedding" vector_cosine_ops) WITH '
+          '(storage_layout = memory_optimized, num_neighbors = 20, '
+          'search_list_size = 30, max_alpha = 1.4, num_dimensions = 2, '
+          'num_bits_per_dimension = 2);',
+        ),
+      );
+      final initialSnapshot = _lastArtifact(directory, 'snapshot.json');
+      expect(initialSnapshot['requirements'], [
+        {
+          'kind': 'extension',
+          'minimumVersion': '0.9.1',
+          'name': 'vectorscale',
+          'indexMethods': {
+            'diskann': ['vector_cosine_ops'],
+          },
+        },
+      ]);
+      await const RivetMigrationChecker().check(directory: directory);
+
+      await generator.generateDeclaration(
+        declaration: _vectorIndexDeclaration(
+          method: 'diskann',
+          operatorClass: 'vector_l2_ops',
+          options: const {'storageLayout': 'plain'},
+        ),
+        directory: directory,
+        name: 'change diskann layout',
+      );
+      final changedSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      expect(changedSql, contains('DROP INDEX "search"."documents_embedding_hnsw";'));
+      expect(
+        changedSql,
+        contains('USING diskann ("embedding" vector_l2_ops) WITH (storage_layout = plain);'),
+      );
+
+      await generator.generateDeclaration(
+        declaration: _vectorIndexDeclaration(
+          method: 'diskann',
+          operatorClass: 'vector_ip_ops',
+          options: const {},
+        ),
+        directory: directory,
+        name: 'omit diskann defaults',
+      );
+      final omittedSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      expect(
+        omittedSql,
+        contains('USING diskann ("embedding" vector_ip_ops);'),
+      );
+      expect(omittedSql, isNot(contains(' WITH ')));
+      final omittedSnapshot = _lastArtifact(directory, 'snapshot.json');
+      final omittedTable =
+          (omittedSnapshot['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final omittedIndex =
+          (omittedTable['indexes']! as List<Object?>).single! as Map<String, Object?>;
+      expect(omittedIndex['options'], isEmpty);
+
+      Future<void> rejects({
+        required Map<String, Object?> invalidOptions,
+        String operatorClass = 'vector_cosine_ops',
+      }) => expectLater(
+        const RivetMigrationGenerator().generateDeclaration(
+          declaration: _vectorIndexDeclaration(
+            method: 'diskann',
+            operatorClass: operatorClass,
+            options: invalidOptions,
+          ),
+          directory: Directory('${directory.path}/invalid-diskann-${nextId++}'),
+          name: 'invalid diskann',
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      await rejects(invalidOptions: {'numNeighbors': 9});
+      await rejects(invalidOptions: {'searchListSize': 1001});
+      await rejects(invalidOptions: {'maxAlpha': 5.1});
+      await rejects(invalidOptions: {'numDimensions': 4});
+      await rejects(invalidOptions: {'numBitsPerDimension': 33});
+      await rejects(
+        invalidOptions: {'storageLayout': 'plain'},
+        operatorClass: 'vector_ip_ops',
+      );
+      await rejects(
+        invalidOptions: {'storageLayout': 'plain', 'numBitsPerDimension': 2},
+      );
+      await expectLater(
+        const RivetMigrationGenerator().generateDeclaration(
+          declaration: _vectorIndexDeclaration(
+            method: 'diskann',
+            operatorClass: 'vector_l2_ops',
+            dimensions: 2001,
+            options: {'storageLayout': 'plain'},
+          ),
+          directory: Directory('${directory.path}/invalid-diskann-plain-dimensions'),
+          name: 'invalid plain dimensions',
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      await expectLater(
+        const RivetMigrationGenerator().generateDeclaration(
+          declaration: _vectorIndexDeclaration(
+            method: 'diskann',
+            dimensions: 931,
+            options: {'numBitsPerDimension': 2},
+          ),
+          directory: Directory('${directory.path}/invalid-diskann-bit-dimensions'),
+          name: 'invalid compressed dimensions',
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
+
     test('should create one shared native enum before scalar and array columns', () async {
       var nextId = 0;
       final generator = RivetMigrationGenerator(
@@ -1074,6 +1207,7 @@ Map<String, Object?> _vectorIndexDeclaration({
   Map<String, Object?> options = const {'m': 8, 'efConstruction': 32},
   String operatorClass = 'vector_cosine_ops',
   String method = 'hnsw',
+  int dimensions = 3,
 }) => {
   'formatVersion': 1,
   'dialect': 'rivet',
@@ -1090,7 +1224,7 @@ Map<String, Object?> _vectorIndexDeclaration({
             'kind': 'vector',
             'nullable': false,
             'codecVersion': 1,
-            'dimensions': 3,
+            'dimensions': dimensions,
           },
           'primaryKey': false,
         },
@@ -1118,8 +1252,8 @@ Map<String, Object?> _vectorIndexDeclaration({
   'requirements': [
     {
       'kind': 'extension',
-      'name': 'vector',
-      'minimumVersion': '0.8.6',
+      'name': method == 'diskann' ? 'vectorscale' : 'vector',
+      'minimumVersion': method == 'diskann' ? '0.9.1' : '0.8.6',
       'indexMethods': {
         method: [operatorClass],
       },
