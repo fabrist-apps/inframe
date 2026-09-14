@@ -325,6 +325,67 @@ void main() {
     );
 
     test(
+      'should tune a transaction without changing exact or approximate query modes',
+      () async {
+        final query = Float32List.fromList([1, 0, 0]);
+        statements.clear();
+
+        await database.transaction((tx) async {
+          await tx.setVectorSearchOptions(const HnswSearchOptions(efSearch: 80));
+          await tx.setVectorSearchOptions(const IvfFlatSearchOptions(probes: 2));
+          await tx.setVectorSearchOptions(
+            const DiskAnnSearchOptions(searchListSize: 120, rescore: 60),
+          );
+          final setupCount = statements.length;
+
+          final exact = await VectorDocuments.db
+              .find(
+                where: (document) => document.categoryId.equals(1),
+                orderBy: (document) => [
+                  document.embedding.l2Distance(query).asc(),
+                  document.id.asc(),
+                ],
+                limit: 5,
+                include: (include) => [include.category()],
+              )
+              .withScore((document) => document.embedding.l2Distance(query))
+              .get(tx);
+          expect(exact.map((row) => row.row.id), [1, 2, 4, 6, 7]);
+          expect(statements, hasLength(setupCount + 1));
+          expect(statements.last, startsWith('WITH "__rivet_roots" AS MATERIALIZED'));
+
+          final approximate = await VectorDocuments.db
+              .find(
+                where: (document) => document.categoryId.equals(1),
+                orderBy: (document) => [
+                  document.embedding.l2Distance(query).asc(),
+                  document.id.asc(),
+                ],
+                limit: 5,
+                include: (include) => [include.category()],
+                vectorSearch: VectorSearchMode.approximate,
+              )
+              .withScore((document) => document.embedding.l2Distance(query))
+              .get(tx);
+          expect(statements, hasLength(setupCount + 2));
+          expect(statements.last, startsWith('WITH "__rivet_candidates" AS MATERIALIZED'));
+          for (var index = 1; index < approximate.length; index++) {
+            final previous = approximate[index - 1];
+            final current = approximate[index];
+            if (previous.score == current.score) {
+              expect(previous.row.id, lessThan(current.row.id));
+            } else if (previous.score != null && current.score != null) {
+              expect(previous.score, lessThan(current.score!));
+            }
+          }
+        });
+
+        expect(statements.where((sql) => sql.contains('set_config')), hasLength(3));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
       'should match the pinned pgvector capability manifest',
       () async {
         final manifest = jsonDecode(
@@ -332,6 +393,7 @@ void main() {
         ) as Map<String, Object?>;
         final extensions = manifest['extensions']! as Map<String, Object?>;
         final queryCompilation = manifest['queryCompilation']! as Map<String, Object?>;
+        final searchOptions = manifest['searchOptions']! as Map<String, Object?>;
         final indexes = manifest['indexes']! as Map<String, Object?>;
         final hnsw = indexes['hnsw']! as Map<String, Object?>;
         final ivfflat = indexes['ivfflat']! as Map<String, Object?>;
@@ -377,6 +439,37 @@ void main() {
           'candidateOrder': 'ascendingDistanceNullsLast',
           'singleStatement': true,
           'relaxedOrderOption': false,
+        });
+        expect(searchOptions['transactionLocal'], isTrue);
+        expect(searchOptions['hnsw'], {
+          'efSearch': {
+            'setting': 'hnsw.ef_search',
+            'minimum': 1,
+            'maximum': 1000,
+            'default': 40,
+          },
+        });
+        expect(searchOptions['ivfflat'], {
+          'probes': {
+            'setting': 'ivfflat.probes',
+            'minimum': 1,
+            'maximum': 32768,
+            'default': 1,
+          },
+        });
+        expect(searchOptions['diskann'], {
+          'searchListSize': {
+            'setting': 'diskann.query_search_list_size',
+            'minimum': 1,
+            'maximum': 10000,
+            'default': 100,
+          },
+          'rescore': {
+            'setting': 'diskann.query_rescore',
+            'minimum': 0,
+            'maximum': 1000,
+            'default': 50,
+          },
         });
         expect(hnsw['extension'], 'vector');
         expect(hnsw['maximumDimensions'], 2000);

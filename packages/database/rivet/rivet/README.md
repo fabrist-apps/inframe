@@ -249,3 +249,29 @@ among the candidates returned by the backend; approximate mode does not promise
 global nearest-neighbor membership. If the query has no compatible leading
 distance order or limit, Rivet uses the exact materialized-root plan. Exact
 remains the default and no relaxed-order control is exposed.
+
+Query tuning is available only on an active transaction and applies to later
+queries on that transaction:
+
+```dart
+await db.transaction((tx) async {
+  await tx.setVectorSearchOptions(const HnswSearchOptions(efSearch: 80));
+  await tx.setVectorSearchOptions(const IvfFlatSearchOptions(probes: 4));
+  await tx.setVectorSearchOptions(
+    const DiskAnnSearchOptions(searchListSize: 200, rescore: 100),
+  );
+
+  return Books.db.find(
+    vectorSearch: VectorSearchMode.approximate,
+    orderBy: (book) => [book.embedding.cosineDistance(queryEmbedding).asc()],
+    limit: 10,
+  ).get(tx);
+});
+```
+
+Each call performs explicit setup before any data query. PostgreSQL resets the
+settings on commit or rollback, and an expired transaction rejects further
+configuration. Tuning does not select exact or approximate mode and does not
+force an index. The database pool has no session-wide tuning operation. The
+server must be provisioned with pgvector 0.8.6 and pgvectorscale 0.9.1 before
+these features are used; Rivet does not install extensions during open.

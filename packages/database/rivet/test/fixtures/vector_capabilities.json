@@ -17,6 +17,19 @@
     "singleStatement": true,
     "relaxedOrderOption": false
   },
+  "searchOptions": {
+    "transactionLocal": true,
+    "hnsw": {
+      "efSearch": {"setting": "hnsw.ef_search", "minimum": 1, "maximum": 1000, "default": 40}
+    },
+    "ivfflat": {
+      "probes": {"setting": "ivfflat.probes", "minimum": 1, "maximum": 32768, "default": 1}
+    },
+    "diskann": {
+      "searchListSize": {"setting": "diskann.query_search_list_size", "minimum": 1, "maximum": 10000, "default": 100},
+      "rescore": {"setting": "diskann.query_rescore", "minimum": 0, "maximum": 1000, "default": 50}
+    }
+  },
   "indexes": {
     "hnsw": {
       "extension": "vector",
