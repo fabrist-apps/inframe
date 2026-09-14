@@ -6,6 +6,8 @@ import 'package:test/test.dart';
 
 import 'support/fake_clock.dart';
 
+import 'support/moments.dart';
+
 void main() {
   group('Effect timing', () {
     test('should pass the registered Context to foreign failure callbacks', () async {
@@ -316,7 +318,7 @@ final class _FailingClock implements Clock {
   final _FailingWait wait;
 
   @override
-  DateTime wallTime() => DateTime.utc(2026);
+  UtcMoment wallTime() => utcMoment(2026);
 
   @override
   Duration monotonic() => Duration.zero;

@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:conflux/cron.dart';
 import 'package:conflux/effect.dart';
+import 'package:conflux/moment.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
@@ -134,10 +135,10 @@ final class Schedule<I, O, E> {
         (_) => EffectAccess.create((execution) async {
           final now = execution.clock.wallTime();
           switch (cron.next(now)) {
-            case Success<DateTime, CronError>(:final value):
+            case Success<ZonedMoment, CronError>(:final value):
               final delay = value.difference(now);
               return Succeeded(ScheduleContinue(delay, delay));
-            case Failure<DateTime, CronError>(:final error):
+            case Failure<ZonedMoment, CronError>(:final error):
               return Failed(Expected(error));
           }
         }),

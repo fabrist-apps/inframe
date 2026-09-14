@@ -8,6 +8,8 @@ import 'package:timezone/timezone.dart' as tz;
 
 import 'support/fake_clock.dart';
 
+import 'support/moments.dart';
+
 void main() {
   tz_data.initializeTimeZones();
   final utc = tz.UTC;
@@ -24,8 +26,8 @@ void main() {
 
   group('Schedule.cron', () {
     test('should repeat immediately then wait until tomorrow at 9am', () async {
-      final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 11));
-      final executions = <DateTime>[];
+      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 11));
+      final executions = <UtcMoment>[];
       final Effect<void, CronError> operation = Effect.sync((_) {
         executions.add(clock.wallTime());
       });
@@ -34,19 +36,19 @@ void main() {
       );
       await flush();
 
-      expect(executions, [DateTime.utc(2026, 9, 11, 11)]);
+      expect(executions, [utcMoment(2026, 9, 11, 11)]);
       expect(clock.activeWaits, 1);
       clock.advance(const Duration(hours: 22));
       await flush();
 
-      expect(executions, [DateTime.utc(2026, 9, 11, 11), DateTime.utc(2026, 9, 12, 9)]);
+      expect(executions, [utcMoment(2026, 9, 11, 11), utcMoment(2026, 9, 12, 9)]);
       await fiber.interrupt('test complete');
       expect(clock.activeWaits, 0);
     });
 
     test('should schedule its first execution tomorrow at 9am', () async {
-      final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 11));
-      final executions = <DateTime>[];
+      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 11));
+      final executions = <UtcMoment>[];
       final Effect<int?, CronError> operation = Effect.sync((_) {
         executions.add(clock.wallTime());
         return null;
@@ -61,13 +63,13 @@ void main() {
       clock.advance(const Duration(hours: 22));
       await flush();
 
-      expect(executions, [DateTime.utc(2026, 9, 12, 9)]);
+      expect(executions, [utcMoment(2026, 9, 12, 9)]);
       await fiber.interrupt('test complete');
     });
 
     test('should execute one overdue wait then skip the backlog', () async {
-      final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 8));
-      final executions = <DateTime>[];
+      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 8));
+      final executions = <UtcMoment>[];
       final Effect<void, CronError> operation = Effect.sync((_) {
         executions.add(clock.wallTime());
       });
@@ -78,7 +80,7 @@ void main() {
 
       clock.advance(const Duration(hours: 25));
       await flush();
-      expect(executions, [DateTime.utc(2026, 9, 12, 9)]);
+      expect(executions, [utcMoment(2026, 9, 12, 9)]);
       expect(clock.activeWaits, 1);
 
       clock.advance(const Duration(hours: 23));
@@ -92,7 +94,7 @@ void main() {
     });
 
     test('should preserve nullable schedule inputs and current wall delays', () async {
-      final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 8, 30));
+      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 8, 30));
       final driver = Schedule.cron<Option<int?>>(parse('0 0 9 * * *')).driver();
 
       final first = await driver.step(const None()).runFuture(clock: clock);
@@ -104,7 +106,7 @@ void main() {
     });
 
     test('should cancel its runtime wait without another execution', () async {
-      final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 8));
+      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 8));
       var executions = 0;
       final Effect<int, CronError> operation = Effect.sync((_) => ++executions);
       final fiber = Runtime(clock: clock).fork(
@@ -123,7 +125,7 @@ void main() {
 
     test('should map search failure into the operation domain', () async {
       final impossible = parse('0 0 0 31 feb *');
-      final clock = FakeClock(wallTime: DateTime.utc(2026));
+      final clock = FakeClock(wallTime: utcMoment(2026));
       var executions = 0;
       final Effect<int, _OperationError> operation = Effect.sync((_) => ++executions);
       final policy = Schedule.cron<Option<int>>(
@@ -156,7 +158,7 @@ void main() {
         return $(operation.schedule(Schedule.cron<Option<int>>(impossible)));
       });
       final fiber = Runtime(
-        clock: FakeClock(wallTime: DateTime.utc(2026)),
+        clock: FakeClock(wallTime: utcMoment(2026)),
       ).fork(program);
       var joined = false;
       final joining = fiber.join().then((exit) {
@@ -176,7 +178,7 @@ void main() {
     });
 
     test('should compose wall-time Cron with a monotonic within limit', () async {
-      final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 11));
+      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 11));
       final driver = Schedule.cron<Object?>(
         parse('0 0 9 * * *'),
       ).within(const Duration(hours: 21)).driver();
@@ -188,7 +190,7 @@ void main() {
 
     test('should run operations in inherited Context and child Scopes', () async {
       final key = ContextKey<String>('service');
-      final clock = FakeClock(wallTime: DateTime.utc(2026, 9, 11, 8));
+      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 8));
       var cleanups = 0;
       final operation = Effect.build<String, CronError>(($) {
         $.addFinalizer(Effect.sync((_) => cleanups += 1));
