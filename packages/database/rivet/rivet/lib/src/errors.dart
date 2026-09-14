@@ -18,8 +18,14 @@ sealed class RivetException implements Exception {
         RivetMissingValueException() => 'RivetMissingValueException',
         RivetEmptyUpdateException() => 'RivetEmptyUpdateException',
         RivetExecutorClosedException() => 'RivetExecutorClosedException',
+        RivetMigrationException() => 'RivetMigrationException',
         AfterCommitException() => 'AfterCommitException',
       }}: $message';
+}
+
+/// A migration artifact, history, coordination, or execution check failed.
+final class RivetMigrationException extends RivetException {
+  const RivetMigrationException(super.message, [super.cause]);
 }
 
 /// A PostgreSQL operation failed.
