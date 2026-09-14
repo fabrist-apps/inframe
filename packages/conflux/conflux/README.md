@@ -187,25 +187,96 @@ already started is allowed to finish. `whileInput`, `concat`, and `tap` support
 input gates, sequential policies with fresh state, and effectful observation of
 continuing decisions.
 
-`Cron` is a pure calendar value with an explicit `timezone.Location`. The
-application chooses and initializes the timezone database; Conflux does not
-change the global local timezone:
+### Moment date and time
+
+Import `package:conflux/moment.dart` for pure date-time values, or use the
+convenience barrel. `UtcMoment` and `ZonedMoment` hold exact epoch microseconds;
+a zoned value retains a `NamedTimeZone` or `FixedTimeZone`. Native Dart
+`DateTime` interop is explicit through `fromDateTime` and `toDateTimeUtc`.
+UTC and fixed offsets need no IANA initialization.
 
 ```dart
-import 'package:conflux/cron.dart';
-import 'package:conflux/result.dart';
-import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:conflux/conflux.dart';
+
+void main() {
+  final parsed = Moment.parse('2026-01-18T10:30:00.123456+08:00');
+  final utc = parsed.map((value) => value.toUtc());
+  print(utc.match(
+    onSuccess: (value) => value.formatIso(),
+    onFailure: (error) => error.message,
+  ));
+  // 2026-01-18T02:30:00.123456Z.
+}
+```
+
+Parsing requires `year-MM-DDTHH:mm:ss[.fraction](Z|±HH:MM[:SS])`, with
+1–6 fractional digits and no whitespace. Invalid fields never normalize.
+Expected failures are `Result<..., MomentError>` with a diagnostic kind and
+optional field. UTC and derived local fields use Dart DateTime’s full native
+range, including year zero and negative years. Years follow Dart’s ISO spelling:
+`0000` through `9999`, `-0001` through `-9999`, and signed six digits outside
+that interval (for example, `+010000`). Parsing rejects other year spellings.
+
+`setZone` preserves an instant. To interpret local fields, use
+`Moment.zoned(parts, zone, disambiguation: ...)`; `withParts`, calendar
+arithmetic, and period boundaries also require a policy. `earlier`/`later`
+select the corresponding overlap instant or shift backward/forward by a gap.
+`compatible` selects the earlier overlap and shifts forward in a gap;
+`reject` returns a typed failure. Named lookup uses the caller's initialized
+database and retains its resolved Location.
+
+`addDuration` changes elapsed microseconds. `addCalendar` combines years and
+months, clamps the day once, then adds weeks and days before resolving the
+final local fields. One calendar day can differ from 24 elapsed hours across
+DST. `startOf`/`endOf` use local fields and Monday weeks; a gap shift may leave
+the nominal period. Boundaries outside the native range return `outOfRange`. Calendar getters include `dayOfYear` and `isoWeek`.
+
+Equality includes representation and exact zone identity, so UTC, fixed zero,
+and named UTC differ. Comparison, difference, and bounds use the instant;
+`difference` returns `Result<Duration, MomentError>` with `outOfRange` if the
+elapsed microseconds exceed Duration’s signed 64-bit range. `min`/`max` retain
+the first input on ties. `formatIso` emits UTC with six
+fractional digits; `formatIsoOffset` retains the numeric offset, including
+historical seconds. Parsing offset output loses named identity.
+
+`Effect.now()` reads the current execution's injected Clock on every run.
+`Clock.wallTime()` returns `UtcMoment`; elapsed schedules, Flow timing, and
+Cache TTLs continue to use monotonic `Duration` values. Custom Clock
+implementations must migrate their wall-time return type.
+
+The implementation starts at `moment.dart`: value and zone files own identity
+and conversion, `local_resolution.dart` resolves transitions, and `calendar.dart`
+owns calendar operations. Native calendar coordinates used during Cron search
+stay in the internal date-time module. JSON persistence, locale/custom formats,
+and ambient timezone services are outside this API.
+
+`Cron` is a pure calendar value with an explicit `timezone.Location`. The
+application can call `Conflux.initialize()` to load the bundled IANA database.
+It retains an already initialized database and is safe to call repeatedly.
+The timezone package sets its local default to UTC on first initialization;
+Moment and Cron continue to use explicitly supplied zones. Applications can
+also initialize a different timezone dataset themselves before this call:
+
+```dart
+import 'package:conflux/conflux.dart';
 import 'package:timezone/timezone.dart' as tz;
 
-tz_data.initializeTimeZones();
-final location = tz.getLocation('America/New_York');
-final parsed = Cron.parse('0 9 * * mon-fri', location);
+Future<void> main() async {
+  Conflux.initialize();
+  final location = tz.getLocation('America/New_York');
+  final parsed = Cron.parse('0 9 * * mon-fri', location);
+  final now = await Effect.now().runFuture();
 
-switch (parsed) {
-  case Success(value: final cron):
-    print(cron.matches(DateTime.now()));
-  case Failure(error: final error):
-    print('Invalid Cron: $error');
+  switch (parsed) {
+    case Success(value: final cron):
+      print(cron.matches(now));
+      print(cron.next(now).match(
+        onSuccess: (next) => next.formatIsoOffset(),
+        onFailure: (error) => error.message,
+      ));
+    case Failure(error: final error):
+      print('Invalid Cron: $error');
+  }
 }
 ```
 
@@ -215,6 +286,8 @@ invalid. When both day-of-month and weekday are restricted, either may match.
 When either begins with `*`, including `*/step`, both must match. `format`
 returns six fields and keeps the location separate.
 
+`matches`, `next`, `previous`, and `sequence` accept `Moment`. Successful
+occurrence results are `ZonedMoment` retaining the configured Location.
 `next` and `previous` search strictly beyond the supplied instant. They verify
 each candidate's local fields against timezone transitions, so spring-forward
 gaps are skipped and both instants in a fall-back overlap can be returned. Each

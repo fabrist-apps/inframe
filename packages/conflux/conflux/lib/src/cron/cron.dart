@@ -1,7 +1,9 @@
 import 'dart:collection';
 
+import 'package:conflux/moment.dart';
 import 'package:conflux/result.dart';
-import 'package:timezone/timezone.dart';
+import 'package:conflux/src/moment/calendar_date.dart';
+import 'package:timezone/timezone.dart' show Location;
 
 /// A validation or calendar-search failure produced by [Cron].
 final class CronError {
@@ -32,7 +34,9 @@ final class Cron {
     required this._months,
     required this._weekdays,
     required this.location,
-  });
+  }) : _zone = TimeZone.fromLocation(location);
+
+  final NamedTimeZone _zone;
 
   final _CronField _seconds;
   final _CronField _minutes;
@@ -135,16 +139,22 @@ final class Cron {
   /// Whether [instant] has allowed calendar fields in [location].
   ///
   /// When both day fields are restricted, either may match. When either field
-  /// starts with `*`, including `*/step`, both must match.
-  bool matches(DateTime instant) {
-    final local = TZDateTime.from(instant, location);
+  /// starts with `*`, including `*/step`, both must match. A conversion outside
+  /// the supported local range does not match.
+  bool matches(Moment instant) {
+    final converted = instant.setZone(_zone);
+    if (converted case Failure<ZonedMoment, MomentError>()) return false;
+    final zoned = (converted as Success<ZonedMoment, MomentError>).value;
+    final local = zoned.parts;
+    if (!_supportedYear(local.year) || !_supportedYear(instant.partsUtc.year)) return false;
     if (!_seconds.values.contains(local.second) ||
         !_minutes.values.contains(local.minute) ||
         !_hours.values.contains(local.hour) ||
         !_months.values.contains(local.month)) {
       return false;
     }
-    return _matchesDay(local.day, local.weekday % 7);
+
+    return _matchesDay(local.day, zoned.weekday % 7);
   }
 
   /// Returns a normalized six-field expression without the location.
@@ -164,60 +174,66 @@ final class Cron {
   /// Each query examines at most 10,000 calendar-day candidates in years 1
   /// through 9999. Exhaustion returns [CronError] and does not prove that no
   /// later occurrence exists. Nonexistent local times are skipped and repeated
-  /// local times represent two distinct occurrences.
-  Result<DateTime, CronError> next(DateTime instant) => _find(instant, forward: true);
+  /// local times represent two distinct occurrences. Results retain [location].
+  Result<ZonedMoment, CronError> next(Moment instant) => _find(instant, forward: true);
 
   /// Finds the first matching occurrence strictly before [instant].
   ///
   /// This uses the same date range, search budget, and timezone-transition
   /// behavior as [next].
-  Result<DateTime, CronError> previous(DateTime instant) => _find(instant, forward: false);
+  Result<ZonedMoment, CronError> previous(Moment instant) => _find(instant, forward: false);
 
   /// Lazily yields occurrences strictly after [instant].
   ///
   /// A search failure is yielded once as the terminal element. The iterable is
   /// synchronous and does not own a timer or impose an end date.
-  Iterable<Result<DateTime, CronError>> sequence(DateTime instant) sync* {
+  Iterable<Result<ZonedMoment, CronError>> sequence(Moment instant) sync* {
     var cursor = instant;
     while (true) {
       final result = next(cursor);
       yield result;
       switch (result) {
-        case Success<DateTime, CronError>(:final value):
+        case Success<ZonedMoment, CronError>(:final value):
           cursor = value;
-        case Failure<DateTime, CronError>():
+        case Failure<ZonedMoment, CronError>():
           return;
       }
     }
   }
 
-  Result<DateTime, CronError> _find(DateTime instant, {required bool forward}) {
-    late final TZDateTime localBoundary;
-    try {
-      localBoundary = TZDateTime.from(instant, location);
-    } on Object {
-      return const Failure(CronError('The input instant is outside the supported date range.'));
+  Result<ZonedMoment, CronError> _find(Moment instant, {required bool forward}) {
+    final local = instant.setZone(_zone);
+    if (local case Failure<ZonedMoment, MomentError>(:final error)) {
+      return Failure(CronError(error.message));
     }
-    if (localBoundary.year < _minimumYear || localBoundary.year > _maximumYear) {
-      return const Failure(CronError('The search reached the supported date range.'));
+
+    if (!_supportedYear(instant.partsUtc.year) ||
+        !_supportedYear((local as Success<ZonedMoment, MomentError>).value.parts.year)) {
+      return const Failure(_searchRangeError);
     }
-    final boundaryMicros = instant.toUtc().microsecondsSinceEpoch;
+
+    final boundaryMicros = instant.microsecondsSinceEpoch;
     final offsets = location.zones.isEmpty
         ? const [Duration.zero]
         : SplayTreeSet<Duration>.of(location.zones.map((zone) => zone.offset)).toList();
+
     // A rollback can revisit the previous calendar date. Start with every date
     // that could contain an eligible instant under any offset in this location.
-    final wallBoundary = instant.toUtc().add(forward ? offsets.first : offsets.last);
-    var date = DateTime.utc(wallBoundary.year, wallBoundary.month, wallBoundary.day);
-    if (forward && date.year < _minimumYear) date = DateTime.utc(_minimumYear);
-    if (!forward && date.year > _maximumYear) date = DateTime.utc(_maximumYear, 12, 31);
-    DateTime? best;
+    final wallBoundary = boundaryMicros + (forward ? offsets.first : offsets.last).inMicroseconds;
+    var date = CalendarDate.fromWallMicroseconds(wallBoundary);
+    if (forward && date.year < _minimumYear) date = CalendarDate(_minimumYear);
+    if (!forward && date.year > _maximumYear) date = CalendarDate(_maximumYear, 12, 31);
+    ZonedMoment? best;
+    CronError? rangeError;
 
     for (var iteration = 0; iteration < _searchBudget; iteration += 1) {
       if (date.year < _minimumYear || date.year > _maximumYear) {
         if (best != null) return Success(best);
-        return const Failure(CronError('The search reached the supported date range.'));
+        return Failure(
+          rangeError ?? const CronError('The search reached the supported date range.'),
+        );
       }
+
       if (_matchesDate(date)) {
         final found = _findOnDate(
           date,
@@ -225,28 +241,40 @@ final class Cron {
           offsets: offsets,
           forward: forward,
         );
-        if (found != null &&
-            (best == null || (forward ? found.isBefore(best) : found.isAfter(best)))) {
-          best = found;
+        switch (found) {
+          case Failure<ZonedMoment?, CronError>(:final error):
+            rangeError = error;
+          case Success<ZonedMoment?, CronError>(:final value):
+            if (value != null &&
+                (best == null || (forward ? value.isBefore(best) : value.isAfter(best)))) {
+              best = value;
+            }
         }
       }
-      date = date.add(Duration(days: forward ? 1 : -1));
+
+      date = date.addDays(forward ? 1 : -1);
+
       // Calendar-date order is not necessarily instant order across a rollback.
       // Return only once no candidate on this or a later searched date can win.
       final dateLimit = forward
-          ? date.subtract(offsets.last)
-          : date.add(const Duration(days: 1)).subtract(offsets.first);
-      if (best != null && (forward ? !dateLimit.isBefore(best) : !dateLimit.isAfter(best))) {
+          ? date.wallMicroseconds - offsets.last.inMicroseconds
+          : date.addDays(1).wallMicroseconds - offsets.first.inMicroseconds;
+      if (best != null &&
+          (forward
+              ? dateLimit >= best.microsecondsSinceEpoch
+              : dateLimit <= best.microsecondsSinceEpoch)) {
         return Success(best);
       }
     }
+
     return const Failure(
       CronError('The search exhausted its 10,000 candidate-iteration budget.'),
     );
   }
 
-  bool _matchesDate(DateTime date) {
+  bool _matchesDate(CalendarDate date) {
     if (!_months.values.contains(date.month)) return false;
+
     return _matchesDay(date.day, date.weekday % 7);
   }
 
@@ -256,11 +284,12 @@ final class Cron {
     if (!_days.startsWithWildcard && !_weekdays.startsWithWildcard) {
       return dayMatches || weekdayMatches;
     }
+
     return dayMatches && weekdayMatches;
   }
 
-  DateTime? _findOnDate(
-    DateTime date, {
+  Result<ZonedMoment?, CronError> _findOnDate(
+    CalendarDate date, {
     required int boundaryMicros,
     required List<Duration> offsets,
     required bool forward,
@@ -270,27 +299,23 @@ final class Cron {
     final orderedSeconds = forward ? _seconds.values : _seconds.values.toList().reversed;
     final minimumOffset = offsets.first;
     final maximumOffset = offsets.last;
-    DateTime? best;
+    ZonedMoment? best;
+    CronError? rangeError;
 
     for (final hour in orderedHours) {
       for (final minute in orderedMinutes) {
         for (final second in orderedSeconds) {
-          final wallMicros = DateTime.utc(
-            date.year,
-            date.month,
-            date.day,
-            hour,
-            minute,
-            second,
-          ).microsecondsSinceEpoch;
+          final wallMicros = date.at(hour, minute, second);
           final earliestPossible = wallMicros - maximumOffset.inMicroseconds;
           final latestPossible = wallMicros - minimumOffset.inMicroseconds;
           if (forward) {
             if (latestPossible <= boundaryMicros) continue;
-            if (best != null && earliestPossible > best.microsecondsSinceEpoch) return best;
+            if (best != null && earliestPossible > best.microsecondsSinceEpoch) {
+              return Success(best);
+            }
           } else {
             if (earliestPossible >= boundaryMicros) continue;
-            if (best != null && latestPossible < best.microsecondsSinceEpoch) return best;
+            if (best != null && latestPossible < best.microsecondsSinceEpoch) return Success(best);
           }
 
           for (final offset in offsets) {
@@ -298,8 +323,27 @@ final class Cron {
             if (forward ? candidateMicros <= boundaryMicros : candidateMicros >= boundaryMicros) {
               continue;
             }
-            final candidate = DateTime.fromMicrosecondsSinceEpoch(candidateMicros, isUtc: true);
-            if (!_hasLocalFields(candidate, date, hour, minute, second)) continue;
+
+            // Only a currently applicable offset reproduces the local fields.
+            // This skips gaps and keeps both actual overlap occurrences.
+            if (_zone.offsetAt(candidateMicros) != offset) continue;
+
+            final result = Moment.fromEpochMicroseconds(candidateMicros)
+                .flatMap((utc) => utc.setZone(_zone));
+            if (result case Failure<ZonedMoment, MomentError>(:final error)) {
+              // Conservative historical-offset bounds can enumerate beyond UTC
+              // range after finding a valid occurrence. Keep ordering the valid
+              // candidates; a range failure must not discard one already found.
+              rangeError = CronError(error.message);
+              continue;
+            }
+
+            final candidate = (result as Success<ZonedMoment, MomentError>).value;
+            if (!_supportedYear(candidate.partsUtc.year)) {
+              rangeError = _searchRangeError;
+              continue;
+            }
+
             if (best == null || (forward ? candidate.isBefore(best) : candidate.isAfter(best))) {
               best = candidate;
             }
@@ -307,21 +351,16 @@ final class Cron {
         }
       }
     }
-    return best;
-  }
 
-  bool _hasLocalFields(DateTime candidate, DateTime date, int hour, int minute, int second) {
-    final local = TZDateTime.from(candidate, location);
-    return local.year == date.year &&
-        local.month == date.month &&
-        local.day == date.day &&
-        local.hour == hour &&
-        local.minute == minute &&
-        local.second == second &&
-        local.millisecond == 0 &&
-        local.microsecond == 0;
+    if (best == null && rangeError != null) return Failure(rangeError);
+
+    return Success(best);
   }
 }
+
+bool _supportedYear(int year) => year >= _minimumYear && year <= _maximumYear;
+
+const _searchRangeError = CronError('Cron searches require UTC and local years 1–9999.');
 
 const _searchBudget = 10000;
 const _minimumYear = 1;

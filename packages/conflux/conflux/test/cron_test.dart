@@ -4,6 +4,8 @@ import 'package:test/test.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
+import 'support/moments.dart';
+
 void main() {
   tz_data.initializeTimeZones();
   final utc = tz.UTC;
@@ -94,27 +96,27 @@ void main() {
       final globalLocation = tz.local;
       final cron = (Cron.parse('0 0 9 * * *', newYork) as Success<Cron, CronError>).value;
 
-      expect(cron.matches(DateTime.utc(2026, 1, 15, 14)), isTrue);
-      expect(cron.matches(DateTime.utc(2026, 1, 15, 9)), isFalse);
+      expect(cron.matches(utcMoment(2026, 1, 15, 14)), isTrue);
+      expect(cron.matches(utcMoment(2026, 1, 15, 9)), isFalse);
       expect(tz.local, same(globalLocation));
     });
 
     test('should OR two restricted day fields', () {
       final cron = (Cron.parse('0 0 0 13 * mon', utc) as Success<Cron, CronError>).value;
 
-      expect(cron.matches(DateTime.utc(2026, 1, 13)), isTrue);
-      expect(cron.matches(DateTime.utc(2026, 1, 19)), isTrue);
-      expect(cron.matches(DateTime.utc(2026, 1, 14)), isFalse);
+      expect(cron.matches(utcMoment(2026, 1, 13)), isTrue);
+      expect(cron.matches(utcMoment(2026, 1, 19)), isTrue);
+      expect(cron.matches(utcMoment(2026, 1, 14)), isFalse);
     });
 
     test('should AND day fields when either starts with wildcard', () {
       final unrestrictedDay = (Cron.parse('0 0 0 * * mon', utc) as Success<Cron, CronError>).value;
       final steppedDay = (Cron.parse('0 0 0 */2 * mon', utc) as Success<Cron, CronError>).value;
 
-      expect(unrestrictedDay.matches(DateTime.utc(2026, 1, 19)), isTrue);
-      expect(unrestrictedDay.matches(DateTime.utc(2026, 1, 20)), isFalse);
-      expect(steppedDay.matches(DateTime.utc(2026, 1, 19)), isTrue);
-      expect(steppedDay.matches(DateTime.utc(2026, 1, 26)), isFalse);
+      expect(unrestrictedDay.matches(utcMoment(2026, 1, 19)), isTrue);
+      expect(unrestrictedDay.matches(utcMoment(2026, 1, 20)), isFalse);
+      expect(steppedDay.matches(utcMoment(2026, 1, 19)), isTrue);
+      expect(steppedDay.matches(utcMoment(2026, 1, 26)), isFalse);
     });
 
     test('should preserve wildcard-sensitive semantics through format', () {
@@ -123,9 +125,9 @@ void main() {
       final reparsed = (Cron.parse(formatted, utc) as Success<Cron, CronError>).value;
 
       for (final instant in [
-        DateTime.utc(2026, 1, 19),
-        DateTime.utc(2026, 1, 20),
-        DateTime.utc(2026, 3, 2),
+        utcMoment(2026, 1, 19),
+        utcMoment(2026, 1, 20),
+        utcMoment(2026, 3, 2),
       ]) {
         expect(reparsed.matches(instant), original.matches(instant));
       }

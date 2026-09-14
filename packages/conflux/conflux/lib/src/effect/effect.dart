@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:conflux/moment.dart';
 import 'package:conflux/non_empty_list.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
@@ -34,6 +35,10 @@ final class Effect<A, E> {
       return Failed(Defect(error, stackTrace));
     }
   }
+
+  /// Reads the executing runtime's Clock each time this effect runs.
+  static Effect<UtcMoment, Never> now() =>
+      Effect._((execution) async => Succeeded(execution.clock.wallTime()));
 
   /// Describes a successful value without starting work.
   static Effect<A, E> succeed<A, E>(A value) => Effect._((_) async => Succeeded(value));
