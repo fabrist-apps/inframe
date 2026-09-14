@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:postgres/postgres.dart' as pg;
 
@@ -39,15 +41,6 @@ final class RivetMigrator {
   /// Verifies durable history and applies every pending transactional migration.
   Future<void> migrate() async {
     final artifacts = RivetMigrationArtifacts.read(directory);
-    for (final migration in artifacts.migrations) {
-      if (migration.phases.any(
-        (phase) => phase.mode != RivetMigrationPhaseMode.transactional,
-      )) {
-        throw const RivetMigrationException(
-          'This runner revision does not support nontransactional phases.',
-        );
-      }
-    }
     await _withLockedConnection((session) async {
       await _bootstrap(session);
       final history = await _readHistory(session, artifacts.databaseId);
@@ -56,14 +49,31 @@ final class RivetMigrator {
         final completedPhases = migrationIndex < history.length
             ? history[migrationIndex].receipts.length
             : 0;
-        for (var phaseIndex = completedPhases; phaseIndex < migration.phases.length; phaseIndex++) {
-          await _applyTransactionalPhase(
-            session,
-            artifacts.databaseId,
-            migration,
-            phaseIndex,
-            insertMigration: migrationIndex >= history.length && phaseIndex == 0,
-          );
+        for (var phaseIndex = 0; phaseIndex < migration.phases.length; phaseIndex++) {
+          final receipt = phaseIndex < completedPhases
+              ? history[migrationIndex].receipts[phaseIndex]
+              : null;
+          if (receipt?.status == 'completed') continue;
+          final insertMigration = migrationIndex >= history.length && phaseIndex == 0;
+          final phase = migration.phases[phaseIndex];
+          if (phase.mode == RivetMigrationPhaseMode.transactional) {
+            await _applyTransactionalPhase(
+              session,
+              artifacts.databaseId,
+              migration,
+              phaseIndex,
+              insertMigration: insertMigration,
+            );
+          } else {
+            await _applyNontransactionalPhase(
+              session,
+              artifacts.databaseId,
+              migration,
+              phase,
+              receipt,
+              insertMigration: insertMigration,
+            );
+          }
         }
       }
     });
@@ -171,7 +181,7 @@ Future<List<_HistoryRecord>> _readHistory(pg.Connection session, String database
       LEFT JOIN _rivet.phase_receipts r
         ON r."databaseId" = m."databaseId" AND r."migrationId" = m.id
       WHERE m."databaseId" = @databaseId
-      ORDER BY m.ordinal, r."phaseId"
+      ORDER BY m.ordinal, r."phaseId"::integer
     '''),
     parameters: {'databaseId': databaseId},
   );
@@ -223,11 +233,14 @@ void _validateHistory(RivetMigrationArtifacts artifacts, List<_HistoryRecord> hi
     }
     for (final (phaseIndex, receipt) in record.receipts.indexed) {
       final phase = migration.phases[phaseIndex];
+      final transactional = phase.mode == RivetMigrationPhaseMode.transactional;
       if (receipt.phaseId != phase.id ||
           receipt.checksum != migration.checksum ||
           receipt.scopeId != phase.scopeId ||
-          receipt.status != 'completed' ||
-          receipt.attemptId != null ||
+          !const {'started', 'completed'}.contains(receipt.status) ||
+          (transactional && (receipt.status != 'completed' || receipt.attemptId != null)) ||
+          (!transactional && receipt.attemptId == null) ||
+          (receipt.status == 'started' && phaseIndex != record.receipts.length - 1) ||
           receipt.evidence is! Map) {
         throw RivetMigrationException(
           'Migration ${migration.id} phase ${phase.id} has a mismatched receipt.',
@@ -235,6 +248,368 @@ void _validateHistory(RivetMigrationArtifacts artifacts, List<_HistoryRecord> hi
       }
     }
   }
+}
+
+Future<void> _applyNontransactionalPhase(
+  pg.Connection connection,
+  String databaseId,
+  RivetMigrationArtifact migration,
+  RivetMigrationPhase phase,
+  _Receipt? receipt, {
+  required bool insertMigration,
+}) async {
+  var attemptId = receipt?.attemptId;
+  Map<String, Object?> beforeEvidence;
+  if (receipt == null) {
+    final before = await _inspectRecovery(connection, phase, null);
+    if (before.classification != _RecoveryClassification.notStarted) {
+      throw RivetMigrationException(
+        'Migration ${migration.id} phase ${phase.id} does not match its declared precondition.',
+      );
+    }
+    beforeEvidence = before.evidence;
+    attemptId = _newAttemptId();
+    await _recordStartedPhase(
+      connection,
+      databaseId,
+      migration,
+      phase,
+      attemptId,
+      beforeEvidence,
+      insertMigration: insertMigration,
+    );
+  } else {
+    beforeEvidence = Map<String, Object?>.from(receipt.evidence! as Map);
+    final recovery = await _inspectRecovery(connection, phase, beforeEvidence);
+    if (recovery.classification == _RecoveryClassification.completed) {
+      await _recordCompletedPhase(
+        connection,
+        databaseId,
+        migration,
+        phase,
+        attemptId!,
+        beforeEvidence,
+        recovery.evidence,
+      );
+      return;
+    }
+    if (recovery.classification != _RecoveryClassification.notStarted) {
+      throw RivetMigrationException(
+        'Migration ${migration.id} phase ${phase.id} has a partial or uncertain outcome.',
+      );
+    }
+  }
+
+  for (final statement in phase.statements) {
+    await connection.execute(statement, queryMode: pg.QueryMode.simple);
+  }
+  final after = await _inspectRecovery(connection, phase, beforeEvidence);
+  if (after.classification != _RecoveryClassification.completed) {
+    throw RivetMigrationException(
+      'Migration ${migration.id} phase ${phase.id} requires explicit recovery.',
+    );
+  }
+  await _recordCompletedPhase(
+    connection,
+    databaseId,
+    migration,
+    phase,
+    attemptId!,
+    beforeEvidence,
+    after.evidence,
+  );
+}
+
+Future<void> _recordStartedPhase(
+  pg.Connection connection,
+  String databaseId,
+  RivetMigrationArtifact migration,
+  RivetMigrationPhase phase,
+  String attemptId,
+  Map<String, Object?> evidence, {
+  required bool insertMigration,
+}) async {
+  await connection.runTx((transaction) async {
+    if (insertMigration) {
+      await _insertMigration(transaction, databaseId, migration);
+    }
+    await transaction.execute(
+      pg.Sql.named('''
+        INSERT INTO _rivet.phase_receipts
+          ("databaseId", "migrationId", "phaseId", checksum, "scopeId", status,
+           "attemptId", evidence)
+        VALUES (@databaseId, @migrationId, @phaseId, @checksum, @scopeId,
+                'started', @attemptId, CAST(@evidence AS jsonb))
+      '''),
+      parameters: {
+        'databaseId': databaseId,
+        'migrationId': migration.id,
+        'phaseId': phase.id,
+        'checksum': migration.checksum,
+        'scopeId': phase.scopeId,
+        'attemptId': attemptId,
+        'evidence': jsonEncode(evidence),
+      },
+    );
+  });
+}
+
+Future<void> _recordCompletedPhase(
+  pg.Connection connection,
+  String databaseId,
+  RivetMigrationArtifact migration,
+  RivetMigrationPhase phase,
+  String attemptId,
+  Map<String, Object?> before,
+  Map<String, Object?> after,
+) async {
+  final result = await connection.execute(
+    pg.Sql.named('''
+      UPDATE _rivet.phase_receipts
+      SET status = 'completed', evidence = CAST(@evidence AS jsonb)
+      WHERE "databaseId" = @databaseId AND "migrationId" = @migrationId
+        AND "phaseId" = @phaseId AND checksum = @checksum
+        AND "attemptId" = @attemptId AND status = 'started'
+    '''),
+    parameters: {
+      'databaseId': databaseId,
+      'migrationId': migration.id,
+      'phaseId': phase.id,
+      'checksum': migration.checksum,
+      'attemptId': attemptId,
+      'evidence': jsonEncode({'before': before, 'after': after}),
+    },
+  );
+  if (result.affectedRows != 1) {
+    throw RivetMigrationException(
+      'Migration ${migration.id} phase ${phase.id} changed while recording completion.',
+    );
+  }
+}
+
+Future<_RecoveryResult> _inspectRecovery(
+  pg.Connection connection,
+  RivetMigrationPhase phase,
+  Map<String, Object?>? recordedBefore,
+) async {
+  final recovery = phase.recovery!;
+  if (recovery['inspector'] == 'postgresql.index.v1') {
+    return _inspectIndex(connection, recovery, recordedBefore);
+  }
+  if (recovery['checks'] case final List<Object?> checks) {
+    return _inspectChecks(connection, checks);
+  }
+  return _RecoveryResult(
+    recordedBefore == null ? _RecoveryClassification.notStarted : _RecoveryClassification.uncertain,
+    {'kind': 'manual', 'declaredBefore': recovery['before']},
+  );
+}
+
+Future<_RecoveryResult> _inspectChecks(
+  pg.Connection connection,
+  List<Object?> checks,
+) async {
+  var matchesAfter = true;
+  var matchesBefore = true;
+  final observations = <bool>[];
+  for (final raw in checks) {
+    final check = raw! as Map<String, Object?>;
+    final parameters = <Object?>[];
+    final types = <pg.Type>[];
+    for (final rawParameter in check['parameters']! as List<Object?>) {
+      final parameter = rawParameter! as Map<String, Object?>;
+      parameters.add(parameter['value']);
+      types.add(switch (parameter['type']) {
+        'boolean' => pg.Type.boolean,
+        'decimal' => pg.Type.numeric,
+        'string' => pg.Type.text,
+        _ => pg.Type.unspecified,
+      });
+    }
+    final result = await connection.execute(
+      pg.Sql(check['sql']! as String, types: types),
+      parameters: parameters,
+    );
+    if (result.length != 1 || result.single.length != 1 || result.single.single is! bool) {
+      return const _RecoveryResult(_RecoveryClassification.uncertain, {});
+    }
+    final observed = result.single.single! as bool;
+    final expected = check['expected']! as bool;
+    observations.add(observed);
+    matchesAfter = matchesAfter && observed == expected;
+    matchesBefore = matchesBefore && observed != expected;
+  }
+  return _RecoveryResult(
+    matchesAfter
+        ? _RecoveryClassification.completed
+        : matchesBefore
+        ? _RecoveryClassification.notStarted
+        : _RecoveryClassification.uncertain,
+    {'kind': 'checks', 'observed': observations},
+  );
+}
+
+Future<_RecoveryResult> _inspectIndex(
+  pg.Connection connection,
+  Map<String, Object?> recovery,
+  Map<String, Object?>? recordedBefore,
+) async {
+  final expected = recovery['after']! as Map<String, Object?>;
+  final schema = expected['schema']! as String;
+  final table = expected['table']! as String;
+  final index = expected['index']! as String;
+  final tableRows = await connection.execute(
+    pg.Sql.named('''
+      SELECT c.oid::bigint, c.relowner::bigint
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = @schema AND c.relname = @table
+        AND c.relkind IN ('r', 'p')
+    '''),
+    parameters: {'schema': schema, 'table': table},
+  );
+  if (tableRows.length != 1) {
+    return const _RecoveryResult(_RecoveryClassification.uncertain, {});
+  }
+  final tableEvidence = <String, Object?>{
+    'kind': 'postgresql.index.v1',
+    'schema': schema,
+    'table': table,
+    'index': index,
+    'tableOid': tableRows.single[0],
+    'tableOwnerOid': tableRows.single[1],
+    'indexAbsent': true,
+  };
+  final indexRows = await connection.execute(
+    pg.Sql.named('''
+      SELECT i.oid::bigint, i.relowner::bigint, am.amname,
+             x.indisunique, x.indisvalid, x.indisready,
+             pg_get_expr(x.indpred, x.indrelid), i.reloptions,
+             x.indnkeyatts, pg_get_indexdef(i.oid)
+      FROM pg_class i
+      JOIN pg_namespace n ON n.oid = i.relnamespace
+      JOIN pg_index x ON x.indexrelid = i.oid
+      JOIN pg_am am ON am.oid = i.relam
+      WHERE n.nspname = @schema AND i.relname = @index
+        AND x.indrelid = @tableOid
+    '''),
+    parameters: {
+      'schema': schema,
+      'index': index,
+      'tableOid': tableRows.single[0],
+    },
+  );
+  if (indexRows.isEmpty) {
+    final unchanged =
+        recordedBefore == null ||
+        (recordedBefore['tableOid'] == tableEvidence['tableOid'] &&
+            recordedBefore['tableOwnerOid'] == tableEvidence['tableOwnerOid'] &&
+            recordedBefore['indexAbsent'] == true);
+    return _RecoveryResult(
+      unchanged ? _RecoveryClassification.notStarted : _RecoveryClassification.uncertain,
+      tableEvidence,
+    );
+  }
+  if (indexRows.length != 1) {
+    return const _RecoveryResult(_RecoveryClassification.uncertain, {});
+  }
+  final row = indexRows.single;
+  final termRows = await connection.execute(
+    pg.Sql.named('''
+      SELECT a.attname, (keys.option & 1) = 1, opc.opcname
+      FROM pg_index x
+      CROSS JOIN LATERAL unnest(
+        x.indkey::smallint[], x.indoption::smallint[], x.indclass::oid[]
+      ) WITH ORDINALITY AS keys(attnum, option, opclass_oid, ordinal)
+      LEFT JOIN pg_attribute a
+        ON a.attrelid = x.indrelid AND a.attnum = keys.attnum
+      JOIN pg_opclass opc ON opc.oid = keys.opclass_oid
+      WHERE x.indexrelid = @indexOid AND keys.ordinal <= x.indnkeyatts
+      ORDER BY keys.ordinal
+    '''),
+    parameters: {'indexOid': row[0]},
+  );
+  final terms = [
+    for (final term in termRows)
+      {'column': term[0], 'descending': term[1], 'operatorClass': term[2]},
+  ];
+  final expectedTerms = (expected['terms']! as List<Object?>).cast<Map<String, Object?>>();
+  final termsMatch =
+      terms.length == expectedTerms.length &&
+      terms.indexed.every(
+        (entry) =>
+            entry.$2['column'] == expectedTerms[entry.$1]['column'] &&
+            entry.$2['descending'] == expectedTerms[entry.$1]['descending'],
+      );
+  final options = row[7] as List<Object?>?;
+  final expectedOptions = expected['options']! as Map<String, Object?>;
+  final evidence = <String, Object?>{
+    ...tableEvidence,
+    'indexAbsent': false,
+    'indexOid': row[0],
+    'indexOwnerOid': row[1],
+    'method': row[2],
+    'unique': row[3],
+    'valid': row[4],
+    'ready': row[5],
+    'predicate': row[6],
+    'options': options ?? <Object?>[],
+    'terms': terms,
+    'definition': row[9],
+  };
+  final matches =
+      row[1] == tableEvidence['tableOwnerOid'] &&
+      row[2] == expected['method'] &&
+      row[3] == expected['unique'] &&
+      row[4] == expected['valid'] &&
+      row[5] == expected['ready'] &&
+      _normalizedSql(row[6] as String?) == _normalizedSql(expected['predicate'] as String?) &&
+      (options == null || options.isEmpty) &&
+      expectedOptions.isEmpty &&
+      termsMatch;
+  return _RecoveryResult(
+    matches ? _RecoveryClassification.completed : _RecoveryClassification.uncertain,
+    evidence,
+  );
+}
+
+Future<void> _insertMigration(
+  pg.Session transaction,
+  String databaseId,
+  RivetMigrationArtifact migration,
+) => transaction
+    .execute(
+      pg.Sql.named('''
+    INSERT INTO _rivet.migrations
+      ("databaseId", id, "parentId", checksum, ordinal)
+    VALUES (@databaseId, @id, @parentId, @checksum, @ordinal)
+  '''),
+      parameters: {
+        'databaseId': databaseId,
+        'id': migration.id,
+        'parentId': migration.parentId,
+        'checksum': migration.checksum,
+        'ordinal': migration.ordinal,
+      },
+    )
+    .then((_) {});
+
+String _newAttemptId() {
+  final random = Random.secure();
+  return List<int>.generate(
+    16,
+    (_) => random.nextInt(256),
+  ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+}
+
+String? _normalizedSql(String? value) => value?.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+enum _RecoveryClassification { completed, notStarted, uncertain }
+
+final class _RecoveryResult {
+  const _RecoveryResult(this.classification, this.evidence);
+
+  final _RecoveryClassification classification;
+  final Map<String, Object?> evidence;
 }
 
 Future<void> _applyTransactionalPhase(
@@ -250,20 +625,7 @@ Future<void> _applyTransactionalPhase(
       await transaction.execute(statement, queryMode: pg.QueryMode.simple);
     }
     if (insertMigration) {
-      await transaction.execute(
-        pg.Sql.named('''
-          INSERT INTO _rivet.migrations
-            ("databaseId", id, "parentId", checksum, ordinal)
-          VALUES (@databaseId, @id, @parentId, @checksum, @ordinal)
-        '''),
-        parameters: {
-          'databaseId': databaseId,
-          'id': migration.id,
-          'parentId': migration.parentId,
-          'checksum': migration.checksum,
-          'ordinal': migration.ordinal,
-        },
-      );
+      await _insertMigration(transaction, databaseId, migration);
     }
     await transaction.execute(
       pg.Sql.named('''

@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 
 import 'package:rivet/src/migration/canonical_json.dart';
+import 'package:rivet/src/migration/recovery.dart';
 import 'package:rivet/src/migration/sql_parser.dart';
 
 final class RivetMigrationArtifacts {
@@ -152,6 +153,9 @@ List<RivetMigrationPhase> _readPhases(Map<String, Object?> migration, String sql
       statements.add(utf8.decode(sqlBytes.sublist(start, end)));
       previousEnd = end;
       parsedIndex++;
+    }
+    if (mode == RivetMigrationPhaseMode.nontransactional) {
+      validateRivetRecovery(phase, statements);
     }
     result.add(
       RivetMigrationPhase(

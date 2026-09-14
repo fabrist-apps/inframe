@@ -346,6 +346,254 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should complete a concurrent btree index from structural evidence',
+      () async {
+        final declaration = _indexMigrationDeclaration();
+        const generator = RivetMigrationGenerator();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial table',
+        );
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        await fixture.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await fixture.execute('DROP SCHEMA IF EXISTS recovery CASCADE');
+        final connection = RivetConnection.url(databaseUrl, sslMode: RivetSslMode.disable);
+        await RivetMigrator(connection: connection, directory: directory).migrate();
+
+        final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+        table['indexes'] = [
+          {
+            'name': 'users_name_idx',
+            'unique': false,
+            'terms': [
+              {'column': 'name', 'descending': false},
+            ],
+            'predicate': null,
+            'options': <String, Object?>{},
+            'platforms': ['postgresql'],
+          },
+        ];
+        final migrationId = await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'concurrent index',
+        );
+        await _sealConcurrentIndex(directory, migrationId!);
+
+        await RivetMigrator(connection: connection, directory: directory).migrate();
+
+        final index = await fixture.execute('''
+          SELECT i.indisvalid, i.indisready, am.amname
+          FROM pg_index i
+          JOIN pg_class c ON c.oid = i.indexrelid
+          JOIN pg_am am ON am.oid = c.relam
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'recovery' AND c.relname = 'users_name_idx'
+        ''');
+        expect(index.single, [true, true, 'btree']);
+        final receipt = await fixture.execute('''
+          SELECT status, "attemptId", evidence FROM _rivet.phase_receipts
+          WHERE "migrationId" = '$migrationId'
+        ''');
+        expect(receipt.single[0], 'completed');
+        expect(receipt.single[1], matches(RegExp(r'^[0-9a-f]{32}$')));
+        expect(receipt.single[2], isA<Map<String, Object?>>());
+        final evidence = receipt.single[2]! as Map<String, Object?>;
+        await fixture.execute(
+          pg.Sql.named('''
+            UPDATE _rivet.phase_receipts
+            SET status = 'started', evidence = CAST(@evidence AS jsonb)
+            WHERE "migrationId" = @migrationId
+          '''),
+          parameters: {
+            'migrationId': migrationId,
+            'evidence': jsonEncode(evidence['before']),
+          },
+        );
+
+        await RivetMigrator(connection: connection, directory: directory).migrate();
+
+        expect(
+          (await fixture.execute(
+            "SELECT status FROM _rivet.phase_receipts WHERE \"migrationId\" = '$migrationId'",
+          )).single.single,
+          'completed',
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should reject a preexisting index instead of treating it as completion',
+      () async {
+        final declaration = _indexMigrationDeclaration();
+        const generator = RivetMigrationGenerator();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial table',
+        );
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        await fixture.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await fixture.execute('DROP SCHEMA IF EXISTS recovery CASCADE');
+        final connection = RivetConnection.url(databaseUrl, sslMode: RivetSslMode.disable);
+        await RivetMigrator(connection: connection, directory: directory).migrate();
+        await fixture.execute(
+          'CREATE INDEX users_name_idx ON recovery.users (id DESC)',
+        );
+        final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+        table['indexes'] = [
+          {
+            'name': 'users_name_idx',
+            'unique': false,
+            'terms': [
+              {'column': 'name', 'descending': false},
+            ],
+            'predicate': null,
+            'options': <String, Object?>{},
+            'platforms': ['postgresql'],
+          },
+        ];
+        final migrationId = await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'concurrent index',
+        );
+        await _sealConcurrentIndex(directory, migrationId!);
+
+        await expectLater(
+          RivetMigrator(connection: connection, directory: directory).migrate(),
+          throwsA(isA<RivetMigrationException>()),
+        );
+
+        expect(
+          (await fixture.execute(
+            "SELECT pg_get_indexdef('recovery.users_name_idx'::regclass)",
+          )).single.single,
+          contains('(id DESC)'),
+        );
+        expect(
+          (await fixture.execute(
+            "SELECT count(*) FROM _rivet.migrations WHERE id = '$migrationId'",
+          )).single.single,
+          0,
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should execute reviewed custom SQL only when its checks prove the precondition',
+      () async {
+        final declaration = _indexMigrationDeclaration();
+        const generator = RivetMigrationGenerator();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial table',
+        );
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        await fixture.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await fixture.execute('DROP SCHEMA IF EXISTS recovery CASCADE');
+        final connection = RivetConnection.url(databaseUrl, sslMode: RivetSslMode.disable);
+        await RivetMigrator(connection: connection, directory: directory).migrate();
+        declaration['tables'] = [
+          ...(declaration['tables']! as List<Object?>),
+          _simpleTable('audits'),
+        ];
+        final migrationId = await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'custom checked table',
+        );
+        await _sealRecovery(directory, migrationId!, {
+          'kind': 'catalog',
+          'operationId': '33333333333333333333333333333333',
+          'before': {'table': 'recovery.audits', 'exists': false},
+          'after': {'table': 'recovery.audits', 'exists': true},
+          'checks': [
+            {
+              'sql': r'SELECT to_regclass($1) IS NOT NULL',
+              'parameters': [
+                {'type': 'string', 'value': 'recovery.audits'},
+              ],
+              'expected': true,
+            },
+          ],
+        });
+
+        await RivetMigrator(connection: connection, directory: directory).migrate();
+
+        expect(
+          (await fixture.execute(
+            "SELECT to_regclass('recovery.audits') IS NOT NULL",
+          )).single.single,
+          isTrue,
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should preserve manual SQL as started until explicit resolution',
+      () async {
+        final declaration = _indexMigrationDeclaration();
+        const generator = RivetMigrationGenerator();
+        await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'initial table',
+        );
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        await fixture.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await fixture.execute('DROP SCHEMA IF EXISTS recovery CASCADE');
+        final connection = RivetConnection.url(databaseUrl, sslMode: RivetSslMode.disable);
+        await RivetMigrator(connection: connection, directory: directory).migrate();
+        declaration['tables'] = [
+          ...(declaration['tables']! as List<Object?>),
+          _simpleTable('manual_effect'),
+        ];
+        final migrationId = await generator.generateDeclaration(
+          declaration: declaration,
+          directory: directory,
+          name: 'manual table',
+        );
+        await _sealRecovery(directory, migrationId!, {
+          'kind': 'manual',
+          'operationId': '44444444444444444444444444444444',
+          'before': {'description': 'manual effect absent'},
+          'after': {'description': 'operator verified manual effect'},
+        });
+
+        await expectLater(
+          RivetMigrator(connection: connection, directory: directory).migrate(),
+          throwsA(isA<RivetMigrationException>()),
+        );
+        await expectLater(
+          RivetMigrator(connection: connection, directory: directory).migrate(),
+          throwsA(isA<RivetMigrationException>()),
+        );
+
+        final receipts = await fixture.execute(
+          "SELECT status FROM _rivet.phase_receipts WHERE \"migrationId\" = '$migrationId'",
+        );
+        expect(receipts.single.single, 'started');
+        expect(
+          (await fixture.execute(
+            "SELECT to_regclass('recovery.manual_effect') IS NOT NULL",
+          )).single.single,
+          isTrue,
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
 }
 
@@ -441,3 +689,115 @@ Map<String, Object?> _enumMigrationDeclaration() => {
   ],
   'requirements': <Object?>[],
 };
+
+Map<String, Object?> _indexMigrationDeclaration() => {
+  'formatVersion': 1,
+  'dialect': 'rivet',
+  'name': 'index_migration',
+  'tables': [
+    {
+      'schema': 'recovery',
+      'name': 'users',
+      'columns': [
+        {
+          'name': 'id',
+          'storage': {'kind': 'integer', 'nullable': false, 'codecVersion': 1},
+          'primaryKey': true,
+        },
+        {
+          'name': 'name',
+          'storage': {'kind': 'text', 'nullable': false, 'codecVersion': 1},
+          'primaryKey': false,
+        },
+      ],
+      'indexes': <Object?>[],
+      'constraints': <Object?>[],
+    },
+  ],
+  'enums': <Object?>[],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _simpleTable(String name) => {
+  'schema': 'recovery',
+  'name': name,
+  'columns': [
+    {
+      'name': 'id',
+      'storage': {'kind': 'integer', 'nullable': false, 'codecVersion': 1},
+      'primaryKey': true,
+    },
+  ],
+  'indexes': <Object?>[],
+  'constraints': <Object?>[],
+};
+
+Future<void> _sealConcurrentIndex(Directory directory, String migrationId) async {
+  final journal = jsonDecode(
+    File('${directory.path}/journal.json').readAsStringSync(),
+  ) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  final path = '${directory.path}/${entry['directory']}';
+  final sqlPath = '$path/migration.sql';
+  final sql = File(sqlPath).readAsStringSync();
+  File(sqlPath).writeAsStringSync(
+    sql.replaceFirst('CREATE INDEX', 'CREATE INDEX CONCURRENTLY'),
+  );
+  final migrationFile = File('$path/migration.json');
+  final migration = jsonDecode(migrationFile.readAsStringSync()) as Map<String, Object?>;
+  final phase = (migration['phases']! as List<Object?>).single! as Map<String, Object?>;
+  migration['phases'] = [
+    {
+      ...phase,
+      'mode': 'nontransactional',
+      'recovery': {
+        'kind': 'catalog',
+        'operationId': '22222222222222222222222222222222',
+        'before': {
+          'schema': 'recovery',
+          'table': 'users',
+          'index': 'users_name_idx',
+          'exists': false,
+        },
+        'after': {
+          'schema': 'recovery',
+          'table': 'users',
+          'index': 'users_name_idx',
+          'method': 'btree',
+          'terms': [
+            {'column': 'name', 'descending': false},
+          ],
+          'predicate': null,
+          'options': <String, Object?>{},
+          'unique': false,
+          'valid': true,
+          'ready': true,
+        },
+        'inspector': 'postgresql.index.v1',
+      },
+    },
+  ];
+  migrationFile.writeAsStringSync(jsonEncode(migration));
+  await RivetArtifactSealer().seal(directory: directory, migrationId: migrationId);
+}
+
+Future<void> _sealRecovery(
+  Directory directory,
+  String migrationId,
+  Map<String, Object?> recovery,
+) async {
+  final journal = jsonDecode(
+    File('${directory.path}/journal.json').readAsStringSync(),
+  ) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  final migrationFile = File(
+    '${directory.path}/${entry['directory']}/migration.json',
+  );
+  final migration = jsonDecode(migrationFile.readAsStringSync()) as Map<String, Object?>;
+  final phase = (migration['phases']! as List<Object?>).single! as Map<String, Object?>;
+  migration['phases'] = [
+    {...phase, 'mode': 'nontransactional', 'recovery': recovery},
+  ];
+  migrationFile.writeAsStringSync(jsonEncode(migration));
+  await RivetArtifactSealer().seal(directory: directory, migrationId: migrationId);
+}
