@@ -58,12 +58,12 @@ void main() {
               )!
               as Map<String, Object?>;
       final phase = (migration['phases']! as List<Object?>).first! as Map<String, Object?>;
-      final statement = (phase['statements']! as List<Object?>).first! as Map<String, Object?>;
+      final statement = (phase['statements']! as List<Object?>).last! as Map<String, Object?>;
       final start = statement['startByte']! as int;
       final end = statement['endByte']! as int;
       final sqlFile = File('$artifactDirectory/migration.sql');
       final bytes = sqlFile.readAsBytesSync().toList(growable: true);
-      const transactionControl = 'START/**/TRANSACTION';
+      const transactionControl = 'SET/**/SESSION/**/CHARACTERISTICS/**/AS/**/TRANSACTION';
       final padding = List.filled(end - start - transactionControl.length - 1, ' ').join();
       final replacement = utf8.encode('$transactionControl$padding;');
       bytes.replaceRange(start, end, replacement);
@@ -80,6 +80,39 @@ void main() {
         ).migrate(),
         throwsA(isA<FormatException>()),
       );
+    });
+
+    test('should reject side-effecting recovery checks while sealing', () async {
+      final migrationId = await const RivetMigrationGenerator().generate(
+        schema: MigrationFixtureDatabaseRivetSchema.build(),
+        directory: directory,
+        name: 'initial',
+      );
+
+      for (final sql in [
+        r'SELECT pg_advisory_unlock/**/($1)',
+        r'SELECT "pg_advisory_unlock"($1)',
+        r"SELECT length('\') = 1 AND pg_advisory_unlock($1)",
+      ]) {
+        await expectLater(
+          _sealRecovery(directory, migrationId!, {
+            'kind': 'catalog',
+            'operationId': '77777777777777777777777777777777',
+            'before': {'lock': true},
+            'after': {'lock': false},
+            'checks': [
+              {
+                'sql': sql,
+                'parameters': [
+                  {'type': 'decimal', 'value': '1'},
+                ],
+                'expected': false,
+              },
+            ],
+          }),
+          throwsA(isA<FormatException>()),
+        );
+      }
     });
 
     test('should reject a negative lock timeout', () {

@@ -66,7 +66,8 @@ void _validateChecks(Object? value) {
         RegExp(
           r'\b(insert|update|delete|alter|create|drop|copy|vacuum|call|do|set)\b',
         ).hasMatch(sql) ||
-        RegExp(r'\b(dblink|postgres_fdw)\b').hasMatch(sql)) {
+        RegExp(r'\b(dblink|postgres_fdw)\b').hasMatch(sql) ||
+        _hasSideEffectingFunction(sql)) {
       throw const FormatException('Recovery checks must be read-only SQL.');
     }
     for (final parameter in raw['parameters']! as List<Object?>) {
@@ -78,6 +79,92 @@ void _validateChecks(Object? value) {
       }
     }
   }
+}
+
+bool _hasSideEffectingFunction(String sql) => RegExp(
+  r'\b(nextval|setval|set_config|pg_notify|pg_(cancel|terminate)_backend|'
+  'pg_(try_)?advisory_(xact_)?lock(_shared)?|pg_advisory_unlock(_all|_shared)?|'
+  r'pg_export_snapshot|pg_logical_emit_message|lo_(create|creat|unlink|import|export|put))\s*\(',
+).hasMatch(_functionScanSql(sql));
+
+String _functionScanSql(String sql) {
+  final code = StringBuffer();
+  var index = 0;
+  while (index < sql.length) {
+    if (sql.startsWith('--', index)) {
+      final newline = sql.indexOf('\n', index + 2);
+      index = newline < 0 ? sql.length : newline + 1;
+      code.write(' ');
+      continue;
+    }
+    if (sql.startsWith('/*', index)) {
+      var depth = 1;
+      index += 2;
+      while (index < sql.length && depth > 0) {
+        if (sql.startsWith('/*', index)) {
+          depth++;
+          index += 2;
+        } else if (sql.startsWith('*/', index)) {
+          depth--;
+          index += 2;
+        } else {
+          index++;
+        }
+      }
+      code.write(' ');
+      continue;
+    }
+    if (sql.codeUnitAt(index) == 0x27) {
+      final backslashEscapes =
+          index > 0 &&
+          (sql.codeUnitAt(index - 1) == 0x45 || sql.codeUnitAt(index - 1) == 0x65) &&
+          (index < 2 || !RegExp(r'[A-Za-z0-9_$]').hasMatch(sql[index - 2]));
+      index++;
+      while (index < sql.length) {
+        if (sql.codeUnitAt(index) == 0x27) {
+          index++;
+          if (index < sql.length && sql.codeUnitAt(index) == 0x27) {
+            index++;
+            continue;
+          }
+          break;
+        }
+        if (backslashEscapes && sql.codeUnitAt(index) == 0x5c && index + 1 < sql.length) index++;
+        index++;
+      }
+      code.write(' ');
+      continue;
+    }
+    if (sql.codeUnitAt(index) == 0x22) {
+      index++;
+      while (index < sql.length) {
+        if (sql.codeUnitAt(index) == 0x22) {
+          index++;
+          if (index < sql.length && sql.codeUnitAt(index) == 0x22) {
+            code.write('"');
+            index++;
+            continue;
+          }
+          break;
+        }
+        code.write(sql[index++].toLowerCase());
+      }
+      continue;
+    }
+    if (sql.codeUnitAt(index) == 0x24) {
+      final tag = RegExp(r'^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$').firstMatch(
+        sql.substring(index),
+      )?[0];
+      if (tag != null) {
+        final end = sql.indexOf(tag, index + tag.length);
+        index = end < 0 ? sql.length : end + tag.length;
+        code.write(' ');
+        continue;
+      }
+    }
+    code.write(sql[index++].toLowerCase());
+  }
+  return code.toString();
 }
 
 void _validateIndex(Object? rawBefore, Object? rawAfter) {

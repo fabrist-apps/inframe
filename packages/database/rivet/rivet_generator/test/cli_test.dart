@@ -167,7 +167,8 @@ void main() {
       stdout: output,
       stderr: errors,
       environment: const {
-        'DEPLOY_DATABASE_URL': 'postgresql://operator:$password@127.0.0.1:1/missing',
+        'DEPLOY_DATABASE_URL':
+            'postgresql://operator:$password@127.0.0.1:1/missing?sslmode=$password',
       },
     );
 
@@ -182,6 +183,8 @@ void main() {
       64,
     );
     await errors.flush();
-    expect(errorFile.readAsStringSync(), isNot(contains(password)));
+    final error = errorFile.readAsStringSync();
+    expect(error, contains('[REDACTED]'));
+    expect(error, isNot(contains(password)));
   });
 }

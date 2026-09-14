@@ -757,7 +757,8 @@ Future<void> _persistResolution(
 Future<_RecoveryResult> _inspectChecks(
   pg.Connection connection,
   List<Object?> checks,
-) async {
+) => connection.runTx((transaction) async {
+  await transaction.execute('SET TRANSACTION READ ONLY');
   var matchesAfter = true;
   var matchesBefore = true;
   final observations = <bool>[];
@@ -775,7 +776,7 @@ Future<_RecoveryResult> _inspectChecks(
         _ => pg.Type.unspecified,
       });
     }
-    final result = await connection.execute(
+    final result = await transaction.execute(
       pg.Sql(check['sql']! as String, types: types),
       parameters: parameters,
     );
@@ -796,7 +797,7 @@ Future<_RecoveryResult> _inspectChecks(
         : _RecoveryClassification.uncertain,
     {'kind': 'checks', 'observed': observations},
   );
-}
+});
 
 Future<_RecoveryResult> _inspectIndex(
   pg.Connection connection,

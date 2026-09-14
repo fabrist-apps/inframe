@@ -199,7 +199,14 @@ bool _isTransactionControl(String statement) {
   if (first.word == 'release' && second.word == 'savepoint') return true;
   if (first.word != 'set') return false;
   if (second.word == 'transaction') return true;
-  return second.word == 'local' && _nextSqlWord(statement, second.end).word == 'transaction';
+  if (second.word == 'local') {
+    return _nextSqlWord(statement, second.end).word == 'transaction';
+  }
+  if (second.word != 'session') return false;
+  final characteristics = _nextSqlWord(statement, second.end);
+  if (characteristics.word != 'characteristics') return false;
+  final as = _nextSqlWord(statement, characteristics.end);
+  return as.word == 'as' && _nextSqlWord(statement, as.end).word == 'transaction';
 }
 
 ({String? word, int end}) _nextSqlWord(String statement, int start) {
