@@ -1,7 +1,11 @@
 // Recovery metadata is data consumed by the later migration runner.
 // ignore_for_file: public_member_api_docs
 
-void validateVoxelRecovery(Map<String, Object?> phase, List<String> statements) {
+void validateVoxelRecovery(
+  Map<String, Object?> phase,
+  List<String> statements, {
+  String? scopeName,
+}) {
   final mode = phase['mode'];
   final recovery = phase['recovery'];
   final concurrent = statements.any(
@@ -46,7 +50,7 @@ void validateVoxelRecovery(Map<String, Object?> phase, List<String> statements) 
   if (inspector != null && inspector != 'native.index.v1') {
     throw FormatException('Unsupported recovery inspector `$inspector`.');
   }
-  if (checks != null) _validateChecks(checks);
+  if (checks != null) _validateChecks(checks, scopeName: scopeName);
   if (concurrent) {
     if (inspector != 'native.index.v1') {
       throw const FormatException(
@@ -89,7 +93,7 @@ String _withoutLeadingComments(String sql) {
   return sql.substring(index);
 }
 
-void _validateChecks(Object? value) {
+void _validateChecks(Object? value, {String? scopeName}) {
   if (value is! List<Object?> || value.isEmpty) {
     throw const FormatException('Recovery checks must be a nonempty array.');
   }
@@ -106,6 +110,15 @@ void _validateChecks(Object? value) {
             .hasMatch(sql) ||
         RegExp(r'\b(dblink|postgres_fdw)\b').hasMatch(sql)) {
       throw const FormatException('Recovery checks must be read-only SQL.');
+    }
+    if (scopeName != null) {
+      final qualifiedNames = RegExp(
+        r'(?:(?:"([^"]+)"|\b([a-z_][a-z0-9_]*))\s*\.)',
+        caseSensitive: false,
+      ).allMatches(raw['sql']! as String).map((match) => match[1] ?? match[2]!).toSet();
+      if (qualifiedNames.any((name) => name.toLowerCase() != scopeName.toLowerCase())) {
+        throw const FormatException('Recovery checks may inspect only their target file scope.');
+      }
     }
     for (final parameter in raw['parameters']! as List<Object?>) {
       if (parameter is! Map<String, Object?> ||

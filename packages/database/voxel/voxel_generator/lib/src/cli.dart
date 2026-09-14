@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:voxel_generator/src/migration/checker.dart';
+import 'package:voxel_generator/src/migration/sealer.dart';
 import 'package:voxel_generator/voxel_generator.dart';
 
 // This type is public only so the executable can keep argument handling testable.
@@ -24,7 +25,7 @@ final class VoxelCli {
       return switch (arguments.first) {
         'generate' => await _generate(arguments.skip(1).toList()),
         'check' => await _check(arguments.skip(1).toList()),
-        'seal' => throw UnsupportedError('seal is implemented by a later FBR-109 slice.'),
+        'seal' => await _seal(arguments.skip(1).toList()),
         _ => throw FormatException('Unknown Voxel command `${arguments.first}`.'),
       };
     } on Object catch (error) {
@@ -100,6 +101,21 @@ final class VoxelCli {
     return 0;
   }
 
+  Future<int> _seal(List<String> arguments) async {
+    final options = _options(arguments);
+    final directory = options['dir'];
+    final migration = options['migration'];
+    if (directory == null || migration == null) {
+      throw const FormatException('seal requires --dir and --migration.');
+    }
+    await VoxelArtifactSealer().seal(
+      directory: Directory(directory),
+      migrationId: migration,
+    );
+    _stdout.writeln('Sealed $migration.');
+    return 0;
+  }
+
   Future<Map<String, Object?>> _readDeclaration(
     String library,
     String className,
@@ -155,6 +171,9 @@ Voxel migration tooling
                  [--transforms <json-file>]
   voxel check --dir <directory>
   voxel seal --dir <directory> --migration <id>
+
+seal validates reviewed statement framing, metadata, and the claimed snapshot.
+It does not execute SQL or inspect deployed migration history.
 ''';
 
 final IOSink ioStdout = stdout;

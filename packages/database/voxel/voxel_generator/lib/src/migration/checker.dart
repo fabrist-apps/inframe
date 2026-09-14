@@ -215,6 +215,11 @@ final class VoxelArtifactChecker {
   ) {
     final bytes = utf8.encode(sql);
     final parsedRanges = parseVoxelSqlStatements(sql);
+    final schemaNames = <String, String>{
+      for (final rawSchema in _list(snapshot['schemas'], 'snapshot schemas'))
+        (_map(rawSchema, 'snapshot schema')['id']! as String):
+            _map(rawSchema, 'snapshot schema')['name']! as String,
+    };
     var parsedIndex = 0;
     final phaseIds = <String>{};
     var previousEnd = -1;
@@ -228,6 +233,16 @@ final class VoxelArtifactChecker {
       }
       if (phase['mode'] != 'transactional' && phase['mode'] != 'nontransactional') {
         throw FormatException('Phase $phaseId has an unknown execution mode.');
+      }
+      final scopeName = schemaNames[phase['scopeId']];
+      if (scopeName == null) {
+        throw FormatException('Phase $phaseId references an unknown file scope.');
+      }
+      final platforms = _list(phase['platforms'], 'phase platforms');
+      if (platforms.isEmpty ||
+          platforms.any((value) => value != 'native' && value != 'browser') ||
+          platforms.toSet().length != platforms.length) {
+        throw FormatException('Phase $phaseId has invalid or duplicate platforms.');
       }
       if (phase['mode'] == 'transactional' && phase['recovery'] != null) {
         throw FormatException('Transactional phase $phaseId cannot have recovery metadata.');
@@ -255,7 +270,7 @@ final class VoxelArtifactChecker {
         phaseSql.add(utf8.decode(bytes.sublist(start, end)));
         previousEnd = end;
       }
-      validateVoxelRecovery(phase, phaseSql);
+      validateVoxelRecovery(phase, phaseSql, scopeName: scopeName);
     }
     if (parsedIndex != parsedRanges.length) {
       throw const FormatException('Migration phases do not cover every SQL statement.');
