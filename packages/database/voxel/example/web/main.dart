@@ -60,29 +60,26 @@ Future<void> _executeMigration(
     final phase = rawPhase! as Map<String, Object?>;
     final rebuild = phase['rebuild'] as Map<String, Object?>?;
     if (rebuild != null) await database.execute('PRAGMA foreign_keys=OFF');
-    await database.execute('BEGIN');
     try {
-      for (final rawRange in phase['statements']! as List<Object?>) {
-        final range = rawRange! as Map<String, Object?>;
-        await database.execute(
-          utf8.decode(
-            bytes.sublist(range['startByte']! as int, range['endByte']! as int),
-          ),
-        );
-      }
-      if (rebuild != null) {
-        for (final rawValidation in rebuild['validations']! as List<Object?>) {
-          final validation = rawValidation! as Map<String, Object?>;
-          final row = (await database.query(validation['sql']! as String)).rows.single;
-          if (row.getInt('valid') != 1) {
-            throw StateError('Bundled migration validation failed.');
+      await database.transaction<void>((transaction) async {
+        for (final rawRange in phase['statements']! as List<Object?>) {
+          final range = rawRange! as Map<String, Object?>;
+          await transaction.execute(
+            utf8.decode(
+              bytes.sublist(range['startByte']! as int, range['endByte']! as int),
+            ),
+          );
+        }
+        if (rebuild != null) {
+          for (final rawValidation in rebuild['validations']! as List<Object?>) {
+            final validation = rawValidation! as Map<String, Object?>;
+            final row = (await transaction.query(validation['sql']! as String)).rows.single;
+            if (row.getInt('valid') != 1) {
+              throw StateError('Bundled migration validation failed.');
+            }
           }
         }
-      }
-      await database.execute('COMMIT');
-    } on Object {
-      await database.execute('ROLLBACK');
-      rethrow;
+      });
     } finally {
       if (rebuild != null) await database.execute('PRAGMA foreign_keys=ON');
     }

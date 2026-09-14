@@ -243,6 +243,22 @@ void main() {
         throwsA(isA<FormatException>()),
       );
     });
+
+    test('should reject the minimum 64-bit integer as non-interoperable JSON', () async {
+      final migrationId = await _generate(directory);
+      final artifacts = _artifacts(directory);
+      final snapshotFile = File('${artifacts.migration.parent.path}/snapshot.json');
+      final snapshot = jsonDecode(snapshotFile.readAsStringSync()) as Map<String, Object?>;
+      (snapshot['requirements']! as List<Object?>).add({
+        'unsupportedInteger': -9223372036854775808,
+      });
+      snapshotFile.writeAsStringSync(jsonEncode(snapshot));
+
+      await expectLater(
+        VoxelArtifactSealer().seal(directory: directory, migrationId: migrationId),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 }
 

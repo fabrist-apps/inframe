@@ -81,11 +81,15 @@ Map<String, Object?> parseSchemaExpression(String source) {
     };
   }
   if (sql.length >= 2 && sql.startsWith("'") && sql.endsWith("'")) {
+    final body = sql.substring(1, sql.length - 1);
+    if (body.replaceAll("''", '').contains("'")) {
+      throw UnsupportedError('Unsupported Voxel schema expression `$source`.');
+    }
     return {
       'formatVersion': 1,
       'kind': 'literal',
       'literalType': 'string',
-      'value': sql.substring(1, sql.length - 1).replaceAll("''", "'"),
+      'value': body.replaceAll("''", "'"),
     };
   }
   final function = RegExp(r'^([a-z_][a-z0-9_]*)\((.*)\)$').firstMatch(sql);

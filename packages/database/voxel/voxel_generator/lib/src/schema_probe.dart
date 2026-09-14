@@ -25,6 +25,7 @@ import 'dart:io';
 import '$importUri' as target;
 
 void main() {
+  stdout.encoding = utf8;
   stdout.write(jsonEncode(target.${className}VoxelSchema.toJson()));
 }
 ''');
@@ -33,6 +34,8 @@ void main() {
       _dartExecutable(),
       [probe.path],
       workingDirectory: root.path,
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
     );
     if (result.exitCode != 0) {
       throw StateError('Could not load $library#$className:\n${result.stderr}');

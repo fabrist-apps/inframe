@@ -1015,7 +1015,7 @@ final class VoxelArtifactChecker {
 
   void _validateJsonValues(Object? value) {
     switch (value) {
-      case final int number when number.abs() > 9007199254740991:
+      case final int number when number > 9007199254740991 || number < -9007199254740991:
         throw const FormatException('JSON integer exceeds the interoperable numeric range.');
       case final double number when !number.isFinite:
         throw const FormatException('JSON numbers must be finite.');
