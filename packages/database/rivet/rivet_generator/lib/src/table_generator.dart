@@ -221,6 +221,7 @@ $includeMethods
     int? limit,
     int? offset,
     RivetIncludes<${className}Include>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -230,6 +231,7 @@ $includeMethods
       limit: limit,
       offset: offset,
       includes: include?.call(${className}Include(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 ''';

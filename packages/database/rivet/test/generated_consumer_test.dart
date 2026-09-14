@@ -322,6 +322,94 @@ void main() {
       expect(table.code.storage.asc(), isA<RivetOrder>());
     });
 
+    test('should expose validated vector-index metadata without filling omitted defaults', () {
+      final schema = VectorDocuments.db.buildSchema();
+      final declaration = RivetDatabaseSchema(
+        name: 'vector_indexes',
+        tables: [schema as RivetTableSchema<Object?, Object?>],
+      ).toJson();
+      final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final indexes = (table['indexes']! as List<Object?>).cast<Map<String, Object?>>();
+
+      expect(indexes.take(3).map((index) => index['method']), everyElement('hnsw'));
+      expect(indexes.first['options'], {'m': 8, 'efConstruction': 32});
+      expect(indexes[1]['options'], isEmpty);
+      expect(
+        indexes
+            .take(3)
+            .map(
+              (index) =>
+                  ((index['terms']! as List<Object?>).single!
+                      as Map<String, Object?>)['operatorClass'],
+            ),
+        ['vector_cosine_ops', 'vector_l2_ops', 'vector_ip_ops'],
+      );
+      expect(declaration['requirements'], [
+        {
+          'kind': 'extension',
+          'name': 'vector',
+          'minimumVersion': '0.8.6',
+          'indexMethods': {
+            'hnsw': ['vector_cosine_ops', 'vector_ip_ops', 'vector_l2_ops'],
+            'ivfflat': ['vector_cosine_ops', 'vector_ip_ops', 'vector_l2_ops'],
+          },
+        },
+        {
+          'kind': 'extension',
+          'name': 'vectorscale',
+          'minimumVersion': '0.9.1',
+          'indexMethods': {
+            'diskann': ['vector_cosine_ops', 'vector_ip_ops', 'vector_l2_ops'],
+          },
+        },
+      ]);
+      expect(
+        indexes.skip(3).take(3).map((index) => index['method']),
+        everyElement('ivfflat'),
+      );
+      expect(indexes[3]['options'], {'lists': 4});
+      expect(indexes[4]['options'], isEmpty);
+      expect(
+        indexes
+            .skip(3)
+            .take(3)
+            .map(
+              (index) =>
+                  ((index['terms']! as List<Object?>).single!
+                      as Map<String, Object?>)['operatorClass'],
+            ),
+        ['vector_cosine_ops', 'vector_l2_ops', 'vector_ip_ops'],
+      );
+      expect(indexes.skip(6).map((index) => index['method']), everyElement('diskann'));
+      expect(indexes[6]['options'], {
+        'storageLayout': 'memory_optimized',
+        'numNeighbors': 20,
+        'searchListSize': 30,
+        'maxAlpha': 1.4,
+        'numDimensions': 2,
+        'numBitsPerDimension': 2,
+      });
+      expect(indexes[7]['options'], {'storageLayout': 'plain'});
+      expect(indexes[8]['options'], isEmpty);
+      expect(
+        indexes
+            .skip(6)
+            .map(
+              (index) =>
+                  ((index['terms']! as List<Object?>).single!
+                      as Map<String, Object?>)['operatorClass'],
+            ),
+        ['vector_cosine_ops', 'vector_l2_ops', 'vector_ip_ops'],
+      );
+    });
+
+    test('should reject HNSW options that violate backend defaults', () {
+      expect(() => _hnswSchema(const Hnsw(m: 16, efConstruction: 31)), throwsArgumentError);
+      expect(() => _hnswSchema(const Hnsw(m: 100)), throwsArgumentError);
+      expect(() => _hnswSchema(const Hnsw(efConstruction: 31)), throwsArgumentError);
+      expect(() => _hnswSchema(const Hnsw(m: 16, efConstruction: 32)), returnsNormally);
+    });
+
     test('should compose one native enum declaration for scalar and array storage', () {
       final declaration = RivetDatabaseSchema(
         name: 'enum_fixture',
@@ -397,6 +485,29 @@ final class _CompositeParent extends RivetTableDefinition<_CompositeParent> {
   late final first = integer()();
   late final second = integer()();
   late final children = many<_CompositeChild>(relation: (child) => child.parent)();
+}
+
+final class _HnswTable extends RivetTableDefinition<_HnswTable> {
+  _HnswTable(this.method);
+
+  final Hnsw method;
+  late final embedding = vector(dimensions: 3)();
+  late final indexes = [
+    index('embedding_hnsw').using(method).on([embedding.l2Ops()]),
+  ];
+}
+
+RivetTableSchema<_HnswTable, Object> _hnswSchema(Hnsw method) {
+  final definition = _HnswTable(method);
+  return RivetTableSchema<_HnswTable, Object>(
+    schemaName: 'search',
+    tableName: 'documents',
+    definition: definition,
+    columns: [definition.embedding],
+    columnNames: const ['embedding'],
+    decode: (_, _) => Object(),
+    indexes: () => definition.indexes,
+  );
 }
 
 final class _CompositeChild extends RivetTableDefinition<_CompositeChild> {

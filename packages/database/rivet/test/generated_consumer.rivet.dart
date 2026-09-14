@@ -155,6 +155,7 @@ final class _$UserProfilesDB
     int? limit,
     int? offset,
     RivetIncludes<UserProfilesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -164,6 +165,7 @@ final class _$UserProfilesDB
       limit: limit,
       offset: offset,
       includes: include?.call(UserProfilesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -331,6 +333,7 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
     int? limit,
     int? offset,
     RivetIncludes<PostsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -340,6 +343,7 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
       limit: limit,
       offset: offset,
       includes: include?.call(PostsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -666,6 +670,7 @@ final class _$RelationalUsersDB
     int? limit,
     int? offset,
     RivetIncludes<RelationalUsersInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -675,6 +680,7 @@ final class _$RelationalUsersDB
       limit: limit,
       offset: offset,
       includes: include?.call(RelationalUsersInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -1066,6 +1072,7 @@ final class _$RelationalPostsDB
     int? limit,
     int? offset,
     RivetIncludes<RelationalPostsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -1075,6 +1082,7 @@ final class _$RelationalPostsDB
       limit: limit,
       offset: offset,
       includes: include?.call(RelationalPostsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -1287,6 +1295,7 @@ final class _$RelationalCommentsDB
     int? limit,
     int? offset,
     RivetIncludes<RelationalCommentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -1296,6 +1305,7 @@ final class _$RelationalCommentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(RelationalCommentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -1548,6 +1558,7 @@ final class _$ThroughBooksDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughBooksInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -1557,6 +1568,7 @@ final class _$ThroughBooksDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughBooksInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -1769,6 +1781,7 @@ final class _$ThroughTagsDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughTagsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -1778,6 +1791,7 @@ final class _$ThroughTagsDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughTagsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -2085,6 +2099,7 @@ final class _$ThroughBookTagsDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughBookTagsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -2094,6 +2109,7 @@ final class _$ThroughBookTagsDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughBookTagsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -2331,6 +2347,7 @@ final class _$ThroughReviewsDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughReviewsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -2340,6 +2357,7 @@ final class _$ThroughReviewsDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughReviewsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -2581,6 +2599,7 @@ final class _$ThroughTagNotesDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughTagNotesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -2590,6 +2609,7 @@ final class _$ThroughTagNotesDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughTagNotesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -3327,6 +3347,462 @@ final class _$VectorValuesDB
   }) => RivetDelete(buildSchema(), where: where);
 }
 
+/// Typed relation include scope for [VectorCategories].
+final class VectorCategoriesInclude {
+  /// Creates the generated include scope.
+  const VectorCategoriesInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<VectorCategories, VectorCategoriesRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [documents] relation.
+  RivetInclude<VectorDocuments, VectorDocumentsRow> documents({
+    RivetWhere<VectorDocuments>? where,
+    RivetOrderBy<VectorDocuments>? orderBy,
+    int? limit,
+
+    RivetIncludes<VectorDocumentsInclude>? include,
+  }) {
+    final target = VectorDocuments.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'documents' : '$path.documents';
+    return RivetInclude<VectorDocuments, VectorDocumentsRow>(
+      name: 'documents',
+      path: relationPath,
+      relation: _schema.relations['documents']!,
+      targetSchema: target,
+
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+
+      includes:
+          include?.call(VectorDocumentsInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr195.vectorCategories'.
+final class VectorCategoriesRow {
+  /// Creates a row from decoded column and relation values.
+  const VectorCategoriesRow({
+    required this.id,
+    required this.name,
+    this.documents = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `name`.
+  final String name;
+
+  /// Loaded or unloaded `documents` relation.
+  final Relation<List<VectorDocumentsRow>> documents;
+}
+
+/// Generated values accepted by mutations of 'fbr195.vectorCategories'.
+final class VectorCategoriesCompanion
+    implements RivetCompanion<VectorCategories> {
+  const VectorCategoriesCompanion._({required this.id, required this.name});
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory VectorCategoriesCompanion.insert({
+    required RivetValue<VectorCategories, int, int> id,
+    required RivetValue<VectorCategories, String, String> name,
+  }) => VectorCategoriesCompanion._(id: id, name: name);
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory VectorCategoriesCompanion.update({
+    RivetValue<VectorCategories, int, int> id = const RivetValue.absent(),
+    RivetValue<VectorCategories, String, String> name =
+        const RivetValue.absent(),
+  }) => VectorCategoriesCompanion._(id: id, name: name);
+
+  /// Mutation value for `id`.
+  final RivetValue<VectorCategories, int, int> id;
+
+  /// Mutation value for `name`.
+  final RivetValue<VectorCategories, String, String> name;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<VectorCategories>> operator [](RivetCompanionKey key) =>
+      [RivetAssignment('id', id), RivetAssignment('name', name)];
+}
+
+final class _$VectorCategoriesDB
+    extends RivetTableAccessor<VectorCategories, VectorCategoriesRow> {
+  const _$VectorCategoriesDB();
+
+  @override
+  RivetTableSchema<VectorCategories, VectorCategoriesRow> buildSchema() {
+    VectorCategories createDefinition() {
+      final definition = VectorCategories();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    VectorCategoriesRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => VectorCategoriesRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      name: transport
+          ? definition.name.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.name.decodeValue(values[1], isSqlNull: sqlNulls[1]),
+      documents: relations.read('documents'),
+    );
+
+    final builtSchema = RivetTableSchema<VectorCategories, VectorCategoriesRow>(
+      schemaName: 'fbr195',
+      tableName: 'vectorCategories',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'name'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.name as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      relations: {
+        'documents': definition.documents as RivetRelationDescriptor<Object?>,
+      },
+    );
+    definition.documents.bind(
+      name: 'documents',
+      ownerSchema: builtSchema,
+      targetSchema: () => VectorDocuments.db.buildSchema(),
+    );
+    return builtSchema;
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<VectorCategories, VectorCategoriesRow> find({
+    RivetWhere<VectorCategories>? where,
+    RivetOrderBy<VectorCategories>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<VectorCategoriesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(VectorCategoriesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<VectorCategories, VectorCategoriesRow> insert(
+    VectorCategoriesCompanion companion, {
+    RivetOnConflict<VectorCategories>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<VectorCategories, VectorCategoriesRow> insertMany(
+    Iterable<VectorCategoriesCompanion> companions, {
+    RivetOnConflict<VectorCategories>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<VectorCategories, VectorCategoriesRow> update(
+    VectorCategoriesCompanion companion, {
+    RivetWhere<VectorCategories>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<VectorCategories, VectorCategoriesRow> delete({
+    RivetWhere<VectorCategories>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
+/// Typed relation include scope for [VectorDocuments].
+final class VectorDocumentsInclude {
+  /// Creates the generated include scope.
+  const VectorDocumentsInclude(this._schema, {this.path = ''});
+
+  final RivetTableSchema<VectorDocuments, VectorDocumentsRow> _schema;
+
+  /// Full relation path used in diagnostics.
+  final String path;
+
+  /// Includes the [category] relation.
+  RivetInclude<VectorCategories, VectorCategoriesRow> category({
+    RivetWhere<VectorCategories>? where,
+
+    RivetIncludes<VectorCategoriesInclude>? include,
+  }) {
+    final target = VectorCategories.db.buildSchema();
+
+    final relationPath = path.isEmpty ? 'category' : '$path.category';
+    return RivetInclude<VectorCategories, VectorCategoriesRow>(
+      name: 'category',
+      path: relationPath,
+      relation: _schema.relations['category']!,
+      targetSchema: target,
+
+      where: where,
+
+      includes:
+          include?.call(VectorCategoriesInclude(target, path: relationPath)) ??
+          const [],
+    );
+  }
+}
+
+/// Generated row returned by reads from 'fbr195.vectorDocuments'.
+final class VectorDocumentsRow {
+  /// Creates a row from decoded column and relation values.
+  const VectorDocumentsRow({
+    required this.id,
+    required this.categoryId,
+    required this.title,
+    required this.embedding,
+    this.category = const Relation.unloaded(),
+  });
+
+  /// Value read from `id`.
+  final int id;
+
+  /// Value read from `categoryId`.
+  final int categoryId;
+
+  /// Value read from `title`.
+  final String title;
+
+  /// Value read from `embedding`.
+  final Float32List? embedding;
+
+  /// Loaded or unloaded `category` relation.
+  final Relation<VectorCategoriesRow?> category;
+}
+
+/// Generated values accepted by mutations of 'fbr195.vectorDocuments'.
+final class VectorDocumentsCompanion
+    implements RivetCompanion<VectorDocuments> {
+  const VectorDocumentsCompanion._({
+    required this.id,
+    required this.categoryId,
+    required this.title,
+    required this.embedding,
+  });
+
+  /// Creates values for an insert, leaving defaulted columns absent.
+  factory VectorDocumentsCompanion.insert({
+    required RivetValue<VectorDocuments, int, int> id,
+    required RivetValue<VectorDocuments, int, int> categoryId,
+    required RivetValue<VectorDocuments, String, String> title,
+    RivetValue<VectorDocuments, Float32List?, Float32List?> embedding =
+        const RivetValue.absent(),
+  }) => VectorDocumentsCompanion._(
+    id: id,
+    categoryId: categoryId,
+    title: title,
+    embedding: embedding,
+  );
+
+  /// Creates values for an update, leaving untouched columns absent.
+  factory VectorDocumentsCompanion.update({
+    RivetValue<VectorDocuments, int, int> id = const RivetValue.absent(),
+    RivetValue<VectorDocuments, int, int> categoryId =
+        const RivetValue.absent(),
+    RivetValue<VectorDocuments, String, String> title =
+        const RivetValue.absent(),
+    RivetValue<VectorDocuments, Float32List?, Float32List?> embedding =
+        const RivetValue.absent(),
+  }) => VectorDocumentsCompanion._(
+    id: id,
+    categoryId: categoryId,
+    title: title,
+    embedding: embedding,
+  );
+
+  /// Mutation value for `id`.
+  final RivetValue<VectorDocuments, int, int> id;
+
+  /// Mutation value for `categoryId`.
+  final RivetValue<VectorDocuments, int, int> categoryId;
+
+  /// Mutation value for `title`.
+  final RivetValue<VectorDocuments, String, String> title;
+
+  /// Mutation value for `embedding`.
+  final RivetValue<VectorDocuments, Float32List?, Float32List?> embedding;
+
+  /// The generated column assignments in declaration order.
+  @override
+  List<RivetAssignment<VectorDocuments>> operator [](RivetCompanionKey key) => [
+    RivetAssignment('id', id),
+    RivetAssignment('categoryId', categoryId),
+    RivetAssignment('title', title),
+    RivetAssignment('embedding', embedding),
+  ];
+}
+
+final class _$VectorDocumentsDB
+    extends RivetTableAccessor<VectorDocuments, VectorDocumentsRow> {
+  const _$VectorDocumentsDB();
+
+  @override
+  RivetTableSchema<VectorDocuments, VectorDocumentsRow> buildSchema() {
+    VectorDocuments createDefinition() {
+      final definition = VectorDocuments();
+
+      return definition;
+    }
+
+    final definition = createDefinition();
+    VectorDocumentsRow decodeRow(
+      List<Object?> values,
+      List<bool> sqlNulls,
+      RivetRelationValues relations, {
+      required bool transport,
+    }) => VectorDocumentsRow(
+      id: transport
+          ? definition.id.decodeTransportValue(
+              values[0],
+              isSqlNull: sqlNulls[0],
+            )
+          : definition.id.decodeValue(values[0], isSqlNull: sqlNulls[0]),
+      categoryId: transport
+          ? definition.categoryId.decodeTransportValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            )
+          : definition.categoryId.decodeValue(
+              values[1],
+              isSqlNull: sqlNulls[1],
+            ),
+      title: transport
+          ? definition.title.decodeTransportValue(
+              values[2],
+              isSqlNull: sqlNulls[2],
+            )
+          : definition.title.decodeValue(values[2], isSqlNull: sqlNulls[2]),
+      embedding: transport
+          ? definition.embedding.decodeTransportValue(
+              values[3],
+              isSqlNull: sqlNulls[3],
+            )
+          : definition.embedding.decodeValue(values[3], isSqlNull: sqlNulls[3]),
+      category: relations.read('category'),
+    );
+
+    final builtSchema = RivetTableSchema<VectorDocuments, VectorDocumentsRow>(
+      schemaName: 'fbr195',
+      tableName: 'vectorDocuments',
+      definition: definition,
+      columns: [
+        definition.id as RivetColumn<Object?>,
+        definition.categoryId as RivetColumn<Object?>,
+        definition.title as RivetColumn<Object?>,
+        definition.embedding as RivetColumn<Object?>,
+      ],
+      columnNames: ['id', 'categoryId', 'title', 'embedding'],
+      createDefinition: createDefinition,
+      columnsFor: (definition) => [
+        definition.id as RivetColumn<Object?>,
+        definition.categoryId as RivetColumn<Object?>,
+        definition.title as RivetColumn<Object?>,
+        definition.embedding as RivetColumn<Object?>,
+      ],
+      decode: (values, sqlNulls) => decodeRow(
+        values,
+        sqlNulls,
+        const RivetRelationValues(),
+        transport: false,
+      ),
+      decodeRelated: decodeRow,
+
+      indexes: () => definition._indexes,
+      relations: {
+        'category': definition.category as RivetRelationDescriptor<Object?>,
+      },
+    );
+    definition.category.bind(
+      name: 'category',
+      ownerSchema: builtSchema,
+      targetSchema: () => VectorCategories.db.buildSchema(),
+    );
+    return builtSchema;
+  }
+
+  /// Creates a reusable read plan with typed relation includes.
+  RivetFind<VectorDocuments, VectorDocumentsRow> find({
+    RivetWhere<VectorDocuments>? where,
+    RivetOrderBy<VectorDocuments>? orderBy,
+    int? limit,
+    int? offset,
+    RivetIncludes<VectorDocumentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
+  }) {
+    final schema = buildSchema();
+    return RivetFind(
+      schema,
+      where: where,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+      includes: include?.call(VectorDocumentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
+    );
+  }
+
+  /// Creates a reusable insert plan.
+  RivetInsert<VectorDocuments, VectorDocumentsRow> insert(
+    VectorDocumentsCompanion companion, {
+    RivetOnConflict<VectorDocuments>? onConflict,
+  }) => RivetInsert(buildSchema(), companion, onConflict: onConflict);
+
+  /// Creates a reusable batch insert plan.
+  RivetInsertMany<VectorDocuments, VectorDocumentsRow> insertMany(
+    Iterable<VectorDocumentsCompanion> companions, {
+    RivetOnConflict<VectorDocuments>? onConflict,
+  }) => RivetInsertMany(buildSchema(), companions, onConflict: onConflict);
+
+  /// Creates a reusable update plan.
+  RivetUpdate<VectorDocuments, VectorDocumentsRow> update(
+    VectorDocumentsCompanion companion, {
+    RivetWhere<VectorDocuments>? where,
+  }) => RivetUpdate(buildSchema(), companion, where: where);
+
+  /// Creates a reusable delete plan.
+  RivetDelete<VectorDocuments, VectorDocumentsRow> delete({
+    RivetWhere<VectorDocuments>? where,
+  }) => RivetDelete(buildSchema(), where: where);
+}
+
 /// Generated row returned by reads from 'fbr122.arrayValues'.
 final class ArrayValuesRow {
   /// Creates a row from decoded column and relation values.
@@ -3804,6 +4280,7 @@ final class _$CodecParentsDB
     int? limit,
     int? offset,
     RivetIncludes<CodecParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -3813,6 +4290,7 @@ final class _$CodecParentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(CodecParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -4305,6 +4783,7 @@ final class _$CodecValuesDB
     int? limit,
     int? offset,
     RivetIncludes<CodecValuesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -4314,6 +4793,7 @@ final class _$CodecValuesDB
       limit: limit,
       offset: offset,
       includes: include?.call(CodecValuesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -4533,6 +5013,7 @@ final class _$CodecLinksDB
     int? limit,
     int? offset,
     RivetIncludes<CodecLinksInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -4542,6 +5023,7 @@ final class _$CodecLinksDB
       limit: limit,
       offset: offset,
       includes: include?.call(CodecLinksInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -6222,6 +6704,7 @@ final class _$MutationParentsDB
     int? limit,
     int? offset,
     RivetIncludes<MutationParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -6231,6 +6714,7 @@ final class _$MutationParentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -6415,6 +6899,7 @@ final class _$MutationChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -6424,6 +6909,7 @@ final class _$MutationChildrenDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -6783,6 +7269,7 @@ final class _$MutationUpdateUsersDB
     int? limit,
     int? offset,
     RivetIncludes<MutationUpdateUsersInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -6792,6 +7279,7 @@ final class _$MutationUpdateUsersDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationUpdateUsersInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -6987,6 +7475,7 @@ final class _$MutationUpdateChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationUpdateChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -6997,6 +7486,7 @@ final class _$MutationUpdateChildrenDB
       offset: offset,
       includes:
           include?.call(MutationUpdateChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -7244,6 +7734,7 @@ final class _$MutationDeleteParentsDB
     int? limit,
     int? offset,
     RivetIncludes<MutationDeleteParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -7253,6 +7744,7 @@ final class _$MutationDeleteParentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationDeleteParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -7452,6 +7944,7 @@ final class _$MutationCascadeChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationCascadeChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -7462,6 +7955,7 @@ final class _$MutationCascadeChildrenDB
       offset: offset,
       includes:
           include?.call(MutationCascadeChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -7662,6 +8156,7 @@ final class _$MutationRestrictChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationRestrictChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -7672,6 +8167,7 @@ final class _$MutationRestrictChildrenDB
       offset: offset,
       includes:
           include?.call(MutationRestrictChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -7951,6 +8447,7 @@ final class _$MutationBatchParentsDB
     int? limit,
     int? offset,
     RivetIncludes<MutationBatchParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -7960,6 +8457,7 @@ final class _$MutationBatchParentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationBatchParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -8155,6 +8653,7 @@ final class _$MutationBatchChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationBatchChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -8164,6 +8663,7 @@ final class _$MutationBatchChildrenDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationBatchChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -8652,6 +9152,7 @@ final class _$MutationConflictParentsDB
     int? limit,
     int? offset,
     RivetIncludes<MutationConflictParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -8662,6 +9163,7 @@ final class _$MutationConflictParentsDB
       offset: offset,
       includes:
           include?.call(MutationConflictParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -8862,6 +9364,7 @@ final class _$MutationConflictChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationConflictChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -8872,6 +9375,7 @@ final class _$MutationConflictChildrenDB
       offset: offset,
       includes:
           include?.call(MutationConflictChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 

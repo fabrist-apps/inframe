@@ -142,3 +142,138 @@ Absent fields in the conflict update run their `onUpdate` callbacks once when th
 The column catalog is `chronoID`, `text`, `integer`, `real`, `boolean`, `dateTime`, `json`, `enumText`, and fixed-dimension `vector`. Add `.map(converter)` for domain values and `.array()` for one-dimensional native PostgreSQL arrays. Nullability before `.array()` applies to elements; nullability after it applies to the array column.
 
 The integration matrix pins `postgres` 3.5.12 and the Inframe image at `sha256:a29d81973c699fdf070b10f77bf5b91b1d94a59fcd7792f67410ba655761f871`: PostgreSQL 18.6, pgvector 0.8.6, pgvectorscale 0.9.1, and pg_textsearch 1.4.0.
+
+Vector distances are typed SQL expressions. They accept fixed-dimension
+`Float32List` query values and can be used in filters, ordering, and scores:
+
+```dart
+final nearest = await Books.db
+    .find(
+      orderBy: (book) => [
+        book.embedding.cosineDistance(queryEmbedding).asc(),
+      ],
+      limit: 10,
+    )
+    .withScore((book) => book.embedding.cosineDistance(queryEmbedding))
+    .get(db);
+```
+
+`find` defaults to `VectorSearchMode.exact`. Exact vector queries materialize
+the eligible root rows before distance ordering and pagination, so an installed
+HNSW, IVFFlat, or StreamingDiskANN index cannot narrow the result population.
+`cosineDistance` rejects a zero query vector and returns a nullable score because
+a stored zero vector has undefined cosine distance. `l2Distance` and
+`negativeInnerProduct` accept stored zero vectors; lower negative inner products
+represent larger dot products. Rivet never normalizes embeddings implicitly.
+
+Declare HNSW indexes on scalar vector columns with the distance operator class
+used by indexed approximate queries:
+
+```dart
+@override
+List<RivetIndex> get indexes => [
+  index('books_embedding_hnsw')
+      .using(const Hnsw(m: 16, efConstruction: 64))
+      .on([embedding.cosineOps()]),
+];
+```
+
+`cosineOps()`, `l2Ops()`, and `innerProductOps()` map to pgvector's cosine,
+Euclidean, and negative inner-product operator classes. Omit `m` or
+`efConstruction` to let pgvector choose its build default; Rivet leaves omitted
+values out of snapshots and SQL. These are index build options. Approximate
+query tuning is selected separately when executing a query and does not change
+the index declaration. HNSW declarations require pgvector 0.8.6 or newer, one
+non-null or nullable scalar vector with at most 2,000 dimensions, `m` from 2 to
+100, and `efConstruction` from 4 to 1,000. After applying pgvector's defaults
+of 16 and 64, `efConstruction` must be at least twice `m`. Concurrent HNSW
+builds are not yet exposed.
+
+IVFFlat uses the same scalar operands with a separate method declaration:
+
+```dart
+index('books_embedding_ivfflat')
+    .using(const IvfFlat(lists: 100))
+    .on([embedding.l2Ops()]);
+```
+
+Omit `lists` to use pgvector's default without recording a value in the
+snapshot or DDL. On the pinned pgvector version, explicit values range from 1
+through 32,768 and scalar vectors can have at most 2,000 dimensions. `lists`
+is an index build option; transaction-scoped `probes` tuning belongs to query
+execution. Concurrent IVFFlat builds are not yet exposed.
+
+StreamingDiskANN uses pgvectorscale and keeps all extension defaults omitted:
+
+```dart
+index('books_embedding_diskann')
+    .using(
+      const DiskAnn(
+        storageLayout: DiskAnnStorageLayout.memoryOptimized,
+        numNeighbors: 50,
+        searchListSize: 100,
+        maxAlpha: 1.2,
+        numDimensions: 768,
+        numBitsPerDimension: 2,
+      ),
+    )
+    .on([embedding.cosineOps()]);
+```
+
+`memoryOptimized` indexes vectors up to 16,000 dimensions. `plain` stores
+uncompressed vectors, is limited to 2,000 indexed dimensions, and cannot use
+`innerProductOps()`. `numDimensions` can index a leading subset of the stored
+embedding. Multi-bit compression requires `memoryOptimized` storage and at
+most 930 indexed dimensions on pgvectorscale 0.9.1. The pinned manifest records
+the accepted ranges for all six build fields. Concurrent DiskANN builds and
+label-array operands are not exposed.
+
+Select approximate retrieval explicitly on a query with an ascending vector
+distance, nulls last, and a limit:
+
+```dart
+final candidates = await Books.db.find(
+  vectorSearch: VectorSearchMode.approximate,
+  where: (book) => book.published.equals(true),
+  orderBy: (book) => [
+    book.embedding.cosineDistance(queryEmbedding).asc(),
+    book.id.asc(),
+  ],
+  limit: 10,
+).get(db);
+```
+
+Rivet retrieves an index-eligible candidate set, materializes it, then applies
+every requested ordering term and pagination in the same SQL statement.
+Includes are loaded after candidate selection. The result is strictly ordered
+among the candidates returned by the backend; approximate mode does not promise
+global nearest-neighbor membership. If the query has no compatible leading
+distance order or limit, Rivet uses the exact materialized-root plan. Exact
+remains the default, including for vector filters and ordering inside relation
+includes, and no relaxed-order control is exposed.
+
+Query tuning is available only on an active transaction and applies to later
+queries on that transaction:
+
+```dart
+await db.transaction((tx) async {
+  await tx.setVectorSearchOptions(const HnswSearchOptions(efSearch: 80));
+  await tx.setVectorSearchOptions(const IvfFlatSearchOptions(probes: 4));
+  await tx.setVectorSearchOptions(
+    const DiskAnnSearchOptions(searchListSize: 200, rescore: 100),
+  );
+
+  return Books.db.find(
+    vectorSearch: VectorSearchMode.approximate,
+    orderBy: (book) => [book.embedding.cosineDistance(queryEmbedding).asc()],
+    limit: 10,
+  ).get(tx);
+});
+```
+
+Each call performs explicit setup before any data query. PostgreSQL resets the
+settings on commit or rollback, and an expired transaction rejects further
+configuration. Tuning does not select exact or approximate mode and does not
+force an index. The database pool has no session-wide tuning operation. The
+server must be provisioned with pgvector 0.8.6 and pgvectorscale 0.9.1 before
+these features are used; Rivet does not install extensions during open.

@@ -317,6 +317,7 @@ final class _$PackageLabelsDB
     int? limit,
     int? offset,
     RivetIncludes<PackageLabelsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -326,6 +327,7 @@ final class _$PackageLabelsDB
       limit: limit,
       offset: offset,
       includes: include?.call(PackageLabelsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -538,6 +540,7 @@ final class _$PackageLabelNotesDB
     int? limit,
     int? offset,
     RivetIncludes<PackageLabelNotesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -547,6 +550,7 @@ final class _$PackageLabelNotesDB
       limit: limit,
       offset: offset,
       includes: include?.call(PackageLabelNotesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 

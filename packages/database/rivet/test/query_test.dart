@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:rivet/rivet.dart';
 import 'package:test/test.dart';
 
@@ -8,6 +10,138 @@ void main() {
     late _RecordingExecutor executor;
 
     setUp(() => executor = _RecordingExecutor());
+
+    test('should compile validated vector distances through an exact root CTE', () async {
+      final query = Float32List.fromList([1, 2, 3]);
+
+      await VectorValues.db
+          .find(
+            where: (values) => values.embedding.l2Distance(query).lessThan(4),
+            orderBy: (values) => [
+              values.embedding.cosineDistance(query).asc(),
+              values.optionalEmbedding.negativeInnerProduct(query).desc(),
+            ],
+            limit: 5,
+          )
+          .withScore((values) => values.embedding.cosineDistance(query))
+          .get(executor);
+
+      final compiled = executor.queries.single;
+      expect(compiled.sql, startsWith('WITH "__rivet_roots" AS MATERIALIZED'));
+      expect(compiled.sql, contains('<->'));
+      expect(compiled.sql, contains('<=>'));
+      expect(compiled.sql, contains('<#>'));
+      expect(compiled.sql, contains('vector_norm'));
+      expect(compiled.sql, contains('ORDER BY'));
+      expect(compiled.sql, endsWith('LIMIT 5'));
+      expect(compiled.parameters, hasLength(5));
+    });
+
+    test('should materialize vector-ordered include populations', () async {
+      final query = Float32List.fromList([1, 0, 0]);
+
+      await VectorCategories.db
+          .find(
+            where: (category) => category.id.equals(1),
+            include: (include) => [
+              include.documents(
+                orderBy: (document) => [
+                  document.embedding.l2Distance(query).asc(),
+                  document.id.asc(),
+                ],
+                limit: 5,
+              ),
+            ],
+          )
+          .get(executor);
+
+      final compiled = executor.queries.single;
+      expect(compiled.sql, isNot(startsWith('WITH "__rivet_roots"')));
+      expect(compiled.sql, contains('AS MATERIALIZED ('));
+      expect(compiled.sql, contains('SELECT "__rivet_t1".*'));
+      expect(compiled.sql, contains(r'WHERE "__rivet_t0"."id" = $2::int4'));
+      expect(compiled.parameters, hasLength(2));
+      expect(compiled.requiredExtensions, {'vector'});
+    });
+
+    test('should validate vector query values before execution', () async {
+      expect(
+        () => VectorValues.db.find(
+          orderBy: (values) => [
+            values.embedding.cosineDistance(Float32List.fromList([0, 0, 0])).asc(),
+          ],
+        ),
+        throwsA(isA<RivetConversionException>()),
+      );
+      expect(
+        () => VectorValues.db.find(
+          orderBy: (values) => [
+            values.embedding.l2Distance(Float32List.fromList([1, 2])).asc(),
+          ],
+        ),
+        throwsA(isA<RivetConversionException>()),
+      );
+      expect(executor.queries, isEmpty);
+    });
+
+    test('should compile ordered approximate candidates and includes in one statement', () async {
+      final query = Float32List.fromList([1, 0, 0]);
+
+      await VectorDocuments.db
+          .find(
+            where: (document) => document.category.matches(
+              (category) => category.name.equals('science'),
+            ),
+            orderBy: (document) => [
+              document.embedding.cosineDistance(query).asc(),
+              document.title.desc(nulls: NullsOrder.first),
+            ],
+            limit: 2,
+            offset: 1,
+            include: (include) => [include.category()],
+            vectorSearch: VectorSearchMode.approximate,
+          )
+          .withScore((document) => document.embedding.l2Distance(query))
+          .get(executor);
+
+      final compiled = executor.queries.single;
+      expect(compiled.sql, startsWith('WITH "__rivet_candidates" AS MATERIALIZED'));
+      expect(compiled.sql, contains('EXISTS (SELECT 1'));
+      expect(compiled.sql, contains('ORDER BY ("__rivet_t0"."embedding" <=>'));
+      expect(compiled.sql, contains('ASC NULLS LAST LIMIT 3) SELECT'));
+      expect(compiled.sql, contains('vector_norm'));
+      expect(compiled.sql, contains('"title" DESC NULLS FIRST'));
+      expect(compiled.sql, endsWith('LIMIT 2 OFFSET 1'));
+      expect(compiled.sql, contains('jsonb_build_object'));
+      expect(compiled.parameters, hasLength(4));
+    });
+
+    test('should use an exact plan for incompatible approximate shapes', () async {
+      final query = Float32List.fromList([1, 0, 0]);
+
+      await VectorValues.db
+          .find(
+            orderBy: (values) => [
+              values.embedding.l2Distance(query).desc(),
+            ],
+            limit: 2,
+            vectorSearch: VectorSearchMode.approximate,
+          )
+          .get(executor);
+      await VectorValues.db
+          .find(
+            orderBy: (values) => [
+              values.embedding.l2Distance(query).asc(),
+            ],
+            vectorSearch: VectorSearchMode.approximate,
+          )
+          .get(executor);
+
+      expect(
+        executor.queries.map((query) => query.sql),
+        everyElement(startsWith('WITH "__rivet_roots" AS MATERIALIZED')),
+      );
+    });
 
     test('should compile bound filters and nulls-last ordering', () async {
       executor.rows = [

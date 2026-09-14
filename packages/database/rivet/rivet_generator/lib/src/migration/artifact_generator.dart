@@ -40,11 +40,7 @@ final class RivetArtifactGenerator {
   }) async {
     _validateLabel(name);
     final physicalDeclaration = normalizeDeclaration(declaration);
-    if ((physicalDeclaration['requirements']! as List<Object?>).isNotEmpty) {
-      throw UnsupportedError(
-        'Rivet migration generation does not provision extension requirements yet.',
-      );
-    }
+    _validateRequirements(physicalDeclaration);
     directory.createSync(recursive: true);
     final journalFile = File('${directory.path}/journal.json');
     if (journalFile.existsSync()) {
@@ -502,6 +498,7 @@ final class RivetArtifactGenerator {
           'tableId': table['id'],
           'name': name,
           'unique': declared['unique'],
+          if (declared['method'] case final String method) 'method': method,
           'terms': [
             for (final rawTerm in declared['terms']! as List<Object?>)
               _settleIndexTerm(rawTerm! as Map<String, Object?>, columnsByName),
@@ -610,7 +607,11 @@ final class RivetArtifactGenerator {
     final name = term['column']! as String;
     final column = columns[name];
     if (column == null) throw FormatException('Index references unknown column $name.');
-    return {'columnId': column['id'], 'descending': term['descending'] == true};
+    return {
+      'columnId': column['id'],
+      'descending': term['descending'] == true,
+      if (term['operatorClass'] case final String operatorClass) 'operatorClass': operatorClass,
+    };
   }
 
   Map<String, Object?> _settleExpression(
@@ -669,6 +670,7 @@ final class RivetArtifactGenerator {
     'boolean' => 'bool',
     'dateTime' => 'timestamptz(3)',
     'json' => 'jsonb',
+    'vector' => 'vector(${storage['dimensions']})',
     'enum' =>
       enumTypes[storage['enumId']] ??
           (throw const FormatException('Enum storage references an unknown type.')),
@@ -1295,10 +1297,10 @@ final class RivetArtifactGenerator {
                 'indexes',
               ).where((value) => value['id'] == index['id']).singleOrNull;
         if (old != null && _sameObject(old, index)) continue;
-        if (canonicalJson(index['options']) != canonicalJson(<String, Object?>{}) ||
-            canonicalJson(index['platforms']) != canonicalJson(const ['postgresql'])) {
+        _validateIndex(index, table);
+        if (canonicalJson(index['platforms']) != canonicalJson(const ['postgresql'])) {
           throw UnsupportedError(
-            'Index ${index['name']} uses options or platforms that ordinary Rivet migrations do not support.',
+            'Index ${index['name']} uses platforms that Rivet migrations do not support.',
           );
         }
         buffer.writeln(_createIndexSql(qualified, index, columnNames));
@@ -1307,22 +1309,225 @@ final class RivetArtifactGenerator {
     return '$buffer$foreignKeys';
   }
 
+  void _validateIndex(Map<String, Object?> index, Map<String, Object?> table) {
+    final method = index['method'];
+    final options = index['options']! as Map<String, Object?>;
+    final terms = (index['terms']! as List<Object?>).cast<Map<String, Object?>>();
+    if (method == null) {
+      if (options.isNotEmpty || terms.any((term) => term['operatorClass'] != null)) {
+        throw UnsupportedError(
+          'Index ${index['name']} uses options or operator classes without a supported method.',
+        );
+      }
+      return;
+    }
+    if (!const {'hnsw', 'ivfflat', 'diskann'}.contains(method) ||
+        index['unique'] == true ||
+        terms.length != 1) {
+      throw UnsupportedError(
+        'Index ${index['name']} has an unsupported vector-index declaration.',
+      );
+    }
+    final term = terms.single;
+    if (term['descending'] == true ||
+        !const {
+          'vector_cosine_ops',
+          'vector_l2_ops',
+          'vector_ip_ops',
+        }.contains(term['operatorClass'])) {
+      throw UnsupportedError('Index ${index['name']} has an unsupported vector-index operand.');
+    }
+    final column = (table['columns']! as List<Object?>).cast<Map<String, Object?>>().singleWhere(
+      (column) => column['id'] == term['columnId'],
+    );
+    final storage = column['storage']! as Map<String, Object?>;
+    final dimensions = storage['dimensions'];
+    final maximumDimensions = method == 'diskann' ? 16000 : 2000;
+    if (storage['kind'] != 'vector' || dimensions is! int || dimensions > maximumDimensions) {
+      throw UnsupportedError(
+        'Index ${index['name']} requires a scalar vector up to '
+        '$maximumDimensions dimensions.',
+      );
+    }
+    final validOptions = switch (method) {
+      'hnsw' => _validHnswOptions(options),
+      'ivfflat' =>
+        !options.keys.any((key) => key != 'lists') &&
+            _integerOption(options['lists'], minimum: 1, maximum: 32768),
+      'diskann' => _validDiskAnnOptions(options, dimensions, term['operatorClass']),
+      _ => false,
+    };
+    if (!validOptions) {
+      throw UnsupportedError('Index ${index['name']} has unsupported $method options.');
+    }
+  }
+
+  bool _integerOption(Object? value, {required int minimum, required int maximum}) =>
+      value == null || (value is int && value >= minimum && value <= maximum);
+
+  bool _validHnswOptions(Map<String, Object?> options) {
+    if (options.keys.any((key) => !const {'m', 'efConstruction'}.contains(key)) ||
+        !_integerOption(options['m'], minimum: 2, maximum: 100) ||
+        !_integerOption(options['efConstruction'], minimum: 4, maximum: 1000)) {
+      return false;
+    }
+    final m = options['m'] as int? ?? 16;
+    final efConstruction = options['efConstruction'] as int? ?? 64;
+    return efConstruction >= 2 * m;
+  }
+
+  bool _validDiskAnnOptions(
+    Map<String, Object?> options,
+    int dimensions,
+    Object? operatorClass,
+  ) {
+    if (options.keys.any(
+      (key) => !const {
+        'storageLayout',
+        'numNeighbors',
+        'searchListSize',
+        'maxAlpha',
+        'numDimensions',
+        'numBitsPerDimension',
+      }.contains(key),
+    )) {
+      return false;
+    }
+    final storageLayout = options['storageLayout'] ?? 'memory_optimized';
+    final maxAlpha = options['maxAlpha'];
+    final numDimensions = options['numDimensions'];
+    final numBits = options['numBitsPerDimension'];
+    if (!const {'memory_optimized', 'plain'}.contains(storageLayout) ||
+        !_integerOption(options['numNeighbors'], minimum: 10, maximum: 1000) ||
+        !_integerOption(options['searchListSize'], minimum: 10, maximum: 1000) ||
+        (maxAlpha != null &&
+            (maxAlpha is! num || !maxAlpha.toDouble().isFinite || maxAlpha < 1 || maxAlpha > 5)) ||
+        !_integerOption(numDimensions, minimum: 1, maximum: dimensions) ||
+        !_integerOption(numBits, minimum: 1, maximum: 32)) {
+      return false;
+    }
+    final indexedDimensions = numDimensions as int? ?? dimensions;
+    if (storageLayout == 'plain' &&
+        (indexedDimensions > 2000 ||
+            operatorClass == 'vector_ip_ops' ||
+            (numBits is int && numBits > 1))) {
+      return false;
+    }
+    final bits = numBits as int?;
+    return bits == null || bits <= 1 || indexedDimensions <= 930;
+  }
+
   String _createIndexSql(
     String qualified,
     Map<String, Object?> index,
     Map<String, String> columnNames,
   ) {
     final unique = index['unique'] == true ? 'UNIQUE ' : '';
+    final method = index['method'] is String ? ' USING ${index['method']}' : '';
     final terms = [
       for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>())
-        '${_quote(columnNames[term['columnId']]!)}${term['descending'] == true ? ' DESC' : ' ASC'}',
+        _indexTermSql(term, columnNames),
     ].join(', ');
+    final options = index['options']! as Map<String, Object?>;
+    final renderedOptions = options.isEmpty
+        ? ''
+        : ' WITH (${options.entries.map((entry) => '${_snakeCase(entry.key)} = ${entry.value}').join(', ')})';
     final predicate = index['predicate'] is Map<String, Object?>
         ? ' WHERE ${renderSchemaExpression(index['predicate']! as Map<String, Object?>, resolveReference: (id) => columnNames[id]!)}'
         : '';
     return 'CREATE ${unique}INDEX ${_quote(index['name']! as String)} '
-        'ON $qualified ($terms)$predicate;';
+        'ON $qualified$method ($terms)$renderedOptions$predicate;';
   }
+
+  String _indexTermSql(Map<String, Object?> term, Map<String, String> columnNames) {
+    final column = _quote(columnNames[term['columnId']]!);
+    final operatorClass = switch (term['operatorClass']) {
+      final String value => ' $value',
+      _ => '',
+    };
+    final ordering = term['operatorClass'] == null
+        ? (term['descending'] == true ? ' DESC' : ' ASC')
+        : '';
+    return '$column$operatorClass$ordering';
+  }
+
+  void _validateRequirements(Map<String, Object?> declaration) {
+    final requiredByExtension = <String, Map<String, Set<String>>>{};
+    for (final table in (declaration['tables']! as List<Object?>).cast<Map<String, Object?>>()) {
+      for (final index in (table['indexes']! as List<Object?>).cast<Map<String, Object?>>()) {
+        final method = index['method'];
+        final extension = switch (method) {
+          'hnsw' || 'ivfflat' => 'vector',
+          'diskann' => 'vectorscale',
+          _ => null,
+        };
+        if (extension == null) continue;
+        final requiredIndexMethods = requiredByExtension.putIfAbsent(
+          extension,
+          () => <String, Set<String>>{},
+        );
+        final operatorClasses = requiredIndexMethods.putIfAbsent(
+          method! as String,
+          () => <String>{},
+        );
+        for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>()) {
+          if (term['operatorClass'] case final String value) operatorClasses.add(value);
+        }
+      }
+    }
+    final requirements = declaration['requirements']! as List<Object?>;
+    if (requiredByExtension.isEmpty && requirements.isEmpty) return;
+    if (requirements.length != requiredByExtension.length) {
+      throw UnsupportedError('Rivet does not support the declared backend requirement.');
+    }
+    final seenExtensions = <String>{};
+    for (final raw in requirements) {
+      final indexMethods = raw is Map<String, Object?> ? raw['indexMethods'] : null;
+      final name = raw is Map<String, Object?> ? raw['name'] : null;
+      final requiredIndexMethods = requiredByExtension[name];
+      final requiredVersion = name == 'vector' ? '0.8.6' : '0.9.1';
+      if (raw is! Map<String, Object?> ||
+          raw['kind'] != 'extension' ||
+          name is! String ||
+          !seenExtensions.add(name) ||
+          requiredIndexMethods == null ||
+          raw['minimumVersion'] != requiredVersion ||
+          indexMethods is! Map<String, Object?> ||
+          indexMethods.length != requiredIndexMethods.length ||
+          !_matchesIndexMethods(indexMethods, requiredIndexMethods) ||
+          raw.length != 4) {
+        throw UnsupportedError('Rivet does not support the declared backend requirement.');
+      }
+    }
+  }
+
+  bool _matchesIndexMethods(
+    Map<String, Object?> actual,
+    Map<String, Set<String>> required,
+  ) {
+    for (final entry in required.entries) {
+      final operatorClasses = actual[entry.key];
+      if (operatorClasses is! List<Object?> ||
+          !operatorClasses.every(
+            const {
+              'vector_cosine_ops',
+              'vector_l2_ops',
+              'vector_ip_ops',
+            }.contains,
+          ) ||
+          operatorClasses.whereType<String>().toSet().length != operatorClasses.length ||
+          operatorClasses.length != entry.value.length ||
+          !entry.value.containsAll(operatorClasses.whereType<String>())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  String _snakeCase(String value) => value.replaceAllMapped(
+    RegExp('[A-Z]'),
+    (match) => '_${match[0]!.toLowerCase()}',
+  );
 
   String _addConstraintSql(
     String qualified,

@@ -71,6 +71,7 @@ final class RivetTableSchema<Definition, Row> {
           when predicate.columns.any((column) => !columns.contains(column))) {
         throw ArgumentError('Index $schemaName.$tableName.${index.name} has an invalid predicate.');
       }
+      _validateIndex(index, '$schemaName.$tableName.${index.name}');
     }
     for (final constraint in this.constraints) {
       if (constraint.columns.any((column) => !columns.contains(column))) {
@@ -162,6 +163,108 @@ final class RivetTableSchema<Definition, Row> {
     return scoped;
   }
 }
+
+void _validateIndex(RivetIndex index, String path) {
+  final method = index.method;
+  if (method == null) {
+    if (index.terms.any((term) => term.operatorClass != null)) {
+      throw ArgumentError('Index $path uses a vector operator class without a method.');
+    }
+    return;
+  }
+  final vector = _validateVectorIndexOperand(index, path, method.sql.toUpperCase());
+  switch (method) {
+    case Hnsw(:final m, :final efConstruction):
+      if (m case final value? when value < 2 || value > 100) {
+        throw RangeError.range(value, 2, 100, 'm');
+      }
+      if (efConstruction case final value? when value < 4 || value > 1000) {
+        throw RangeError.range(value, 4, 1000, 'efConstruction');
+      }
+      final effectiveM = m ?? 16;
+      final effectiveEfConstruction = efConstruction ?? 64;
+      if (effectiveEfConstruction < 2 * effectiveM) {
+        throw ArgumentError.value(
+          efConstruction,
+          'efConstruction',
+          'must be at least twice m after applying pgvector defaults',
+        );
+      }
+    case IvfFlat(:final lists):
+      if (lists case final value? when value < 1 || value > 32768) {
+        throw RangeError.range(value, 1, 32768, 'lists');
+      }
+    case DiskAnn(
+      :final storageLayout,
+      :final numNeighbors,
+      :final searchListSize,
+      :final maxAlpha,
+      :final numDimensions,
+      :final numBitsPerDimension,
+    ):
+      if (numNeighbors case final value? when value < 10 || value > 1000) {
+        throw RangeError.range(value, 10, 1000, 'numNeighbors');
+      }
+      if (searchListSize case final value? when value < 10 || value > 1000) {
+        throw RangeError.range(value, 10, 1000, 'searchListSize');
+      }
+      if (maxAlpha case final value? when !value.isFinite || value < 1 || value > 5) {
+        throw RangeError.range(value, 1, 5, 'maxAlpha');
+      }
+      if (numDimensions case final value? when value < 1 || value > vector.dimensions) {
+        throw RangeError.range(value, 1, vector.dimensions, 'numDimensions');
+      }
+      if (numBitsPerDimension case final value? when value < 1 || value > 32) {
+        throw RangeError.range(value, 1, 32, 'numBitsPerDimension');
+      }
+      final indexedDimensions = numDimensions ?? vector.dimensions;
+      if (storageLayout == DiskAnnStorageLayout.plain && indexedDimensions > 2000) {
+        throw ArgumentError('Plain DiskANN index $path supports at most 2000 dimensions.');
+      }
+      if (storageLayout == DiskAnnStorageLayout.plain &&
+          index.terms.single.operatorClass == RivetVectorOperatorClass.innerProduct) {
+        throw ArgumentError('Plain DiskANN index $path does not support inner product.');
+      }
+      if (storageLayout == DiskAnnStorageLayout.plain &&
+          numBitsPerDimension != null &&
+          numBitsPerDimension > 1) {
+        throw ArgumentError(
+          'DiskANN numBitsPerDimension above 1 requires memoryOptimized storage.',
+        );
+      }
+      if (numBitsPerDimension != null && numBitsPerDimension > 1 && indexedDimensions > 930) {
+        throw ArgumentError(
+          'DiskANN numBitsPerDimension above 1 supports at most 930 indexed dimensions.',
+        );
+      }
+  }
+}
+
+RivetVectorCodec _validateVectorIndexOperand(RivetIndex index, String path, String method) {
+  if (index.unique || index.terms.length != 1) {
+    throw ArgumentError('$method index $path must be non-unique with one vector operand.');
+  }
+  final term = index.terms.single;
+  final vector = _vectorCodec(term.column.codec);
+  if (vector == null || term.operatorClass == null || term.descending) {
+    throw ArgumentError(
+      '$method index $path requires one scalar vector operator-class operand.',
+    );
+  }
+  final maximumDimensions = index.method is DiskAnn ? 16000 : 2000;
+  if (vector.dimensions > maximumDimensions) {
+    throw ArgumentError(
+      '$method index $path supports at most $maximumDimensions vector dimensions.',
+    );
+  }
+  return vector;
+}
+
+RivetVectorCodec? _vectorCodec(RivetCodec<dynamic> codec) => switch (codec) {
+  RivetVectorCodec() => codec,
+  RivetNullableCodec<dynamic>() => _vectorCodec(codec.inner),
+  _ => null,
+};
 
 /// Base class used by annotated table declarations.
 abstract class RivetTableDefinition<Self> {
@@ -275,30 +378,169 @@ final class RivetConstraint {
 }
 
 final class RivetIndex {
-  const RivetIndex({required this.name, required this.unique, required this.terms, this.predicate});
+  const RivetIndex({
+    required this.name,
+    required this.unique,
+    required this.terms,
+    this.predicate,
+    this.method,
+  });
 
   final String name;
   final bool unique;
   final List<RivetIndexTerm> terms;
   final RivetPredicate? predicate;
+  final RivetIndexMethod? method;
 }
 
 final class RivetIndexTerm {
-  const RivetIndexTerm(this.column, {this.descending = false});
+  const RivetIndexTerm(
+    this.column, {
+    this.descending = false,
+    this.operatorClass,
+  });
 
   final RivetColumn<dynamic> column;
   final bool descending;
+  final RivetVectorOperatorClass? operatorClass;
+}
+
+/// A pgvector operator class that fixes the distance semantics of an index.
+enum RivetVectorOperatorClass {
+  cosine('vector_cosine_ops'),
+  l2('vector_l2_ops'),
+  innerProduct('vector_ip_ops');
+
+  const RivetVectorOperatorClass(this.sql);
+
+  final String sql;
+}
+
+/// PostgreSQL index method metadata retained in checked migration artifacts.
+sealed class RivetIndexMethod {
+  const RivetIndexMethod();
+
+  String get sql;
+  Map<String, Object?> get options;
+}
+
+/// Builds a pgvector HNSW index.
+///
+/// Omitted options remain omitted so pgvector supplies its pinned defaults.
+final class Hnsw extends RivetIndexMethod {
+  /// Creates HNSW build metadata.
+  const Hnsw({this.m, this.efConstruction});
+
+  /// Maximum connections per graph layer, from 2 through 100 when supplied.
+  final int? m;
+
+  /// Build-time candidate list size, from 4 through 1000 when supplied.
+  final int? efConstruction;
+
+  @override
+  String get sql => 'hnsw';
+
+  @override
+  Map<String, Object?> get options => {
+    if (m != null) 'm': m,
+    if (efConstruction != null) 'efConstruction': efConstruction,
+  };
+}
+
+/// Builds a pgvector IVFFlat index.
+///
+/// An omitted [lists] value remains omitted so pgvector supplies its pinned
+/// default.
+final class IvfFlat extends RivetIndexMethod {
+  /// Creates IVFFlat build metadata.
+  const IvfFlat({this.lists});
+
+  /// Number of inverted lists, from 1 through 32768 when supplied.
+  final int? lists;
+
+  @override
+  String get sql => 'ivfflat';
+
+  @override
+  Map<String, Object?> get options => {if (lists != null) 'lists': lists};
+}
+
+/// Physical storage used by a StreamingDiskANN index.
+enum DiskAnnStorageLayout {
+  /// Statistical binary quantization storage.
+  memoryOptimized('memory_optimized'),
+
+  /// Uncompressed vector storage.
+  plain('plain');
+
+  const DiskAnnStorageLayout(this.sql);
+
+  /// PostgreSQL option spelling.
+  final String sql;
+}
+
+/// Builds a pgvectorscale StreamingDiskANN index.
+final class DiskAnn extends RivetIndexMethod {
+  /// Creates DiskANN build metadata while preserving omitted extension defaults.
+  const DiskAnn({
+    this.storageLayout,
+    this.numNeighbors,
+    this.searchListSize,
+    this.maxAlpha,
+    this.numDimensions,
+    this.numBitsPerDimension,
+  });
+
+  /// Compressed or plain index storage.
+  final DiskAnnStorageLayout? storageLayout;
+
+  /// Maximum graph neighbors per node.
+  final int? numNeighbors;
+
+  /// Build-time greedy-search candidate count.
+  final int? searchListSize;
+
+  /// Build-time pruning alpha.
+  final double? maxAlpha;
+
+  /// Leading vector dimensions to index, or all dimensions when omitted.
+  final int? numDimensions;
+
+  /// Bits used for each indexed dimension in compressed storage.
+  final int? numBitsPerDimension;
+
+  @override
+  String get sql => 'diskann';
+
+  @override
+  Map<String, Object?> get options => {
+    if (storageLayout != null) 'storageLayout': storageLayout!.sql,
+    if (numNeighbors != null) 'numNeighbors': numNeighbors,
+    if (searchListSize != null) 'searchListSize': searchListSize,
+    if (maxAlpha != null) 'maxAlpha': maxAlpha,
+    if (numDimensions != null) 'numDimensions': numDimensions,
+    if (numBitsPerDimension != null) 'numBitsPerDimension': numBitsPerDimension,
+  };
 }
 
 final class RivetIndexBuilder {
-  const RivetIndexBuilder(this.name, {required this.unique, this.predicate});
+  const RivetIndexBuilder(
+    this.name, {
+    required this.unique,
+    this.predicate,
+    this.method,
+  });
 
   final String name;
   final bool unique;
   final RivetPredicate? predicate;
+  final RivetIndexMethod? method;
 
   RivetIndexBuilder where(RivetPredicate value) =>
-      RivetIndexBuilder(name, unique: unique, predicate: value);
+      RivetIndexBuilder(name, unique: unique, predicate: value, method: method);
+
+  RivetIndexBuilder using(RivetIndexMethod value) =>
+      RivetIndexBuilder(name, unique: unique, predicate: predicate, method: value);
 
   RivetIndex on(List<Object> terms) => RivetIndex(
     name: name,
@@ -313,7 +555,21 @@ final class RivetIndexBuilder {
         },
     ],
     predicate: predicate,
+    method: method,
   );
+}
+
+extension RivetVectorIndexOperand<T extends Float32List?> on RivetColumn<T> {
+  /// Uses cosine distance for a vector index operand.
+  RivetIndexTerm cosineOps() =>
+      RivetIndexTerm(this, operatorClass: RivetVectorOperatorClass.cosine);
+
+  /// Uses Euclidean distance for a vector index operand.
+  RivetIndexTerm l2Ops() => RivetIndexTerm(this, operatorClass: RivetVectorOperatorClass.l2);
+
+  /// Uses negative inner product for a vector index operand.
+  RivetIndexTerm innerProductOps() =>
+      RivetIndexTerm(this, operatorClass: RivetVectorOperatorClass.innerProduct);
 }
 
 /// Builds a generated table schema without retaining a live executor.
@@ -1276,6 +1532,143 @@ abstract interface class RivetAliasedExpression<T> implements RivetExpression<T>
 
 abstract interface class RivetOrderableExpression<T> implements RivetExpression<T> {}
 
+/// A pgvector distance expression used by exact and approximate query planning.
+abstract interface class RivetVectorDistanceExpression<T extends double?>
+    implements RivetOrderableExpression<T> {
+  /// Renders the bare pgvector operator so PostgreSQL can match an ANN index.
+  String renderIndexedParameters({int startAt = 1});
+}
+
+extension RivetVectorDistanceComparison<T extends double?> on RivetVectorDistanceExpression<T> {
+  RivetPredicate lessThan(double value) => (this as _RivetVectorDistance<T>)._compare('<', value);
+
+  RivetPredicate greaterThan(double value) =>
+      (this as _RivetVectorDistance<T>)._compare('>', value);
+}
+
+final class _RivetVectorDistance<T extends double?> implements RivetVectorDistanceExpression<T> {
+  _RivetVectorDistance(
+    this.source,
+    Float32List query,
+    this.operator,
+    this.codec, {
+    required this.nullStoredZero,
+    required bool rejectZeroQuery,
+  }) : parameters = [source.encodeValue(query)] {
+    if (rejectZeroQuery && query.every((component) => component == 0)) {
+      throw source._conversionError(
+        'encode',
+        const FormatException('cosine distance requires a non-zero query vector'),
+      );
+    }
+  }
+
+  final RivetColumn<dynamic> source;
+  final String operator;
+  @override
+  final RivetCodec<T> codec;
+  final bool nullStoredZero;
+
+  @override
+  final List<Object?> parameters;
+
+  @override
+  List<RivetColumn<dynamic>> get columns => [source];
+
+  @override
+  bool get referencesRows => true;
+
+  @override
+  String get sql => renderPlaceholders((_) => '@value');
+
+  @override
+  String renderPlaceholders(String Function(int index) placeholder) {
+    final distance = '(${source.sql} $operator ${placeholder(0)}::vector)';
+    return nullStoredZero
+        ? '(CASE WHEN vector_norm(${source.sql}) = 0 THEN NULL ELSE $distance END)'
+        : distance;
+  }
+
+  @override
+  String renderParameters({int startAt = 1}) =>
+      renderPlaceholders((index) => '\$${startAt + index}');
+
+  @override
+  String renderIndexedParameters({int startAt = 1}) =>
+      '(${source.sql} $operator \$$startAt::vector)';
+
+  RivetPredicate _compare(String comparison, double value) => RivetPredicate._(
+    (placeholder, _) =>
+        '${renderPlaceholders(placeholder)} $comparison '
+        '${placeholder(parameters.length)}::float8',
+    [...parameters, value],
+    columns,
+    false,
+    null,
+    true,
+  );
+}
+
+extension RivetVectorColumnExpression on RivetColumn<Float32List> {
+  RivetVectorDistanceExpression<double?> cosineDistance(Float32List query) => _RivetVectorDistance(
+    this,
+    query,
+    '<=>',
+    RivetNullableCodec(RivetRealCodec()),
+    nullStoredZero: true,
+    rejectZeroQuery: true,
+  );
+
+  RivetVectorDistanceExpression<double> l2Distance(Float32List query) => _RivetVectorDistance(
+    this,
+    query,
+    '<->',
+    RivetRealCodec(),
+    nullStoredZero: false,
+    rejectZeroQuery: false,
+  );
+
+  RivetVectorDistanceExpression<double> negativeInnerProduct(Float32List query) =>
+      _RivetVectorDistance(
+        this,
+        query,
+        '<#>',
+        RivetRealCodec(),
+        nullStoredZero: false,
+        rejectZeroQuery: false,
+      );
+}
+
+extension RivetNullableVectorColumnExpression on RivetColumn<Float32List?> {
+  RivetVectorDistanceExpression<double?> cosineDistance(Float32List query) => _RivetVectorDistance(
+    this,
+    query,
+    '<=>',
+    RivetNullableCodec(RivetRealCodec()),
+    nullStoredZero: true,
+    rejectZeroQuery: true,
+  );
+
+  RivetVectorDistanceExpression<double?> l2Distance(Float32List query) => _RivetVectorDistance(
+    this,
+    query,
+    '<->',
+    RivetNullableCodec(RivetRealCodec()),
+    nullStoredZero: false,
+    rejectZeroQuery: false,
+  );
+
+  RivetVectorDistanceExpression<double?> negativeInnerProduct(Float32List query) =>
+      _RivetVectorDistance(
+        this,
+        query,
+        '<#>',
+        RivetNullableCodec(RivetRealCodec()),
+        nullStoredZero: false,
+        rejectZeroQuery: false,
+      );
+}
+
 final class _RivetBoundExpression<T> implements RivetExpression<T> {
   _RivetBoundExpression(this.source, T value) : parameters = [source.encodeValue(value)];
 
@@ -1448,6 +1841,14 @@ class RivetColumn<T> implements RivetExpression<T> {
       );
     }
   }
+
+  RivetConversionException _conversionError(String operation, Object cause) =>
+      RivetConversionException(
+        table: '${_table.schemaName}.${_table.tableName}',
+        column: physicalName,
+        message: 'Failed to $operation value.',
+        cause: cause,
+      );
 }
 
 Map<String, Object?> _schemaExpressionFor(RivetExpression<dynamic> expression) =>
@@ -1837,9 +2238,10 @@ final class RivetPredicate {
     List<Object?> parameters,
     List<RivetColumn<dynamic>> columns,
     this.usesRelations,
-    this._schemaExpression,
-  ) : parameters = List.unmodifiable(parameters),
-      columns = List.unmodifiable(columns);
+    this._schemaExpression, [
+    this.usesVectorDistance = false,
+  ]) : parameters = List.unmodifiable(parameters),
+       columns = List.unmodifiable(columns);
 
   RivetPredicate._raw(
     String Function() sql,
@@ -1921,6 +2323,7 @@ final class RivetPredicate {
   final List<Object?> parameters;
   final List<RivetColumn<dynamic>> columns;
   final bool usesRelations;
+  final bool usesVectorDistance;
   final Map<String, Object?> Function()? _schemaExpression;
 
   Map<String, Object?> schemaExpression() {
@@ -1956,6 +2359,7 @@ final class RivetPredicate {
       'operator': 'AND',
       'arguments': [schemaExpression(), other.schemaExpression()],
     },
+    usesVectorDistance || other.usesVectorDistance,
   );
 
   RivetPredicate operator |(RivetPredicate other) => RivetPredicate._(
@@ -1971,6 +2375,7 @@ final class RivetPredicate {
       'operator': 'OR',
       'arguments': [schemaExpression(), other.schemaExpression()],
     },
+    usesVectorDistance || other.usesVectorDistance,
   );
 
   RivetPredicate operator ~() => RivetPredicate._(
@@ -1984,6 +2389,7 @@ final class RivetPredicate {
       'operator': 'NOT',
       'arguments': [schemaExpression()],
     },
+    usesVectorDistance,
   );
 
   String renderWith(

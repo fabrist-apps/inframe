@@ -1,0 +1,92 @@
+{
+  "formatVersion": 1,
+  "postgresql": "18.6",
+  "extensions": {
+    "vector": "0.8.6",
+    "vectorscale": "0.9.1"
+  },
+  "scalarVector": {
+    "maximumDimensions": 16000,
+    "operators": ["<=>", "<->", "<#>"],
+    "storedZeroCosine": "null"
+  },
+  "queryCompilation": {
+    "exact": "materializedEligibleRoots",
+    "approximate": "materializedIndexedCandidatesThenFinalSort",
+    "candidateOrder": "ascendingDistanceNullsLast",
+    "singleStatement": true,
+    "relaxedOrderOption": false
+  },
+  "searchOptions": {
+    "transactionLocal": true,
+    "hnsw": {
+      "efSearch": {"setting": "hnsw.ef_search", "minimum": 1, "maximum": 1000, "default": 40}
+    },
+    "ivfflat": {
+      "probes": {"setting": "ivfflat.probes", "minimum": 1, "maximum": 32768, "default": 1}
+    },
+    "diskann": {
+      "searchListSize": {"setting": "diskann.query_search_list_size", "minimum": 1, "maximum": 10000, "default": 100},
+      "rescore": {"setting": "diskann.query_rescore", "minimum": 0, "maximum": 1000, "default": 50}
+    }
+  },
+  "indexes": {
+    "hnsw": {
+      "extension": "vector",
+      "maximumDimensions": 2000,
+      "operatorClasses": [
+        "vector_cosine_ops",
+        "vector_l2_ops",
+        "vector_ip_ops"
+      ],
+      "buildOptions": {
+        "m": {"minimum": 2, "maximum": 100, "default": 16},
+        "efConstruction": {
+          "minimum": 4,
+          "maximum": 1000,
+          "default": 64,
+          "minimumMultipleOfM": 2
+        }
+      },
+      "concurrentBuild": false
+    },
+    "ivfflat": {
+      "extension": "vector",
+      "maximumDimensions": 2000,
+      "operatorClasses": [
+        "vector_cosine_ops",
+        "vector_l2_ops",
+        "vector_ip_ops"
+      ],
+      "buildOptions": {
+        "lists": {"minimum": 1, "maximum": 32768, "default": 100}
+      },
+      "concurrentBuild": false
+    },
+    "diskann": {
+      "extension": "vectorscale",
+      "maximumDimensions": 16000,
+      "plainMaximumDimensions": 2000,
+      "multiBitMaximumDimensions": 930,
+      "operatorClasses": [
+        "vector_cosine_ops",
+        "vector_l2_ops",
+        "vector_ip_ops"
+      ],
+      "storageLayouts": ["memory_optimized", "plain"],
+      "buildOptions": {
+        "numNeighbors": {"minimum": 10, "maximum": 1000, "default": 50},
+        "searchListSize": {"minimum": 10, "maximum": 1000, "default": 100},
+        "maxAlpha": {"minimum": 1.0, "maximum": 5.0, "default": 1.2},
+        "numDimensions": {"minimum": 1, "maximum": "storedDimensions", "default": "all"},
+        "numBitsPerDimension": {"minimum": 1, "maximum": 32, "default": "backendSelected"}
+      },
+      "incompatible": [
+        "plain+vector_ip_ops",
+        "plain+numBitsPerDimension>1",
+        "numBitsPerDimension>1+numDimensions>930"
+      ],
+      "concurrentBuild": false
+    }
+  }
+}

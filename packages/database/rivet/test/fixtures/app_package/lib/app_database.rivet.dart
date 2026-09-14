@@ -334,6 +334,7 @@ final class _$PackageUsersDB
     int? limit,
     int? offset,
     RivetIncludes<PackageUsersInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -343,6 +344,7 @@ final class _$PackageUsersDB
       limit: limit,
       offset: offset,
       includes: include?.call(PackageUsersInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -635,6 +637,7 @@ final class _$AppProjectsDB
     int? limit,
     int? offset,
     RivetIncludes<AppProjectsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -644,6 +647,7 @@ final class _$AppProjectsDB
       limit: limit,
       offset: offset,
       includes: include?.call(AppProjectsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -872,6 +876,7 @@ final class _$AppProjectLabelsDB
     int? limit,
     int? offset,
     RivetIncludes<AppProjectLabelsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -881,6 +886,7 @@ final class _$AppProjectLabelsDB
       limit: limit,
       offset: offset,
       includes: include?.call(AppProjectLabelsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 

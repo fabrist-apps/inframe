@@ -12,6 +12,7 @@ void main() {
     final databaseUrl = Platform.environment['RIVET_TEST_DATABASE_URL'];
     late pg.Connection fixture;
     late RivetDb database;
+    late List<String> statements;
 
     setUp(() async {
       if (databaseUrl == null) return;
@@ -24,8 +25,11 @@ void main() {
       ''');
       await fixture.execute('TRUNCATE fbr116."userProfiles"');
       await fixture.execute("INSERT INTO fbr116.\"userProfiles\" VALUES ('Ada')");
+      await fixture.execute('CREATE EXTENSION IF NOT EXISTS vector');
+      await fixture.execute('CREATE EXTENSION IF NOT EXISTS vectorscale');
+      statements = [];
       database = await RivetTestDatabase().open(
-        connection: RivetConnection.url(databaseUrl),
+        connection: RivetConnection.url(databaseUrl, onStatement: statements.add),
         pool: const RivetPoolOptions(maxConnections: 1),
       );
     });
@@ -35,6 +39,113 @@ void main() {
       await database.close();
       await fixture.close();
     });
+
+    test(
+      'should apply all vector tuning locally and reset it after commit',
+      () async {
+        await database.transaction((tx) async {
+          await tx.setVectorSearchOptions(const HnswSearchOptions(efSearch: 80));
+          await tx.setVectorSearchOptions(const IvfFlatSearchOptions(probes: 3));
+          await tx.setVectorSearchOptions(
+            const DiskAnnSearchOptions(searchListSize: 120, rescore: 60),
+          );
+
+          expect(await _vectorSettings(tx), ['80', '3', '120', '60']);
+        });
+
+        final afterCommit = await _vectorSettings(database);
+        expect(afterCommit[0], isNot('80'));
+        expect(afterCommit[1], isNot('3'));
+        expect(afterCommit[2], isNot('120'));
+        expect(afterCommit[3], isNot('60'));
+        expect(statements.where((sql) => sql.contains('set_config')), hasLength(3));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should reset vector tuning after rollback on the reused pool connection',
+      () async {
+        await expectLater(
+          database.transaction<void>((tx) async {
+            await tx.setVectorSearchOptions(
+              const DiskAnnSearchOptions(searchListSize: 140, rescore: 70),
+            );
+            expect((await _vectorSettings(tx)).skip(2), ['140', '70']);
+            throw StateError('roll back vector tuning');
+          }),
+          throwsA(isA<StateError>()),
+        );
+
+        final afterRollback = await _vectorSettings(database);
+        expect(afterRollback[2], isNot('140'));
+        expect(afterRollback[3], isNot('70'));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should reject invalid options and expired executors before setup SQL',
+      () async {
+        late RivetTransaction expired;
+        await database.transaction((tx) async {
+          expired = tx;
+          final before = statements.length;
+          await expectLater(
+            tx.setVectorSearchOptions(const HnswSearchOptions(efSearch: 0)),
+            throwsA(isA<RangeError>()),
+          );
+          await expectLater(
+            tx.setVectorSearchOptions(const IvfFlatSearchOptions(probes: 32769)),
+            throwsA(isA<RangeError>()),
+          );
+          await expectLater(
+            tx.setVectorSearchOptions(const DiskAnnSearchOptions()),
+            throwsA(isA<ArgumentError>()),
+          );
+          expect(statements, hasLength(before));
+        });
+        statements.clear();
+
+        await expectLater(
+          expired.setVectorSearchOptions(const HnswSearchOptions(efSearch: 80)),
+          throwsA(isA<RivetExecutorClosedException>()),
+        );
+        expect(statements, isEmpty);
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should report missing vector tuning capabilities explicitly',
+      () async {
+        const databaseName = 'fbr200_missing_vector';
+        await fixture.execute('DROP DATABASE IF EXISTS $databaseName WITH (FORCE)');
+        await fixture.execute('CREATE DATABASE $databaseName');
+        final missingUrl = Uri.parse(databaseUrl!).replace(path: '/$databaseName').toString();
+        final missingStatements = <String>[];
+        final missingDatabase = await RivetTestDatabase().open(
+          connection: RivetConnection.url(missingUrl, onStatement: missingStatements.add),
+          pool: const RivetPoolOptions(maxConnections: 1),
+        );
+        addTearDown(() async {
+          await missingDatabase.close();
+          await fixture.execute('DROP DATABASE IF EXISTS $databaseName WITH (FORCE)');
+        });
+
+        await expectLater(
+          missingDatabase.transaction(
+            (tx) => tx.setVectorSearchOptions(
+              const HnswSearchOptions(efSearch: 80),
+            ),
+          ),
+          throwsA(isA<RivetCapabilityException>()),
+        );
+        expect(missingStatements, hasLength(1));
+        expect(missingStatements.single, contains('pg_extension'));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
 
     test(
       'should reserve one connection and expire the transaction executor',
@@ -140,3 +251,15 @@ void main() {
     );
   });
 }
+
+Future<List<String?>> _vectorSettings(RivetExecutor executor) => executor
+    .execute(
+      RivetCompiledQuery('''
+    SELECT current_setting('hnsw.ef_search', true),
+           current_setting('ivfflat.probes', true),
+           current_setting('diskann.query_search_list_size', true),
+           current_setting('diskann.query_rescore', true)
+  ''', const []),
+      (values, _) => values.cast<String?>(),
+    )
+    .then((rows) => rows.single);

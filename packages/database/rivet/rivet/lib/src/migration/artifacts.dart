@@ -11,10 +11,15 @@ import 'package:rivet/src/migration/recovery.dart';
 import 'package:rivet/src/migration/sql_parser.dart';
 
 final class RivetMigrationArtifacts {
-  const RivetMigrationArtifacts({required this.databaseId, required this.migrations});
+  const RivetMigrationArtifacts({
+    required this.databaseId,
+    required this.migrations,
+    required this.requirements,
+  });
 
   final String databaseId;
   final List<RivetMigrationArtifact> migrations;
+  final List<RivetExtensionRequirement> requirements;
 
   static RivetMigrationArtifacts read(Directory directory) {
     final journal = _readJson(File('${directory.path}/journal.json'));
@@ -23,6 +28,7 @@ final class RivetMigrationArtifacts {
     final migrations = <RivetMigrationArtifact>[];
     final migrationIds = <String>{};
     String? parentId;
+    var requirements = const <RivetExtensionRequirement>[];
     for (final (ordinal, rawEntry) in _list(journal['entries'], 'journal entries').indexed) {
       final entry = _map(rawEntry, 'journal entry $ordinal');
       final migrationId = _id(entry['id'], 'journal entry id');
@@ -50,6 +56,7 @@ final class RivetMigrationArtifacts {
         throw FormatException('Migration $migrationId checksum does not match its artifacts.');
       }
       _validateSnapshot(snapshot);
+      requirements = _readRequirements(snapshot);
       final phases = _readPhases(migration, sql);
       migrations.add(
         RivetMigrationArtifact(
@@ -68,9 +75,54 @@ final class RivetMigrationArtifacts {
     return RivetMigrationArtifacts(
       databaseId: databaseId,
       migrations: List.unmodifiable(migrations),
+      requirements: requirements,
     );
   }
 }
+
+final class RivetExtensionRequirement {
+  const RivetExtensionRequirement({
+    required this.name,
+    required this.minimumVersion,
+    required this.indexMethods,
+  });
+
+  final String name;
+  final String minimumVersion;
+  final Map<String, List<String>> indexMethods;
+}
+
+List<RivetExtensionRequirement> _readRequirements(Map<String, Object?> snapshot) => [
+  for (final raw in _list(snapshot['requirements'], 'snapshot requirements'))
+    switch (_map(raw, 'extension requirement')) {
+      {
+        'kind': 'extension',
+        'name': final String name,
+        'minimumVersion': final String version,
+        'indexMethods': final Map<String, Object?> indexMethods,
+      } =>
+        RivetExtensionRequirement(
+          name: name,
+          minimumVersion: version,
+          indexMethods: {
+            for (final entry in indexMethods.entries)
+              entry.key: [
+                for (final operatorClass in _list(
+                  entry.value,
+                  'extension index operator classes',
+                ))
+                  if (operatorClass case final String value)
+                    value
+                  else
+                    throw const FormatException(
+                      'Extension operator classes must be strings.',
+                    ),
+              ],
+          },
+        ),
+      _ => throw const FormatException('Snapshot contains an unsupported backend requirement.'),
+    },
+];
 
 final class RivetMigrationArtifact {
   const RivetMigrationArtifact({

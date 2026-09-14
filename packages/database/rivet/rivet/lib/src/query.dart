@@ -10,10 +10,16 @@ import 'package:rivet/src/schema.dart';
 const _postgresParameterLimit = 65535;
 const int _postgresSqlByteLimit = 1024 * 1024 * 1024;
 
+enum VectorSearchMode { exact, approximate }
+
 /// A compiled query plus validated bound values.
 final class RivetCompiledQuery {
-  RivetCompiledQuery(this.sql, List<Object?> parameters)
-    : parameters = List.unmodifiable(parameters) {
+  RivetCompiledQuery(
+    this.sql,
+    List<Object?> parameters, {
+    Set<String> requiredExtensions = const {},
+  }) : parameters = List.unmodifiable(parameters),
+       requiredExtensions = Set.unmodifiable(requiredExtensions) {
     if (parameters.length > _postgresParameterLimit) {
       throw const RivetUnsupportedQueryException(
         'PostgreSQL supports at most 65535 bound parameters.',
@@ -28,6 +34,7 @@ final class RivetCompiledQuery {
 
   final String sql;
   final List<Object?> parameters;
+  final Set<String> requiredExtensions;
 }
 
 final class ScoredRow<Row> {
@@ -56,6 +63,7 @@ extension RivetFindAccess<Definition, Row> on RivetTableAccessor<Definition, Row
     int? limit,
     int? offset,
     List<RivetInclude<dynamic, dynamic>> includes = const [],
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) => RivetFind(
     buildSchema(),
     where: where,
@@ -63,6 +71,7 @@ extension RivetFindAccess<Definition, Row> on RivetTableAccessor<Definition, Row
     limit: limit,
     offset: offset,
     includes: includes,
+    vectorSearch: vectorSearch,
   );
 }
 
@@ -75,6 +84,7 @@ final class RivetFind<Definition, Row> {
     int? limit,
     int? offset,
     List<RivetInclude<dynamic, dynamic>> includes = const [],
+    this.vectorSearch = VectorSearchMode.exact,
   }) : _predicate = where?.call(_schema.definition),
        _orders = List.unmodifiable(orderBy?.call(_schema.definition) ?? const []),
        _limit = _positiveOrNull(limit, 'limit'),
@@ -113,6 +123,7 @@ final class RivetFind<Definition, Row> {
   final int? _limit;
   final int? _offset;
   final List<RivetInclude<dynamic, dynamic>> _includes;
+  final VectorSearchMode vectorSearch;
 
   RivetScoredFind<Definition, Row, Score> withScore<Score extends double?>(
     RivetExpression<Score> Function(Definition table) score,
@@ -154,7 +165,12 @@ final class RivetFind<Definition, Row> {
     int? terminalLimit,
     RivetExpression<dynamic>? score,
   }) {
+    final vectorQuery =
+        (_predicate?.usesVectorDistance ?? false) ||
+        _orders.any((order) => order.expression is RivetVectorDistanceExpression<dynamic>) ||
+        score is RivetVectorDistanceExpression<dynamic>;
     if (_includes.isNotEmpty ||
+        vectorQuery ||
         (_predicate?.usesRelations ?? false) ||
         score is RivetAliasedExpression<dynamic> ||
         _orders.any(
@@ -216,6 +232,27 @@ final class RivetFind<Definition, Row> {
     final rootAlias = nextAlias();
     _schema.qualify(rootAlias);
     try {
+      final rootVectorQuery =
+          (_predicate?.usesVectorDistance ?? false) ||
+          _orders.any(
+            (order) => order.expression is RivetVectorDistanceExpression<dynamic>,
+          ) ||
+          score is RivetVectorDistanceExpression<dynamic>;
+      final vectorQuery = rootVectorQuery || _includes.any(_includeUsesVectorDistance);
+      final effectiveLimit = switch ((_limit, terminalLimit)) {
+        (final int requested, final int terminal) => requested < terminal ? requested : terminal,
+        (final int requested, null) => requested,
+        (null, final int terminal) => terminal,
+        _ => null,
+      };
+      final candidateOrder = _orders.firstOrNull;
+      final approximateCandidates =
+          vectorSearch == VectorSearchMode.approximate &&
+          effectiveLimit != null &&
+          candidateOrder?.expression is RivetVectorDistanceExpression<dynamic> &&
+          candidateOrder?.descending == false &&
+          candidateOrder?.nulls == NullsOrder.last;
+      final exactVectorQuery = rootVectorQuery && !approximateCandidates;
       final parameters = <Object?>[];
       final selections = <String>[
         for (final column in _schema.columns) column.selectionSql,
@@ -226,31 +263,63 @@ final class RivetFind<Definition, Row> {
         final rendered = _renderExpression(score, parameters, nextAlias: nextAlias);
         selections.add('${score.codec.select(rendered)} AS "__rivet_score"');
       }
-      final sql = StringBuffer(
-        'SELECT ${selections.join(', ')} FROM ${_schema.qualifiedName} AS ${quoteIdentifier(rootAlias)}',
-      );
+      String? renderedPredicate;
       if (_predicate case final predicate?) {
-        final rendered = predicate.renderParameters(
+        renderedPredicate = predicate.renderParameters(
           startAt: parameters.length + 1,
           nextAlias: nextAlias,
         );
-        sql.write(' WHERE $rendered');
         parameters.addAll(predicate.parameters);
+      }
+      final rootSource = rootVectorQuery
+          ? quoteIdentifier(
+              approximateCandidates ? '__rivet_candidates' : '__rivet_roots',
+            )
+          : _schema.qualifiedName;
+      final sql = StringBuffer();
+      if (exactVectorQuery) {
+        sql
+          ..write('WITH ${quoteIdentifier('__rivet_roots')} AS MATERIALIZED (')
+          ..write(
+            'SELECT * FROM ${_schema.qualifiedName} AS ${quoteIdentifier(rootAlias)}',
+          );
+        if (renderedPredicate != null) sql.write(' WHERE $renderedPredicate');
+        sql.write(') ');
+      } else if (approximateCandidates) {
+        final indexedOrder = (candidateOrder!.expression as RivetVectorDistanceExpression<dynamic>)
+            .renderIndexedParameters(startAt: parameters.length + 1);
+        parameters.addAll(candidateOrder.expression.parameters);
+        final candidateLimit = effectiveLimit + (_offset ?? 0);
+        sql
+          ..write(
+            'WITH ${quoteIdentifier('__rivet_candidates')} AS MATERIALIZED (',
+          )
+          ..write(
+            'SELECT * FROM ${_schema.qualifiedName} AS ${quoteIdentifier(rootAlias)}',
+          );
+        if (renderedPredicate != null) sql.write(' WHERE $renderedPredicate');
+        sql
+          ..write(' ORDER BY $indexedOrder ASC NULLS LAST')
+          ..write(' LIMIT $candidateLimit) ');
+      }
+      sql.write(
+        'SELECT ${selections.join(', ')} FROM $rootSource AS ${quoteIdentifier(rootAlias)}',
+      );
+      if (!rootVectorQuery && renderedPredicate != null) {
+        sql.write(' WHERE $renderedPredicate');
       }
       if (_orders.isNotEmpty) {
         sql.write(
           ' ORDER BY ${_renderOrders(_orders, parameters, nextAlias: nextAlias)}',
         );
       }
-      final effectiveLimit = switch ((_limit, terminalLimit)) {
-        (final int requested, final int terminal) => requested < terminal ? requested : terminal,
-        (final int requested, null) => requested,
-        (null, final int terminal) => terminal,
-        _ => null,
-      };
       if (effectiveLimit != null) sql.write(' LIMIT $effectiveLimit');
       if (_offset != null) sql.write(' OFFSET $_offset');
-      return RivetCompiledQuery(sql.toString(), parameters);
+      return RivetCompiledQuery(
+        sql.toString(),
+        parameters,
+        requiredExtensions: vectorQuery ? const {'vector'} : const {},
+      );
     } finally {
       _schema.unqualify();
     }
@@ -341,6 +410,20 @@ String _compileInclude(
   final renderedOrder = include.orders.isEmpty
       ? ''
       : _renderOrders(include.orders, parameters, nextAlias: nextAlias);
+  final vectorQuery =
+      (include.predicate?.usesVectorDistance ?? false) ||
+      include.orders.any(
+        (order) => order.expression is RivetVectorDistanceExpression<dynamic>,
+      );
+  final exactRoot = vectorQuery ? nextAlias() : null;
+  final fromSql = exactRoot == null
+      ? join.fromSql
+      : 'LATERAL (WITH ${quoteIdentifier(exactRoot)} AS MATERIALIZED ( '
+            'SELECT ${quoteIdentifier(alias)}.* FROM ${join.fromSql} '
+            'WHERE ${predicates.join(' AND ')}) '
+            'SELECT * FROM ${quoteIdentifier(exactRoot)}) '
+            'AS ${quoteIdentifier(alias)}';
+  final whereSql = exactRoot == null ? ' WHERE ${predicates.join(' AND ')}' : '';
   final orderSql = renderedOrder.isEmpty ? '' : ' ORDER BY $renderedOrder';
   final aggregateOrder = include.orders.isEmpty ? '' : ' ORDER BY "__rivet_ordinal"';
   final ordinal = include.orders.isEmpty
@@ -356,11 +439,17 @@ SELECT jsonb_build_object(
 )
 FROM (
   SELECT jsonb_build_array(${cells.join(', ')}) AS "__rivet_row"$ordinal
-  FROM ${join.fromSql}
-  WHERE ${predicates.join(' AND ')}$orderSql$limitSql
+  FROM $fromSql$whereSql$orderSql$limitSql
 ) AS "__rivet_relation"
 )''';
 }
+
+bool _includeUsesVectorDistance(RivetInclude<dynamic, dynamic> include) =>
+    (include.predicate?.usesVectorDistance ?? false) ||
+    include.orders.any(
+      (order) => order.expression is RivetVectorDistanceExpression<dynamic>,
+    ) ||
+    include.includes.any(_includeUsesVectorDistance);
 
 ({String fromSql, List<String> predicates}) _resolveDirectJoin(
   RivetInclude<dynamic, dynamic> include,

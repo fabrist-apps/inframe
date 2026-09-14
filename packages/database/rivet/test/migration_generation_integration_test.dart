@@ -23,7 +23,15 @@ void main() {
       await connection.execute('DROP SCHEMA IF EXISTS auth CASCADE');
       await connection.execute('DROP SCHEMA IF EXISTS work CASCADE');
       await connection.execute('DROP SCHEMA IF EXISTS fbr120 CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS fbr121 CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS fbr122 CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS fbr138 CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS fbr139 CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS fbr148 CASCADE');
       await connection.execute('DROP SCHEMA IF EXISTS enum_evolution CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS metadata CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS search CASCADE');
+      await connection.execute('DROP SCHEMA IF EXISTS fbr195 CASCADE');
     });
 
     tearDown(() async {
@@ -102,6 +110,249 @@ void main() {
         );
 
         expect(rows.single, ['Bhaswanth', true]);
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should reject a missing required extension before bootstrapping history',
+      () async {
+        await connection.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await connection.execute('DROP EXTENSION IF EXISTS vectorscale');
+        await connection.execute('DROP EXTENSION IF EXISTS vector');
+        addTearDown(() async {
+          await connection.execute('CREATE EXTENSION IF NOT EXISTS vector');
+          await connection.execute('CREATE EXTENSION IF NOT EXISTS vectorscale');
+        });
+        final schema = RivetDatabaseSchema(
+          name: 'vector_indexes',
+          tables: [
+            VectorDocuments.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+          ],
+        );
+        await const RivetMigrationGenerator().generate(
+          schema: schema,
+          directory: directory,
+          name: 'hnsw indexes',
+        );
+
+        await expectLater(
+          RivetMigrator(
+            connection: RivetConnection.url(databaseUrl!),
+            directory: directory,
+          ).migrate(),
+          throwsA(
+            isA<RivetMigrationException>().having(
+              (error) => error.message,
+              'message',
+              contains('extension `vector` >= 0.8.6, but it is not installed'),
+            ),
+          ),
+        );
+        final historySchema = await connection.execute(
+          "SELECT 1 FROM pg_namespace WHERE nspname = '_rivet'",
+        );
+        expect(historySchema, isEmpty);
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should apply checked HNSW indexes after extension preflight',
+      () async {
+        await connection.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await connection.execute('CREATE EXTENSION IF NOT EXISTS vector');
+        final schema = RivetDatabaseSchema(
+          name: 'vector_indexes',
+          tables: [
+            VectorDocuments.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+          ],
+        );
+        await const RivetMigrationGenerator().generate(
+          schema: schema,
+          directory: directory,
+          name: 'hnsw indexes',
+        );
+
+        await RivetMigrator(
+          connection: RivetConnection.url(databaseUrl!),
+          directory: directory,
+        ).migrate();
+
+        final indexes = await connection.execute('''
+          SELECT indexdef FROM pg_indexes
+          WHERE schemaname = 'fbr195' AND tablename = 'vectorDocuments'
+            AND indexdef LIKE '% USING hnsw %'
+          ORDER BY indexname
+        ''');
+        expect(indexes, hasLength(3));
+        expect(
+          indexes.map((row) => row.first! as String),
+          containsAll([
+            contains('USING hnsw (embedding vector_cosine_ops)'),
+            contains('USING hnsw (embedding vector_l2_ops)'),
+            contains('USING hnsw (embedding vector_ip_ops)'),
+          ]),
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should reject missing pgvectorscale before bootstrapping history',
+      () async {
+        await connection.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await connection.execute('DROP EXTENSION IF EXISTS vectorscale');
+        addTearDown(
+          () => connection.execute('CREATE EXTENSION IF NOT EXISTS vectorscale'),
+        );
+        await connection.execute('CREATE EXTENSION IF NOT EXISTS vector');
+        final schema = RivetDatabaseSchema(
+          name: 'vector_indexes',
+          tables: [
+            VectorDocuments.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+          ],
+        );
+        await const RivetMigrationGenerator().generate(
+          schema: schema,
+          directory: directory,
+          name: 'diskann indexes',
+        );
+
+        await expectLater(
+          RivetMigrator(
+            connection: RivetConnection.url(databaseUrl!),
+            directory: directory,
+          ).migrate(),
+          throwsA(
+            isA<RivetMigrationException>().having(
+              (error) => error.message,
+              'message',
+              contains('extension `vectorscale` >= 0.9.1, but it is not installed'),
+            ),
+          ),
+        );
+        final historySchema = await connection.execute(
+          "SELECT 1 FROM pg_namespace WHERE nspname = '_rivet'",
+        );
+        expect(historySchema, isEmpty);
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should apply checked IVFFlat indexes after extension preflight',
+      () async {
+        await connection.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await connection.execute('CREATE EXTENSION IF NOT EXISTS vector');
+        final schema = RivetDatabaseSchema(
+          name: 'vector_indexes',
+          tables: [
+            VectorDocuments.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+          ],
+        );
+        await const RivetMigrationGenerator().generate(
+          schema: schema,
+          directory: directory,
+          name: 'ivfflat indexes',
+        );
+        final generatedSql = directory
+            .listSync(recursive: true)
+            .whereType<File>()
+            .singleWhere((file) => file.path.endsWith('migration.sql'))
+            .readAsStringSync();
+        expect(
+          generatedSql,
+          allOf(
+            contains('USING ivfflat ("embedding" vector_cosine_ops) WITH (lists = 4)'),
+            contains('USING ivfflat ("embedding" vector_l2_ops)'),
+            contains('USING ivfflat ("embedding" vector_ip_ops)'),
+          ),
+        );
+
+        await RivetMigrator(
+          connection: RivetConnection.url(databaseUrl!),
+          directory: directory,
+        ).migrate();
+
+        final indexes = await connection.execute('''
+          SELECT indexdef FROM pg_indexes
+          WHERE schemaname = 'fbr195' AND tablename = 'vectorDocuments'
+            AND indexdef LIKE '% USING ivfflat %'
+          ORDER BY indexname
+        ''');
+        expect(indexes, hasLength(3));
+        expect(
+          indexes.map((row) => row.first! as String),
+          containsAll([
+            contains("USING ivfflat (embedding vector_cosine_ops) WITH (lists='4')"),
+            contains('USING ivfflat (embedding)'),
+            contains('USING ivfflat (embedding vector_ip_ops)'),
+          ]),
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should apply checked DiskANN indexes with every build field',
+      () async {
+        await connection.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+        await connection.execute('CREATE EXTENSION IF NOT EXISTS vector');
+        await connection.execute('CREATE EXTENSION IF NOT EXISTS vectorscale');
+        final schema = RivetDatabaseSchema(
+          name: 'vector_indexes',
+          tables: [
+            VectorDocuments.db.buildSchema() as RivetTableSchema<Object?, Object?>,
+          ],
+        );
+        await const RivetMigrationGenerator().generate(
+          schema: schema,
+          directory: directory,
+          name: 'diskann indexes',
+        );
+        final generatedSql = directory
+            .listSync(recursive: true)
+            .whereType<File>()
+            .singleWhere((file) => file.path.endsWith('migration.sql'))
+            .readAsStringSync();
+        expect(
+          generatedSql,
+          allOf(
+            contains(
+              'USING diskann ("embedding" vector_cosine_ops) WITH '
+              '(storage_layout = memory_optimized, num_neighbors = 20, '
+              'search_list_size = 30, max_alpha = 1.4, num_dimensions = 2, '
+              'num_bits_per_dimension = 2)',
+            ),
+            contains(
+              'USING diskann ("embedding" vector_l2_ops) WITH '
+              '(storage_layout = plain)',
+            ),
+            contains('USING diskann ("embedding" vector_ip_ops);'),
+          ),
+        );
+
+        await RivetMigrator(
+          connection: RivetConnection.url(databaseUrl!),
+          directory: directory,
+        ).migrate();
+
+        final indexes = await connection.execute('''
+          SELECT indexdef FROM pg_indexes
+          WHERE schemaname = 'fbr195' AND tablename = 'vectorDocuments'
+            AND indexdef LIKE '% USING diskann %'
+          ORDER BY indexname
+        ''');
+        expect(indexes, hasLength(3));
+        expect(
+          indexes.map((row) => row.first! as String),
+          containsAll([
+            contains('USING diskann (embedding'),
+            contains('storage_layout=memory_optimized'),
+            contains('storage_layout=plain'),
+          ]),
+        );
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

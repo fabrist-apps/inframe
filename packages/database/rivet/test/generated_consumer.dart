@@ -249,6 +249,57 @@ final class VectorValues extends RivetTableDefinition<VectorValues> {
   late final optionalEmbedding = vector(dimensions: 3).nullable()();
 }
 
+@RivetTable(schema: 'fbr195')
+final class VectorCategories extends RivetTableDefinition<VectorCategories> {
+  static const db = _$VectorCategoriesDB();
+
+  late final id = integer().primaryKey()();
+  late final name = text()();
+  late final documents = many<VectorDocuments>()();
+}
+
+@RivetTable(schema: 'fbr195')
+final class VectorDocuments extends RivetTableDefinition<VectorDocuments> {
+  static const db = _$VectorDocumentsDB();
+
+  late final id = integer().primaryKey()();
+  late final categoryId = integer()();
+  late final title = text()();
+  late final embedding = vector(dimensions: 3).nullable()();
+  late final category = one<VectorCategories>(
+    fields: [categoryId],
+    references: (category) => [category.id],
+  )();
+  late final _indexes = [
+    index('vector_documents_cosine_hnsw')
+        .using(const Hnsw(m: 8, efConstruction: 32))
+        .on([embedding.cosineOps()]),
+    index('vector_documents_l2_hnsw').using(const Hnsw()).on([embedding.l2Ops()]),
+    index('vector_documents_ip_hnsw').using(const Hnsw()).on([embedding.innerProductOps()]),
+    index('vector_documents_cosine_ivfflat')
+        .using(const IvfFlat(lists: 4))
+        .on([embedding.cosineOps()]),
+    index('vector_documents_l2_ivfflat').using(const IvfFlat()).on([embedding.l2Ops()]),
+    index('vector_documents_ip_ivfflat').using(const IvfFlat()).on([embedding.innerProductOps()]),
+    index('vector_documents_cosine_diskann')
+        .using(
+          const DiskAnn(
+            storageLayout: DiskAnnStorageLayout.memoryOptimized,
+            numNeighbors: 20,
+            searchListSize: 30,
+            maxAlpha: 1.4,
+            numDimensions: 2,
+            numBitsPerDimension: 2,
+          ),
+        )
+        .on([embedding.cosineOps()]),
+    index('vector_documents_l2_diskann')
+        .using(const DiskAnn(storageLayout: DiskAnnStorageLayout.plain))
+        .on([embedding.l2Ops()]),
+    index('vector_documents_ip_diskann').using(const DiskAnn()).on([embedding.innerProductOps()]),
+  ];
+}
+
 @RivetTable(schema: 'fbr122')
 final class ArrayValues extends RivetTableDefinition<ArrayValues> {
   static const db = _$ArrayValuesDB();

@@ -19,8 +19,14 @@ sealed class RivetException implements Exception {
         RivetEmptyUpdateException() => 'RivetEmptyUpdateException',
         RivetExecutorClosedException() => 'RivetExecutorClosedException',
         RivetMigrationException() => 'RivetMigrationException',
+        RivetCapabilityException() => 'RivetCapabilityException',
         AfterCommitException() => 'AfterCommitException',
       }}: $message';
+}
+
+/// A query or schema feature is unavailable on the connected PostgreSQL server.
+final class RivetCapabilityException extends RivetException {
+  const RivetCapabilityException(super.message, [super.cause]);
 }
 
 /// A migration artifact, history, coordination, or execution check failed.

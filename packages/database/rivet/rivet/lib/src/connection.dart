@@ -14,7 +14,7 @@ import 'package:rivet/src/schema.dart';
 
 enum RivetSslMode { verifyFull, require, disable }
 
-/// Observes a compiled data statement without exposing bound values.
+/// Observes a compiled SQL statement without exposing bound values.
 typedef RivetStatementObserver = void Function(String sql);
 
 /// Driver-independent PostgreSQL connection configuration.
@@ -229,6 +229,9 @@ final class RivetDb implements RivetExecutor {
       ];
     } on RivetException {
       rethrow;
+    } on pg.ServerException catch (error) {
+      throw _vectorCapabilityError(query, error) ??
+          RivetDatabaseException('PostgreSQL query failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL query failed.', error);
     }
@@ -249,6 +252,9 @@ final class RivetDb implements RivetExecutor {
       return result.affectedRows;
     } on RivetException {
       rethrow;
+    } on pg.ServerException catch (error) {
+      throw _vectorCapabilityError(query, error) ??
+          RivetDatabaseException('PostgreSQL mutation failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL mutation failed.', error);
     }
@@ -305,6 +311,106 @@ final class RivetTransaction implements RivetExecutor {
   bool _active = true;
   final List<FutureOr<void> Function()> _callbacks = [];
 
+  /// Applies query tuning to subsequent statements in this transaction.
+  Future<void> setVectorSearchOptions(VectorSearchOptions options) async {
+    if (!_active) {
+      throw const RivetExecutorClosedException('The transaction executor has expired.');
+    }
+    final configuration = switch (options) {
+      HnswSearchOptions(:final efSearch) => (
+        extension: 'vector',
+        minimumVersion: '0.8.6',
+        method: 'hnsw',
+        settings: {'hnsw.ef_search': _range(efSearch, 1, 1000, 'efSearch')},
+      ),
+      IvfFlatSearchOptions(:final probes) => (
+        extension: 'vector',
+        minimumVersion: '0.8.6',
+        method: 'ivfflat',
+        settings: {'ivfflat.probes': _range(probes, 1, 32768, 'probes')},
+      ),
+      DiskAnnSearchOptions(:final searchListSize, :final rescore) => (
+        extension: 'vectorscale',
+        minimumVersion: '0.9.1',
+        method: 'diskann',
+        settings: {
+          if (searchListSize != null)
+            'diskann.query_search_list_size': _range(
+              searchListSize,
+              1,
+              10000,
+              'searchListSize',
+            ),
+          if (rescore != null) 'diskann.query_rescore': _range(rescore, 0, 1000, 'rescore'),
+        },
+      ),
+    };
+    if (configuration.settings.isEmpty) {
+      throw ArgumentError('At least one DiskANN search option is required.');
+    }
+    const capabilitySql = r'''
+      SELECT extension.extversion
+      FROM pg_extension AS extension
+      JOIN pg_am AS access_method ON access_method.amname = $2::text
+      WHERE extension.extname = $1::text
+    ''';
+    try {
+      _connection.onStatement?.call(capabilitySql);
+      final capability = await _session.execute(
+        pg.Sql(capabilitySql, types: const [pg.Type.text, pg.Type.text]),
+        parameters: [configuration.extension, configuration.method],
+      );
+      if (capability.isEmpty) {
+        throw RivetCapabilityException(
+          'Vector tuning requires extension `${configuration.extension}` >= '
+          '${configuration.minimumVersion} and access method '
+          '`${configuration.method}`.',
+        );
+      }
+      final installedVersion = capability.single.first! as String;
+      if (!_versionAtLeast(installedVersion, configuration.minimumVersion)) {
+        throw RivetCapabilityException(
+          'Vector tuning requires extension `${configuration.extension}` >= '
+          '${configuration.minimumVersion}, but found $installedVersion.',
+        );
+      }
+      final parameters = <Object?>[];
+      final values = <String>[];
+      for (final entry in configuration.settings.entries) {
+        final offset = parameters.length;
+        parameters.addAll([entry.key, '${entry.value}']);
+        values.add('(\$${offset + 1}::text, \$${offset + 2}::text)');
+      }
+      final setupSql =
+          '''
+        SELECT set_config(requested.name, requested.value, true)
+        FROM (VALUES ${values.join(', ')}) AS requested(name, value)
+      ''';
+      _connection.onStatement?.call(setupSql);
+      final applied = await _session.execute(
+        pg.Sql(setupSql, types: List.filled(parameters.length, pg.Type.text)),
+        parameters: parameters,
+      );
+      if (applied.length != configuration.settings.length) {
+        throw const RivetCapabilityException(
+          'PostgreSQL did not apply every requested vector search setting.',
+        );
+      }
+    } on RivetException {
+      rethrow;
+    } on pg.ServerException catch (error) {
+      if (error.code == '42704') {
+        throw RivetCapabilityException(
+          'PostgreSQL rejected ${configuration.method} vector search tuning.',
+          error,
+        );
+      }
+      throw RivetDatabaseException('PostgreSQL vector search tuning failed.', error);
+    } catch (error) {
+      throw RivetDatabaseException('PostgreSQL vector search tuning failed.', error);
+    }
+  }
+
   void afterCommit(FutureOr<void> Function() callback) {
     if (!_active) {
       throw const RivetExecutorClosedException('The transaction executor has expired.');
@@ -335,6 +441,9 @@ final class RivetTransaction implements RivetExecutor {
       ];
     } on RivetException {
       rethrow;
+    } on pg.ServerException catch (error) {
+      throw _vectorCapabilityError(query, error) ??
+          RivetDatabaseException('PostgreSQL transaction query failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL transaction query failed.', error);
     }
@@ -354,12 +463,80 @@ final class RivetTransaction implements RivetExecutor {
       return result.affectedRows;
     } on RivetException {
       rethrow;
+    } on pg.ServerException catch (error) {
+      throw _vectorCapabilityError(query, error) ??
+          RivetDatabaseException('PostgreSQL transaction mutation failed.', error);
     } catch (error) {
       throw RivetDatabaseException('PostgreSQL transaction mutation failed.', error);
     }
   }
 
   void _expire() => _active = false;
+}
+
+/// Query-time vector tuning accepted by [RivetTransaction.setVectorSearchOptions].
+sealed class VectorSearchOptions {
+  const VectorSearchOptions();
+}
+
+/// Transaction-local pgvector HNSW query tuning.
+final class HnswSearchOptions extends VectorSearchOptions {
+  const HnswSearchOptions({required this.efSearch});
+
+  final int efSearch;
+}
+
+/// Transaction-local pgvector IVFFlat query tuning.
+final class IvfFlatSearchOptions extends VectorSearchOptions {
+  const IvfFlatSearchOptions({required this.probes});
+
+  final int probes;
+}
+
+/// Transaction-local pgvectorscale DiskANN query tuning.
+final class DiskAnnSearchOptions extends VectorSearchOptions {
+  const DiskAnnSearchOptions({this.searchListSize, this.rescore});
+
+  final int? searchListSize;
+  final int? rescore;
+}
+
+int _range(int value, int minimum, int maximum, String name) {
+  if (value < minimum || value > maximum) {
+    throw RangeError.range(value, minimum, maximum, name);
+  }
+  return value;
+}
+
+bool _versionAtLeast(String installed, String minimum) {
+  final installedParts = installed.split('.').map(int.tryParse).toList();
+  final minimumParts = minimum.split('.').map(int.tryParse).toList();
+  if (installedParts.any((part) => part == null) || minimumParts.any((part) => part == null)) {
+    return false;
+  }
+  final length = installedParts.length > minimumParts.length
+      ? installedParts.length
+      : minimumParts.length;
+  for (var index = 0; index < length; index++) {
+    final installedPart = index < installedParts.length ? installedParts[index]! : 0;
+    final minimumPart = index < minimumParts.length ? minimumParts[index]! : 0;
+    if (installedPart != minimumPart) return installedPart > minimumPart;
+  }
+  return true;
+}
+
+RivetCapabilityException? _vectorCapabilityError(
+  RivetCompiledQuery query,
+  pg.ServerException error,
+) {
+  if (query.requiredExtensions.contains('vector') &&
+      const {'42704', '42883'}.contains(error.code)) {
+    return RivetCapabilityException(
+      'Vector queries require a compatible pgvector extension and operator classes.',
+      error,
+    );
+  }
+  return null;
 }
 
 final class _PoolWaiter {

@@ -96,10 +96,16 @@ final class RivetDatabaseSchema {
               'unique': index.unique,
               'terms': [
                 for (final term in index.terms)
-                  {'column': term.column.physicalName, 'descending': term.descending},
+                  {
+                    'column': term.column.physicalName,
+                    'descending': term.descending,
+                    if (term.operatorClass case final operatorClass?)
+                      'operatorClass': operatorClass.sql,
+                  },
               ],
               if (index.predicate case final predicate?) 'predicate': predicate.schemaExpression(),
-              'options': <String, Object?>{},
+              if (index.method case final method?) 'method': method.sql,
+              'options': index.method?.options ?? <String, Object?>{},
               'platforms': ['postgresql'],
             },
         ],
@@ -122,6 +128,20 @@ final class RivetDatabaseSchema {
         ],
       });
     }
+
+    Map<String, List<String>> indexMethods(Iterable<String> methods) => {
+      for (final method in methods)
+        if (tables.any((table) => table.indexes.any((index) => index.method?.sql == method)))
+          method: (<String>{
+            for (final table in tables)
+              for (final index in table.indexes)
+                if (index.method?.sql == method)
+                  for (final term in index.terms)
+                    if (term.operatorClass case final operatorClass?) operatorClass.sql,
+          }.toList()..sort()),
+    };
+    final pgvectorIndexMethods = indexMethods(['hnsw', 'ivfflat']);
+    final vectorscaleIndexMethods = indexMethods(['diskann']);
 
     return {
       'formatVersion': 1,
@@ -146,7 +166,22 @@ final class RivetDatabaseSchema {
             ],
           },
       ],
-      'requirements': <Object?>[],
+      'requirements': [
+        if (pgvectorIndexMethods.isNotEmpty)
+          {
+            'kind': 'extension',
+            'name': 'vector',
+            'minimumVersion': '0.8.6',
+            'indexMethods': pgvectorIndexMethods,
+          },
+        if (vectorscaleIndexMethods.isNotEmpty)
+          {
+            'kind': 'extension',
+            'name': 'vectorscale',
+            'minimumVersion': '0.9.1',
+            'indexMethods': vectorscaleIndexMethods,
+          },
+      ],
     };
   }
 }
