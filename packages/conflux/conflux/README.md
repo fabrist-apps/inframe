@@ -251,16 +251,18 @@ stay in the internal date-time module. JSON persistence, locale/custom formats,
 and ambient timezone services are outside this API.
 
 `Cron` is a pure calendar value with an explicit `timezone.Location`. The
-application chooses and initializes the timezone database; Conflux does not
-change the global local timezone:
+application can call `Conflux.initialize()` to load the bundled IANA database.
+It retains an already initialized database and is safe to call repeatedly.
+The timezone package sets its local default to UTC on first initialization;
+Moment and Cron continue to use explicitly supplied zones. Applications can
+also initialize a different timezone dataset themselves before this call:
 
 ```dart
 import 'package:conflux/conflux.dart';
-import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 Future<void> main() async {
-  tz_data.initializeTimeZones();
+  Conflux.initialize();
   final location = tz.getLocation('America/New_York');
   final parsed = Cron.parse('0 9 * * mon-fri', location);
   final now = await Effect.now().runFuture();
