@@ -165,3 +165,25 @@ HNSW, IVFFlat, or StreamingDiskANN index cannot narrow the result population.
 a stored zero vector has undefined cosine distance. `l2Distance` and
 `negativeInnerProduct` accept stored zero vectors; lower negative inner products
 represent larger dot products. Rivet never normalizes embeddings implicitly.
+
+Declare HNSW indexes on scalar vector columns with the distance operator class
+used by indexed approximate queries:
+
+```dart
+@override
+List<RivetIndex> get indexes => [
+  index('books_embedding_hnsw')
+      .using(const Hnsw(m: 16, efConstruction: 64))
+      .on([embedding.cosineOps()]),
+];
+```
+
+`cosineOps()`, `l2Ops()`, and `innerProductOps()` map to pgvector's cosine,
+Euclidean, and negative inner-product operator classes. Omit `m` or
+`efConstruction` to let pgvector choose its build default; Rivet leaves omitted
+values out of snapshots and SQL. These are index build options. Approximate
+query tuning is selected separately when executing a query and does not change
+the index declaration. HNSW declarations require pgvector 0.8.6 or newer, one
+non-null or nullable scalar vector with at most 2,000 dimensions, `m` from 2 to
+100, and `efConstruction` from 4 to 1,000. Concurrent HNSW builds are not yet
+exposed.

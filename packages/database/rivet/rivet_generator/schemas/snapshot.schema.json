@@ -61,6 +61,7 @@
       "properties": {
         "id": {"$ref": "#/$defs/id"}, "tableId": {"$ref": "#/$defs/id"}, "name": {"type": "string"},
         "unique": {"type": "boolean"},
+        "method": {"enum": ["hnsw", "ivfflat", "diskann"]},
         "terms": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/indexTerm"}},
         "predicate": {"$ref": "expression.schema.json"}, "options": {"type": "object"},
         "platforms": {"type": "array", "items": {"type": "string"}}
@@ -70,7 +71,11 @@
     "indexTerm": {
       "type": "object",
       "required": ["columnId", "descending"],
-      "properties": {"columnId": {"$ref": "#/$defs/id"}, "descending": {"type": "boolean"}},
+      "properties": {
+        "columnId": {"$ref": "#/$defs/id"},
+        "descending": {"type": "boolean"},
+        "operatorClass": {"enum": ["vector_cosine_ops", "vector_l2_ops", "vector_ip_ops"]}
+      },
       "additionalProperties": false
     },
     "constraint": {

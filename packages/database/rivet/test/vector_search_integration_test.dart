@@ -52,6 +52,14 @@ void main() {
         CREATE INDEX vector_documents_cosine_idx
         ON fbr195."vectorDocuments" USING hnsw (embedding vector_cosine_ops)
       ''');
+      await fixture.execute('''
+        CREATE INDEX vector_documents_l2_idx
+        ON fbr195."vectorDocuments" USING hnsw (embedding vector_l2_ops)
+      ''');
+      await fixture.execute('''
+        CREATE INDEX vector_documents_ip_idx
+        ON fbr195."vectorDocuments" USING hnsw (embedding vector_ip_ops)
+      ''');
       statements = [];
       database = await RivetTestDatabase().open(
         connection: RivetConnection.url(databaseUrl, onStatement: statements.add),
@@ -109,6 +117,43 @@ void main() {
     );
 
     test(
+      'should keep full-population ordering for every exact distance with indexes',
+      () async {
+        final query = Float32List.fromList([1, 0, 0]);
+
+        Future<List<int>> orderedIds(
+          RivetVectorDistanceExpression<double?> Function(VectorDocuments document) distance,
+        ) async =>
+            (await VectorDocuments.db
+                    .find(
+                      orderBy: (document) => [distance(document).asc(), document.id.asc()],
+                    )
+                    .get(database))
+                .map((row) => row.id)
+                .toList();
+
+        expect(
+          await orderedIds((document) => document.embedding.cosineDistance(query)),
+          [1, 2, 3, 6, 7, 4, 5],
+        );
+        expect(
+          await orderedIds((document) => document.embedding.l2Distance(query)),
+          [1, 2, 4, 3, 6, 7, 5],
+        );
+        expect(
+          await orderedIds((document) => document.embedding.negativeInnerProduct(query)),
+          [1, 2, 3, 4, 6, 7, 5],
+        );
+        expect(statements, hasLength(3));
+        expect(
+          statements,
+          everyElement(startsWith('WITH "__rivet_roots" AS MATERIALIZED')),
+        );
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
       'should preserve distance edge cases and lower negative inner product',
       () async {
         final query = Float32List.fromList([1, 0, 0]);
@@ -151,13 +196,34 @@ void main() {
           await _capabilityManifest().readAsString(),
         ) as Map<String, Object?>;
         final extensions = manifest['extensions']! as Map<String, Object?>;
+        final indexes = manifest['indexes']! as Map<String, Object?>;
+        final hnsw = indexes['hnsw']! as Map<String, Object?>;
         final server = await fixture.execute("SELECT current_setting('server_version')");
         final vector = await fixture.execute(
           "SELECT extversion FROM pg_extension WHERE extname = 'vector'",
         );
+        final hnswOperatorClasses = await fixture.execute('''
+          SELECT operator_class.opcname
+          FROM pg_opclass AS operator_class
+          JOIN pg_am AS access_method
+            ON access_method.oid = operator_class.opcmethod
+          WHERE access_method.amname = 'hnsw'
+          ORDER BY operator_class.opcname
+        ''');
 
         expect(server.single.first, startsWith(manifest['postgresql']! as String));
         expect(vector.single.first, extensions['vector']);
+        expect(hnsw['extension'], 'vector');
+        expect(hnsw['maximumDimensions'], 2000);
+        expect(
+          hnswOperatorClasses.map((row) => row.first),
+          containsAll(hnsw['operatorClasses']! as List<Object?>),
+        );
+        expect(hnsw['buildOptions'], {
+          'm': {'minimum': 2, 'maximum': 100},
+          'efConstruction': {'minimum': 4, 'maximum': 1000},
+        });
+        expect(hnsw['concurrentBuild'], isFalse);
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );

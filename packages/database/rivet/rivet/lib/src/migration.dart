@@ -43,6 +43,7 @@ final class RivetMigrator {
   Future<void> migrate() async {
     final artifacts = RivetMigrationArtifacts.read(directory);
     await _withLockedConnection((session) async {
+      await _verifyRequirements(session, artifacts.requirements);
       await _bootstrap(session);
       final history = await _readHistory(session, artifacts.databaseId);
       _validateHistory(artifacts, history);
@@ -250,6 +251,64 @@ final class RivetMigrator {
       );
     }
   }
+}
+
+Future<void> _verifyRequirements(
+  pg.Connection session,
+  List<RivetExtensionRequirement> requirements,
+) async {
+  for (final requirement in requirements) {
+    final result = await session.execute(
+      pg.Sql.named('SELECT extversion FROM pg_extension WHERE extname = @name'),
+      parameters: {'name': requirement.name},
+    );
+    if (result.isEmpty) {
+      throw RivetMigrationException(
+        'Migration requires extension `${requirement.name}` >= '
+        '${requirement.minimumVersion}, but it is not installed.',
+      );
+    }
+    final installed = result.single.first! as String;
+    if (_compareVersions(installed, requirement.minimumVersion) < 0) {
+      throw RivetMigrationException(
+        'Migration requires extension `${requirement.name}` >= '
+        '${requirement.minimumVersion}, but found $installed.',
+      );
+    }
+    for (final operatorClass in requirement.operatorClasses) {
+      final operatorClassResult = await session.execute(
+        pg.Sql.named('''
+          SELECT 1
+          FROM pg_opclass AS operator_class
+          JOIN pg_am AS access_method
+            ON access_method.oid = operator_class.opcmethod
+          WHERE access_method.amname = 'hnsw'
+            AND operator_class.opcname = @operatorClass
+        '''),
+        parameters: {'operatorClass': operatorClass},
+      );
+      if (operatorClassResult.isEmpty) {
+        throw RivetMigrationException(
+          'Migration requires HNSW operator class `$operatorClass` from '
+          'extension `${requirement.name}`, but it is unavailable.',
+        );
+      }
+    }
+  }
+}
+
+int _compareVersions(String left, String right) {
+  final leftParts = left.split('.').map(int.tryParse).toList();
+  final rightParts = right.split('.').map(int.tryParse).toList();
+  if (leftParts.any((part) => part == null) || rightParts.any((part) => part == null)) {
+    throw const RivetMigrationException('Extension version is not numeric dotted notation.');
+  }
+  for (var index = 0; index < max(leftParts.length, rightParts.length); index++) {
+    final leftPart = index < leftParts.length ? leftParts[index]! : 0;
+    final rightPart = index < rightParts.length ? rightParts[index]! : 0;
+    if (leftPart != rightPart) return leftPart.compareTo(rightPart);
+  }
+  return 0;
 }
 
 /// A read-only view of one checked migration directory and its database state.

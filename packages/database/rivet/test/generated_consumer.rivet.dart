@@ -3723,6 +3723,7 @@ final class _$VectorDocumentsDB
       ),
       decodeRelated: decodeRow,
 
+      indexes: () => definition._indexes,
       relations: {
         'category': definition.category as RivetRelationDescriptor<Object?>,
       },

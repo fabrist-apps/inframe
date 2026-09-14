@@ -270,6 +270,13 @@ final class VectorDocuments extends RivetTableDefinition<VectorDocuments> {
     fields: [categoryId],
     references: (category) => [category.id],
   )();
+  late final _indexes = [
+    index('vector_documents_cosine_hnsw')
+        .using(const Hnsw(m: 8, efConstruction: 32))
+        .on([embedding.cosineOps()]),
+    index('vector_documents_l2_hnsw').using(const Hnsw()).on([embedding.l2Ops()]),
+    index('vector_documents_ip_hnsw').using(const Hnsw()).on([embedding.innerProductOps()]),
+  ];
 }
 
 @RivetTable(schema: 'fbr122')

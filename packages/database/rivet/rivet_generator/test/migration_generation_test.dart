@@ -365,6 +365,144 @@ void main() {
       expect(File('${directory.path}/journal.json').existsSync(), false);
     });
 
+    test('should preserve and diff checked HNSW declarations', () async {
+      var nextId = 0;
+      final generator = RivetMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+
+      await generator.generateDeclaration(
+        declaration: _vectorIndexDeclaration(),
+        directory: directory,
+        name: 'hnsw',
+      );
+      final initialSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      final initialSnapshot = jsonDecode(
+        _lastArtifactFile(directory, 'snapshot.json').readAsStringSync(),
+      ) as Map<String, Object?>;
+      final table = (initialSnapshot['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final index = (table['indexes']! as List<Object?>).single! as Map<String, Object?>;
+
+      expect(
+        initialSql,
+        contains(
+          'CREATE INDEX "documents_embedding_hnsw" ON "search"."documents" '
+          'USING hnsw ("embedding" vector_cosine_ops) WITH (m = 8, ef_construction = 32);',
+        ),
+      );
+      expect(index['method'], 'hnsw');
+      expect(index['options'], {'efConstruction': 32, 'm': 8});
+      expect(initialSnapshot['requirements'], [
+        {
+          'kind': 'extension',
+          'minimumVersion': '0.8.6',
+          'name': 'vector',
+          'operatorClasses': ['vector_cosine_ops'],
+        },
+      ]);
+      await const RivetMigrationChecker().check(directory: directory);
+
+      await generator.generateDeclaration(
+        declaration: _vectorIndexDeclaration(options: {'m': 16}),
+        directory: directory,
+        name: 'change hnsw',
+      );
+      final changedSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      expect(changedSql, contains('DROP INDEX "search"."documents_embedding_hnsw";'));
+      expect(
+        changedSql,
+        contains(
+          'USING hnsw ("embedding" vector_cosine_ops) WITH (m = 16);',
+        ),
+      );
+
+      await generator.generateDeclaration(
+        declaration: _vectorIndexDeclaration(
+          options: const {},
+          operatorClass: 'vector_l2_ops',
+        ),
+        directory: directory,
+        name: 'change hnsw opclass',
+      );
+      final changedOpclassSql = _lastArtifactFile(
+        directory,
+        'migration.sql',
+      ).readAsStringSync();
+      expect(
+        changedOpclassSql,
+        contains('DROP INDEX "search"."documents_embedding_hnsw";'),
+      );
+      expect(
+        changedOpclassSql,
+        contains('USING hnsw ("embedding" vector_l2_ops);'),
+      );
+
+      final withoutIndex = _vectorIndexDeclaration();
+      final withoutIndexTable =
+          (withoutIndex['tables']! as List<Object?>).single! as Map<String, Object?>;
+      withoutIndexTable['indexes'] = <Object?>[];
+      withoutIndex['requirements'] = <Object?>[];
+      await generator.generateDeclaration(
+        declaration: withoutIndex,
+        directory: directory,
+        name: 'remove hnsw',
+      );
+      final removedSql = _lastArtifactFile(directory, 'migration.sql').readAsStringSync();
+      expect(
+        removedSql,
+        contains('DROP INDEX "search"."documents_embedding_hnsw";'),
+      );
+      expect(removedSql, isNot(contains('CREATE INDEX')));
+    });
+
+    test('should reject invalid HNSW options, operands, and dimensions', () async {
+      var caseNumber = 0;
+      Future<void> rejects(void Function(Map<String, Object?> declaration) change) async {
+        final declaration = _vectorIndexDeclaration();
+        change(declaration);
+        await expectLater(
+          const RivetMigrationGenerator().generateDeclaration(
+            declaration: declaration,
+            directory: Directory('${directory.path}/invalid-hnsw-${caseNumber++}'),
+            name: 'invalid hnsw',
+          ),
+          throwsA(isA<UnsupportedError>()),
+        );
+      }
+
+      Map<String, Object?> table(Map<String, Object?> declaration) =>
+          (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+      Map<String, Object?> index(Map<String, Object?> declaration) =>
+          (table(declaration)['indexes']! as List<Object?>).single! as Map<String, Object?>;
+      Map<String, Object?> vectorStorage(Map<String, Object?> declaration) =>
+          ((table(declaration)['columns']! as List<Object?>)[1]!
+                  as Map<String, Object?>)['storage']!
+              as Map<String, Object?>;
+      Map<String, Object?> term(Map<String, Object?> declaration) =>
+          (index(declaration)['terms']! as List<Object?>).single! as Map<String, Object?>;
+
+      await rejects((declaration) => index(declaration)['options'] = {'m': 1});
+      await rejects(
+        (declaration) => index(declaration)['options'] = {'efConstruction': 1001},
+      );
+      await rejects((declaration) => vectorStorage(declaration)['dimensions'] = 2001);
+      await rejects((declaration) {
+        final vector = Map<String, Object?>.from(vectorStorage(declaration));
+        final column =
+            (table(declaration)['columns']! as List<Object?>)[1]! as Map<String, Object?>;
+        column['storage'] = {
+          'kind': 'array',
+          'nullable': false,
+          'codecVersion': 1,
+          'element': vector,
+        };
+      });
+      await rejects(
+        (declaration) => term(declaration)['operatorClass'] = 'vector_l1_ops',
+      );
+      await rejects((declaration) => index(declaration)['unique'] = true);
+    });
+
     test('should create one shared native enum before scalar and array columns', () async {
       var nextId = 0;
       final generator = RivetMigrationGenerator(
@@ -864,6 +1002,60 @@ Map<String, Object?> _constraintDeclaration() => {
   ],
   'enums': <Object?>[],
   'requirements': <Object?>[],
+};
+
+Map<String, Object?> _vectorIndexDeclaration({
+  Map<String, Object?> options = const {'m': 8, 'efConstruction': 32},
+  String operatorClass = 'vector_cosine_ops',
+}) => {
+  'formatVersion': 1,
+  'dialect': 'rivet',
+  'name': 'vector_indexes',
+  'tables': [
+    {
+      'schema': 'search',
+      'name': 'documents',
+      'columns': [
+        _column('id', primaryKey: true),
+        {
+          'name': 'embedding',
+          'storage': {
+            'kind': 'vector',
+            'nullable': false,
+            'codecVersion': 1,
+            'dimensions': 3,
+          },
+          'primaryKey': false,
+        },
+      ],
+      'indexes': [
+        {
+          'name': 'documents_embedding_hnsw',
+          'unique': false,
+          'method': 'hnsw',
+          'terms': [
+            {
+              'column': 'embedding',
+              'descending': false,
+              'operatorClass': operatorClass,
+            },
+          ],
+          'options': options,
+          'platforms': ['postgresql'],
+        },
+      ],
+      'constraints': <Object?>[],
+    },
+  ],
+  'enums': <Object?>[],
+  'requirements': [
+    {
+      'kind': 'extension',
+      'name': 'vector',
+      'minimumVersion': '0.8.6',
+      'operatorClasses': [operatorClass],
+    },
+  ],
 };
 
 Map<String, Object?> _column(

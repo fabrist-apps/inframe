@@ -417,11 +417,14 @@ final class RivetArtifactChecker {
   ) => {
     'name': index['name'],
     'unique': index['unique'],
+    if (index['method'] case final String method) 'method': method,
     'terms': [
       for (final raw in _list(index['terms'], 'index terms'))
         {
           'column': columnNames[_map(raw, 'index term')['columnId']],
           'descending': _map(raw, 'index term')['descending'],
+          if (_map(raw, 'index term')['operatorClass'] case final String operatorClass)
+            'operatorClass': operatorClass,
         },
     ],
     if (index['predicate'] case final Map<String, Object?> expression)

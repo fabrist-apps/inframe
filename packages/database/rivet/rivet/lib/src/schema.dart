@@ -71,6 +71,7 @@ final class RivetTableSchema<Definition, Row> {
           when predicate.columns.any((column) => !columns.contains(column))) {
         throw ArgumentError('Index $schemaName.$tableName.${index.name} has an invalid predicate.');
       }
+      _validateIndex(index, '$schemaName.$tableName.${index.name}');
     }
     for (final constraint in this.constraints) {
       if (constraint.columns.any((column) => !columns.contains(column))) {
@@ -162,6 +163,41 @@ final class RivetTableSchema<Definition, Row> {
     return scoped;
   }
 }
+
+void _validateIndex(RivetIndex index, String path) {
+  final method = index.method;
+  if (method == null) {
+    if (index.terms.any((term) => term.operatorClass != null)) {
+      throw ArgumentError('Index $path uses a vector operator class without a method.');
+    }
+    return;
+  }
+  if (method case final Hnsw hnsw) {
+    if (index.unique || index.terms.length != 1) {
+      throw ArgumentError('HNSW index $path must be non-unique with one vector operand.');
+    }
+    final term = index.terms.single;
+    final vector = _vectorCodec(term.column.codec);
+    if (vector == null || term.operatorClass == null || term.descending) {
+      throw ArgumentError('HNSW index $path requires one scalar vector operator-class operand.');
+    }
+    if (vector.dimensions > 2000) {
+      throw ArgumentError('HNSW index $path supports at most 2000 vector dimensions.');
+    }
+    if (hnsw.m case final value? when value < 2 || value > 100) {
+      throw RangeError.range(value, 2, 100, 'm');
+    }
+    if (hnsw.efConstruction case final value? when value < 4 || value > 1000) {
+      throw RangeError.range(value, 4, 1000, 'efConstruction');
+    }
+  }
+}
+
+RivetVectorCodec? _vectorCodec(RivetCodec<dynamic> codec) => switch (codec) {
+  RivetVectorCodec() => codec,
+  RivetNullableCodec<dynamic>() => _vectorCodec(codec.inner),
+  _ => null,
+};
 
 /// Base class used by annotated table declarations.
 abstract class RivetTableDefinition<Self> {
@@ -275,30 +311,93 @@ final class RivetConstraint {
 }
 
 final class RivetIndex {
-  const RivetIndex({required this.name, required this.unique, required this.terms, this.predicate});
+  const RivetIndex({
+    required this.name,
+    required this.unique,
+    required this.terms,
+    this.predicate,
+    this.method,
+  });
 
   final String name;
   final bool unique;
   final List<RivetIndexTerm> terms;
   final RivetPredicate? predicate;
+  final RivetIndexMethod? method;
 }
 
 final class RivetIndexTerm {
-  const RivetIndexTerm(this.column, {this.descending = false});
+  const RivetIndexTerm(
+    this.column, {
+    this.descending = false,
+    this.operatorClass,
+  });
 
   final RivetColumn<dynamic> column;
   final bool descending;
+  final RivetVectorOperatorClass? operatorClass;
+}
+
+/// A pgvector operator class that fixes the distance semantics of an index.
+enum RivetVectorOperatorClass {
+  cosine('vector_cosine_ops'),
+  l2('vector_l2_ops'),
+  innerProduct('vector_ip_ops');
+
+  const RivetVectorOperatorClass(this.sql);
+
+  final String sql;
+}
+
+/// PostgreSQL index method metadata retained in checked migration artifacts.
+sealed class RivetIndexMethod {
+  const RivetIndexMethod();
+
+  String get sql;
+  Map<String, Object?> get options;
+}
+
+/// Builds a pgvector HNSW index.
+///
+/// Omitted options remain omitted so pgvector supplies its pinned defaults.
+final class Hnsw extends RivetIndexMethod {
+  /// Creates HNSW build metadata.
+  const Hnsw({this.m, this.efConstruction});
+
+  /// Maximum connections per graph layer, from 2 through 100 when supplied.
+  final int? m;
+
+  /// Build-time candidate list size, from 4 through 1000 when supplied.
+  final int? efConstruction;
+
+  @override
+  String get sql => 'hnsw';
+
+  @override
+  Map<String, Object?> get options => {
+    if (m != null) 'm': m,
+    if (efConstruction != null) 'efConstruction': efConstruction,
+  };
 }
 
 final class RivetIndexBuilder {
-  const RivetIndexBuilder(this.name, {required this.unique, this.predicate});
+  const RivetIndexBuilder(
+    this.name, {
+    required this.unique,
+    this.predicate,
+    this.method,
+  });
 
   final String name;
   final bool unique;
   final RivetPredicate? predicate;
+  final RivetIndexMethod? method;
 
   RivetIndexBuilder where(RivetPredicate value) =>
-      RivetIndexBuilder(name, unique: unique, predicate: value);
+      RivetIndexBuilder(name, unique: unique, predicate: value, method: method);
+
+  RivetIndexBuilder using(RivetIndexMethod value) =>
+      RivetIndexBuilder(name, unique: unique, predicate: predicate, method: value);
 
   RivetIndex on(List<Object> terms) => RivetIndex(
     name: name,
@@ -313,7 +412,21 @@ final class RivetIndexBuilder {
         },
     ],
     predicate: predicate,
+    method: method,
   );
+}
+
+extension RivetVectorIndexOperand<T extends Float32List?> on RivetColumn<T> {
+  /// Uses cosine distance for a vector index operand.
+  RivetIndexTerm cosineOps() =>
+      RivetIndexTerm(this, operatorClass: RivetVectorOperatorClass.cosine);
+
+  /// Uses Euclidean distance for a vector index operand.
+  RivetIndexTerm l2Ops() => RivetIndexTerm(this, operatorClass: RivetVectorOperatorClass.l2);
+
+  /// Uses negative inner product for a vector index operand.
+  RivetIndexTerm innerProductOps() =>
+      RivetIndexTerm(this, operatorClass: RivetVectorOperatorClass.innerProduct);
 }
 
 /// Builds a generated table schema without retaining a live executor.
