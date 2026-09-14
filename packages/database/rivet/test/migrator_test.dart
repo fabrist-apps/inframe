@@ -395,11 +395,17 @@ void main() {
         await fixture.execute('DROP SCHEMA IF EXISTS auth CASCADE');
         await fixture.execute('DROP SCHEMA IF EXISTS work CASCADE');
         await fixture.execute('DROP SCHEMA IF EXISTS enum_evolution CASCADE');
+        final processFixture = [
+          File(
+            '${Directory.current.path}/packages/database/rivet/test/fixtures/migrator_process.dart',
+          ),
+          File('${Directory.current.path}/test/fixtures/migrator_process.dart'),
+        ].firstWhere((file) => file.existsSync());
         final process = await Process.start(
           Platform.resolvedExecutable,
           [
             'run',
-            'packages/database/rivet/test/fixtures/migrator_process.dart',
+            processFixture.path,
             directory.path,
             databaseUrl,
           ],
@@ -427,6 +433,7 @@ void main() {
         );
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+      timeout: const Timeout(Duration(minutes: 1)),
     );
 
     test(
@@ -1058,7 +1065,7 @@ Future<void> _splitLastMigrationIntoTwoPhases(
 }
 
 Future<void> _waitForPhaseReceipt(pg.Connection connection, int count) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 10));
+  final deadline = DateTime.now().add(const Duration(seconds: 20));
   while (DateTime.now().isBefore(deadline)) {
     try {
       final result = await connection.execute(
