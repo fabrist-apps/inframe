@@ -25,6 +25,10 @@ void registerVoxelNativeDefaultStorage(VoxelNativeDefaultStorage resolver) {
   _defaultStorage = resolver;
 }
 
+void resetVoxelNativeDefaultStorageForTesting() {
+  _defaultStorage = null;
+}
+
 Future<String> resolveVoxelNativeStorageDirectory(String? explicitDirectory) async {
   final selected = explicitDirectory ?? await _resolveDefaultStorage();
   if (selected.trim().isEmpty || selected.contains('\u0000')) {
@@ -499,8 +503,11 @@ WHERE name NOT LIKE 'sqlite_%'
     }
     return await operation(database, availableScopes, uncertainScopes);
   } finally {
-    await database?.close();
-    lease.release();
+    try {
+      await database?.close();
+    } finally {
+      lease.release();
+    }
   }
 }
 
@@ -652,7 +659,30 @@ String _quoteIdentifier(String identifier) => '"${identifier.replaceAll('"', '""
 String _pathKey(String path) => Platform.isWindows ? path.toLowerCase() : path;
 
 bool _samePath(String left, String right) =>
-    _pathKey(_canonicalPersistentPath(left)) == _pathKey(_canonicalPersistentPath(right));
+    _pathKey(_canonicalPathForComparison(left)) == _pathKey(_canonicalPathForComparison(right));
+
+String _canonicalPathForComparison(String path) {
+  final absolute = File(path).absolute;
+  if (absolute.existsSync()) return absolute.resolveSymbolicLinksSync();
+  final missing = <String>[absolute.uri.pathSegments.last];
+  var ancestor = absolute.parent;
+  while (!ancestor.existsSync() && ancestor.parent.path != ancestor.path) {
+    missing.add(ancestor.uri.pathSegments.last);
+    ancestor = ancestor.parent;
+  }
+  final canonicalAncestor = ancestor.existsSync()
+      ? ancestor.resolveSymbolicLinksSync()
+      : ancestor.absolute.path;
+  var result = canonicalAncestor;
+  for (final component in missing.reversed) {
+    result = result.endsWith(Platform.pathSeparator)
+        ? '$result$component'
+        : '$result${Platform.pathSeparator}$component';
+  }
+  return result;
+}
+
+bool sameVoxelNativePathForTesting(String left, String right) => _samePath(left, right);
 
 final class _PlannedAttachment {
   const _PlannedAttachment({

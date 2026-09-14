@@ -1097,11 +1097,13 @@ SELECT migration_id, phase_id, checksum, platform, attempt_id, evidence, retry_a
 FROM ${_qualified(scope, '_voxel_phase_attempts')}
 ''',
   )).rows;
-  final expectedPhases = <String, ({String checksum, Set<String> phaseIds})>{
+  final expectedPhases = <String, ({String checksum, Map<String, String> phaseModes})>{
     for (final entry in expected)
       entry.migration.id: (
         checksum: entry.migration.checksum,
-        phaseIds: entry.phases.map((phase) => phase['id']! as String).toSet(),
+        phaseModes: {
+          for (final phase in entry.phases) phase['id']! as String: phase['mode']! as String,
+        },
       ),
   };
   final appliedIds = applied.map((row) => row.getString('migration_id')).toSet();
@@ -1117,7 +1119,7 @@ FROM ${_qualified(scope, '_voxel_phases')}
     final bundled = expectedPhases[migrationId];
     if (!appliedIds.contains(migrationId) ||
         bundled == null ||
-        !bundled.phaseIds.contains(phaseId) ||
+        !bundled.phaseModes.containsKey(phaseId) ||
         receipt.getString('checksum') != bundled.checksum ||
         receipt.getString('platform') != voxelPlatform ||
         receipt.getString('status') != 'completed') {
@@ -1155,7 +1157,7 @@ FROM ${_qualified(scope, '_voxel_phases')}
     final phaseId = attempt.getString('phase_id');
     final bundled = expectedPhases[migrationId];
     if (bundled == null ||
-        !bundled.phaseIds.contains(phaseId) ||
+        bundled.phaseModes[phaseId] != 'nontransactional' ||
         attempt.getString('checksum') != bundled.checksum ||
         attempt.getString('platform') != voxelPlatform ||
         attempt.getString('attempt_id').isEmpty ||
@@ -1564,6 +1566,17 @@ VALUES (?, ?, ?, ?, 'completed')
     try {
       await _setForeignKeys(database, enabled: true);
     } on Object catch (restorationFailure, restorationStackTrace) {
+      if (primaryFailure != null) {
+        Error.throwWithStackTrace(
+          _VoxelForeignKeyRestorationException(
+            primaryFailure: primaryFailure,
+            primaryStackTrace: primaryStackTrace!,
+            restorationFailure: restorationFailure,
+            restorationStackTrace: restorationStackTrace,
+          ),
+          primaryStackTrace,
+        );
+      }
       Error.throwWithStackTrace(restorationFailure, restorationStackTrace);
     }
   }
@@ -1577,6 +1590,25 @@ VALUES (?, ?, ?, ?, 'completed')
       phaseId: phase['id']! as String,
     ),
   );
+}
+
+final class _VoxelForeignKeyRestorationException implements Exception {
+  const _VoxelForeignKeyRestorationException({
+    required this.primaryFailure,
+    required this.primaryStackTrace,
+    required this.restorationFailure,
+    required this.restorationStackTrace,
+  });
+
+  final Object primaryFailure;
+  final StackTrace primaryStackTrace;
+  final Object restorationFailure;
+  final StackTrace restorationStackTrace;
+
+  @override
+  String toString() =>
+      'Voxel migration failed and foreign-key enforcement could not be restored. '
+      'Primary failure: $primaryFailure. Restoration failure: $restorationFailure.';
 }
 
 Future<void> _setForeignKeys(TursoDatabase database, {required bool enabled}) async {

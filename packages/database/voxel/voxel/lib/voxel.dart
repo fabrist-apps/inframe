@@ -20,4 +20,5 @@ export 'src/migration_schema.dart';
 export 'src/migration_status.dart';
 export 'src/relation.dart';
 export 'src/schema.dart';
+export 'src/testing.dart';
 export 'src/value.dart';

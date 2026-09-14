@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:test/test.dart';
-import 'package:voxel/src/testing.dart';
 import 'package:voxel/voxel.dart';
 import 'package:voxel_fixture_app/app_database.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';

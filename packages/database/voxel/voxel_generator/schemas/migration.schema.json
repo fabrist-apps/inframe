@@ -39,7 +39,7 @@
     },
     "rebuild": {
       "type": "object",
-      "required": ["foreignKeys", "validations"],
+      "required": ["foreignKeys", "tables", "validations"],
       "properties": {
         "foreignKeys": {"const": "offOutsideTransaction"},
         "tables": {

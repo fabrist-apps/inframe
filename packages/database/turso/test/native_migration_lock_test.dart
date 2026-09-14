@@ -45,7 +45,11 @@ void main() {
         () => NativeMigrationLock.tryAcquire('$lockPath/missing/lock'),
         throwsA(
           isA<NativeMigrationLockException>()
-              .having((error) => error.operation, 'operation', 'open')
+              .having(
+                (error) => error.operation,
+                'operation',
+                Platform.isWindows ? 'CreateFileW' : 'open',
+              )
               .having((error) => error.path, 'path', '$lockPath/missing/lock'),
         ),
       );

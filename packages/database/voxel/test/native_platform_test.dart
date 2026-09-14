@@ -41,6 +41,7 @@ void main() {
       final defaultDirectory = Directory('${temporaryDirectory.path}/default');
       final explicitDirectory = Directory('${temporaryDirectory.path}/explicit');
       registerVoxelNativeDefaultStorage(() async => defaultDirectory.path);
+      addTearDown(resetVoxelNativeDefaultStorageForTesting);
 
       final defaultDatabase = await FixtureAppDatabase().open();
       await defaultDatabase.close();
@@ -51,6 +52,23 @@ void main() {
       );
       await explicitDatabase.close();
       expect(explicitDirectory.listSync().whereType<File>(), isNotEmpty);
+    });
+
+    test('should compare missing paths without creating their directories', () async {
+      final temporaryDirectory = await Directory.systemTemp.createTemp('voxel-compare-');
+      addTearDown(() => temporaryDirectory.delete(recursive: true));
+      final real = Directory('${temporaryDirectory.path}/real')..createSync();
+      final alias = Link('${temporaryDirectory.path}/alias')..createSync(real.path);
+      final missingParent = Directory('${real.path}/missing');
+
+      expect(
+        sameVoxelNativePathForTesting(
+          '${alias.path}/missing/database.db',
+          '${real.path}/missing/database.db',
+        ),
+        isTrue,
+      );
+      expect(missingParent.existsSync(), isFalse);
     });
 
     test('should safely namespace names inside a canonical explicit directory', () async {

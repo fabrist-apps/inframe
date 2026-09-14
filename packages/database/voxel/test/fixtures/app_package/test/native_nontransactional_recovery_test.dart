@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:test/test.dart';
 import 'package:turso/turso.dart';
-import 'package:voxel/src/connection.dart';
 import 'package:voxel/src/migration.dart';
 import 'package:voxel/src/platform.dart';
 import 'package:voxel/voxel.dart';

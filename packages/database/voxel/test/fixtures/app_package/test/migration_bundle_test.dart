@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 import 'package:turso/turso.dart';
-import 'package:voxel/src/testing.dart';
 import 'package:voxel/voxel.dart';
 import 'package:voxel_fixture_app/app_database.dart';
 import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
@@ -71,21 +70,42 @@ void main() {
           database,
           "INSERT INTO content.authors VALUES ('author-2', 'Ada')",
         ),
-        throwsA(anything),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.authors WHERE name = 'Ada'",
+        ),
+        1,
       );
       await expectLater(
         VoxelTesting.execute(
           database,
           "INSERT INTO content.authors VALUES ('author-3', '')",
         ),
-        throwsA(anything),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.authors WHERE id = 'author-3'",
+        ),
+        0,
       );
       await expectLater(
         VoxelTesting.execute(
           database,
           "INSERT INTO content.posts VALUES ('post-1', 'missing', 'draft')",
         ),
-        throwsA(anything),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.posts WHERE id = 'post-1'",
+        ),
+        0,
       );
       await VoxelTesting.execute(
         database,
@@ -94,9 +114,30 @@ void main() {
       await expectLater(
         VoxelTesting.execute(
           database,
+          "INSERT INTO content.locales VALUES ('en', 'title')",
+        ),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.locales WHERE language = 'en' AND key = 'title'",
+        ),
+        1,
+      );
+      await expectLater(
+        VoxelTesting.execute(
+          database,
           "INSERT INTO content.translations VALUES ('en', 'missing', 'Title')",
         ),
-        throwsA(anything),
+        throwsA(isA<VoxelDatabaseException>()),
+      );
+      expect(
+        await VoxelTesting.scalarInt(
+          database,
+          "SELECT COUNT(*) AS value FROM content.translations WHERE language = 'en' AND key = 'missing'",
+        ),
+        0,
       );
 
       expect(

@@ -88,6 +88,34 @@ void main() {
     );
   });
 
+  test('status should reject attempt records for transactional phases', () async {
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'voxel-transactional-attempt-',
+    );
+    addTearDown(() => temporaryDirectory.delete(recursive: true));
+    final storage = VoxelStorage.directory(temporaryDirectory.path);
+    final migration = FixtureAppDatabaseVoxelMigrations.bundle.migrations.first;
+    final database = await FixtureAppDatabase().open(storage: storage);
+    await VoxelTesting.execute(
+      database,
+      '''
+INSERT INTO content._voxel_phase_attempts
+  (migration_id, phase_id, checksum, platform, attempt_id, evidence)
+VALUES ('${migration.id}', '0', '${migration.checksum}', 'native', 'invalid', '{}')
+''',
+    );
+    await database.close();
+
+    await expectLater(
+      VoxelDatabaseRuntime.migrationStatus(
+        schema: FixtureAppDatabaseVoxelSchema.build(),
+        bundle: FixtureAppDatabaseVoxelMigrations.bundle,
+        storage: storage,
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test('generated open creates and reopens its persistent main file', () async {
     final temporaryDirectory = await Directory.systemTemp.createTemp(
       'voxel-generated-persistent-',

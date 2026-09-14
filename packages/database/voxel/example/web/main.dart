@@ -3,7 +3,6 @@ import 'dart:js_interop';
 import 'dart:typed_data';
 
 import 'package:turso/turso.dart';
-import 'package:voxel/src/connection.dart' show VoxelTesting;
 import 'package:voxel/src/migration.dart';
 import 'package:voxel/src/platform_web.dart'
     show

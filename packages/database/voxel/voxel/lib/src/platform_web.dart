@@ -379,8 +379,11 @@ WHERE name NOT LIKE 'sqlite_%'
     }
     return await operation(database, availableScopes, uncertainScopes);
   } finally {
-    await database?.close();
-    await lease.release();
+    try {
+      await database?.close();
+    } finally {
+      await lease.release();
+    }
   }
 }
 
