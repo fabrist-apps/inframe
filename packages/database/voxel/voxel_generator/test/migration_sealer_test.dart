@@ -226,6 +226,23 @@ void main() {
         throwsA(isA<FormatException>()),
       );
     });
+
+    test('should reject snapshot records outside the versioned artifact schema', () async {
+      final migrationId = await _generate(directory);
+      final artifacts = _artifacts(directory);
+      final entryDirectory = artifacts.migration.parent.path;
+      final snapshotFile = File('$entryDirectory/snapshot.json');
+      final snapshot = jsonDecode(snapshotFile.readAsStringSync()) as Map<String, Object?>;
+      final table = (snapshot['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final column = (table['columns']! as List<Object?>).single! as Map<String, Object?>;
+      column['storage'] = {'kind': 'unsupported_future_type'};
+      snapshotFile.writeAsStringSync(jsonEncode(snapshot));
+
+      await expectLater(
+        VoxelArtifactSealer().seal(directory: directory, migrationId: migrationId),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 }
 

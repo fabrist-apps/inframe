@@ -17,6 +17,8 @@ void main() {
         ]),
         '[333333333.3333333,1e+30,4.5,0.002,1e-27]',
       );
+      expect(canonicalJson(1e20), '100000000000000000000');
+      expect(canonicalJson(-0.0), '0');
     });
 
     test('should sort object keys by UTF-16 code units', () {

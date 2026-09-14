@@ -234,6 +234,32 @@ void main() {
       );
     });
 
+    test('should preserve semicolons inside generated SQL literals', () async {
+      final declaration = _declaration(table: 'users', columns: ['id', 'name']);
+      final table = (declaration['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final name = (table['columns']! as List<Object?>).last! as Map<String, Object?>;
+      name['default'] = {
+        'formatVersion': 1,
+        'kind': 'literal',
+        'literalType': 'string',
+        'value': 'a;b',
+      };
+
+      await const VoxelMigrationGenerator().generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'literal semicolon',
+      );
+
+      expect(_finalSql(directory), contains("DEFAULT 'a;b'"));
+      expect(
+        ((_finalMigration(directory)['phases']! as List<Object?>).single!
+                as Map<String, Object?>)['statements']!
+            as List<Object?>,
+        hasLength(1),
+      );
+    });
+
     test('should generate indexes, checks and same-schema foreign keys', () async {
       var nextId = 0;
       await VoxelMigrationGenerator(
@@ -382,6 +408,34 @@ void main() {
         beforeValues.reversed.map((value) => value['id']),
       );
       expect(_finalSql(directory), isEmpty);
+    });
+
+    test('should constrain an enum column added without a rebuild', () async {
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      final declaration = _enumDeclaration();
+      final jobs = (declaration['tables']! as List<Object?>).first! as Map<String, Object?>;
+      final mood = (jobs['columns']! as List<Object?>).removeLast()!;
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'without scalar enum',
+      );
+      (mood as Map<String, Object?>)['storage'] = _enumStorage(nullable: true);
+      (jobs['columns']! as List<Object?>).add(mood);
+
+      await generator.generateDeclaration(
+        declaration: declaration,
+        directory: directory,
+        name: 'add scalar enum',
+      );
+
+      expect(
+        _finalSql(directory),
+        contains('ADD COLUMN "mood" TEXT CHECK ("mood" IN (\'queued\', \'done\'))'),
+      );
     });
 
     test('should require explicit scalar and array transforms for stored-label changes', () async {

@@ -164,6 +164,58 @@ void main() {
       );
     });
 
+    test('should preserve incoming foreign keys when a rebuilt parent is renamed', () async {
+      final directory = Directory.systemTemp.createTempSync('voxel_renamed_rebuild_test_');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generateDeclaration(
+        declaration: _constrainedDeclaration(),
+        directory: directory,
+        name: 'constraints',
+      );
+      final database = await TursoDatabase.open(TursoLocation.memory());
+      addTearDown(database.close);
+      await database.execute("ATTACH DATABASE ':memory:' AS content");
+      await _executeMigration(database, _migrationSql(directory));
+      await database.execute('PRAGMA foreign_keys=ON');
+      await database.execute("INSERT INTO content.parents VALUES (1, '42')");
+      await database.execute('INSERT INTO content.children VALUES (1, 1)');
+
+      final changed = _constrainedDeclaration();
+      final parents = (changed['tables']! as List<Object?>).first! as Map<String, Object?>;
+      parents['name'] = 'guardians';
+      parents['renamedFrom'] = 'parents';
+      final name = (parents['columns']! as List<Object?>).last! as Map<String, Object?>;
+      name['storage'] = {'kind': 'integer', 'nullable': false, 'codecVersion': 1};
+      final children = (changed['tables']! as List<Object?>).last! as Map<String, Object?>;
+      final foreignKey =
+          (children['constraints']! as List<Object?>).single! as Map<String, Object?>;
+      (foreignKey['references']! as Map<String, Object?>)['table'] = 'guardians';
+      await generator.generateDeclaration(
+        declaration: changed,
+        directory: directory,
+        name: 'rename and rebuild parent',
+        storageTransforms: {
+          'content.guardians.name': 'CAST("name" AS INTEGER)',
+        },
+      );
+      await _executeLatestGeneratedMigration(database, directory);
+
+      await database.execute('INSERT INTO content.children VALUES (2, 1)');
+      await expectLater(
+        database.execute('INSERT INTO content.children VALUES (3, 99)'),
+        throwsA(isA<TursoDatabaseException>()),
+      );
+      final foreignKeyTarget = (await database.query('PRAGMA content.foreign_key_list(children)'))
+          .rows
+          .single
+          .getString('table');
+      expect(foreignKeyTarget, 'guardians');
+    });
+
     test('should roll back a rebuild when final foreign-key validation fails', () async {
       final directory = Directory.systemTemp.createTempSync('voxel_rebuild_rollback_test_');
       addTearDown(() => directory.deleteSync(recursive: true));

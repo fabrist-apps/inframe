@@ -9,12 +9,13 @@ import 'package:voxel_fixture_app/fixture_app.voxel_migrations.dart';
 void main() {
   test('generated migration bundle should preserve and execute checked history', () async {
     const bundle = FixtureAppDatabaseVoxelMigrations.bundle;
-    final localDirectory = Directory('${Directory.current.path}/migrations/fixture_app');
-    final sourceDirectory = localDirectory.existsSync()
-        ? localDirectory
-        : Directory(
-            '${Directory.current.path}/test/fixtures/app_package/migrations/fixture_app',
-          );
+    final sourceDirectory = [
+      Directory('${Directory.current.path}/migrations/fixture_app'),
+      Directory('${Directory.current.path}/test/fixtures/app_package/migrations/fixture_app'),
+      Directory(
+        '${Directory.current.path}/packages/database/voxel/test/fixtures/app_package/migrations/fixture_app',
+      ),
+    ].singleWhere((directory) => directory.existsSync());
     final journal = jsonDecode(
       File('${sourceDirectory.path}/journal.json').readAsStringSync(),
     ) as Map<String, Object?>;

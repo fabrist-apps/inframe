@@ -8,6 +8,7 @@ import 'package:voxel/voxel.dart';
 import 'package:voxel_generator/src/migration/canonical_json.dart';
 import 'package:voxel_generator/src/migration/checker.dart';
 import 'package:voxel_generator/src/migration/schema_expression.dart';
+import 'package:voxel_generator/src/migration/sql_parser.dart';
 
 // This coordinator is internal to VoxelMigrationGenerator's public operation.
 // ignore_for_file: public_member_api_docs, unnecessary_cast, use_null_aware_elements
@@ -747,7 +748,13 @@ final class VoxelArtifactGenerator {
         );
         qualifiedTable = '${_quote(newSchema)}.${_quote(nextTable['name']! as String)}';
       }
-      _writeColumnDiff(buffer, qualifiedTable, previousTable, nextTable);
+      _writeColumnDiff(
+        buffer,
+        qualifiedTable,
+        previousTable,
+        nextTable,
+        nextEnums,
+      );
     }
     final unusedTransforms = storageTransforms.keys.toSet().difference(usedTransformPaths);
     if (unusedTransforms.isNotEmpty) {
@@ -869,9 +876,14 @@ final class VoxelArtifactGenerator {
       )
       ..writeln('DROP TABLE ${_quote(schema)}.${_quote(oldName)};')
       ..writeln(
-        'ALTER TABLE ${_quote(schema)}.${_quote(replacement)} RENAME TO ${_quote(newName)};',
-      )
-      ..write(_indexesForTable(next, schemas, tables));
+        'ALTER TABLE ${_quote(schema)}.${_quote(replacement)} RENAME TO ${_quote(oldName)};',
+      );
+    if (oldName != newName) {
+      buffer.writeln(
+        'ALTER TABLE ${_quote(schema)}.${_quote(oldName)} RENAME TO ${_quote(newName)};',
+      );
+    }
+    buffer.write(_indexesForTable(next, schemas, tables));
     return buffer.toString();
   }
 
@@ -880,6 +892,7 @@ final class VoxelArtifactGenerator {
     String qualifiedTable,
     Map<String, Object?> previousTable,
     Map<String, Object?> nextTable,
+    Map<String, Map<String, Object?>> enums,
   ) {
     final previousColumns = {
       for (final value in (previousTable['columns']! as List<Object?>).cast<Map<String, Object?>>())
@@ -897,7 +910,8 @@ final class VoxelArtifactGenerator {
         buffer.writeln(
           'ALTER TABLE $qualifiedTable ADD COLUMN ${_quote(nextColumn['name']! as String)} '
           '${_tursoType(storage)}${_defaultSql(nextColumn)}'
-          '${storage['nullable'] == true ? '' : ' NOT NULL'};',
+          '${storage['nullable'] == true ? '' : ' NOT NULL'}'
+          '${_enumColumnCheck(nextColumn, enums)};',
         );
         continue;
       }
@@ -935,6 +949,31 @@ final class VoxelArtifactGenerator {
         );
       }
     }
+  }
+
+  String _enumColumnCheck(
+    Map<String, Object?> column,
+    Map<String, Map<String, Object?>> enums,
+  ) {
+    final storage = column['storage']! as Map<String, Object?>;
+    final name = _quote(column['name']! as String);
+    if (storage['kind'] == 'enum') {
+      final value =
+          enums[storage['enumId']] ??
+          (throw const FormatException('Enum column references an unknown snapshot enum.'));
+      final labels = (value['values']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map((entry) => _stringLiteral(entry['label']! as String))
+          .join(', ');
+      return ' CHECK ($name IN ($labels))';
+    }
+    if (storage case {'kind': 'array', 'element': final Map<String, Object?> element}
+        when element['kind'] == 'enum') {
+      return ' CHECK (CASE WHEN $name IS NULL THEN '
+          "${storage['nullable'] == true ? '1' : '0'} WHEN json_valid($name) THEN "
+          "json_type($name) = 'array' ELSE 0 END)";
+    }
+    return '';
   }
 
   String _createTableSql(
@@ -1385,22 +1424,7 @@ final class VoxelArtifactGenerator {
   }
 
   List<Map<String, int>> _statementRanges(String sql) {
-    final bytes = utf8.encode(sql);
-    final ranges = <Map<String, int>>[];
-    var start = 0;
-    for (var index = 0; index < bytes.length; index++) {
-      if (bytes[index] != 0x3b) continue;
-      ranges.add({'startByte': start, 'endByte': index + 1});
-      start = index + 1;
-      while (start < bytes.length && (bytes[start] == 0x0a || bytes[start] == 0x0d)) {
-        start++;
-      }
-      index = start - 1;
-    }
-    if (start != bytes.length) {
-      throw StateError('Generated SQL contains an incomplete statement.');
-    }
-    return ranges;
+    return parseVoxelSqlStatements(sql);
   }
 
   String _checksum(

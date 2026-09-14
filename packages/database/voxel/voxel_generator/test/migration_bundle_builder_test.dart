@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:build/build.dart';
 import 'package:build_test/build_test.dart';
 import 'package:test/test.dart';
 import 'package:voxel_generator/src/migration_bundle_builder.dart';
@@ -78,6 +79,58 @@ void main() {
     );
     expect(duplicateResult.succeeded, isFalse);
     expect(duplicateResult.errors.single, contains('Duplicate JSON key `formatVersion`'));
+  });
+
+  test('should reject unsafe journal paths before materializing artifacts', () async {
+    final fixture = await _fixture();
+    addTearDown(() => fixture.directory.deleteSync(recursive: true));
+    final assets = Map<String, Object>.from(fixture.assets);
+    final journalKey = assets.keys.singleWhere((id) => id.endsWith('journal.json'));
+    final journal = jsonDecode(assets[journalKey]! as String) as Map<String, Object?>;
+    final entry = (journal['entries']! as List<Object?>).single! as Map<String, Object?>;
+    final escapedName = 'voxel_bundle_escape_$pid';
+    entry['directory'] = '../$escapedName';
+    assets[journalKey] = jsonEncode(journal);
+    final escaped = Directory('${Directory.systemTemp.path}/$escapedName');
+    if (escaped.existsSync()) escaped.deleteSync(recursive: true);
+    addTearDown(() {
+      if (escaped.existsSync()) escaped.deleteSync(recursive: true);
+    });
+
+    final result = await testBuilder(
+      VoxelMigrationBundleBuilder(
+        readDeclaration: (_, _, _) async => fixture.declaration,
+        resolvePackageRoot: (_) async => Directory.current,
+      ),
+      assets,
+      readerWriter: TestReaderWriter(rootPackage: 'voxel_generator'),
+    );
+
+    expect(result.succeeded, isFalse);
+    expect(result.errors.single, contains('unsafe migration directory'));
+    expect(escaped.existsSync(), isFalse);
+  });
+
+  test('should register Dart model files as bundle dependencies', () async {
+    final fixture = await _fixture();
+    addTearDown(() => fixture.directory.deleteSync(recursive: true));
+    final assets = Map<String, Object>.from(fixture.assets)
+      ..['voxel_generator|lib/database.dart'] = 'final modelVersion = 1;';
+    final readerWriter = TestReaderWriter(rootPackage: 'voxel_generator');
+
+    await testBuilder(
+      VoxelMigrationBundleBuilder(
+        readDeclaration: (_, _, _) async => fixture.declaration,
+        resolvePackageRoot: (_) async => Directory.current,
+      ),
+      assets,
+      readerWriter: readerWriter,
+    );
+
+    expect(
+      readerWriter.testing.assetsRead,
+      contains(AssetId('voxel_generator', 'lib/database.dart')),
+    );
   });
 }
 

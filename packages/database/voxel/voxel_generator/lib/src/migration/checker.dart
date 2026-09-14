@@ -17,7 +17,7 @@ final class VoxelArtifactChecker {
     String? allowUnsealedMigrationId,
   }) async {
     final journal = _readJson(File('${directory.path}/journal.json'));
-    _expectVersion(journal, 'journal.json');
+    validateJournal(journal);
     final databaseId = _id(journal['databaseId'], 'journal databaseId');
     final entries = _list(journal['entries'], 'journal entries');
     String? parentId;
@@ -34,8 +34,8 @@ final class VoxelArtifactChecker {
       final migration = _readJson(File('${migrationDirectory.path}/migration.json'));
       final snapshot = _readJson(File('${migrationDirectory.path}/snapshot.json'));
       final sql = _readUtf8(File('${migrationDirectory.path}/migration.sql'));
-      _expectVersion(migration, '$relativeDirectory/migration.json');
-      _expectVersion(snapshot, '$relativeDirectory/snapshot.json');
+      _validateMigrationRecord(migration, '$relativeDirectory/migration.json');
+      _validateSnapshotRecord(snapshot, '$relativeDirectory/snapshot.json');
       if (migration['databaseId'] != databaseId || snapshot['databaseId'] != databaseId) {
         throw FormatException('Migration $migrationId has a different database ID.');
       }
@@ -70,13 +70,176 @@ final class VoxelArtifactChecker {
     }
   }
 
+  void validateJournal(Map<String, Object?> journal) {
+    _record(
+      journal,
+      'journal.json',
+      required: const {'formatVersion', 'dialect', 'databaseId', 'entries'},
+      optional: const {'source'},
+    );
+    _expectVersion(journal, 'journal.json');
+    _id(journal['databaseId'], 'journal databaseId');
+    if (journal['source'] case final Map<String, Object?> source) {
+      _record(source, 'journal source', required: const {'library', 'class'});
+      _nonemptyString(source['library'], 'journal source library');
+      _nonemptyString(source['class'], 'journal source class');
+    } else if (journal['source'] != null) {
+      throw const FormatException('journal source must be a JSON object.');
+    }
+    for (final rawEntry in _list(journal['entries'], 'journal entries')) {
+      final entry = _map(rawEntry, 'journal entry');
+      _record(entry, 'journal entry', required: const {'id', 'directory', 'checksum'});
+      _id(entry['id'], 'journal entry id');
+      _safeDirectory(entry['directory']);
+      _hex(entry['checksum'], 64, 'journal entry checksum');
+    }
+  }
+
   void validateSealedMigration(
     Map<String, Object?> migration,
     Map<String, Object?> snapshot,
     String sql,
   ) {
+    _validateMigrationRecord(migration, 'migration.json');
+    _validateSnapshotRecord(snapshot, 'snapshot.json');
     _validateSnapshot(snapshot);
     _validatePhases(migration, snapshot, sql);
+  }
+
+  void _validateMigrationRecord(Map<String, Object?> migration, String source) {
+    _record(
+      migration,
+      source,
+      required: const {
+        'formatVersion',
+        'dialect',
+        'databaseId',
+        'id',
+        'parentId',
+        'checksum',
+        'phases',
+      },
+    );
+    _expectVersion(migration, source);
+    _id(migration['databaseId'], '$source databaseId');
+    _id(migration['id'], '$source id');
+    if (migration['parentId'] != null) _id(migration['parentId'], '$source parentId');
+    _hex(migration['checksum'], 64, '$source checksum');
+    for (final rawPhase in _list(migration['phases'], '$source phases')) {
+      final phase = _map(rawPhase, 'migration phase');
+      _record(
+        phase,
+        'migration phase',
+        required: const {'id', 'scopeId', 'mode', 'platforms', 'statements', 'recovery'},
+        optional: const {'rebuild'},
+      );
+      final phaseId = phase['id'];
+      if (phaseId is! String || !RegExp(r'^(0|[1-9][0-9]*)$').hasMatch(phaseId)) {
+        throw const FormatException('migration phase id must be a decimal string.');
+      }
+      _id(phase['scopeId'], 'migration phase scopeId');
+      _oneOf(phase['mode'], const {'transactional', 'nontransactional'}, 'phase mode');
+      _stringList(phase['platforms'], 'phase platforms');
+      for (final rawStatement in _list(phase['statements'], 'phase statements')) {
+        final statement = _map(rawStatement, 'statement range');
+        _record(statement, 'statement range', required: const {'startByte', 'endByte'});
+        _positiveInt(statement['startByte'], 'statement startByte', allowZero: true);
+        _positiveInt(statement['endByte'], 'statement endByte');
+      }
+      if (phase['recovery'] case final Map<String, Object?> recovery) {
+        _validateRecoveryRecord(recovery);
+      } else if (phase['recovery'] != null) {
+        throw const FormatException('phase recovery must be an object or null.');
+      }
+      if (phase['rebuild'] case final Map<String, Object?> rebuild) {
+        _validateRebuildRecord(rebuild);
+      } else if (phase['rebuild'] != null) {
+        throw const FormatException('phase rebuild must be an object.');
+      }
+    }
+  }
+
+  void _validateRecoveryRecord(Map<String, Object?> recovery) {
+    _record(
+      recovery,
+      'phase recovery',
+      required: const {'kind', 'operationId', 'before', 'after'},
+      optional: const {'checks', 'inspector'},
+    );
+    final kind = _oneOf(recovery['kind'], const {'catalog', 'manual'}, 'recovery kind');
+    _id(recovery['operationId'], 'recovery operationId');
+    _map(recovery['before'], 'recovery before');
+    _map(recovery['after'], 'recovery after');
+    if (kind == 'manual') {
+      if (recovery.containsKey('checks') || recovery.containsKey('inspector')) {
+        throw const FormatException('manual recovery cannot contain checks or an inspector.');
+      }
+      return;
+    }
+    if (!recovery.containsKey('checks') && recovery['inspector'] != 'native.index.v1') {
+      throw const FormatException('catalog recovery requires checks or its native inspector.');
+    }
+    if (recovery.containsKey('inspector') && recovery['inspector'] != 'native.index.v1') {
+      throw const FormatException('recovery inspector is unsupported.');
+    }
+    if (recovery.containsKey('checks')) {
+      final checks = _list(recovery['checks'], 'recovery checks');
+      if (checks.isEmpty) throw const FormatException('recovery checks must not be empty.');
+      for (final rawCheck in checks) {
+        final check = _map(rawCheck, 'recovery check');
+        _record(check, 'recovery check', required: const {'sql', 'parameters', 'expected'});
+        _nonemptyString(check['sql'], 'recovery check sql');
+        if (check['expected'] is! bool) {
+          throw const FormatException('recovery check expected must be boolean.');
+        }
+        for (final rawParameter in _list(check['parameters'], 'recovery parameters')) {
+          final parameter = _map(rawParameter, 'recovery parameter');
+          _record(parameter, 'recovery parameter', required: const {'type', 'value'});
+          final type = _oneOf(
+            parameter['type'],
+            const {'null', 'boolean', 'decimal', 'string'},
+            'recovery parameter type',
+          );
+          final value = parameter['value'];
+          if ((type == 'null' && value != null) ||
+              (type == 'boolean' && value is! bool) ||
+              ((type == 'decimal' || type == 'string') && value is! String)) {
+            throw const FormatException('recovery parameter value does not match its type.');
+          }
+        }
+      }
+    }
+  }
+
+  void _validateRebuildRecord(Map<String, Object?> rebuild) {
+    _record(rebuild, 'phase rebuild', required: const {'foreignKeys', 'validations'});
+    if (rebuild['foreignKeys'] != 'offOutsideTransaction') {
+      throw const FormatException('rebuild foreignKeys mode is unsupported.');
+    }
+    for (final rawValidation in _list(rebuild['validations'], 'rebuild validations')) {
+      final validation = _map(rawValidation, 'rebuild validation');
+      final kind = _oneOf(
+        validation['kind'],
+        const {'foreignKeyAntiJoin', 'enumArrayLabels'},
+        'rebuild validation kind',
+      );
+      _record(
+        validation,
+        'rebuild validation',
+        required: {
+          'kind',
+          'tableId',
+          'sql',
+          if (kind == 'foreignKeyAntiJoin') 'constraintId' else 'columnId',
+        },
+      );
+      _id(validation['tableId'], 'rebuild validation tableId');
+      _id(
+        validation[kind == 'foreignKeyAntiJoin' ? 'constraintId' : 'columnId'],
+        'rebuild validation identity',
+      );
+      _nonemptyString(validation['sql'], 'rebuild validation sql');
+    }
   }
 
   void _expectVersion(Map<String, Object?> value, String source) {
@@ -179,6 +342,233 @@ final class VoxelArtifactChecker {
       }
     }
     _list(snapshot['requirements'], 'snapshot requirements');
+  }
+
+  void _validateSnapshotRecord(Map<String, Object?> snapshot, String source) {
+    _record(
+      snapshot,
+      source,
+      required: const {
+        'formatVersion',
+        'dialect',
+        'databaseId',
+        'migrationId',
+        'schemas',
+        'tables',
+        'enums',
+        'requirements',
+      },
+    );
+    _expectVersion(snapshot, source);
+    _id(snapshot['databaseId'], '$source databaseId');
+    _id(snapshot['migrationId'], '$source migrationId');
+    for (final rawSchema in _list(snapshot['schemas'], '$source schemas')) {
+      final schema = _map(rawSchema, 'snapshot schema');
+      _record(schema, 'snapshot schema', required: const {'id', 'name'});
+      _id(schema['id'], 'schema identity');
+      _nonemptyString(schema['name'], 'schema name');
+    }
+    for (final rawTable in _list(snapshot['tables'], '$source tables')) {
+      final table = _map(rawTable, 'snapshot table');
+      _record(
+        table,
+        'snapshot table',
+        required: const {'id', 'schemaId', 'name', 'columns', 'indexes', 'constraints'},
+      );
+      _id(table['id'], 'table identity');
+      _id(table['schemaId'], 'table schemaId');
+      _nonemptyString(table['name'], 'table name');
+      for (final rawColumn in _list(table['columns'], 'table columns')) {
+        final column = _map(rawColumn, 'table column');
+        _record(
+          column,
+          'table column',
+          required: const {'id', 'tableId', 'name', 'storage', 'primaryKey'},
+          optional: const {'default'},
+        );
+        _id(column['id'], 'column identity');
+        _id(column['tableId'], 'column tableId');
+        _nonemptyString(column['name'], 'column name');
+        if (column['primaryKey'] is! bool) {
+          throw const FormatException('column primaryKey must be a boolean.');
+        }
+        _validateStorage(_map(column['storage'], 'column storage'));
+        if (column.containsKey('default')) {
+          _validateExpressionRecord(_map(column['default'], 'column default'));
+        }
+      }
+      for (final rawIndex in _list(table['indexes'], 'table indexes')) {
+        final index = _map(rawIndex, 'table index');
+        _record(
+          index,
+          'table index',
+          required: const {'id', 'tableId', 'name', 'unique', 'terms', 'options', 'platforms'},
+          optional: const {'predicate'},
+        );
+        _id(index['id'], 'index identity');
+        _id(index['tableId'], 'index tableId');
+        _nonemptyString(index['name'], 'index name');
+        if (index['unique'] is! bool) throw const FormatException('index unique must be boolean.');
+        final terms = _list(index['terms'], 'index terms');
+        if (terms.isEmpty) throw const FormatException('index terms must not be empty.');
+        for (final rawTerm in terms) {
+          final term = _map(rawTerm, 'index term');
+          _record(term, 'index term', required: const {'columnId', 'descending'});
+          _id(term['columnId'], 'index term columnId');
+          if (term['descending'] is! bool) {
+            throw const FormatException('index term descending must be boolean.');
+          }
+        }
+        if (index.containsKey('predicate')) {
+          _validateExpressionRecord(_map(index['predicate'], 'index predicate'));
+        }
+        _map(index['options'], 'index options');
+        _stringList(index['platforms'], 'index platforms');
+      }
+      for (final rawConstraint in _list(table['constraints'], 'table constraints')) {
+        _validateConstraintRecord(_map(rawConstraint, 'table constraint'));
+      }
+    }
+    for (final rawEnum in _list(snapshot['enums'], '$source enums')) {
+      final value = _map(rawEnum, 'snapshot enum');
+      _record(
+        value,
+        'snapshot enum',
+        required: const {'id', 'schemaId', 'name', 'values'},
+      );
+      _id(value['id'], 'enum identity');
+      _id(value['schemaId'], 'enum schemaId');
+      _nonemptyString(value['name'], 'enum name');
+      final values = _list(value['values'], 'enum values');
+      if (values.isEmpty) throw const FormatException('enum values must not be empty.');
+      for (final rawValue in values) {
+        final enumValue = _map(rawValue, 'enum value');
+        _record(enumValue, 'enum value', required: const {'id', 'enumId', 'label'});
+        _id(enumValue['id'], 'enum value identity');
+        _id(enumValue['enumId'], 'enum value enumId');
+        _nonemptyString(enumValue['label'], 'enum value label');
+      }
+    }
+    for (final requirement in _list(snapshot['requirements'], '$source requirements')) {
+      _map(requirement, 'snapshot requirement');
+    }
+  }
+
+  void _validateStorage(Map<String, Object?> storage) {
+    final kind = _oneOf(
+      storage['kind'],
+      const {'text', 'integer', 'real', 'boolean', 'dateTime', 'json', 'enum', 'vector', 'array'},
+      'storage kind',
+    );
+    final specific = switch (kind) {
+      'enum' => const {'enumId'},
+      'vector' => const {'dimensions'},
+      'array' => const {'element'},
+      _ => const <String>{},
+    };
+    _record(
+      storage,
+      'column storage',
+      required: {'kind', 'nullable', 'codecVersion', ...specific},
+    );
+    if (storage['nullable'] is! bool) {
+      throw const FormatException('storage nullable must be boolean.');
+    }
+    _positiveInt(storage['codecVersion'], 'storage codecVersion');
+    if (kind == 'enum') _id(storage['enumId'], 'storage enumId');
+    if (kind == 'vector') _positiveInt(storage['dimensions'], 'storage dimensions');
+    if (kind == 'array') _validateStorage(_map(storage['element'], 'array element storage'));
+  }
+
+  void _validateConstraintRecord(Map<String, Object?> constraint) {
+    final kind = _oneOf(
+      constraint['kind'],
+      const {'check', 'primaryKey', 'foreignKey'},
+      'constraint kind',
+    );
+    final specific = switch (kind) {
+      'check' => const {'expression'},
+      'foreignKey' => const {
+        'referenceTableId',
+        'referenceColumnIds',
+        'onDelete',
+        'onUpdate',
+      },
+      _ => const <String>{},
+    };
+    _record(
+      constraint,
+      'table constraint',
+      required: {'id', 'tableId', 'name', 'kind', 'columnIds', ...specific},
+    );
+    _id(constraint['id'], 'constraint identity');
+    _id(constraint['tableId'], 'constraint tableId');
+    _nonemptyString(constraint['name'], 'constraint name');
+    for (final columnId in _list(constraint['columnIds'], 'constraint columns')) {
+      _id(columnId, 'constraint columnId');
+    }
+    if (kind == 'check') {
+      _validateExpressionRecord(_map(constraint['expression'], 'constraint expression'));
+    }
+    if (kind == 'foreignKey') {
+      _id(constraint['referenceTableId'], 'foreign key referenceTableId');
+      final references = _list(constraint['referenceColumnIds'], 'foreign key columns');
+      for (final columnId in references) {
+        _id(columnId, 'foreign key referenceColumnId');
+      }
+      if (references.length != (constraint['columnIds']! as List<Object?>).length) {
+        throw const FormatException('foreign key columns must have matching arity.');
+      }
+      const actions = {'noAction', 'restrict', 'cascade', 'setNull', 'setDefault'};
+      _oneOf(constraint['onDelete'], actions, 'foreign key onDelete');
+      _oneOf(constraint['onUpdate'], actions, 'foreign key onUpdate');
+    }
+  }
+
+  void _validateExpressionRecord(Map<String, Object?> expression) {
+    if (expression['formatVersion'] != 1) {
+      throw const FormatException('schema expression has an unknown format version.');
+    }
+    final kind = _oneOf(
+      expression['kind'],
+      const {'literal', 'reference', 'operator', 'function'},
+      'schema expression kind',
+    );
+    final specific = switch (kind) {
+      'literal' => const {'literalType', 'value'},
+      'reference' => const {'objectId'},
+      'operator' => const {'operator', 'arguments'},
+      'function' => const {'name', 'arguments'},
+      _ => const <String>{},
+    };
+    _record(
+      expression,
+      'schema expression',
+      required: {'formatVersion', 'kind', ...specific},
+    );
+    if (kind == 'literal') {
+      final literalType = _oneOf(
+        expression['literalType'],
+        const {'null', 'boolean', 'decimal', 'string'},
+        'schema literal type',
+      );
+      final value = expression['value'];
+      if ((literalType == 'null' && value != null) ||
+          (literalType == 'boolean' && value is! bool) ||
+          ((literalType == 'decimal' || literalType == 'string') && value is! String)) {
+        throw const FormatException('schema literal value does not match its type.');
+      }
+    } else if (kind == 'reference') {
+      _id(expression['objectId'], 'schema reference objectId');
+    } else {
+      _nonemptyString(
+        expression[kind == 'operator' ? 'operator' : 'name'],
+        'schema expression operation',
+      );
+      for (final rawArgument in _list(expression['arguments'], 'schema expression arguments')) {
+        _validateExpressionRecord(_map(rawArgument, 'schema expression argument'));
+      }
+    }
   }
 
   void _validateStorageReferences(Map<String, Object?> storage, Set<String> enumIds) {
@@ -676,11 +1066,61 @@ final class VoxelArtifactChecker {
     return value;
   }
 
-  String _id(Object? value, String field) {
-    if (value is! String || !RegExp(r'^[0-9a-f]{32}$').hasMatch(value)) {
-      throw FormatException('$field must be 32 lowercase hexadecimal characters.');
+  void _record(
+    Map<String, Object?> value,
+    String field, {
+    required Set<String> required,
+    Set<String> optional = const {},
+  }) {
+    final missing = required.difference(value.keys.toSet());
+    if (missing.isNotEmpty) {
+      throw FormatException('$field is missing required fields: ${missing.toList()..sort()}.');
+    }
+    final unknown = value.keys.toSet().difference({...required, ...optional});
+    if (unknown.isNotEmpty) {
+      throw FormatException('$field contains unknown fields: ${unknown.toList()..sort()}.');
+    }
+  }
+
+  String _nonemptyString(Object? value, String field) {
+    if (value is! String || value.isEmpty) {
+      throw FormatException('$field must be a non-empty string.');
     }
     return value;
+  }
+
+  String _oneOf(Object? value, Set<String> allowed, String field) {
+    if (value is! String || !allowed.contains(value)) {
+      throw FormatException('$field has an unsupported value.');
+    }
+    return value;
+  }
+
+  void _positiveInt(Object? value, String field, {bool allowZero = false}) {
+    if (value is! int || (allowZero ? value < 0 : value < 1)) {
+      throw FormatException(
+        '$field must be ${allowZero ? 'a non-negative' : 'a positive'} integer.',
+      );
+    }
+  }
+
+  List<String> _stringList(Object? value, String field) {
+    final list = _list(value, field);
+    if (list.any((entry) => entry is! String)) {
+      throw FormatException('$field must contain only strings.');
+    }
+    return list.cast<String>();
+  }
+
+  String _hex(Object? value, int length, String field) {
+    if (value is! String || !RegExp('^[0-9a-f]{$length}\$').hasMatch(value)) {
+      throw FormatException('$field must be $length lowercase hexadecimal characters.');
+    }
+    return value;
+  }
+
+  String _id(Object? value, String field) {
+    return _hex(value, 32, field);
   }
 
   List<Object?> _list(Object? value, String field) {

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:build/build.dart';
+import 'package:glob/glob.dart';
 import 'package:voxel_generator/src/generator_utils.dart';
 import 'package:voxel_generator/src/migration/checker.dart';
 import 'package:voxel_generator/src/schema_probe.dart';
@@ -37,6 +38,7 @@ final class VoxelMigrationBundleBuilder implements Builder {
     if (journal is! Map<String, Object?>) {
       throw const FormatException('journal.json must contain one JSON object.');
     }
+    final checker = VoxelArtifactChecker()..validateJournal(journal);
     final source = journal['source'];
     if (source is! Map<String, Object?> ||
         source['library'] is! String ||
@@ -50,6 +52,7 @@ final class VoxelMigrationBundleBuilder implements Builder {
       throw FormatException('Invalid bundled database class `$className`.');
     }
     final packageRoot = await (resolvePackageRoot ?? _packageRoot)(buildStep.inputId.package);
+    await _trackModelInputs(buildStep);
     final migrationDirectory = await _materializeArtifacts(
       buildStep,
       journal,
@@ -67,7 +70,7 @@ final class VoxelMigrationBundleBuilder implements Builder {
               className,
               packageRoot,
             );
-      await VoxelArtifactChecker().check(
+      await checker.check(
         directory: migrationDirectory,
         declaration: declaration,
       );
@@ -103,6 +106,14 @@ VoxelBundledMigration(
       await buildStep.writeAsString(buildStep.allowedOutputs.single, output.toString());
     } finally {
       migrationDirectory.deleteSync(recursive: true);
+    }
+  }
+
+  Future<void> _trackModelInputs(BuildStep buildStep) async {
+    await for (final id in buildStep.findAssets(Glob('lib/**.dart'))) {
+      if (!buildStep.allowedOutputs.contains(id)) {
+        await buildStep.readAsBytes(id);
+      }
     }
   }
 
