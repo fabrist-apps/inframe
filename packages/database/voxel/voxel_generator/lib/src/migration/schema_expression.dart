@@ -138,6 +138,7 @@ String _renderOperator(
     'IS NULL' when arguments.length == 1 => '${arguments.single} IS NULL',
     '=' ||
     '<' ||
+    '>' ||
     '+' ||
     'AND' ||
     'OR' when arguments.length == 2 => '(${arguments.first} $operator ${arguments.last})',

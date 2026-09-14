@@ -84,8 +84,128 @@ void main() {
       expect(row.getString('displayName'), 'Ada');
       expect(row.value('nickname'), isNull);
     });
+
+    test('should enforce generated indexes, checks and foreign keys', () async {
+      final directory = Directory.systemTemp.createTempSync('voxel_constraints_test_');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      await const VoxelMigrationGenerator().generateDeclaration(
+        declaration: _constrainedDeclaration(),
+        directory: directory,
+        name: 'constraints',
+      );
+
+      final database = await TursoDatabase.open(TursoLocation.memory());
+      addTearDown(database.close);
+      await database.execute("ATTACH DATABASE ':memory:' AS content");
+      await _executeMigration(database, _migrationSql(directory));
+      await database.execute('PRAGMA foreign_keys=ON');
+      await database.execute("INSERT INTO content.parents VALUES (1, 'Ada')");
+      await database.execute('INSERT INTO content.children VALUES (1, 1)');
+
+      await expectLater(
+        database.execute("INSERT INTO content.parents VALUES (2, 'Ada')"),
+        throwsA(isA<TursoDatabaseException>()),
+      );
+      await expectLater(
+        database.execute("INSERT INTO content.parents VALUES (2, '')"),
+        throwsA(isA<TursoDatabaseException>()),
+      );
+      await expectLater(
+        database.execute('INSERT INTO content.children VALUES (2, 99)'),
+        throwsA(isA<TursoDatabaseException>()),
+      );
+    });
   });
 }
+
+Map<String, Object?> _constrainedDeclaration() => {
+  'formatVersion': 1,
+  'dialect': 'voxel',
+  'name': 'content',
+  'tables': [
+    {
+      'schema': 'content',
+      'name': 'parents',
+      'columns': [
+        _column('id', 'integer', primaryKey: true),
+        _column('name', 'text'),
+      ],
+      'indexes': [
+        {
+          'name': 'parent_name_unique',
+          'unique': true,
+          'terms': [
+            {'column': 'name', 'descending': false},
+          ],
+          'predicate': _notEmptyExpression('name'),
+          'options': <String, Object?>{},
+          'platforms': ['native', 'browser'],
+        },
+      ],
+      'constraints': [
+        {
+          'name': 'parent_name_check',
+          'kind': 'check',
+          'columns': <Object?>[],
+          'expression': _notEmptyExpression('name'),
+        },
+      ],
+    },
+    {
+      'schema': 'content',
+      'name': 'children',
+      'columns': [
+        _column('id', 'integer', primaryKey: true),
+        _column('parentId', 'integer'),
+      ],
+      'indexes': <Object?>[],
+      'constraints': [
+        {
+          'name': 'children_parent_fkey',
+          'kind': 'foreignKey',
+          'columns': ['parentId'],
+          'references': {
+            'schema': 'content',
+            'table': 'parents',
+            'columns': ['id'],
+          },
+          'onDelete': 'noAction',
+          'onUpdate': 'noAction',
+        },
+      ],
+    },
+  ],
+  'enums': <Object?>[],
+  'requirements': <Object?>[],
+};
+
+Map<String, Object?> _column(String name, String kind, {bool primaryKey = false}) => {
+  'name': name,
+  'storage': {'kind': kind, 'nullable': false, 'codecVersion': 1},
+  'primaryKey': primaryKey,
+};
+
+Map<String, Object?> _notEmptyExpression(String column) => {
+  'formatVersion': 1,
+  'kind': 'operator',
+  'operator': 'NOT',
+  'arguments': [
+    {
+      'formatVersion': 1,
+      'kind': 'operator',
+      'operator': '=',
+      'arguments': [
+        {'formatVersion': 1, 'kind': 'reference', 'objectName': column},
+        {
+          'formatVersion': 1,
+          'kind': 'literal',
+          'literalType': 'string',
+          'value': '',
+        },
+      ],
+    },
+  ],
+};
 
 Map<String, Object?> _physicalDeclaration(
   String table,

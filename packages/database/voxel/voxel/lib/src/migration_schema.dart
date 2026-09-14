@@ -24,9 +24,10 @@ extension VoxelMigrationSchemaSerialization on VoxelDatabaseSchema {
     final encodedTables = <Map<String, Object?>>[];
     for (final table in tables) {
       final encodedColumns = <Map<String, Object?>>[];
+      final encodedForeignKeys = <Map<String, Object?>>[];
       for (final column in table.columns) {
         final storage = _storage(column.codec);
-        final enumCodec = storage.enumCodec;
+        final enumCodec = _enumCodec(storage);
         if (enumCodec != null) {
           final key = '${enumCodec.schemaName}.${enumCodec.typeName}';
           final existing = enumCodecs[key];
@@ -55,9 +56,14 @@ extension VoxelMigrationSchemaSerialization on VoxelDatabaseSchema {
             throw ArgumentError('A Voxel foreign key references an unregistered column.');
           }
           encodedForeignKey = {
-            'schema': target.schemaName,
-            'table': target.tableName,
-            'column': referenced.physicalName,
+            'name': '${table.tableName}_${column.physicalName}_fkey',
+            'kind': 'foreignKey',
+            'columns': [column.physicalName],
+            'references': {
+              'schema': target.schemaName,
+              'table': target.tableName,
+              'columns': [referenced.physicalName],
+            },
             'onDelete': foreignKey.onDelete.name,
             'onUpdate': foreignKey.onUpdate.name,
           };
@@ -70,8 +76,8 @@ extension VoxelMigrationSchemaSerialization on VoxelDatabaseSchema {
           'primaryKey': column.isPrimaryKey,
           if (column.sqlDefault case final sqlDefault?)
             'default': {'formatVersion': 1, 'kind': 'sql', 'sql': sqlDefault},
-          if (encodedForeignKey != null) 'foreignKey': encodedForeignKey,
         });
+        if (encodedForeignKey != null) encodedForeignKeys.add(encodedForeignKey);
       }
 
       encodedTables.add({
@@ -88,32 +94,14 @@ extension VoxelMigrationSchemaSerialization on VoxelDatabaseSchema {
                 for (final term in index.terms)
                   {'column': term.column.physicalName, 'descending': term.descending},
               ],
-              if (index.predicate case final predicate?)
-                'predicate': {
-                  'formatVersion': 1,
-                  'kind': 'sql',
-                  'sql': predicate.renderLiterals(),
-                },
+              if (index.predicate case final predicate?) 'predicate': predicate.schemaExpression(),
+              'options': <String, Object?>{},
+              'platforms': ['native', 'browser'],
             },
         ],
         'constraints': [
-          for (final constraint in table.constraints)
-            {
-              'name': constraint.name,
-              'kind': constraint.kind.name,
-              if (constraint.predicate case final predicate?)
-                'expression': {
-                  'formatVersion': 1,
-                  'kind': 'sql',
-                  'sql': predicate.renderLiterals(),
-                }
-              else if (constraint.expression case final expression?)
-                'expression': {
-                  'formatVersion': 1,
-                  'kind': 'sql',
-                  'sql': expression,
-                },
-            },
+          for (final constraint in table.constraints) _constraintToJson(constraint, tablesByType),
+          ...encodedForeignKeys,
         ],
       });
     }
@@ -131,8 +119,9 @@ extension VoxelMigrationSchemaSerialization on VoxelDatabaseSchema {
             'name': entry.value.typeName,
             if (entry.value.renamedFrom case final renamedFrom?) 'renamedFrom': renamedFrom,
             'values': [
-              for (final label in entry.value.labels)
+              for (final (index, label) in entry.value.labels.indexed)
                 {
+                  'dartName': entry.value.values[index].name,
                   'label': label,
                   if (entry.value.renamedLabels[label] case final renamedFrom?)
                     'renamedFrom': renamedFrom,
@@ -143,6 +132,42 @@ extension VoxelMigrationSchemaSerialization on VoxelDatabaseSchema {
       'requirements': <Object?>[],
     };
   }
+}
+
+Map<String, Object?> _constraintToJson(
+  VoxelConstraint constraint,
+  Map<Type, VoxelTableSchema<Object?, Object?>> tablesByType,
+) {
+  final result = <String, Object?>{
+    'name': constraint.name,
+    'kind': constraint.kind.name,
+    'columns': [for (final column in constraint.columns) column.physicalName],
+    if (constraint.predicate case final predicate?)
+      'expression': predicate.schemaExpression()
+    else if (constraint.expression case final expression?)
+      'expression': {
+        'formatVersion': 1,
+        'kind': 'sql',
+        'sql': expression,
+      },
+  };
+  if (constraint.kind != VoxelConstraintKind.foreignKey) return result;
+  final target = tablesByType[constraint.targetTable];
+  if (target == null || constraint.referencedColumns.length != constraint.columns.length) {
+    throw ArgumentError('Voxel foreign key ${constraint.name} is not resolved.');
+  }
+  return {
+    ...result,
+    'references': {
+      'schema': target.schemaName,
+      'table': target.tableName,
+      'columns': [
+        for (final column in constraint.referencedColumns) column.physicalName,
+      ],
+    },
+    'onDelete': constraint.onDelete.name,
+    'onUpdate': constraint.onUpdate.name,
+  };
 }
 
 final class _StorageDescriptor {
@@ -169,6 +194,9 @@ final class _StorageDescriptor {
     if (dimensions != null) 'dimensions': dimensions,
   };
 }
+
+VoxelEnumCodec<Enum>? _enumCodec(_StorageDescriptor storage) =>
+    storage.enumCodec ?? (storage.element == null ? null : _enumCodec(storage.element!));
 
 _StorageDescriptor _storage(VoxelCodec<dynamic> codec, {bool nullable = false}) {
   if (codec is VoxelMappedCodec<dynamic, dynamic>) {

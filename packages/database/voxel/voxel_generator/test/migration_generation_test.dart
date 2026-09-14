@@ -34,7 +34,7 @@ void main() {
         name: 'create users',
       );
 
-      expect(migrationId, '00000000000000000000000000000006');
+      expect(migrationId, '00000000000000000000000000000007');
       final journal = jsonDecode(
         File('${directory.path}/journal.json').readAsStringSync(),
       ) as Map<String, Object?>;
@@ -52,8 +52,9 @@ void main() {
       expect(
         File('${migrationDirectory.path}/migration.sql').readAsStringSync(),
         'CREATE TABLE "auth"."users" (\n'
-        '  "id" INTEGER NOT NULL PRIMARY KEY,\n'
-        '  "name" TEXT NOT NULL\n'
+        '  "id" INTEGER NOT NULL,\n'
+        '  "name" TEXT NOT NULL,\n'
+        '  CONSTRAINT "users_pkey" PRIMARY KEY ("id")\n'
         ');\n',
       );
       final migration = jsonDecode(
@@ -232,6 +233,26 @@ void main() {
         isNull,
       );
     });
+
+    test('should generate indexes, checks and same-schema foreign keys', () async {
+      var nextId = 0;
+      await VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      ).generate(
+        schema: VoxelDatabaseSchema(
+          name: 'content',
+          tables: [Parents.db.buildSchema(), Children.db.buildSchema()],
+        ),
+        directory: directory,
+        name: 'create constrained tables',
+      );
+
+      final sql = _finalSql(directory);
+      expect(sql, contains('CHECK'));
+      expect(sql, contains('REFERENCES "parents" ("id")'));
+      expect(sql, contains('CREATE UNIQUE INDEX "content"."parent_name_unique"'));
+      expect(sql, contains('WHERE NOT (("name" = \'\'))'));
+    });
   });
 }
 
@@ -285,6 +306,68 @@ String _finalSql(Directory directory) {
       jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
   final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
   return File('${directory.path}/${entry['directory']}/migration.sql').readAsStringSync();
+}
+
+final class Parents extends VoxelTableDefinition<Parents> {
+  static const db = _ParentsAccessor();
+
+  late final VoxelOrderableColumn<int> id = integer().primaryKey()();
+  late final VoxelOrderableColumn<String> name = text()();
+  late final List<VoxelIndex> indexes = [
+    uniqueIndex('parent_name_unique').on([name]).where(~name.equals('')),
+  ];
+  late final List<VoxelConstraint> constraints = [
+    check('parent_name_check', ~name.equals('')),
+  ];
+}
+
+final class Children extends VoxelTableDefinition<Children> {
+  static const db = _ChildrenAccessor();
+
+  late final VoxelOrderableColumn<int> id = integer().primaryKey()();
+  late final VoxelOrderableColumn<int> parentId = integer().references<Parents>(
+    (parent) => parent.id,
+  )();
+}
+
+final class _ParentsAccessor extends VoxelTableAccessor<Parents, Object> {
+  const _ParentsAccessor();
+
+  @override
+  VoxelTableSchema<Parents, Object> buildSchema() {
+    final definition = Parents();
+    return VoxelTableSchema(
+      schemaName: 'content',
+      tableName: 'parents',
+      definition: definition,
+      columns: [definition.id, definition.name],
+      columnNames: const ['id', 'name'],
+      decode: (_, _) => Object(),
+      definitionType: Parents,
+      rowType: Object,
+      indexes: () => definition.indexes,
+      constraints: () => definition.constraints,
+    );
+  }
+}
+
+final class _ChildrenAccessor extends VoxelTableAccessor<Children, Object> {
+  const _ChildrenAccessor();
+
+  @override
+  VoxelTableSchema<Children, Object> buildSchema() {
+    final definition = Children();
+    return VoxelTableSchema(
+      schemaName: 'content',
+      tableName: 'children',
+      definition: definition,
+      columns: [definition.id, definition.parentId],
+      columnNames: const ['id', 'parentId'],
+      decode: (_, _) => Object(),
+      definitionType: Children,
+      rowType: Object,
+    );
+  }
 }
 
 @VoxelTable(schema: 'auth', name: 'renamedUsers')
