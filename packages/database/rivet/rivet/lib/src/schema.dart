@@ -1527,7 +1527,10 @@ abstract interface class RivetOrderableExpression<T> implements RivetExpression<
 
 /// A pgvector distance expression used by exact and approximate query planning.
 abstract interface class RivetVectorDistanceExpression<T extends double?>
-    implements RivetOrderableExpression<T> {}
+    implements RivetOrderableExpression<T> {
+  /// Renders the bare pgvector operator so PostgreSQL can match an ANN index.
+  String renderIndexedParameters({int startAt = 1});
+}
 
 extension RivetVectorDistanceComparison<T extends double?> on RivetVectorDistanceExpression<T> {
   RivetPredicate lessThan(double value) => (this as _RivetVectorDistance<T>)._compare('<', value);
@@ -1582,6 +1585,10 @@ final class _RivetVectorDistance<T extends double?> implements RivetVectorDistan
   @override
   String renderParameters({int startAt = 1}) =>
       renderPlaceholders((index) => '\$${startAt + index}');
+
+  @override
+  String renderIndexedParameters({int startAt = 1}) =>
+      '(${source.sql} $operator \$$startAt::vector)';
 
   RivetPredicate _compare(String comparison, double value) => RivetPredicate._(
     (placeholder, _) =>

@@ -155,6 +155,7 @@ final class _$UserProfilesDB
     int? limit,
     int? offset,
     RivetIncludes<UserProfilesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -164,6 +165,7 @@ final class _$UserProfilesDB
       limit: limit,
       offset: offset,
       includes: include?.call(UserProfilesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -331,6 +333,7 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
     int? limit,
     int? offset,
     RivetIncludes<PostsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -340,6 +343,7 @@ final class _$PostsDB extends RivetTableAccessor<Posts, PostsRow> {
       limit: limit,
       offset: offset,
       includes: include?.call(PostsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -666,6 +670,7 @@ final class _$RelationalUsersDB
     int? limit,
     int? offset,
     RivetIncludes<RelationalUsersInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -675,6 +680,7 @@ final class _$RelationalUsersDB
       limit: limit,
       offset: offset,
       includes: include?.call(RelationalUsersInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -1066,6 +1072,7 @@ final class _$RelationalPostsDB
     int? limit,
     int? offset,
     RivetIncludes<RelationalPostsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -1075,6 +1082,7 @@ final class _$RelationalPostsDB
       limit: limit,
       offset: offset,
       includes: include?.call(RelationalPostsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -1287,6 +1295,7 @@ final class _$RelationalCommentsDB
     int? limit,
     int? offset,
     RivetIncludes<RelationalCommentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -1296,6 +1305,7 @@ final class _$RelationalCommentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(RelationalCommentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -1548,6 +1558,7 @@ final class _$ThroughBooksDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughBooksInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -1557,6 +1568,7 @@ final class _$ThroughBooksDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughBooksInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -1769,6 +1781,7 @@ final class _$ThroughTagsDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughTagsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -1778,6 +1791,7 @@ final class _$ThroughTagsDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughTagsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -2085,6 +2099,7 @@ final class _$ThroughBookTagsDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughBookTagsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -2094,6 +2109,7 @@ final class _$ThroughBookTagsDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughBookTagsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -2331,6 +2347,7 @@ final class _$ThroughReviewsDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughReviewsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -2340,6 +2357,7 @@ final class _$ThroughReviewsDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughReviewsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -2581,6 +2599,7 @@ final class _$ThroughTagNotesDB
     int? limit,
     int? offset,
     RivetIncludes<ThroughTagNotesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -2590,6 +2609,7 @@ final class _$ThroughTagNotesDB
       limit: limit,
       offset: offset,
       includes: include?.call(ThroughTagNotesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -3489,6 +3509,7 @@ final class _$VectorCategoriesDB
     int? limit,
     int? offset,
     RivetIncludes<VectorCategoriesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -3498,6 +3519,7 @@ final class _$VectorCategoriesDB
       limit: limit,
       offset: offset,
       includes: include?.call(VectorCategoriesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -3743,6 +3765,7 @@ final class _$VectorDocumentsDB
     int? limit,
     int? offset,
     RivetIncludes<VectorDocumentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -3752,6 +3775,7 @@ final class _$VectorDocumentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(VectorDocumentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -4256,6 +4280,7 @@ final class _$CodecParentsDB
     int? limit,
     int? offset,
     RivetIncludes<CodecParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -4265,6 +4290,7 @@ final class _$CodecParentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(CodecParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -4757,6 +4783,7 @@ final class _$CodecValuesDB
     int? limit,
     int? offset,
     RivetIncludes<CodecValuesInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -4766,6 +4793,7 @@ final class _$CodecValuesDB
       limit: limit,
       offset: offset,
       includes: include?.call(CodecValuesInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -4985,6 +5013,7 @@ final class _$CodecLinksDB
     int? limit,
     int? offset,
     RivetIncludes<CodecLinksInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -4994,6 +5023,7 @@ final class _$CodecLinksDB
       limit: limit,
       offset: offset,
       includes: include?.call(CodecLinksInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -6674,6 +6704,7 @@ final class _$MutationParentsDB
     int? limit,
     int? offset,
     RivetIncludes<MutationParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -6683,6 +6714,7 @@ final class _$MutationParentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -6867,6 +6899,7 @@ final class _$MutationChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -6876,6 +6909,7 @@ final class _$MutationChildrenDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -7235,6 +7269,7 @@ final class _$MutationUpdateUsersDB
     int? limit,
     int? offset,
     RivetIncludes<MutationUpdateUsersInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -7244,6 +7279,7 @@ final class _$MutationUpdateUsersDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationUpdateUsersInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -7439,6 +7475,7 @@ final class _$MutationUpdateChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationUpdateChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -7449,6 +7486,7 @@ final class _$MutationUpdateChildrenDB
       offset: offset,
       includes:
           include?.call(MutationUpdateChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -7696,6 +7734,7 @@ final class _$MutationDeleteParentsDB
     int? limit,
     int? offset,
     RivetIncludes<MutationDeleteParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -7705,6 +7744,7 @@ final class _$MutationDeleteParentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationDeleteParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -7904,6 +7944,7 @@ final class _$MutationCascadeChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationCascadeChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -7914,6 +7955,7 @@ final class _$MutationCascadeChildrenDB
       offset: offset,
       includes:
           include?.call(MutationCascadeChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -8114,6 +8156,7 @@ final class _$MutationRestrictChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationRestrictChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -8124,6 +8167,7 @@ final class _$MutationRestrictChildrenDB
       offset: offset,
       includes:
           include?.call(MutationRestrictChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -8403,6 +8447,7 @@ final class _$MutationBatchParentsDB
     int? limit,
     int? offset,
     RivetIncludes<MutationBatchParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -8412,6 +8457,7 @@ final class _$MutationBatchParentsDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationBatchParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -8607,6 +8653,7 @@ final class _$MutationBatchChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationBatchChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -8616,6 +8663,7 @@ final class _$MutationBatchChildrenDB
       limit: limit,
       offset: offset,
       includes: include?.call(MutationBatchChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -9104,6 +9152,7 @@ final class _$MutationConflictParentsDB
     int? limit,
     int? offset,
     RivetIncludes<MutationConflictParentsInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -9114,6 +9163,7 @@ final class _$MutationConflictParentsDB
       offset: offset,
       includes:
           include?.call(MutationConflictParentsInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 
@@ -9314,6 +9364,7 @@ final class _$MutationConflictChildrenDB
     int? limit,
     int? offset,
     RivetIncludes<MutationConflictChildrenInclude>? include,
+    VectorSearchMode vectorSearch = VectorSearchMode.exact,
   }) {
     final schema = buildSchema();
     return RivetFind(
@@ -9324,6 +9375,7 @@ final class _$MutationConflictChildrenDB
       offset: offset,
       includes:
           include?.call(MutationConflictChildrenInclude(schema)) ?? const [],
+      vectorSearch: vectorSearch,
     );
   }
 

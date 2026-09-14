@@ -226,3 +226,26 @@ embedding. Multi-bit compression requires `memoryOptimized` storage and at
 most 930 indexed dimensions on pgvectorscale 0.9.1. The pinned manifest records
 the accepted ranges for all six build fields. Concurrent DiskANN builds and
 label-array operands are not exposed.
+
+Select approximate retrieval explicitly on a query with an ascending vector
+distance, nulls last, and a limit:
+
+```dart
+final candidates = await Books.db.find(
+  vectorSearch: VectorSearchMode.approximate,
+  where: (book) => book.published.equals(true),
+  orderBy: (book) => [
+    book.embedding.cosineDistance(queryEmbedding).asc(),
+    book.id.asc(),
+  ],
+  limit: 10,
+).get(db);
+```
+
+Rivet retrieves an index-eligible candidate set, materializes it, then applies
+every requested ordering term and pagination in the same SQL statement.
+Includes are loaded after candidate selection. The result is strictly ordered
+among the candidates returned by the backend; approximate mode does not promise
+global nearest-neighbor membership. If the query has no compatible leading
+distance order or limit, Rivet uses the exact materialized-root plan. Exact
+remains the default and no relaxed-order control is exposed.

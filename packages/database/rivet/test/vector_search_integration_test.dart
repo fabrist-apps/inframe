@@ -218,12 +218,120 @@ void main() {
     );
 
     test(
+      'should retrieve and finally order candidates through every ANN method and distance',
+      () async {
+        final indexes = await fixture.execute('''
+          SELECT quote_ident(schemaname) || '.' || quote_ident(indexname)
+          FROM pg_indexes
+          WHERE schemaname = 'fbr195'
+            AND tablename = 'vectorDocuments'
+            AND indexname NOT LIKE '%_pkey'
+        ''');
+        for (final row in indexes) {
+          await fixture.execute('DROP INDEX ${row.first! as String}');
+        }
+        const combinations = [
+          ('hnsw', 'vector_cosine_ops', '<=>'),
+          ('hnsw', 'vector_l2_ops', '<->'),
+          ('hnsw', 'vector_ip_ops', '<#>'),
+          ('ivfflat', 'vector_cosine_ops', '<=>'),
+          ('ivfflat', 'vector_l2_ops', '<->'),
+          ('ivfflat', 'vector_ip_ops', '<#>'),
+          ('diskann', 'vector_cosine_ops', '<=>'),
+          ('diskann', 'vector_l2_ops', '<->'),
+          ('diskann', 'vector_ip_ops', '<#>'),
+        ];
+        final query = Float32List.fromList([1, 0, 0]);
+        await fixture.execute('SET enable_seqscan = off');
+        addTearDown(() => fixture.execute('RESET enable_seqscan'));
+
+        for (final (method, operatorClass, operator) in combinations) {
+          final indexName = 'active_${method}_$operatorClass';
+          final options = method == 'ivfflat' ? ' WITH (lists = 1)' : '';
+          await fixture.execute('''
+            CREATE INDEX $indexName ON fbr195."vectorDocuments"
+            USING $method (embedding $operatorClass)$options
+          ''');
+          await fixture.execute('ANALYZE fbr195."vectorDocuments"');
+          final plan = await fixture.execute('''
+            EXPLAIN (COSTS OFF)
+            WITH candidates AS MATERIALIZED (
+              SELECT * FROM fbr195."vectorDocuments"
+              WHERE "categoryId" = 1
+              ORDER BY embedding $operator '[1,0,0]'::vector
+              LIMIT 5
+            )
+            SELECT * FROM candidates
+            ORDER BY embedding $operator '[1,0,0]'::vector, id DESC
+          ''');
+          expect(
+            plan.map((row) => row.first).join('\n'),
+            contains(indexName),
+            reason: '$method $operatorClass should be planner-eligible',
+          );
+
+          RivetVectorDistanceExpression<double?> distance(
+            VectorDocuments document,
+          ) => switch (operator) {
+            '<=>' => document.embedding.cosineDistance(query),
+            '<->' => document.embedding.l2Distance(query),
+            '<#>' => document.embedding.negativeInnerProduct(query),
+            _ => throw StateError('Unexpected vector operator $operator.'),
+          };
+          statements.clear();
+          final rows = await VectorDocuments.db
+              .find(
+                where: (document) => document.category.matches(
+                  (category) => category.name.equals('science'),
+                ),
+                orderBy: (document) => [
+                  distance(document).asc(),
+                  document.id.desc(),
+                ],
+                limit: 5,
+                include: (include) => [include.category()],
+                vectorSearch: VectorSearchMode.approximate,
+              )
+              .withScore(distance)
+              .get(database);
+
+          expect(statements, hasLength(1));
+          expect(statements.single, startsWith('WITH "__rivet_candidates" AS MATERIALIZED'));
+          expect(rows, isNotEmpty);
+          expect(
+            rows.map(
+              (row) => (row.row.category as LoadedRelation<VectorCategoriesRow?>).value?.name,
+            ),
+            everyElement('science'),
+          );
+          for (var index = 1; index < rows.length; index++) {
+            final previous = rows[index - 1];
+            final current = rows[index];
+            final previousScore = previous.score;
+            final currentScore = current.score;
+            if (previousScore == null) {
+              expect(currentScore, isNull);
+            } else if (currentScore != null) {
+              expect(previousScore, lessThanOrEqualTo(currentScore));
+              if (previousScore == currentScore) {
+                expect(previous.row.id, greaterThan(current.row.id));
+              }
+            }
+          }
+          await fixture.execute('DROP INDEX fbr195.$indexName');
+        }
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
       'should match the pinned pgvector capability manifest',
       () async {
         final manifest = jsonDecode(
           await _capabilityManifest().readAsString(),
         ) as Map<String, Object?>;
         final extensions = manifest['extensions']! as Map<String, Object?>;
+        final queryCompilation = manifest['queryCompilation']! as Map<String, Object?>;
         final indexes = manifest['indexes']! as Map<String, Object?>;
         final hnsw = indexes['hnsw']! as Map<String, Object?>;
         final ivfflat = indexes['ivfflat']! as Map<String, Object?>;
@@ -263,6 +371,13 @@ void main() {
         expect(server.single.first, startsWith(manifest['postgresql']! as String));
         expect(vector.single.first, extensions['vector']);
         expect(vectorscale.single.first, extensions['vectorscale']);
+        expect(queryCompilation, {
+          'exact': 'materializedEligibleRoots',
+          'approximate': 'materializedIndexedCandidatesThenFinalSort',
+          'candidateOrder': 'ascendingDistanceNullsLast',
+          'singleStatement': true,
+          'relaxedOrderOption': false,
+        });
         expect(hnsw['extension'], 'vector');
         expect(hnsw['maximumDimensions'], 2000);
         expect(

@@ -57,10 +57,62 @@ void main() {
       expect(executor.queries, isEmpty);
     });
 
-    test('should reject approximate vector search until its slice is implemented', () {
+    test('should compile ordered approximate candidates and includes in one statement', () async {
+      final query = Float32List.fromList([1, 0, 0]);
+
+      await VectorDocuments.db
+          .find(
+            where: (document) => document.category.matches(
+              (category) => category.name.equals('science'),
+            ),
+            orderBy: (document) => [
+              document.embedding.cosineDistance(query).asc(),
+              document.title.desc(nulls: NullsOrder.first),
+            ],
+            limit: 2,
+            offset: 1,
+            include: (include) => [include.category()],
+            vectorSearch: VectorSearchMode.approximate,
+          )
+          .withScore((document) => document.embedding.l2Distance(query))
+          .get(executor);
+
+      final compiled = executor.queries.single;
+      expect(compiled.sql, startsWith('WITH "__rivet_candidates" AS MATERIALIZED'));
+      expect(compiled.sql, contains('EXISTS (SELECT 1'));
+      expect(compiled.sql, contains('ORDER BY ("__rivet_t0"."embedding" <=>'));
+      expect(compiled.sql, contains('ASC NULLS LAST LIMIT 3) SELECT'));
+      expect(compiled.sql, contains('vector_norm'));
+      expect(compiled.sql, contains('"title" DESC NULLS FIRST'));
+      expect(compiled.sql, endsWith('LIMIT 2 OFFSET 1'));
+      expect(compiled.sql, contains('jsonb_build_object'));
+      expect(compiled.parameters, hasLength(4));
+    });
+
+    test('should use an exact plan for incompatible approximate shapes', () async {
+      final query = Float32List.fromList([1, 0, 0]);
+
+      await VectorValues.db
+          .find(
+            orderBy: (values) => [
+              values.embedding.l2Distance(query).desc(),
+            ],
+            limit: 2,
+            vectorSearch: VectorSearchMode.approximate,
+          )
+          .get(executor);
+      await VectorValues.db
+          .find(
+            orderBy: (values) => [
+              values.embedding.l2Distance(query).asc(),
+            ],
+            vectorSearch: VectorSearchMode.approximate,
+          )
+          .get(executor);
+
       expect(
-        () => VectorValues.db.find(vectorSearch: VectorSearchMode.approximate),
-        throwsA(isA<RivetUnsupportedQueryException>()),
+        executor.queries.map((query) => query.sql),
+        everyElement(startsWith('WITH "__rivet_roots" AS MATERIALIZED')),
       );
     });
 

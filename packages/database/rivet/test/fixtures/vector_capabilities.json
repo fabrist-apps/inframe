@@ -10,6 +10,13 @@
     "operators": ["<=>", "<->", "<#>"],
     "storedZeroCosine": "null"
   },
+  "queryCompilation": {
+    "exact": "materializedEligibleRoots",
+    "approximate": "materializedIndexedCandidatesThenFinalSort",
+    "candidateOrder": "ascendingDistanceNullsLast",
+    "singleStatement": true,
+    "relaxedOrderOption": false
+  },
   "indexes": {
     "hnsw": {
       "extension": "vector",
