@@ -33,6 +33,7 @@ Mobile browsers are excluded; Android and iOS use their native Flutter targets.
 
 | Contract | Evidence |
 | --- | --- |
+| Native migration-lock exclusion, persistent sidecars, release, and process termination | `test/native_migration_lock_test.dart` on enabled desktop native targets (with the same Windows path ready for the recorded disabled job); independent-handle contention in `tool/flutter_native_runtime_test.dart.template` on Android and iOS |
 | Native values, bindings, persistence, memory opening, encryption failures, and lifecycle | `test/native_database_test.dart` on macOS and Linux, with Windows verified before its temporary CI disablement; `tool/flutter_native_runtime_test.dart.template` on Android and iOS |
 | Transactions, serialization, submitted-work draining, rollback/commit failure, and retirement | `test/transaction_test.dart` on desktop native targets; the representative transaction and lifecycle cases in the mobile integration suite |
 | Native encryption, FTS rollback/reopen, and vector functions | `test/feature_test.dart` on desktop native targets and both ciphers in the mobile integration suite |
