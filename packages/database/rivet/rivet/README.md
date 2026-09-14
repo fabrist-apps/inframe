@@ -41,6 +41,22 @@ await db.close();
 
 Consumers add `rivet_generator` and `build_runner` as development dependencies, add a `part '<library>.rivet.dart';` directive, then run `dart run build_runner build`.
 
+Migration execution is explicit and separate from application open. A
+deployment process can apply a checked artifact directory through one owned
+PostgreSQL session:
+
+```dart
+await RivetMigrator(
+  connection: RivetConnection.url(databaseUrl),
+  directory: Directory('migrations'),
+).migrate();
+```
+
+The migrator holds a database-wide advisory lock across history validation,
+transactional phase commits, and nontransactional recovery. `status()` reads
+the same checked history without bootstrapping it. `resolve(...)` records an
+audited decision for the exact checksum and active interrupted attempt.
+
 `RivetConnection.url` defaults to certificate and hostname verification. Use a Dart `SecurityContext` for a private CA. Choose `RivetSslMode.require` only when TLS without certificate verification is intentional, or `RivetSslMode.disable` for an explicitly unencrypted disposable fixture.
 
 Query plans do not retain a database connection. Supply either the root database or a transaction at the terminal:

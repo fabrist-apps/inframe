@@ -1,25 +1,9 @@
-// Recovery metadata is data consumed by the later migration runner.
+// Runtime validation and execution model for nontransactional recovery.
 // ignore_for_file: public_member_api_docs
 
 void validateRivetRecovery(Map<String, Object?> phase, List<String> statements) {
-  final mode = phase['mode'];
   final recovery = phase['recovery'];
-  final concurrent = statements.any(
-    (sql) => RegExp(
-      r'^\s*create\s+(unique\s+)?index\s+concurrently\b',
-      caseSensitive: false,
-    ).hasMatch(_withoutLeadingComments(sql)),
-  );
-  if (mode == 'transactional') {
-    if (recovery != null) {
-      throw const FormatException('Transactional phases must have null recovery metadata.');
-    }
-    if (concurrent) {
-      throw const FormatException('CREATE INDEX CONCURRENTLY requires a nontransactional phase.');
-    }
-    return;
-  }
-  if (mode != 'nontransactional' || recovery is! Map<String, Object?>) {
+  if (recovery is! Map<String, Object?>) {
     throw const FormatException('Nontransactional phases require recovery metadata.');
   }
   final operationId = recovery['operationId'];
@@ -47,46 +31,21 @@ void validateRivetRecovery(Map<String, Object?> phase, List<String> statements) 
     throw FormatException('Unsupported recovery inspector `$inspector`.');
   }
   if (checks != null) _validateChecks(checks);
+
+  final concurrent = statements.any(
+    (statement) => RegExp(
+      r'^\s*create\s+(unique\s+)?index\s+concurrently\b',
+      caseSensitive: false,
+    ).hasMatch(_withoutLeadingComments(statement)),
+  );
   if (concurrent) {
-    if (inspector != 'postgresql.index.v1') {
+    if (statements.length != 1 || inspector != 'postgresql.index.v1') {
       throw const FormatException(
-        'Concurrent index recovery requires the postgresql.index.v1 inspector.',
+        'Concurrent index recovery requires one statement and postgresql.index.v1.',
       );
     }
-    _validateIndex(recovery['after']! as Map<String, Object?>);
+    _validateIndex(recovery['before'], recovery['after']);
   }
-}
-
-String _withoutLeadingComments(String sql) {
-  var index = 0;
-  while (index < sql.length) {
-    while (index < sql.length && RegExp(r'\s').hasMatch(sql[index])) {
-      index++;
-    }
-    if (sql.startsWith('--', index)) {
-      final newline = sql.indexOf('\n', index + 2);
-      index = newline < 0 ? sql.length : newline + 1;
-      continue;
-    }
-    if (sql.startsWith('/*', index)) {
-      var depth = 1;
-      index += 2;
-      while (index < sql.length && depth > 0) {
-        if (sql.startsWith('/*', index)) {
-          depth++;
-          index += 2;
-        } else if (sql.startsWith('*/', index)) {
-          depth--;
-          index += 2;
-        } else {
-          index++;
-        }
-      }
-      continue;
-    }
-    break;
-  }
-  return sql.substring(index);
 }
 
 void _validateChecks(Object? value) {
@@ -98,12 +57,15 @@ void _validateChecks(Object? value) {
         raw['sql'] is! String ||
         raw['parameters'] is! List<Object?> ||
         raw['expected'] is! bool) {
-      throw const FormatException('Recovery checks require SQL, parameters, and a boolean result.');
+      throw const FormatException(
+        'Recovery checks require SQL, parameters, and a boolean result.',
+      );
     }
     final sql = (raw['sql']! as String).trim().toLowerCase();
     if (!(sql.startsWith('select ') || sql.startsWith('with ')) ||
-        RegExp(r'\b(insert|update|delete|alter|create|drop|copy|vacuum|call|do|set)\b')
-            .hasMatch(sql) ||
+        RegExp(
+          r'\b(insert|update|delete|alter|create|drop|copy|vacuum|call|do|set)\b',
+        ).hasMatch(sql) ||
         RegExp(r'\b(dblink|postgres_fdw)\b').hasMatch(sql) ||
         _hasSideEffectingFunction(sql)) {
       throw const FormatException('Recovery checks must be read-only SQL.');
@@ -206,6 +168,36 @@ String _functionScanSql(String sql) {
   return code.toString();
 }
 
+void _validateIndex(Object? rawBefore, Object? rawAfter) {
+  final before = rawBefore! as Map<String, Object?>;
+  final after = rawAfter! as Map<String, Object?>;
+  if (before['schema'] is! String ||
+      before['table'] is! String ||
+      before['index'] is! String ||
+      before['exists'] != false ||
+      after['schema'] != before['schema'] ||
+      after['table'] != before['table'] ||
+      after['index'] != before['index'] ||
+      after['method'] != 'btree' ||
+      after['terms'] is! List<Object?> ||
+      after['predicate'] is! String? ||
+      after['options'] is! Map<String, Object?> ||
+      after['unique'] is! bool ||
+      after['valid'] != true ||
+      after['ready'] != true) {
+    throw const FormatException(
+      'Concurrent btree recovery must describe one qualified absent-to-valid index.',
+    );
+  }
+  for (final term in after['terms']! as List<Object?>) {
+    if (term is! Map<String, Object?> || term['column'] is! String || term['descending'] is! bool) {
+      throw const FormatException(
+        'Concurrent btree terms must be ordered column descriptors.',
+      );
+    }
+  }
+}
+
 bool _matchesLiteralType(String type, Object? value) => switch (type) {
   'null' => value == null,
   'boolean' => value is bool,
@@ -214,38 +206,34 @@ bool _matchesLiteralType(String type, Object? value) => switch (type) {
   _ => false,
 };
 
-void _validateIndex(Map<String, Object?> after) {
-  const required = {
-    'schema',
-    'table',
-    'index',
-    'method',
-    'terms',
-    'predicate',
-    'options',
-    'unique',
-    'valid',
-    'ready',
-  };
-  if (!after.keys.toSet().containsAll(required) ||
-      after['schema'] is! String ||
-      after['table'] is! String ||
-      after['index'] is! String ||
-      after['method'] != 'btree' ||
-      after['terms'] is! List<Object?> ||
-      after['options'] is! Map<String, Object?> ||
-      after['unique'] is! bool ||
-      after['valid'] != true ||
-      after['ready'] != true) {
-    throw const FormatException(
-      'Concurrent index recovery must describe qualified structure, uniqueness, validity, and readiness.',
-    );
-  }
-  for (final term in after['terms']! as List<Object?>) {
-    if (term is! Map<String, Object?> || term['column'] is! String || term['descending'] is! bool) {
-      throw const FormatException(
-        'Concurrent btree index terms must be ordered column descriptors.',
-      );
+String _withoutLeadingComments(String sql) {
+  var index = 0;
+  while (index < sql.length) {
+    while (index < sql.length && RegExp(r'\s').hasMatch(sql[index])) {
+      index++;
     }
+    if (sql.startsWith('--', index)) {
+      final newline = sql.indexOf('\n', index + 2);
+      index = newline < 0 ? sql.length : newline + 1;
+      continue;
+    }
+    if (sql.startsWith('/*', index)) {
+      var depth = 1;
+      index += 2;
+      while (index < sql.length && depth > 0) {
+        if (sql.startsWith('/*', index)) {
+          depth++;
+          index += 2;
+        } else if (sql.startsWith('*/', index)) {
+          depth--;
+          index += 2;
+        } else {
+          index++;
+        }
+      }
+      continue;
+    }
+    break;
   }
+  return sql.substring(index);
 }

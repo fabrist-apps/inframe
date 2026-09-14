@@ -139,6 +139,7 @@ jobs:
       - name: Run Rivet PostgreSQL integration tests
         env:
           RIVET_TEST_DATABASE_URL: postgresql://postgres:test-password@127.0.0.1:15432/inframe_test?sslmode=disable
+          RIVET_TEST_DATABASE_ISOLATED: '1'
           RIVET_TEST_TLS: '1'
         run: |
           echo "Rivet PostgreSQL image: $RIVET_POSTGRES_IMAGE" | tee -a "$GITHUB_STEP_SUMMARY"
