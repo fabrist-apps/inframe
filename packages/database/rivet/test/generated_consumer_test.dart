@@ -403,6 +403,13 @@ void main() {
       );
     });
 
+    test('should reject HNSW options that violate backend defaults', () {
+      expect(() => _hnswSchema(const Hnsw(m: 16, efConstruction: 31)), throwsArgumentError);
+      expect(() => _hnswSchema(const Hnsw(m: 100)), throwsArgumentError);
+      expect(() => _hnswSchema(const Hnsw(efConstruction: 31)), throwsArgumentError);
+      expect(() => _hnswSchema(const Hnsw(m: 16, efConstruction: 32)), returnsNormally);
+    });
+
     test('should compose one native enum declaration for scalar and array storage', () {
       final declaration = RivetDatabaseSchema(
         name: 'enum_fixture',
@@ -478,6 +485,29 @@ final class _CompositeParent extends RivetTableDefinition<_CompositeParent> {
   late final first = integer()();
   late final second = integer()();
   late final children = many<_CompositeChild>(relation: (child) => child.parent)();
+}
+
+final class _HnswTable extends RivetTableDefinition<_HnswTable> {
+  _HnswTable(this.method);
+
+  final Hnsw method;
+  late final embedding = vector(dimensions: 3)();
+  late final indexes = [
+    index('embedding_hnsw').using(method).on([embedding.l2Ops()]),
+  ];
+}
+
+RivetTableSchema<_HnswTable, Object> _hnswSchema(Hnsw method) {
+  final definition = _HnswTable(method);
+  return RivetTableSchema<_HnswTable, Object>(
+    schemaName: 'search',
+    tableName: 'documents',
+    definition: definition,
+    columns: [definition.embedding],
+    columnNames: const ['embedding'],
+    decode: (_, _) => Object(),
+    indexes: () => definition.indexes,
+  );
 }
 
 final class _CompositeChild extends RivetTableDefinition<_CompositeChild> {

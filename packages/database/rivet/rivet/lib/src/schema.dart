@@ -181,6 +181,15 @@ void _validateIndex(RivetIndex index, String path) {
       if (efConstruction case final value? when value < 4 || value > 1000) {
         throw RangeError.range(value, 4, 1000, 'efConstruction');
       }
+      final effectiveM = m ?? 16;
+      final effectiveEfConstruction = efConstruction ?? 64;
+      if (effectiveEfConstruction < 2 * effectiveM) {
+        throw ArgumentError.value(
+          efConstruction,
+          'efConstruction',
+          'must be at least twice m after applying pgvector defaults',
+        );
+      }
     case IvfFlat(:final lists):
       if (lists case final value? when value < 1 || value > 32768) {
         throw RangeError.range(value, 1, 32768, 'lists');

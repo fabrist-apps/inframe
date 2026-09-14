@@ -182,6 +182,33 @@ void main() {
     );
 
     test(
+      'should keep vector-ordered includes exact with ANN indexes installed',
+      () async {
+        final query = Float32List.fromList([1, 0, 0]);
+        final category = await VectorCategories.db
+            .find(
+              where: (category) => category.id.equals(1),
+              include: (include) => [
+                include.documents(
+                  orderBy: (document) => [
+                    document.embedding.l2Distance(query).asc(),
+                    document.id.asc(),
+                  ],
+                  limit: 100,
+                ),
+              ],
+            )
+            .getSingle(database);
+
+        final documents = (category.documents as LoadedRelation<List<VectorDocumentsRow>>).value;
+        expect(documents.map((document) => document.id), [1, 2, 4, 6, 7, 5]);
+        expect(statements, hasLength(1));
+        expect(statements.single, contains('AS MATERIALIZED ('));
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
       'should preserve distance edge cases and lower negative inner product',
       () async {
         final query = Float32List.fromList([1, 0, 0]);
@@ -478,8 +505,13 @@ void main() {
           containsAll(hnsw['operatorClasses']! as List<Object?>),
         );
         expect(hnsw['buildOptions'], {
-          'm': {'minimum': 2, 'maximum': 100},
-          'efConstruction': {'minimum': 4, 'maximum': 1000},
+          'm': {'minimum': 2, 'maximum': 100, 'default': 16},
+          'efConstruction': {
+            'minimum': 4,
+            'maximum': 1000,
+            'default': 64,
+            'minimumMultipleOfM': 2,
+          },
         });
         expect(hnsw['concurrentBuild'], isFalse);
         expect(ivfflat['extension'], 'vector');

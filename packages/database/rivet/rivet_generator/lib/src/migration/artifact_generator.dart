@@ -1350,10 +1350,7 @@ final class RivetArtifactGenerator {
       );
     }
     final validOptions = switch (method) {
-      'hnsw' =>
-        !options.keys.any((key) => !const {'m', 'efConstruction'}.contains(key)) &&
-            _integerOption(options['m'], minimum: 2, maximum: 100) &&
-            _integerOption(options['efConstruction'], minimum: 4, maximum: 1000),
+      'hnsw' => _validHnswOptions(options),
       'ivfflat' =>
         !options.keys.any((key) => key != 'lists') &&
             _integerOption(options['lists'], minimum: 1, maximum: 32768),
@@ -1367,6 +1364,17 @@ final class RivetArtifactGenerator {
 
   bool _integerOption(Object? value, {required int minimum, required int maximum}) =>
       value == null || (value is int && value >= minimum && value <= maximum);
+
+  bool _validHnswOptions(Map<String, Object?> options) {
+    if (options.keys.any((key) => !const {'m', 'efConstruction'}.contains(key)) ||
+        !_integerOption(options['m'], minimum: 2, maximum: 100) ||
+        !_integerOption(options['efConstruction'], minimum: 4, maximum: 1000)) {
+      return false;
+    }
+    final m = options['m'] as int? ?? 16;
+    final efConstruction = options['efConstruction'] as int? ?? 64;
+    return efConstruction >= 2 * m;
+  }
 
   bool _validDiskAnnOptions(
     Map<String, Object?> options,

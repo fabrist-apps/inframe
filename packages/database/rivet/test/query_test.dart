@@ -37,6 +37,33 @@ void main() {
       expect(compiled.parameters, hasLength(5));
     });
 
+    test('should materialize vector-ordered include populations', () async {
+      final query = Float32List.fromList([1, 0, 0]);
+
+      await VectorCategories.db
+          .find(
+            where: (category) => category.id.equals(1),
+            include: (include) => [
+              include.documents(
+                orderBy: (document) => [
+                  document.embedding.l2Distance(query).asc(),
+                  document.id.asc(),
+                ],
+                limit: 5,
+              ),
+            ],
+          )
+          .get(executor);
+
+      final compiled = executor.queries.single;
+      expect(compiled.sql, isNot(startsWith('WITH "__rivet_roots"')));
+      expect(compiled.sql, contains('AS MATERIALIZED ('));
+      expect(compiled.sql, contains('SELECT "__rivet_t1".*'));
+      expect(compiled.sql, contains(r'WHERE "__rivet_t0"."id" = $2::int4'));
+      expect(compiled.parameters, hasLength(2));
+      expect(compiled.requiredExtensions, {'vector'});
+    });
+
     test('should validate vector query values before execution', () async {
       expect(
         () => VectorValues.db.find(

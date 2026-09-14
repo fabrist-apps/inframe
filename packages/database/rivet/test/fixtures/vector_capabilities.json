@@ -40,8 +40,13 @@
         "vector_ip_ops"
       ],
       "buildOptions": {
-        "m": {"minimum": 2, "maximum": 100},
-        "efConstruction": {"minimum": 4, "maximum": 1000}
+        "m": {"minimum": 2, "maximum": 100, "default": 16},
+        "efConstruction": {
+          "minimum": 4,
+          "maximum": 1000,
+          "default": 64,
+          "minimumMultipleOfM": 2
+        }
       },
       "concurrentBuild": false
     },

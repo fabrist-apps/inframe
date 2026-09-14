@@ -485,6 +485,13 @@ void main() {
 
       await rejects((declaration) => index(declaration)['options'] = {'m': 1});
       await rejects(
+        (declaration) => index(declaration)['options'] = {'m': 16, 'efConstruction': 31},
+      );
+      await rejects((declaration) => index(declaration)['options'] = {'m': 100});
+      await rejects(
+        (declaration) => index(declaration)['options'] = {'efConstruction': 31},
+      );
+      await rejects(
         (declaration) => index(declaration)['options'] = {'efConstruction': 1001},
       );
       await rejects((declaration) => vectorStorage(declaration)['dimensions'] = 2001);

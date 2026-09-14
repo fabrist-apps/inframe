@@ -185,8 +185,9 @@ values out of snapshots and SQL. These are index build options. Approximate
 query tuning is selected separately when executing a query and does not change
 the index declaration. HNSW declarations require pgvector 0.8.6 or newer, one
 non-null or nullable scalar vector with at most 2,000 dimensions, `m` from 2 to
-100, and `efConstruction` from 4 to 1,000. Concurrent HNSW builds are not yet
-exposed.
+100, and `efConstruction` from 4 to 1,000. After applying pgvector's defaults
+of 16 and 64, `efConstruction` must be at least twice `m`. Concurrent HNSW
+builds are not yet exposed.
 
 IVFFlat uses the same scalar operands with a separate method declaration:
 
@@ -248,7 +249,8 @@ Includes are loaded after candidate selection. The result is strictly ordered
 among the candidates returned by the backend; approximate mode does not promise
 global nearest-neighbor membership. If the query has no compatible leading
 distance order or limit, Rivet uses the exact materialized-root plan. Exact
-remains the default and no relaxed-order control is exposed.
+remains the default, including for vector filters and ordering inside relation
+includes, and no relaxed-order control is exposed.
 
 Query tuning is available only on an active transaction and applies to later
 queries on that transaction:
