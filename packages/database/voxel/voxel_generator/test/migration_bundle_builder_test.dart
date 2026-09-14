@@ -26,6 +26,9 @@ void main() {
           allOf([
             contains('abstract final class AccountsDatabaseVoxelMigrations'),
             contains('VoxelMigrationBundle('),
+            contains('extension AccountsDatabaseVoxelOpen on AccountsDatabase'),
+            contains('Future<VoxelDb> open('),
+            contains('bundle: AccountsDatabaseVoxelMigrations.bundle'),
             contains(r'''sql: 'CREATE TABLE "auth"."users" (\n'''),
             contains(fixture.migrationId),
           ]),
