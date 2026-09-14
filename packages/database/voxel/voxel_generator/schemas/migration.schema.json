@@ -23,6 +23,12 @@
       "properties": {
         "id": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
         "scopeId": {"$ref": "#/$defs/id"},
+        "writeScopeIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/id"}
+        },
         "mode": {"enum": ["transactional", "nontransactional"]},
         "platforms": {"type": "array", "items": {"type": "string"}},
         "statements": {"type": "array", "items": {"$ref": "#/$defs/statement"}},
@@ -36,10 +42,60 @@
       "required": ["foreignKeys", "validations"],
       "properties": {
         "foreignKeys": {"const": "offOutsideTransaction"},
+        "tables": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/rebuiltTable"}
+        },
         "validations": {
           "type": "array",
           "items": {"$ref": "#/$defs/rebuildValidation"}
         }
+      },
+      "additionalProperties": false
+    },
+    "rebuiltTable": {
+      "type": "object",
+      "required": [
+        "tableId",
+        "oldName",
+        "replacementName",
+        "finalName",
+        "managedDependencies",
+        "expectedBefore"
+      ],
+      "properties": {
+        "tableId": {"$ref": "#/$defs/id"},
+        "oldName": {"type": "string", "minLength": 1},
+        "replacementName": {"type": "string", "minLength": 1},
+        "finalName": {"type": "string", "minLength": 1},
+        "managedDependencies": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/managedDependency"}
+        },
+        "expectedBefore": {
+          "type": "object",
+          "required": ["id", "schemaId", "name", "columns", "indexes", "constraints"],
+          "properties": {
+            "id": {"$ref": "#/$defs/id"},
+            "schemaId": {"$ref": "#/$defs/id"},
+            "name": {"type": "string", "minLength": 1},
+            "columns": {"type": "array", "items": {"type": "object"}},
+            "indexes": {"type": "array", "items": {"type": "object"}},
+            "constraints": {"type": "array", "items": {"type": "object"}}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "managedDependency": {
+      "type": "object",
+      "required": ["kind", "objectId", "name"],
+      "properties": {
+        "kind": {"const": "index"},
+        "objectId": {"$ref": "#/$defs/id"},
+        "name": {"type": "string", "minLength": 1}
       },
       "additionalProperties": false
     },

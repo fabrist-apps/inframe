@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:turso/turso.dart';
 
 import 'package:voxel/src/platform.dart';
+import 'package:voxel/src/rebuild_catalog_validator.dart';
 import 'package:voxel/src/schema.dart';
 
 /// Checked migration history embedded in generated application code.
@@ -210,81 +211,17 @@ final class VoxelMigrationPlan {
         final sourceScope = _scopeNames[migrationIndex][phase['scopeId']]!;
         final scope = scopeName(phase['scopeId']! as String);
         if (await _phaseCompleted(database, scope, migration, phase)) continue;
-        final rebuild = phase['rebuild'] as Map<String, Object?>?;
-        if (rebuild != null) await database.execute('PRAGMA foreign_keys=OFF');
-        Object? primaryFailure;
-        StackTrace? primaryStackTrace;
-        try {
-          await database.transaction<void>((transaction) async {
-            for (final rawRange in _list(phase['statements'], 'phase statements')) {
-              final range = _map(rawRange, 'statement range');
-              var statement = utf8.decode(
-                utf8
-                    .encode(migration.sql)
-                    .sublist(
-                      range['startByte']! as int,
-                      range['endByte']! as int,
-                    ),
-              );
-              if (sourceScope != scope) {
-                statement = statement.replaceAll(
-                  '${_quote(sourceScope)}.',
-                  '${_quote(scope)}.',
-                );
-              }
-              await transaction.execute(statement);
-            }
-            if (rebuild != null) {
-              for (final rawValidation in _list(
-                rebuild['validations'],
-                'rebuild validations',
-              )) {
-                final validation = _map(rawValidation, 'rebuild validation');
-                final row = (await transaction.query(validation['sql']! as String)).rows.single;
-                if (row.getInt('valid') != 1) {
-                  throw StateError(
-                    'Migration ${migration.id} phase ${phase['id']} failed validation.',
-                  );
-                }
-              }
-            }
-            await transaction.execute(
-              '''
-INSERT INTO ${_qualified(scope, '_voxel_migrations')}
-  (migration_id, parent_id, checksum, ordinal)
-VALUES (?, ?, ?, ?)
-ON CONFLICT (migration_id) DO NOTHING
-''',
-              parameters: [migration.id, migration.parentId, migration.checksum, migrationIndex],
-            );
-            await transaction.execute(
-              '''
-INSERT INTO ${_qualified(scope, '_voxel_phases')}
-  (migration_id, phase_id, checksum, platform, status)
-VALUES (?, ?, ?, ?, 'completed')
-''',
-              parameters: [
-                migration.id,
-                phase['id'],
-                migration.checksum,
-                voxelPlatform,
-              ],
-            );
-          });
-        } on Object catch (error, stackTrace) {
-          primaryFailure = error;
-          primaryStackTrace = stackTrace;
-        }
-        if (rebuild != null) {
-          try {
-            await database.execute('PRAGMA foreign_keys=ON');
-          } on Object {
-            if (primaryFailure == null) rethrow;
-          }
-        }
-        if (primaryFailure != null) {
-          Error.throwWithStackTrace(primaryFailure, primaryStackTrace!);
-        }
+        await _runTransactionalPhase(
+          database,
+          scope,
+          migrationIndex,
+          migration,
+          phase,
+          previousSnapshot: migrationIndex == 0
+              ? null
+              : bundle.migrations[migrationIndex - 1].snapshot,
+          sourceScope: sourceScope,
+        );
       }
     }
   }
@@ -344,6 +281,9 @@ VALUES (?, ?, ?, ?, 'completed')
           entry.migration,
           phase,
           interrupt,
+          previousSnapshot: entry.ordinal == 0
+              ? null
+              : bundle.migrations[entry.ordinal - 1].snapshot,
         );
       }
     }
@@ -394,6 +334,7 @@ VALUES (?, ?, ?, ?, 'completed')
           migration,
           phase,
           interrupt,
+          previousSnapshot: ordinal == 0 ? null : bundle.migrations[ordinal - 1].snapshot,
           sourceScope: _scopeNames[ordinal][phase['scopeId']],
         );
         if (scope != 'main' && fileIdentities.containsKey('main')) {
@@ -877,6 +818,7 @@ Future<void> _applyPersistentPhase(
   VoxelBundledMigration migration,
   Map<String, Object?> phase,
   Future<void> Function(VoxelMigrationInterruption interruption)? interrupt, {
+  required Map<String, Object?>? previousSnapshot,
   String? sourceScope,
 }) async {
   if (phase['mode'] != 'transactional') {
@@ -894,46 +836,119 @@ ON CONFLICT (migration_id, phase_id) DO NOTHING
 ''',
     parameters: [migration.id, phase['id'], migration.checksum, voxelPlatform],
   );
-  final bytes = utf8.encode(migration.sql);
-  await database.transaction<void>((transaction) async {
-    for (final rawRange in _list(phase['statements'], 'phase statements')) {
-      final range = _map(rawRange, 'statement range');
-      var statement = utf8.decode(
-        bytes.sublist(range['startByte']! as int, range['endByte']! as int),
-      );
-      if (sourceScope != null && sourceScope != scope) {
-        statement = statement.replaceAll(
-          '${_quote(sourceScope)}.',
-          '${_quote(scope)}.',
+  await _runTransactionalPhase(
+    database,
+    scope,
+    ordinal,
+    migration,
+    phase,
+    previousSnapshot: previousSnapshot,
+    sourceScope: sourceScope,
+    interrupt: interrupt,
+  );
+}
+
+Future<void> _runTransactionalPhase(
+  TursoDatabase database,
+  String scope,
+  int ordinal,
+  VoxelBundledMigration migration,
+  Map<String, Object?> phase, {
+  required Map<String, Object?>? previousSnapshot,
+  String? sourceScope,
+  Future<void> Function(VoxelMigrationInterruption interruption)? interrupt,
+}) async {
+  final rebuild = phase['rebuild'] as Map<String, Object?>?;
+  Object? primaryFailure;
+  StackTrace? primaryStackTrace;
+  var foreignKeysMayBeDisabled = false;
+  try {
+    if (rebuild != null) {
+      if (rebuild['tables'] != null) {
+        if (previousSnapshot == null) {
+          throw const FormatException('An initial migration cannot rebuild an existing table.');
+        }
+        await const VoxelRebuildCatalogValidator().validate(
+          scopeName: scope,
+          rebuild: rebuild,
+          previousSnapshot: previousSnapshot,
+          query: (sql) => _catalogRows(database.query(sql)),
         );
       }
-      await transaction.execute(statement);
+      foreignKeysMayBeDisabled = true;
+      await _setForeignKeys(database, enabled: false);
     }
-    await transaction.execute(
-      '''
+    final bytes = utf8.encode(migration.sql);
+    await database.transaction<void>((transaction) async {
+      for (final rawRange in _list(phase['statements'], 'phase statements')) {
+        final range = _map(rawRange, 'statement range');
+        final statement = _rewriteScope(
+          utf8.decode(
+            bytes.sublist(range['startByte']! as int, range['endByte']! as int),
+          ),
+          sourceScope,
+          scope,
+        );
+        await transaction.execute(statement);
+      }
+      if (rebuild != null) {
+        await const VoxelRebuildCatalogValidator().validateFinalScope(
+          scopeName: scope,
+          scopeId: phase['scopeId']! as String,
+          snapshot: migration.snapshot,
+          query: (sql) => _catalogRows(transaction.query(sql)),
+        );
+        for (final rawValidation in _list(rebuild['validations'], 'rebuild validations')) {
+          final validation = _map(rawValidation, 'rebuild validation');
+          final sql = _rewriteScope(validation['sql']! as String, sourceScope, scope);
+          final row = (await transaction.query(sql)).rows.single;
+          if (row.getInt('valid') != 1) {
+            throw StateError(
+              'Migration ${migration.id} phase ${phase['id']} failed validation.',
+            );
+          }
+        }
+      }
+      await transaction.execute(
+        '''
 INSERT INTO ${_qualified(scope, '_voxel_migrations')}
   (migration_id, parent_id, checksum, ordinal)
 VALUES (?, ?, ?, ?)
 ON CONFLICT (migration_id) DO NOTHING
 ''',
-      parameters: [migration.id, migration.parentId, migration.checksum, ordinal],
-    );
-    await transaction.execute(
-      '''
+        parameters: [migration.id, migration.parentId, migration.checksum, ordinal],
+      );
+      await transaction.execute(
+        '''
 INSERT INTO ${_qualified(scope, '_voxel_phases')}
   (migration_id, phase_id, checksum, platform, status)
 VALUES (?, ?, ?, ?, 'completed')
 ''',
-      parameters: [migration.id, phase['id'], migration.checksum, voxelPlatform],
-    );
-    await interrupt?.call(
-      VoxelMigrationInterruption(
-        point: VoxelMigrationInterruptionPoint.beforePhaseCommit,
-        migrationId: migration.id,
-        phaseId: phase['id']! as String,
-      ),
-    );
-  });
+        parameters: [migration.id, phase['id'], migration.checksum, voxelPlatform],
+      );
+      await interrupt?.call(
+        VoxelMigrationInterruption(
+          point: VoxelMigrationInterruptionPoint.beforePhaseCommit,
+          migrationId: migration.id,
+          phaseId: phase['id']! as String,
+        ),
+      );
+    });
+  } on Object catch (error, stackTrace) {
+    primaryFailure = error;
+    primaryStackTrace = stackTrace;
+  }
+
+  if (foreignKeysMayBeDisabled) {
+    try {
+      await _setForeignKeys(database, enabled: true);
+    } on Object catch (restorationFailure, restorationStackTrace) {
+      Error.throwWithStackTrace(restorationFailure, restorationStackTrace);
+    }
+  }
+  if (primaryFailure != null) {
+    Error.throwWithStackTrace(primaryFailure, primaryStackTrace!);
+  }
   await interrupt?.call(
     VoxelMigrationInterruption(
       point: VoxelMigrationInterruptionPoint.afterPhaseCommit,
@@ -941,6 +956,30 @@ VALUES (?, ?, ?, ?, 'completed')
       phaseId: phase['id']! as String,
     ),
   );
+}
+
+Future<void> _setForeignKeys(TursoDatabase database, {required bool enabled}) async {
+  await database.execute('PRAGMA foreign_keys=${enabled ? 'ON' : 'OFF'}');
+  final actual = (await database.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys');
+  if ((actual == 1) != enabled) {
+    throw StateError('Voxel could not ${enabled ? 'restore' : 'disable'} foreign-key enforcement.');
+  }
+}
+
+String _rewriteScope(String sql, String? sourceScope, String targetScope) {
+  if (sourceScope == null || sourceScope == targetScope) return sql;
+  return sql.replaceAll('${_quote(sourceScope)}.', '${_quote(targetScope)}.');
+}
+
+Future<List<Map<String, Object?>>> _catalogRows(Future<TursoQueryResult> result) async {
+  final resolved = await result;
+  return [
+    for (final row in resolved.rows)
+      {
+        for (var index = 0; index < resolved.columns.length; index++)
+          resolved.columns[index].name: row.valueAt(index),
+      },
+  ];
 }
 
 Future<bool> _phaseCompleted(

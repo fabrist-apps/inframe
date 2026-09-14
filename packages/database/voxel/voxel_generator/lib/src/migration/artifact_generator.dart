@@ -231,12 +231,12 @@ final class VoxelArtifactGenerator {
 
     final migrationId = _nextId();
     snapshot['migrationId'] = migrationId;
-    final rebuiltScopes = <String>{};
+    final rebuiltTablesByScope = <String, List<Map<String, Object?>>>{};
     final sql = _diffSql(
       previousSnapshot,
       snapshot,
       storageTransforms,
-      rebuiltScopes,
+      rebuiltTablesByScope,
     );
     final metadata = <String, Object?>{
       'formatVersion': 1,
@@ -244,7 +244,7 @@ final class VoxelArtifactGenerator {
       'databaseId': databaseId,
       'id': migrationId,
       'parentId': previousEntry['id'],
-      'phases': _phases(snapshot, sql, rebuiltScopes: rebuiltScopes),
+      'phases': _phases(snapshot, sql, rebuiltTablesByScope: rebuiltTablesByScope),
     };
     final checksum = _checksum(metadata, snapshot, sql);
     final migration = {...metadata, 'checksum': checksum};
@@ -665,7 +665,7 @@ final class VoxelArtifactGenerator {
     Map<String, Object?> previous,
     Map<String, Object?> next,
     Map<String, String> storageTransforms,
-    Set<String> rebuiltScopes,
+    Map<String, List<Map<String, Object?>>> rebuiltTablesByScope,
   ) {
     final previousSchemas = {
       for (final value in (previous['schemas']! as List<Object?>).cast<Map<String, Object?>>())
@@ -726,7 +726,9 @@ final class VoxelArtifactGenerator {
         throw UnsupportedError('Moving a Voxel table between schemas is not supported.');
       }
       if (rebuiltTableIds.contains(entry.key)) {
-        rebuiltScopes.add(newSchema);
+        rebuiltTablesByScope
+            .putIfAbsent(nextTable['schemaId']! as String, () => [])
+            .add(_rebuildMetadata(previousTable, nextTable));
         buffer.write(
           _rebuildTableSql(
             previousTable,
@@ -822,7 +824,7 @@ final class VoxelArtifactGenerator {
     final schema = schemas[next['schemaId']]!;
     final oldName = previous['name']! as String;
     final newName = next['name']! as String;
-    final replacement = '__voxel_rebuild_${(next['id']! as String).substring(0, 12)}';
+    final replacement = _replacementTableName(next['id']! as String);
     final oldColumns = {
       for (final column in (previous['columns']! as List<Object?>).cast<Map<String, Object?>>())
         column['id']: column,
@@ -886,6 +888,27 @@ final class VoxelArtifactGenerator {
     buffer.write(_indexesForTable(next, schemas, tables));
     return buffer.toString();
   }
+
+  Map<String, Object?> _rebuildMetadata(
+    Map<String, Object?> previous,
+    Map<String, Object?> next,
+  ) => {
+    'tableId': next['id'],
+    'oldName': previous['name'],
+    'replacementName': _replacementTableName(next['id']! as String),
+    'finalName': next['name'],
+    'managedDependencies': [
+      for (final index in _objects(previous, 'indexes'))
+        {
+          'kind': 'index',
+          'objectId': index['id'],
+          'name': index['name'],
+        },
+    ],
+    'expectedBefore': previous,
+  };
+
+  String _replacementTableName(String tableId) => '__voxel_rebuild_${tableId.substring(0, 12)}';
 
   void _writeColumnDiff(
     StringBuffer buffer,
@@ -1282,7 +1305,7 @@ final class VoxelArtifactGenerator {
   List<Map<String, Object?>> _phases(
     Map<String, Object?> snapshot,
     String sql, {
-    Set<String> rebuiltScopes = const {},
+    Map<String, List<Map<String, Object?>>> rebuiltTablesByScope = const {},
   }) {
     final ranges = _statementRanges(sql);
     final bytes = utf8.encode(sql);
@@ -1308,19 +1331,34 @@ final class VoxelArtifactGenerator {
       phases.add({
         'id': '${phases.length}',
         'scopeId': scopeId,
+        'writeScopeIds': [scopeId],
         'mode': 'transactional',
         'platforms': ['native', 'browser'],
         'statements': <Map<String, int>>[range],
         'recovery': null,
-        if (rebuiltScopes.contains(matchingSchemas.single['name']))
-          'rebuild': {
-            'foreignKeys': 'offOutsideTransaction',
-            'validations': _rebuildValidations(
-              snapshot,
-              matchingSchemas.single['id']! as String,
-            ),
-          },
       });
+    }
+    for (final phase in phases) {
+      final scopeId = phase['scopeId']! as String;
+      final candidates = rebuiltTablesByScope[scopeId] ?? const [];
+      final statements = [
+        for (final range in (phase['statements']! as List<Map<String, int>>))
+          utf8.decode(bytes.sublist(range['startByte']!, range['endByte'])),
+      ];
+      final rebuiltTables = [
+        for (final table in candidates)
+          if (statements.any(
+            (statement) => statement.contains(_quote(table['replacementName']! as String)),
+          ))
+            table,
+      ];
+      if (rebuiltTables.isNotEmpty) {
+        phase['rebuild'] = {
+          'foreignKeys': 'offOutsideTransaction',
+          'tables': rebuiltTables,
+          'validations': _rebuildValidations(snapshot, scopeId),
+        };
+      }
     }
     return phases;
   }
