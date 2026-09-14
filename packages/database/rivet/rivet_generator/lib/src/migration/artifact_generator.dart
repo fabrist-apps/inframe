@@ -1405,7 +1405,8 @@ final class RivetArtifactGenerator {
             (numBits is int && numBits > 1))) {
       return false;
     }
-    return numBits == null || numBits is! int || numBits <= 1 || indexedDimensions <= 930;
+    final bits = numBits as int?;
+    return bits == null || bits <= 1 || indexedDimensions <= 930;
   }
 
   String _createIndexSql(

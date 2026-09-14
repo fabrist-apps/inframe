@@ -242,13 +242,11 @@ RivetVectorCodec _validateVectorIndexOperand(RivetIndex index, String path, Stri
       '$method index $path requires one scalar vector operator-class operand.',
     );
   }
-  if (vector.dimensions > 2000) {
-    if (index.method is! DiskAnn || vector.dimensions > 16000) {
-      throw ArgumentError(
-        '$method index $path supports at most '
-        '${index.method is DiskAnn ? 16000 : 2000} vector dimensions.',
-      );
-    }
+  final maximumDimensions = index.method is DiskAnn ? 16000 : 2000;
+  if (vector.dimensions > maximumDimensions) {
+    throw ArgumentError(
+      '$method index $path supports at most $maximumDimensions vector dimensions.',
+    );
   }
   return vector;
 }
