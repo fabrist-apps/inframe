@@ -120,6 +120,81 @@ final class RivetMigrator {
     });
   }
 
+  /// Records an audited operator decision for an interrupted phase.
+  Future<void> resolve({
+    required String migrationId,
+    required String phaseId,
+    required String expectedChecksum,
+    required String attemptId,
+    required String reason,
+    required RivetMigrationResolution resolution,
+  }) async {
+    final operatorReason = reason.trim();
+    if (operatorReason.isEmpty) {
+      throw ArgumentError.value(reason, 'reason', 'must not be empty');
+    }
+    final artifacts = RivetMigrationArtifacts.read(directory);
+    await _withLockedConnection((session) async {
+      await _bootstrap(session);
+      final history = await _readHistory(session, artifacts.databaseId);
+      _validateHistory(artifacts, history);
+      final migrationMatches = artifacts.migrations.indexed.where(
+        (entry) => entry.$2.id == migrationId,
+      );
+      if (migrationMatches.length != 1) {
+        throw const RivetMigrationException('Resolution migration ID is not in the history.');
+      }
+      final match = migrationMatches.single;
+      final migrationIndex = match.$1;
+      final migration = match.$2;
+      if (migrationIndex >= history.length || migration.checksum != expectedChecksum) {
+        throw const RivetMigrationException('Resolution checksum does not match durable history.');
+      }
+      final phaseMatches = migration.phases.indexed.where((entry) => entry.$2.id == phaseId);
+      if (phaseMatches.length != 1) {
+        throw const RivetMigrationException('Resolution phase ID is not in the migration.');
+      }
+      final phaseMatch = phaseMatches.single;
+      final phaseIndex = phaseMatch.$1;
+      final phase = phaseMatch.$2;
+      final receipts = history[migrationIndex].receipts;
+      if (phaseIndex >= receipts.length) {
+        throw const RivetMigrationException('Resolution phase has not started.');
+      }
+      final receipt = receipts[phaseIndex];
+      if (receipt.status != 'started' || receipt.attemptId != attemptId) {
+        throw const RivetMigrationException(
+          'Resolution attempt is not the active started attempt.',
+        );
+      }
+      final beforeEvidence = Map<String, Object?>.from(receipt.evidence! as Map);
+      final inspected = await _inspectRecovery(session, phase, beforeEvidence);
+      final manual = phase.recovery!['kind'] == 'manual';
+      final agrees = switch (resolution) {
+        RivetMigrationResolution.completed =>
+          manual || inspected.classification == _RecoveryClassification.completed,
+        RivetMigrationResolution.retry =>
+          manual || inspected.classification == _RecoveryClassification.notStarted,
+      };
+      if (!agrees) {
+        throw RivetMigrationException(
+          'Current recovery evidence contradicts resolution `${resolution.name}`.',
+        );
+      }
+      await _persistResolution(
+        session,
+        artifacts.databaseId,
+        migration,
+        phase,
+        receipt,
+        operatorReason,
+        resolution,
+        inspected,
+        manual: manual,
+      );
+    });
+  }
+
   Future<T> _withLockedConnection<T>(Future<T> Function(pg.Connection session) operation) async {
     pg.Connection? session;
     var locked = false;
@@ -246,6 +321,15 @@ enum RivetMigrationPhaseState {
   completed,
 }
 
+/// Operator decision for an interrupted migration attempt.
+enum RivetMigrationResolution {
+  /// Certifies that the intended effect is complete.
+  completed,
+
+  /// Certifies that the prior effect is safe to attempt again.
+  retry,
+}
+
 RivetMigrationPhaseStatus _phaseStatus(RivetMigrationPhase phase, _Receipt? receipt) {
   final evidence = receipt?.evidence;
   return RivetMigrationPhaseStatus(
@@ -289,6 +373,20 @@ Future<void> _bootstrap(pg.Connection session) async {
       "attemptId" text,
       evidence jsonb NOT NULL,
       PRIMARY KEY ("databaseId", "migrationId", "phaseId")
+    )
+  ''');
+  await session.execute('''
+    CREATE TABLE IF NOT EXISTS _rivet.recovery_audits (
+      id bigserial PRIMARY KEY,
+      "databaseId" text NOT NULL,
+      "migrationId" text NOT NULL,
+      "phaseId" text NOT NULL,
+      checksum text NOT NULL,
+      "attemptId" text NOT NULL,
+      resolution text NOT NULL CHECK (resolution IN ('completed', 'retry')),
+      reason text NOT NULL CHECK (length(btrim(reason)) > 0),
+      evidence jsonb NOT NULL,
+      "createdAt" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   ''');
 }
@@ -530,9 +628,83 @@ Future<_RecoveryResult> _inspectRecovery(
     return _inspectChecks(connection, checks);
   }
   return _RecoveryResult(
-    recordedBefore == null ? _RecoveryClassification.notStarted : _RecoveryClassification.uncertain,
+    recordedBefore == null || recordedBefore['manualRetryApproved'] == true
+        ? _RecoveryClassification.notStarted
+        : _RecoveryClassification.uncertain,
     {'kind': 'manual', 'declaredBefore': recovery['before']},
   );
+}
+
+Future<void> _persistResolution(
+  pg.Connection connection,
+  String databaseId,
+  RivetMigrationArtifact migration,
+  RivetMigrationPhase phase,
+  _Receipt receipt,
+  String reason,
+  RivetMigrationResolution resolution,
+  _RecoveryResult inspected, {
+  required bool manual,
+}) async {
+  await connection.runTx((transaction) async {
+    await transaction.execute(
+      pg.Sql.named('''
+        INSERT INTO _rivet.recovery_audits
+          ("databaseId", "migrationId", "phaseId", checksum, "attemptId",
+           resolution, reason, evidence)
+        VALUES (@databaseId, @migrationId, @phaseId, @checksum, @attemptId,
+                @resolution, @reason, CAST(@evidence AS jsonb))
+      '''),
+      parameters: {
+        'databaseId': databaseId,
+        'migrationId': migration.id,
+        'phaseId': phase.id,
+        'checksum': migration.checksum,
+        'attemptId': receipt.attemptId,
+        'resolution': resolution.name,
+        'reason': reason,
+        'evidence': jsonEncode({
+          'receipt': receipt.evidence,
+          'inspection': inspected.evidence,
+        }),
+      },
+    );
+    final nextAttemptId = resolution == RivetMigrationResolution.retry
+        ? _newAttemptId()
+        : receipt.attemptId!;
+    final nextEvidence = resolution == RivetMigrationResolution.retry
+        ? <String, Object?>{
+            ...inspected.evidence,
+            if (manual) 'manualRetryApproved': true,
+          }
+        : <String, Object?>{
+            'before': receipt.evidence,
+            'resolved': inspected.evidence,
+          };
+    final updated = await transaction.execute(
+      pg.Sql.named('''
+        UPDATE _rivet.phase_receipts
+        SET status = @status, "attemptId" = @nextAttemptId,
+            evidence = CAST(@evidence AS jsonb)
+        WHERE "databaseId" = @databaseId AND "migrationId" = @migrationId
+          AND "phaseId" = @phaseId AND checksum = @checksum
+          AND "attemptId" = @attemptId AND status = 'started'
+      '''),
+      parameters: {
+        'status': resolution == RivetMigrationResolution.completed ? 'completed' : 'started',
+        'nextAttemptId': nextAttemptId,
+        'evidence': jsonEncode(nextEvidence),
+        'databaseId': databaseId,
+        'migrationId': migration.id,
+        'phaseId': phase.id,
+        'checksum': migration.checksum,
+        'attemptId': receipt.attemptId,
+      },
+    );
+    if (updated.affectedRows != 1) {
+      throw const RivetMigrationException('The interrupted attempt changed during resolution.');
+    }
+  });
 }
 
 Future<_RecoveryResult> _inspectChecks(

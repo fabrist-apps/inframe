@@ -678,7 +678,175 @@ void main() {
       },
       skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
     );
+
+    test(
+      'should complete manual recovery only with matching operator input and audit it',
+      () async {
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        final recovery = await _prepareManualRecovery(
+          directory,
+          databaseUrl,
+          fixture,
+          tableName: 'manual_complete',
+        );
+
+        await expectLater(
+          recovery.migrator.resolve(
+            migrationId: recovery.migrationId,
+            phaseId: '0',
+            expectedChecksum: recovery.checksum,
+            attemptId: recovery.attemptId,
+            reason: '   ',
+            resolution: RivetMigrationResolution.completed,
+          ),
+          throwsArgumentError,
+        );
+        await expectLater(
+          recovery.migrator.resolve(
+            migrationId: recovery.migrationId,
+            phaseId: '0',
+            expectedChecksum: List.filled(64, '0').join(),
+            attemptId: recovery.attemptId,
+            reason: 'Verified the manually created table.',
+            resolution: RivetMigrationResolution.completed,
+          ),
+          throwsA(isA<RivetMigrationException>()),
+        );
+
+        await recovery.migrator.resolve(
+          migrationId: recovery.migrationId,
+          phaseId: '0',
+          expectedChecksum: recovery.checksum,
+          attemptId: recovery.attemptId,
+          reason: 'Verified the manually created table.',
+          resolution: RivetMigrationResolution.completed,
+        );
+
+        final status = await recovery.migrator.status();
+        expect(status.migrations.last.phases.single.state, RivetMigrationPhaseState.completed);
+        final audits = await fixture.execute('''
+          SELECT "migrationId", "phaseId", checksum, "attemptId", resolution, reason
+          FROM _rivet.recovery_audits
+        ''');
+        expect(audits.single, [
+          recovery.migrationId,
+          '0',
+          recovery.checksum,
+          recovery.attemptId,
+          'completed',
+          'Verified the manually created table.',
+        ]);
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
+
+    test(
+      'should preserve the old attempt in an audit before retrying manual work',
+      () async {
+        final fixture = await pg.Connection.openFromUrl(databaseUrl!);
+        addTearDown(fixture.close);
+        final recovery = await _prepareManualRecovery(
+          directory,
+          databaseUrl,
+          fixture,
+          tableName: 'manual_retry',
+        );
+        await fixture.execute('DROP TABLE recovery.manual_retry');
+
+        await recovery.migrator.resolve(
+          migrationId: recovery.migrationId,
+          phaseId: '0',
+          expectedChecksum: recovery.checksum,
+          attemptId: recovery.attemptId,
+          reason: 'Removed the partial object and approved one retry.',
+          resolution: RivetMigrationResolution.retry,
+        );
+        final retried = await recovery.migrator.status();
+        final newAttempt = retried.migrations.last.phases.single.attemptId;
+        expect(newAttempt, isNot(recovery.attemptId));
+
+        await expectLater(recovery.migrator.migrate(), throwsA(isA<RivetMigrationException>()));
+        expect(
+          (await fixture.execute(
+            "SELECT to_regclass('recovery.manual_retry') IS NOT NULL",
+          )).single.single,
+          isTrue,
+        );
+        await recovery.migrator.resolve(
+          migrationId: recovery.migrationId,
+          phaseId: '0',
+          expectedChecksum: recovery.checksum,
+          attemptId: newAttempt!,
+          reason: 'Verified the retried manual operation.',
+          resolution: RivetMigrationResolution.completed,
+        );
+
+        final audits = await fixture.execute(
+          'SELECT "attemptId", resolution FROM _rivet.recovery_audits ORDER BY id',
+        );
+        expect(audits.map((row) => row.toList()), [
+          [recovery.attemptId, 'retry'],
+          [newAttempt, 'completed'],
+        ]);
+      },
+      skip: databaseUrl == null ? 'RIVET_TEST_DATABASE_URL is not configured.' : false,
+    );
   });
+}
+
+Future<
+  ({
+    RivetMigrator migrator,
+    String migrationId,
+    String checksum,
+    String attemptId,
+  })
+>
+_prepareManualRecovery(
+  Directory directory,
+  String databaseUrl,
+  pg.Connection fixture, {
+  required String tableName,
+}) async {
+  final declaration = _indexMigrationDeclaration();
+  const generator = RivetMigrationGenerator();
+  await generator.generateDeclaration(
+    declaration: declaration,
+    directory: directory,
+    name: 'initial table',
+  );
+  await fixture.execute('DROP SCHEMA IF EXISTS _rivet CASCADE');
+  await fixture.execute('DROP SCHEMA IF EXISTS recovery CASCADE');
+  final migrator = RivetMigrator(
+    connection: RivetConnection.url(databaseUrl, sslMode: RivetSslMode.disable),
+    directory: directory,
+  );
+  await migrator.migrate();
+  declaration['tables'] = [
+    ...(declaration['tables']! as List<Object?>),
+    _simpleTable(tableName),
+  ];
+  final migrationId = await generator.generateDeclaration(
+    declaration: declaration,
+    directory: directory,
+    name: 'manual recovery',
+  );
+  await _sealRecovery(directory, migrationId!, {
+    'kind': 'manual',
+    'operationId': '66666666666666666666666666666666',
+    'before': {'description': '$tableName absent'},
+    'after': {'description': '$tableName present'},
+  });
+  await expectLater(migrator.migrate(), throwsA(isA<RivetMigrationException>()));
+  final status = await migrator.status();
+  final phase = status.migrations.last.phases.single;
+  return (
+    migrator: migrator,
+    migrationId: migrationId,
+    checksum: status.migrations.last.checksum,
+    attemptId: phase.attemptId!,
+  );
 }
 
 Future<void> _splitLastMigrationIntoTwoPhases(
