@@ -2,17 +2,22 @@ import 'dart:async';
 
 import 'package:conflux/conflux.dart';
 
-final class FakeClock implements Clock {
-  FakeClock({DateTime? wallTime}) : _wallTime = wallTime ?? DateTime.utc(2026);
+import 'moments.dart';
 
-  DateTime _wallTime;
+final class FakeClock implements Clock {
+  FakeClock({UtcMoment? wallTime}) : _wallTime = wallTime ?? utcMoment(2026);
+
+  UtcMoment _wallTime;
   Duration _monotonic = Duration.zero;
   final _waits = <_FakeWait>{};
 
   int get activeWaits => _waits.length;
 
   void advance(Duration duration) {
-    _wallTime = _wallTime.add(duration);
+    _wallTime = _wallTime
+        .addDuration(duration)
+        .getOrThrowWith((e) => StateError(e.message))
+        .toUtc();
     _monotonic += duration;
     for (final wait in List.of(_waits)) {
       wait.completeIfDue(_monotonic);
@@ -20,7 +25,10 @@ final class FakeClock implements Clock {
   }
 
   void adjustWall(Duration duration) {
-    _wallTime = _wallTime.add(duration);
+    _wallTime = _wallTime
+        .addDuration(duration)
+        .getOrThrowWith((e) => StateError(e.message))
+        .toUtc();
   }
 
   void advanceMonotonic(Duration duration) {
@@ -31,7 +39,7 @@ final class FakeClock implements Clock {
   }
 
   @override
-  DateTime wallTime() => _wallTime;
+  UtcMoment wallTime() => _wallTime;
 
   @override
   Duration monotonic() => _monotonic;

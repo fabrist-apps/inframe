@@ -33,6 +33,12 @@ jobs:
         working-directory: packages/chronicler/chronicler
         run: dart run build_runner build
 
+      - name: Generate Conflux mapping fixtures
+        working-directory: packages/conflux/dart_mappable_conflux
+        run: |
+          dart run build_runner build
+          dart format .
+
       - name: Generate Turso native bindings
         working-directory: packages/database/turso
         run: dart run ffigen --config ffigen.yaml
@@ -86,6 +92,7 @@ jobs:
         run: |
           dart test packages/conflux/conflux/test --chain-stack-traces
           dart test packages/conflux/chronicler_conflux/test --chain-stack-traces
+          dart test packages/conflux/dart_mappable_conflux/test --chain-stack-traces
 
       - name: Run Chrono ID tests
         run: |

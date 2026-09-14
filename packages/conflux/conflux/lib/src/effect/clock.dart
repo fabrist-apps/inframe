@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:conflux/moment.dart';
+import 'package:conflux/result.dart';
+
 /// A cancellable registration created by [Clock.sleep].
 abstract interface class CancellableWait {
   /// Completes when the wait expires or its registration is cancelled.
@@ -11,8 +14,8 @@ abstract interface class CancellableWait {
 
 /// Supplies wall time, monotonic elapsed time, and cancellable waiting.
 abstract interface class Clock {
-  /// The current civil time.
-  DateTime wallTime();
+  /// The current instant in UTC, without requiring IANA initialization.
+  UtcMoment wallTime();
 
   /// Time elapsed since this clock's monotonic origin.
   Duration monotonic();
@@ -29,7 +32,8 @@ final class SystemClock implements Clock {
   final Stopwatch _stopwatch;
 
   @override
-  DateTime wallTime() => DateTime.now();
+  UtcMoment wallTime() =>
+      Moment.fromDateTime(DateTime.now()).getOrThrowWith((error) => StateError(error.message));
 
   @override
   Duration monotonic() => _stopwatch.elapsed;
