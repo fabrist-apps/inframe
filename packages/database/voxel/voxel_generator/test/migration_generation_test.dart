@@ -253,6 +253,66 @@ void main() {
       expect(sql, contains('CREATE UNIQUE INDEX "content"."parent_name_unique"'));
       expect(sql, contains('WHERE NOT (("name" = \'\'))'));
     });
+
+    test('should generate an explicit table rebuild with a storage transform', () async {
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generateDeclaration(
+        declaration: _declaration(table: 'users', columns: ['id', 'name']),
+        directory: directory,
+        name: 'initial',
+      );
+      final changed = _declaration(table: 'users', columns: ['id', 'name']);
+      final table = (changed['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final name = (table['columns']! as List<Object?>).last! as Map<String, Object?>;
+      name['storage'] = {'kind': 'integer', 'nullable': false, 'codecVersion': 1};
+
+      await generator.generateDeclaration(
+        declaration: changed,
+        directory: directory,
+        name: 'convert name',
+        storageTransforms: {'auth.users.name': 'CAST("name" AS INTEGER)'},
+      );
+
+      final sql = _finalSql(directory);
+      expect(sql, contains('CREATE TABLE "auth"."__voxel_rebuild_'));
+      expect(sql, contains('SELECT "id", CAST("name" AS INTEGER)'));
+      expect(sql, contains('DROP TABLE "auth"."users";'));
+      final migration = _finalMigration(directory);
+      final phase = (migration['phases']! as List<Object?>).single! as Map<String, Object?>;
+      expect(phase['rebuild'], isA<Map<String, Object?>>());
+    });
+
+    test('should reject an incompatible rebuild without a storage transform', () async {
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generateDeclaration(
+        declaration: _declaration(table: 'users', columns: ['id', 'name']),
+        directory: directory,
+        name: 'initial',
+      );
+      final changed = _declaration(table: 'users', columns: ['id', 'name']);
+      final table = (changed['tables']! as List<Object?>).single! as Map<String, Object?>;
+      final name = (table['columns']! as List<Object?>).last! as Map<String, Object?>;
+      name['storage'] = {'kind': 'integer', 'nullable': false, 'codecVersion': 1};
+
+      await expectLater(
+        generator.generateDeclaration(
+          declaration: changed,
+          directory: directory,
+          name: 'convert name',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      final journal = jsonDecode(
+        File('${directory.path}/journal.json').readAsStringSync(),
+      ) as Map<String, Object?>;
+      expect(journal['entries']! as List<Object?>, hasLength(1));
+    });
   });
 }
 
@@ -306,6 +366,15 @@ String _finalSql(Directory directory) {
       jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
   final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
   return File('${directory.path}/${entry['directory']}/migration.sql').readAsStringSync();
+}
+
+Map<String, Object?> _finalMigration(Directory directory) {
+  final journal =
+      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  return jsonDecode(
+    File('${directory.path}/${entry['directory']}/migration.json').readAsStringSync(),
+  ) as Map<String, Object?>;
 }
 
 final class Parents extends VoxelTableDefinition<Parents> {

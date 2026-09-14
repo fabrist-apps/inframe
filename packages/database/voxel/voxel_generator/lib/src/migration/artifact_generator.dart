@@ -35,6 +35,7 @@ final class VoxelArtifactGenerator {
     required Directory directory,
     required String name,
     Map<String, String>? source,
+    Map<String, String> storageTransforms = const {},
   }) async {
     _validateLabel(name);
     final physicalDeclaration = normalizeDeclaration(declaration);
@@ -46,6 +47,7 @@ final class VoxelArtifactGenerator {
         directory: directory,
         name: name,
         source: source,
+        storageTransforms: storageTransforms,
       );
     }
 
@@ -197,6 +199,7 @@ final class VoxelArtifactGenerator {
     required Map<String, Object?> declaration,
     required Directory directory,
     required String name,
+    required Map<String, String> storageTransforms,
     Map<String, String>? source,
   }) async {
     await VoxelArtifactChecker().check(directory: directory);
@@ -214,7 +217,13 @@ final class VoxelArtifactGenerator {
 
     final migrationId = _nextId();
     snapshot['migrationId'] = migrationId;
-    final sql = _diffSql(previousSnapshot, snapshot);
+    final rebuiltScopes = <String>{};
+    final sql = _diffSql(
+      previousSnapshot,
+      snapshot,
+      storageTransforms,
+      rebuiltScopes,
+    );
     if (sql.isEmpty) {
       throw UnsupportedError(
         'The composed schema changed, but Voxel cannot generate its Turso DDL.',
@@ -226,7 +235,7 @@ final class VoxelArtifactGenerator {
       'databaseId': databaseId,
       'id': migrationId,
       'parentId': previousEntry['id'],
-      'phases': _phases(snapshot, sql),
+      'phases': _phases(snapshot, sql, rebuiltScopes: rebuiltScopes),
     };
     final checksum = _checksum(metadata, snapshot, sql);
     final migration = {...metadata, 'checksum': checksum};
@@ -514,7 +523,12 @@ final class VoxelArtifactGenerator {
     _withoutKeysRecursively(snapshot, {'id', 'tableId', 'schemaId', 'migrationId', 'renamedFrom'}),
   );
 
-  String _diffSql(Map<String, Object?> previous, Map<String, Object?> next) {
+  String _diffSql(
+    Map<String, Object?> previous,
+    Map<String, Object?> next,
+    Map<String, String> storageTransforms,
+    Set<String> rebuiltScopes,
+  ) {
     final previousSchemas = {
       for (final value in (previous['schemas']! as List<Object?>).cast<Map<String, Object?>>())
         value['id']! as String: value['name']! as String,
@@ -531,7 +545,14 @@ final class VoxelArtifactGenerator {
       for (final value in (next['tables']! as List<Object?>).cast<Map<String, Object?>>())
         value['id']! as String: value,
     };
-    final buffer = StringBuffer()..write(_droppedObjectsSql(previous, next));
+    final rebuiltTableIds = <String>{
+      for (final entry in nextTables.entries)
+        if (previousTables[entry.key] case final oldTable?
+            when _requiresRebuild(oldTable, entry.value))
+          entry.key,
+    };
+    final usedTransformPaths = <String>{};
+    final buffer = StringBuffer()..write(_droppedObjectsSql(previous, next, rebuiltTableIds));
     for (final entry in previousTables.entries) {
       if (!nextTables.containsKey(entry.key)) {
         buffer.writeln(
@@ -552,6 +573,20 @@ final class VoxelArtifactGenerator {
       if (oldSchema != newSchema) {
         throw UnsupportedError('Moving a Voxel table between schemas is not supported.');
       }
+      if (rebuiltTableIds.contains(entry.key)) {
+        rebuiltScopes.add(newSchema);
+        buffer.write(
+          _rebuildTableSql(
+            previousTable,
+            nextTable,
+            nextSchemas,
+            nextTables,
+            storageTransforms,
+            usedTransformPaths,
+          ),
+        );
+        continue;
+      }
       var qualifiedTable = '${_quote(oldSchema)}.${_quote(previousTable['name']! as String)}';
       if (previousTable['name'] != nextTable['name']) {
         buffer.writeln(
@@ -561,7 +596,119 @@ final class VoxelArtifactGenerator {
       }
       _writeColumnDiff(buffer, qualifiedTable, previousTable, nextTable);
     }
-    buffer.write(_addedObjectsSql(next, previous));
+    final unusedTransforms = storageTransforms.keys.toSet().difference(usedTransformPaths);
+    if (unusedTransforms.isNotEmpty) {
+      throw FormatException(
+        'Unused Voxel storage transforms: ${unusedTransforms.toList()..sort()}.',
+      );
+    }
+    buffer.write(_addedObjectsSql(next, previous, rebuiltTableIds));
+    return buffer.toString();
+  }
+
+  bool _requiresRebuild(
+    Map<String, Object?> previous,
+    Map<String, Object?> next,
+  ) {
+    final oldColumns = {
+      for (final column in (previous['columns']! as List<Object?>).cast<Map<String, Object?>>())
+        column['id']: column,
+    };
+    final newColumns = {
+      for (final column in (next['columns']! as List<Object?>).cast<Map<String, Object?>>())
+        column['id']: column,
+    };
+    if (oldColumns.keys.any((id) => !newColumns.containsKey(id))) return true;
+    for (final entry in newColumns.entries) {
+      final old = oldColumns[entry.key];
+      final column = entry.value;
+      if (old == null) {
+        if (column['storage'] case {'nullable': false} when column['default'] == null) {
+          return true;
+        }
+        continue;
+      }
+      if (canonicalJson(old['storage']) != canonicalJson(column['storage']) ||
+          canonicalJson(old['default']) != canonicalJson(column['default']) ||
+          old['primaryKey'] != column['primaryKey']) {
+        return true;
+      }
+    }
+    final oldConstraints = _objects(
+      previous,
+      'constraints',
+    ).map((value) => _withoutKeysRecursively(value, {'id', 'tableId', 'name'})).toList();
+    final newConstraints = _objects(
+      next,
+      'constraints',
+    ).map((value) => _withoutKeysRecursively(value, {'id', 'tableId', 'name'})).toList();
+    return canonicalJson(oldConstraints) != canonicalJson(newConstraints);
+  }
+
+  String _rebuildTableSql(
+    Map<String, Object?> previous,
+    Map<String, Object?> next,
+    Map<String, String> schemas,
+    Map<String, Map<String, Object?>> tables,
+    Map<String, String> storageTransforms,
+    Set<String> usedTransformPaths,
+  ) {
+    final schema = schemas[next['schemaId']]!;
+    final oldName = previous['name']! as String;
+    final newName = next['name']! as String;
+    final replacement = '__voxel_rebuild_${(next['id']! as String).substring(0, 12)}';
+    final oldColumns = {
+      for (final column in (previous['columns']! as List<Object?>).cast<Map<String, Object?>>())
+        column['id']: column,
+    };
+    final targetColumns = (next['columns']! as List<Object?>).cast<Map<String, Object?>>();
+    final expressions = <String>[];
+    for (final column in targetColumns) {
+      final path = '$schema.$newName.${column['name']}';
+      final transform = storageTransforms[path];
+      if (transform != null) {
+        if (transform.trim().isEmpty || transform.contains(';')) {
+          throw FormatException('Storage transform `$path` must be one SQL expression.');
+        }
+        usedTransformPaths.add(path);
+      }
+      final old = oldColumns[column['id']];
+      if (old == null) {
+        if (transform != null) {
+          expressions.add(transform);
+        } else if (column['default'] case final Map<String, Object?> expression) {
+          expressions.add(renderSchemaExpression(expression));
+        } else if ((column['storage']! as Map<String, Object?>)['nullable'] == true) {
+          expressions.add('NULL');
+        } else {
+          throw FormatException(
+            'Rebuilding $schema.$newName requires a value for ${column['name']}.',
+          );
+        }
+        continue;
+      }
+      if (canonicalJson(old['storage']) != canonicalJson(column['storage'])) {
+        if (transform == null) {
+          throw FormatException('Rebuilding $schema.$newName requires storage transform `$path`.');
+        }
+        expressions.add(transform);
+      } else {
+        expressions.add(_quote(old['name']! as String));
+      }
+    }
+    final temporaryTable = {...next, 'name': replacement, 'indexes': <Object?>[]};
+    final columns = targetColumns.map((column) => _quote(column['name']! as String)).join(', ');
+    final buffer = StringBuffer()
+      ..write(_createTableSql(temporaryTable, schemas, tables))
+      ..writeln(
+        'INSERT INTO ${_quote(schema)}.${_quote(replacement)} ($columns) '
+        'SELECT ${expressions.join(', ')} FROM ${_quote(schema)}.${_quote(oldName)};',
+      )
+      ..writeln('DROP TABLE ${_quote(schema)}.${_quote(oldName)};')
+      ..writeln(
+        'ALTER TABLE ${_quote(schema)}.${_quote(replacement)} RENAME TO ${_quote(newName)};',
+      )
+      ..write(_indexesForTable(next, schemas, tables));
     return buffer.toString();
   }
 
@@ -666,12 +813,14 @@ final class VoxelArtifactGenerator {
   String _droppedObjectsSql(
     Map<String, Object?> previous,
     Map<String, Object?> next,
+    Set<String> rebuiltTableIds,
   ) {
     final previousSchemas = _schemaNames(previous);
     final nextTables = _tablesById(next);
     final buffer = StringBuffer();
     for (final oldTable in _snapshotTables(previous)) {
       final nextTable = nextTables[oldTable['id']];
+      if (rebuiltTableIds.contains(oldTable['id'])) continue;
       for (final constraint in _objects(oldTable, 'constraints')) {
         final replacement = nextTable == null
             ? null
@@ -703,21 +852,17 @@ final class VoxelArtifactGenerator {
 
   String _addedObjectsSql(
     Map<String, Object?> next,
-    Map<String, Object?> previous,
-  ) {
+    Map<String, Object?> previous, [
+    Set<String> rebuiltTableIds = const {},
+  ]) {
     final schemas = _schemaNames(next);
     final tables = _tablesById(next);
     final previousTables = previous.isEmpty
         ? const <String, Map<String, Object?>>{}
         : _tablesById(previous);
-    final columnNames = <String, String>{};
-    for (final table in tables.values) {
-      for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>()) {
-        columnNames[column['id']! as String] = column['name']! as String;
-      }
-    }
     final buffer = StringBuffer();
     for (final table in tables.values) {
+      if (rebuiltTableIds.contains(table['id'])) continue;
       final oldTable = previousTables[table['id']];
       for (final constraint in _objects(table, 'constraints')) {
         final old = oldTable == null
@@ -731,34 +876,50 @@ final class VoxelArtifactGenerator {
           throw UnsupportedError('Changing Voxel constraints requires a table rebuild.');
         }
       }
-      for (final index in _objects(table, 'indexes')) {
-        final old = oldTable == null
-            ? null
-            : _objects(
-                oldTable,
-                'indexes',
-              ).where((value) => value['id'] == index['id']).singleOrNull;
-        if (old != null && _sameObject(old, index)) continue;
-        if (canonicalJson(index['options']) != canonicalJson(<String, Object?>{}) ||
-            canonicalJson(index['platforms']) != canonicalJson(const ['native', 'browser'])) {
-          throw UnsupportedError(
-            'Index ${index['name']} uses options or platforms that ordinary Voxel migrations do not support.',
-          );
-        }
-        final unique = index['unique'] == true ? 'UNIQUE ' : '';
-        final terms = [
-          for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>())
-            '${_quote(columnNames[term['columnId']]!)}${term['descending'] == true ? ' DESC' : ' ASC'}',
-        ].join(', ');
-        final predicate = index['predicate'] is Map<String, Object?>
-            ? ' WHERE ${renderSchemaExpression(index['predicate']! as Map<String, Object?>, resolveReference: (id) => columnNames[id]!)}'
-            : '';
-        buffer.writeln(
-          'CREATE ${unique}INDEX '
-          '${_quote(schemas[table['schemaId']]!)}.${_quote(index['name']! as String)} '
-          'ON ${_quote(table['name']! as String)} ($terms)$predicate;',
+      buffer.write(_indexesForTable(table, schemas, tables, oldTable: oldTable));
+    }
+    return buffer.toString();
+  }
+
+  String _indexesForTable(
+    Map<String, Object?> table,
+    Map<String, String> schemas,
+    Map<String, Map<String, Object?>> tables, {
+    Map<String, Object?>? oldTable,
+  }) {
+    final columnNames = <String, String>{
+      for (final current in tables.values)
+        for (final column in (current['columns']! as List<Object?>).cast<Map<String, Object?>>())
+          column['id']! as String: column['name']! as String,
+    };
+    final buffer = StringBuffer();
+    for (final index in _objects(table, 'indexes')) {
+      final old = oldTable == null
+          ? null
+          : _objects(
+              oldTable,
+              'indexes',
+            ).where((value) => value['id'] == index['id']).singleOrNull;
+      if (old != null && _sameObject(old, index)) continue;
+      if (canonicalJson(index['options']) != canonicalJson(<String, Object?>{}) ||
+          canonicalJson(index['platforms']) != canonicalJson(const ['native', 'browser'])) {
+        throw UnsupportedError(
+          'Index ${index['name']} uses options or platforms that ordinary Voxel migrations do not support.',
         );
       }
+      final unique = index['unique'] == true ? 'UNIQUE ' : '';
+      final terms = [
+        for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>())
+          '${_quote(columnNames[term['columnId']]!)}${term['descending'] == true ? ' DESC' : ' ASC'}',
+      ].join(', ');
+      final predicate = index['predicate'] is Map<String, Object?>
+          ? ' WHERE ${renderSchemaExpression(index['predicate']! as Map<String, Object?>, resolveReference: (id) => columnNames[id]!)}'
+          : '';
+      buffer.writeln(
+        'CREATE ${unique}INDEX '
+        '${_quote(schemas[table['schemaId']]!)}.${_quote(index['name']! as String)} '
+        'ON ${_quote(table['name']! as String)} ($terms)$predicate;',
+      );
     }
     return buffer.toString();
   }
@@ -876,8 +1037,9 @@ final class VoxelArtifactGenerator {
 
   List<Map<String, Object?>> _phases(
     Map<String, Object?> snapshot,
-    String sql,
-  ) {
+    String sql, {
+    Set<String> rebuiltScopes = const {},
+  }) {
     final ranges = _statementRanges(sql);
     final bytes = utf8.encode(sql);
     final schemas = (snapshot['schemas']! as List<Object?>).cast<Map<String, Object?>>();
@@ -906,9 +1068,93 @@ final class VoxelArtifactGenerator {
         'platforms': ['native', 'browser'],
         'statements': <Map<String, int>>[range],
         'recovery': null,
+        if (rebuiltScopes.contains(matchingSchemas.single['name']))
+          'rebuild': {
+            'foreignKeys': 'offOutsideTransaction',
+            'validations': _foreignKeyValidations(
+              snapshot,
+              matchingSchemas.single['id']! as String,
+            ),
+          },
       });
     }
     return phases;
+  }
+
+  List<Map<String, Object?>> _foreignKeyValidations(
+    Map<String, Object?> snapshot,
+    String schemaId,
+  ) {
+    final tables = _tablesById(snapshot);
+    final columnNames = <String, String>{
+      for (final table in tables.values)
+        for (final column in (table['columns']! as List<Object?>).cast<Map<String, Object?>>())
+          column['id']! as String: column['name']! as String,
+    };
+    final validations = <Map<String, Object?>>[];
+    for (final table in tables.values.where((value) => value['schemaId'] == schemaId)) {
+      for (final constraint in _objects(table, 'constraints')) {
+        if (constraint['kind'] != 'foreignKey') continue;
+        final target = tables[constraint['referenceTableId']]!;
+        if (target['schemaId'] != schemaId) {
+          throw UnsupportedError(
+            'Voxel table rebuilds cannot validate a cross-file foreign key.',
+          );
+        }
+        final childIds = (constraint['columnIds']! as List<Object?>).cast<String>();
+        final parentIds = (constraint['referenceColumnIds']! as List<Object?>).cast<String>();
+        _requireUniqueForeignKeyTarget(target, parentIds);
+        final present = childIds
+            .map((id) => '"voxel_child".${_quote(columnNames[id]!)} IS NOT NULL')
+            .join(' AND ');
+        final matches = [
+          for (var index = 0; index < childIds.length; index++)
+            '"voxel_parent".${_quote(columnNames[parentIds[index]]!)} = "voxel_child".${_quote(columnNames[childIds[index]]!)}',
+        ].join(' AND ');
+        validations.add({
+          'kind': 'foreignKeyAntiJoin',
+          'tableId': table['id'],
+          'constraintId': constraint['id'],
+          'sql':
+              'SELECT NOT EXISTS (SELECT 1 FROM '
+              '${_quote(_schemaNames(snapshot)[schemaId]!)}.${_quote(table['name']! as String)} '
+              'AS "voxel_child" WHERE $present AND NOT EXISTS (SELECT 1 FROM '
+              '${_quote(_schemaNames(snapshot)[schemaId]!)}.${_quote(target['name']! as String)} '
+              'AS "voxel_parent" WHERE $matches)) AS "valid";',
+        });
+      }
+    }
+    return validations;
+  }
+
+  void _requireUniqueForeignKeyTarget(
+    Map<String, Object?> table,
+    List<String> targetColumnIds,
+  ) {
+    final columns = (table['columns']! as List<Object?>).cast<Map<String, Object?>>();
+    final inlinePrimaryKey = [
+      for (final column in columns)
+        if (column['primaryKey'] == true) column['id']! as String,
+    ];
+    final candidates = <List<String>>[
+      if (inlinePrimaryKey.isNotEmpty) inlinePrimaryKey,
+      for (final constraint in _objects(table, 'constraints'))
+        if (constraint['kind'] == 'primaryKey')
+          (constraint['columnIds']! as List<Object?>).cast<String>(),
+      for (final index in _objects(table, 'indexes'))
+        if (index['unique'] == true && index['predicate'] == null)
+          [
+            for (final term in (index['terms']! as List<Object?>).cast<Map<String, Object?>>())
+              term['columnId']! as String,
+          ],
+    ];
+    if (!candidates.any(
+      (candidate) => canonicalJson(candidate) == canonicalJson(targetColumnIds),
+    )) {
+      throw FormatException(
+        'Foreign key target ${table['name']} must have an exact primary key or unique index.',
+      );
+    }
   }
 
   List<Map<String, int>> _statementRanges(String sql) {

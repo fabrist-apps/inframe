@@ -26,7 +26,31 @@
         "mode": {"enum": ["transactional", "nontransactional"]},
         "platforms": {"type": "array", "items": {"type": "string"}},
         "statements": {"type": "array", "items": {"$ref": "#/$defs/statement"}},
-        "recovery": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/recovery"}]}
+        "recovery": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/recovery"}]},
+        "rebuild": {"$ref": "#/$defs/rebuild"}
+      },
+      "additionalProperties": false
+    },
+    "rebuild": {
+      "type": "object",
+      "required": ["foreignKeys", "validations"],
+      "properties": {
+        "foreignKeys": {"const": "offOutsideTransaction"},
+        "validations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/rebuildValidation"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "rebuildValidation": {
+      "type": "object",
+      "required": ["kind", "tableId", "constraintId", "sql"],
+      "properties": {
+        "kind": {"const": "foreignKeyAntiJoin"},
+        "tableId": {"$ref": "#/$defs/id"},
+        "constraintId": {"$ref": "#/$defs/id"},
+        "sql": {"type": "string", "minLength": 1}
       },
       "additionalProperties": false
     },

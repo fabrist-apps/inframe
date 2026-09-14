@@ -115,6 +115,99 @@ void main() {
         throwsA(isA<TursoDatabaseException>()),
       );
     });
+
+    test('should rebuild transactionally and validate incoming foreign keys', () async {
+      final directory = Directory.systemTemp.createTempSync('voxel_rebuild_test_');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generateDeclaration(
+        declaration: _constrainedDeclaration(),
+        directory: directory,
+        name: 'constraints',
+      );
+
+      final database = await TursoDatabase.open(TursoLocation.memory());
+      addTearDown(database.close);
+      await database.execute("ATTACH DATABASE ':memory:' AS content");
+      await _executeMigration(database, _migrationSql(directory));
+      await database.execute("INSERT INTO content.parents VALUES (1, '42')");
+      await database.execute('INSERT INTO content.children VALUES (1, 1)');
+
+      final changed = _constrainedDeclaration();
+      final parents = (changed['tables']! as List<Object?>).first! as Map<String, Object?>;
+      final name = (parents['columns']! as List<Object?>).last! as Map<String, Object?>;
+      name['storage'] = {'kind': 'integer', 'nullable': false, 'codecVersion': 1};
+      await generator.generateDeclaration(
+        declaration: changed,
+        directory: directory,
+        name: 'convert parent name',
+        storageTransforms: {
+          'content.parents.name': 'CAST("name" AS INTEGER)',
+        },
+      );
+      await const VoxelMigrationChecker().check(directory: directory);
+      await _executeLatestGeneratedMigration(database, directory);
+
+      final parent = (await database.query(
+        'SELECT name, typeof(name) AS storage FROM content.parents',
+      )).rows.single;
+      expect(parent.getInt('name'), 42);
+      expect(parent.getString('storage'), 'integer');
+      expect((await database.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys'), 1);
+      expect(
+        (await database.query('SELECT parentId FROM content.children')).rows.single
+            .getInt('parentId'),
+        1,
+      );
+    });
+
+    test('should roll back a rebuild when final foreign-key validation fails', () async {
+      final directory = Directory.systemTemp.createTempSync('voxel_rebuild_rollback_test_');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      var nextId = 0;
+      final generator = VoxelMigrationGenerator(
+        createId: () => (++nextId).toRadixString(16).padLeft(32, '0'),
+      );
+      await generator.generateDeclaration(
+        declaration: _constrainedDeclaration(),
+        directory: directory,
+        name: 'constraints',
+      );
+      final database = await TursoDatabase.open(TursoLocation.memory());
+      addTearDown(database.close);
+      await database.execute("ATTACH DATABASE ':memory:' AS content");
+      await _executeMigration(database, _migrationSql(directory));
+      await database.execute('PRAGMA foreign_keys=OFF');
+      await database.execute("INSERT INTO content.parents VALUES (1, '42')");
+      await database.execute('INSERT INTO content.children VALUES (1, 99)');
+
+      final changed = _constrainedDeclaration();
+      final parents = (changed['tables']! as List<Object?>).first! as Map<String, Object?>;
+      final name = (parents['columns']! as List<Object?>).last! as Map<String, Object?>;
+      name['storage'] = {'kind': 'integer', 'nullable': false, 'codecVersion': 1};
+      await generator.generateDeclaration(
+        declaration: changed,
+        directory: directory,
+        name: 'convert parent name',
+        storageTransforms: {
+          'content.parents.name': 'CAST("name" AS INTEGER)',
+        },
+      );
+
+      await expectLater(
+        _executeLatestGeneratedMigration(database, directory),
+        throwsA(isA<StateError>()),
+      );
+      final parent = (await database.query(
+        'SELECT name, typeof(name) AS storage FROM content.parents',
+      )).rows.single;
+      expect(parent.getString('name'), '42');
+      expect(parent.getString('storage'), 'text');
+      expect((await database.query('PRAGMA foreign_keys')).rows.single.getInt('foreign_keys'), 1);
+    });
   });
 }
 
@@ -253,6 +346,48 @@ String _migrationSql(Directory directory) {
 Future<void> _executeMigration(TursoDatabase database, String sql) async {
   for (final statement in sql.split(';')) {
     if (statement.trim().isNotEmpty) await database.execute('$statement;');
+  }
+}
+
+Future<void> _executeLatestGeneratedMigration(
+  TursoDatabase database,
+  Directory directory,
+) async {
+  final journal =
+      jsonDecode(File('${directory.path}/journal.json').readAsStringSync()) as Map<String, Object?>;
+  final entry = (journal['entries']! as List<Object?>).last! as Map<String, Object?>;
+  final migrationDirectory = '${directory.path}/${entry['directory']}';
+  final migration = jsonDecode(
+    File('$migrationDirectory/migration.json').readAsStringSync(),
+  ) as Map<String, Object?>;
+  final sql = File('$migrationDirectory/migration.sql').readAsStringSync();
+  final bytes = utf8.encode(sql);
+  for (final rawPhase in migration['phases']! as List<Object?>) {
+    final phase = rawPhase! as Map<String, Object?>;
+    final rebuild = phase['rebuild'] as Map<String, Object?>?;
+    if (rebuild != null) await database.execute('PRAGMA foreign_keys=OFF');
+    await database.execute('BEGIN');
+    try {
+      for (final rawRange in phase['statements']! as List<Object?>) {
+        final range = rawRange! as Map<String, Object?>;
+        await database.execute(
+          utf8.decode(bytes.sublist(range['startByte']! as int, range['endByte']! as int)),
+        );
+      }
+      if (rebuild != null) {
+        for (final rawValidation in rebuild['validations']! as List<Object?>) {
+          final validation = rawValidation! as Map<String, Object?>;
+          final row = (await database.query(validation['sql']! as String)).rows.single;
+          if (row.getInt('valid') != 1) throw StateError('Rebuild validation failed.');
+        }
+      }
+      await database.execute('COMMIT');
+    } on Object {
+      await database.execute('ROLLBACK');
+      rethrow;
+    } finally {
+      if (rebuild != null) await database.execute('PRAGMA foreign_keys=ON');
+    }
   }
 }
 

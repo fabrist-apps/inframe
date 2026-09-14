@@ -47,10 +47,12 @@ final class VoxelMigrationGenerator {
     required Directory directory,
     required String name,
     Map<String, String>? source,
+    Map<String, String> storageTransforms = const {},
   }) => VoxelArtifactGenerator(createId: createId).generateDeclaration(
     declaration: declaration,
     directory: directory,
     name: name,
     source: source,
+    storageTransforms: storageTransforms,
   );
 }

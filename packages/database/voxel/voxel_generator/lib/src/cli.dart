@@ -51,14 +51,26 @@ final class VoxelCli {
       throw FormatException('Invalid database class `$className`.');
     }
     final declaration = await _readDeclaration(library, className);
+    final transforms = options['transforms'] == null
+        ? const <String, String>{}
+        : _readTransforms(File(options['transforms']!));
     final migrationId = await const VoxelMigrationGenerator().generateDeclaration(
       declaration: declaration,
       directory: Directory(output),
       name: name,
       source: {'library': library, 'class': className},
+      storageTransforms: transforms,
     );
     _stdout.writeln(migrationId == null ? 'Schema is current.' : 'Generated $migrationId.');
     return 0;
+  }
+
+  Map<String, String> _readTransforms(File file) {
+    final value = jsonDecode(file.readAsStringSync());
+    if (value is! Map<String, Object?> || value.values.any((item) => item is! String)) {
+      throw const FormatException('A transforms file must be a JSON object of SQL strings.');
+    }
+    return value.map((key, value) => MapEntry(key, value! as String));
   }
 
   Future<int> _check(List<String> arguments) async {
@@ -140,6 +152,7 @@ const _usage = '''
 Voxel migration tooling
 
   voxel generate --database <library-uri>#<class> --out <directory> --name <label>
+                 [--transforms <json-file>]
   voxel check --dir <directory>
   voxel seal --dir <directory> --migration <id>
 ''';

@@ -52,7 +52,9 @@ final class VoxelArtifactChecker {
         throw FormatException('Migration $migrationId checksum does not match its artifacts.');
       }
       _validateSnapshot(snapshot);
-      if (migrationId != allowUnsealedMigrationId) _validatePhases(migration, sql);
+      if (migrationId != allowUnsealedMigrationId) {
+        _validatePhases(migration, snapshot, sql);
+      }
       parentId = migrationId;
       finalSnapshot = snapshot;
     }
@@ -74,7 +76,7 @@ final class VoxelArtifactChecker {
     String sql,
   ) {
     _validateSnapshot(snapshot);
-    _validatePhases(migration, sql);
+    _validatePhases(migration, snapshot, sql);
   }
 
   void _expectVersion(Map<String, Object?> value, String source) {
@@ -206,7 +208,11 @@ final class VoxelArtifactChecker {
     }
   }
 
-  void _validatePhases(Map<String, Object?> migration, String sql) {
+  void _validatePhases(
+    Map<String, Object?> migration,
+    Map<String, Object?> snapshot,
+    String sql,
+  ) {
     final bytes = utf8.encode(sql);
     final parsedRanges = parseVoxelSqlStatements(sql);
     var parsedIndex = 0;
@@ -226,6 +232,7 @@ final class VoxelArtifactChecker {
       if (phase['mode'] == 'transactional' && phase['recovery'] != null) {
         throw FormatException('Transactional phase $phaseId cannot have recovery metadata.');
       }
+      _validateRebuild(phase, snapshot);
       final phaseSql = <String>[];
       for (final rawStatement in _list(phase['statements'], 'phase statements')) {
         final statement = _map(rawStatement, 'statement range');
@@ -252,6 +259,50 @@ final class VoxelArtifactChecker {
     }
     if (parsedIndex != parsedRanges.length) {
       throw const FormatException('Migration phases do not cover every SQL statement.');
+    }
+  }
+
+  void _validateRebuild(
+    Map<String, Object?> phase,
+    Map<String, Object?> snapshot,
+  ) {
+    final rawRebuild = phase['rebuild'];
+    if (rawRebuild == null) return;
+    final rebuild = _map(rawRebuild, 'phase rebuild');
+    if (phase['mode'] != 'transactional' || rebuild['foreignKeys'] != 'offOutsideTransaction') {
+      throw const FormatException(
+        'A rebuild must be transactional and restore foreign keys outside its transaction.',
+      );
+    }
+    final tables = <String, Map<String, Object?>>{
+      for (final rawTable in _list(snapshot['tables'], 'snapshot tables'))
+        (_map(rawTable, 'snapshot table')['id']! as String): _map(rawTable, 'snapshot table'),
+    };
+    for (final rawValidation in _list(rebuild['validations'], 'rebuild validations')) {
+      final validation = _map(rawValidation, 'rebuild validation');
+      if (validation['kind'] != 'foreignKeyAntiJoin') {
+        throw const FormatException('A rebuild contains an unknown validation kind.');
+      }
+      final table = tables[validation['tableId']];
+      if (table == null || table['schemaId'] != phase['scopeId']) {
+        throw const FormatException('A rebuild validation references a table outside its scope.');
+      }
+      final constraints = _list(
+        table['constraints'],
+        'table constraints',
+      ).map((value) => _map(value, 'table constraint'));
+      if (!constraints.any(
+        (constraint) =>
+            constraint['id'] == validation['constraintId'] && constraint['kind'] == 'foreignKey',
+      )) {
+        throw const FormatException('A rebuild validation references an unknown foreign key.');
+      }
+      final validationSql = validation['sql'];
+      if (validationSql is! String ||
+          !RegExp(r'^\s*SELECT\b', caseSensitive: false).hasMatch(validationSql) ||
+          parseVoxelSqlStatements(validationSql).length != 1) {
+        throw const FormatException('A rebuild validation must be one read-only SELECT statement.');
+      }
     }
   }
 
