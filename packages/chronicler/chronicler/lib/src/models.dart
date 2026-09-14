@@ -137,6 +137,12 @@ final class RecordEnvelope with RecordEnvelopeMappable {
 
   /// Parent span identifier for span records.
   final String? parentSpanId;
+
+  /// Decodes a [RecordEnvelope] from a map.
+  static const fromMap = RecordEnvelopeMapper.fromMap;
+
+  /// Decodes a [RecordEnvelope] from JSON.
+  static const fromJson = RecordEnvelopeMapper.fromJson;
 }
 
 /// Defensive text extracted from an application error.
@@ -153,6 +159,12 @@ final class ErrorDetails with ErrorDetailsMappable {
 
   /// Optional stack trace text.
   final String? stackTrace;
+
+  /// Decodes [ErrorDetails] from a map.
+  static const fromMap = ErrorDetailsMapper.fromMap;
+
+  /// Decodes [ErrorDetails] from JSON.
+  static const fromJson = ErrorDetailsMapper.fromJson;
 }
 
 /// Payload carried by a structured log record.
@@ -181,6 +193,12 @@ final class LogPayload with LogPayloadMappable {
 
   /// Optional standalone stack trace when [error] is absent.
   final String? stackTrace;
+
+  /// Decodes a [LogPayload] from a map.
+  static const fromMap = LogPayloadMapper.fromMap;
+
+  /// Decodes a [LogPayload] from JSON.
+  static const fromJson = LogPayloadMapper.fromJson;
 }
 
 /// Payload carried by an ordinary named product event.
@@ -197,6 +215,12 @@ final class ProductEventPayload with ProductEventPayloadMappable {
 
   /// Immutable event properties.
   final Map<String, Object?> properties;
+
+  /// Decodes a [ProductEventPayload] from a map.
+  static const fromMap = ProductEventPayloadMapper.fromMap;
+
+  /// Decodes a [ProductEventPayload] from JSON.
+  static const fromJson = ProductEventPayloadMapper.fromJson;
 }
 
 /// Payload linking one anonymous identity to a known user.
@@ -210,6 +234,12 @@ final class IdentityLinkPayload with IdentityLinkPayloadMappable {
 
   /// Known End User identifier receiving the link.
   final String userId;
+
+  /// Decodes an [IdentityLinkPayload] from a map.
+  static const fromMap = IdentityLinkPayloadMapper.fromMap;
+
+  /// Decodes an [IdentityLinkPayload] from JSON.
+  static const fromJson = IdentityLinkPayloadMapper.fromJson;
 }
 
 /// Payload setting explicit user properties.
@@ -226,6 +256,12 @@ final class UserPropertiesSetPayload with UserPropertiesSetPayloadMappable {
 
   /// Nonempty immutable properties to set.
   final Map<String, Object?> properties;
+
+  /// Decodes a [UserPropertiesSetPayload] from a map.
+  static const fromMap = UserPropertiesSetPayloadMapper.fromMap;
+
+  /// Decodes a [UserPropertiesSetPayload] from JSON.
+  static const fromJson = UserPropertiesSetPayloadMapper.fromJson;
 }
 
 /// Payload removing explicit user-property keys.
@@ -240,6 +276,12 @@ final class UserPropertiesUnsetPayload with UserPropertiesUnsetPayloadMappable {
 
   /// Distinct property keys to remove.
   final List<String> keys;
+
+  /// Decodes a [UserPropertiesUnsetPayload] from a map.
+  static const fromMap = UserPropertiesUnsetPayloadMapper.fromMap;
+
+  /// Decodes a [UserPropertiesUnsetPayload] from JSON.
+  static const fromJson = UserPropertiesUnsetPayloadMapper.fromJson;
 }
 
 /// Payload carried by a completed span.
@@ -268,6 +310,12 @@ final class SpanPayload with SpanPayloadMappable {
 
   /// Immutable span attributes.
   final Map<String, Object?> attributes;
+
+  /// Decodes a [SpanPayload] from a map.
+  static const fromMap = SpanPayloadMapper.fromMap;
+
+  /// Decodes a [SpanPayload] from JSON.
+  static const fromJson = SpanPayloadMapper.fromJson;
 }
 
 /// Payload carried by an explicit error occurrence.
@@ -293,6 +341,12 @@ final class ErrorPayload with ErrorPayloadMappable {
 
   /// Immutable error attributes.
   final Map<String, Object?> attributes;
+
+  /// Decodes an [ErrorPayload] from a map.
+  static const fromMap = ErrorPayloadMapper.fromMap;
+
+  /// Decodes an [ErrorPayload] from JSON.
+  static const fromJson = ErrorPayloadMapper.fromJson;
 }
 
 /// Payload carried by one finalized metric series interval.
@@ -371,10 +425,17 @@ final class MetricPayload with MetricPayloadMappable {
 
   /// Occurrence time of the most recent gauge value.
   final DateTime? observedAt;
+
+  /// Decodes a [MetricPayload] from a map.
+  static const fromMap = MetricPayloadMapper.fromMap;
+
+  /// Decodes a [MetricPayload] from JSON.
+  static const fromJson = MetricPayloadMapper.fromJson;
 }
 
 /// Closed version-one record family.
-sealed class ChroniclerRecord {
+@MappableClass(discriminatorKey: 'kind')
+sealed class ChroniclerRecord with ChroniclerRecordMappable {
   /// Creates the base type for a version-one record.
   const ChroniclerRecord();
 
@@ -384,8 +445,11 @@ sealed class ChroniclerRecord {
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind;
 
-  /// Stable serialized record-kind label.
-  String get kind;
+  /// Decodes a [ChroniclerRecord] from a map.
+  static const fromMap = ChroniclerRecordMapper.fromMap;
+
+  /// Decodes a [ChroniclerRecord] from JSON.
+  static const fromJson = ChroniclerRecordMapper.fromJson;
 }
 
 /// Internal signal classification stored with immutable records.
@@ -407,7 +471,7 @@ enum ChroniclerSignalKind {
 }
 
 /// A version-one structured log record.
-@MappableClass()
+@MappableClass(discriminatorValue: 'log')
 final class LogRecord extends ChroniclerRecord with LogRecordMappable {
   /// Creates a structured log record.
   const LogRecord({required this.envelope, required this.payload});
@@ -420,16 +484,18 @@ final class LogRecord extends ChroniclerRecord with LogRecordMappable {
   final LogPayload payload;
 
   @override
-  /// Stable serialized record-kind label.
-  String get kind => 'log';
-
-  @override
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind => ChroniclerSignalKind.logs;
+
+  /// Decodes a [LogRecord] from a map.
+  static const fromMap = LogRecordMapper.fromMap;
+
+  /// Decodes a [LogRecord] from JSON.
+  static const fromJson = LogRecordMapper.fromJson;
 }
 
 /// A version-one named product event.
-@MappableClass()
+@MappableClass(discriminatorValue: 'event')
 final class ProductEventRecord extends ChroniclerRecord with ProductEventRecordMappable {
   /// Creates a named product event record.
   const ProductEventRecord({required this.envelope, required this.payload});
@@ -442,16 +508,18 @@ final class ProductEventRecord extends ChroniclerRecord with ProductEventRecordM
   final ProductEventPayload payload;
 
   @override
-  /// Stable serialized record-kind label.
-  String get kind => 'event';
-
-  @override
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind => ChroniclerSignalKind.events;
+
+  /// Decodes a [ProductEventRecord] from a map.
+  static const fromMap = ProductEventRecordMapper.fromMap;
+
+  /// Decodes a [ProductEventRecord] from JSON.
+  static const fromJson = ProductEventRecordMapper.fromJson;
 }
 
 /// A version-one anonymous-to-user identity link.
-@MappableClass()
+@MappableClass(discriminatorValue: 'identity_link')
 final class IdentityLinkRecord extends ChroniclerRecord with IdentityLinkRecordMappable {
   /// Creates an identity-link record.
   const IdentityLinkRecord({required this.envelope, required this.payload});
@@ -464,16 +532,18 @@ final class IdentityLinkRecord extends ChroniclerRecord with IdentityLinkRecordM
   final IdentityLinkPayload payload;
 
   @override
-  /// Stable serialized record-kind label.
-  String get kind => 'identity_link';
-
-  @override
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind => ChroniclerSignalKind.events;
+
+  /// Decodes an [IdentityLinkRecord] from a map.
+  static const fromMap = IdentityLinkRecordMapper.fromMap;
+
+  /// Decodes an [IdentityLinkRecord] from JSON.
+  static const fromJson = IdentityLinkRecordMapper.fromJson;
 }
 
 /// A version-one user-property set operation.
-@MappableClass()
+@MappableClass(discriminatorValue: 'user_properties_set')
 final class UserPropertiesSetRecord extends ChroniclerRecord with UserPropertiesSetRecordMappable {
   /// Creates a user-property set record.
   const UserPropertiesSetRecord({required this.envelope, required this.payload});
@@ -486,16 +556,18 @@ final class UserPropertiesSetRecord extends ChroniclerRecord with UserProperties
   final UserPropertiesSetPayload payload;
 
   @override
-  /// Stable serialized record-kind label.
-  String get kind => 'user_properties_set';
-
-  @override
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind => ChroniclerSignalKind.events;
+
+  /// Decodes a [UserPropertiesSetRecord] from a map.
+  static const fromMap = UserPropertiesSetRecordMapper.fromMap;
+
+  /// Decodes a [UserPropertiesSetRecord] from JSON.
+  static const fromJson = UserPropertiesSetRecordMapper.fromJson;
 }
 
 /// A version-one user-property unset operation.
-@MappableClass()
+@MappableClass(discriminatorValue: 'user_properties_unset')
 final class UserPropertiesUnsetRecord extends ChroniclerRecord
     with UserPropertiesUnsetRecordMappable {
   /// Creates a user-property unset record.
@@ -509,16 +581,18 @@ final class UserPropertiesUnsetRecord extends ChroniclerRecord
   final UserPropertiesUnsetPayload payload;
 
   @override
-  /// Stable serialized record-kind label.
-  String get kind => 'user_properties_unset';
-
-  @override
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind => ChroniclerSignalKind.events;
+
+  /// Decodes a [UserPropertiesUnsetRecord] from a map.
+  static const fromMap = UserPropertiesUnsetRecordMapper.fromMap;
+
+  /// Decodes a [UserPropertiesUnsetRecord] from JSON.
+  static const fromJson = UserPropertiesUnsetRecordMapper.fromJson;
 }
 
 /// A version-one completed span.
-@MappableClass()
+@MappableClass(discriminatorValue: 'span')
 final class SpanRecord extends ChroniclerRecord with SpanRecordMappable {
   /// Creates a completed span record.
   const SpanRecord({required this.envelope, required this.payload});
@@ -531,16 +605,18 @@ final class SpanRecord extends ChroniclerRecord with SpanRecordMappable {
   final SpanPayload payload;
 
   @override
-  /// Stable serialized record-kind label.
-  String get kind => 'span';
-
-  @override
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind => ChroniclerSignalKind.traces;
+
+  /// Decodes a [SpanRecord] from a map.
+  static const fromMap = SpanRecordMapper.fromMap;
+
+  /// Decodes a [SpanRecord] from JSON.
+  static const fromJson = SpanRecordMapper.fromJson;
 }
 
 /// A version-one explicit error occurrence.
-@MappableClass()
+@MappableClass(discriminatorValue: 'error')
 final class ErrorRecord extends ChroniclerRecord with ErrorRecordMappable {
   /// Creates an explicit error-occurrence record.
   const ErrorRecord({required this.envelope, required this.payload});
@@ -553,16 +629,18 @@ final class ErrorRecord extends ChroniclerRecord with ErrorRecordMappable {
   final ErrorPayload payload;
 
   @override
-  /// Stable serialized record-kind label.
-  String get kind => 'error';
-
-  @override
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind => ChroniclerSignalKind.errors;
+
+  /// Decodes an [ErrorRecord] from a map.
+  static const fromMap = ErrorRecordMapper.fromMap;
+
+  /// Decodes an [ErrorRecord] from JSON.
+  static const fromJson = ErrorRecordMapper.fromJson;
 }
 
 /// A version-one finalized metric aggregate.
-@MappableClass()
+@MappableClass(discriminatorValue: 'metric')
 final class MetricRecord extends ChroniclerRecord with MetricRecordMappable {
   /// Creates a finalized metric aggregate record.
   const MetricRecord({required this.envelope, required this.payload});
@@ -575,12 +653,14 @@ final class MetricRecord extends ChroniclerRecord with MetricRecordMappable {
   final MetricPayload payload;
 
   @override
-  /// Stable serialized record-kind label.
-  String get kind => 'metric';
-
-  @override
   /// Signal used by collection controls.
   ChroniclerSignalKind get signalKind => ChroniclerSignalKind.metrics;
+
+  /// Decodes a [MetricRecord] from a map.
+  static const fromMap = MetricRecordMapper.fromMap;
+
+  /// Decodes a [MetricRecord] from JSON.
+  static const fromJson = MetricRecordMapper.fromJson;
 }
 
 /// An immutable ordered collection submitted to an exporter.

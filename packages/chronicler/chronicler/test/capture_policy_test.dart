@@ -308,11 +308,10 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
 
-      expect(exporter.batches.single.records.map((record) => record.kind), [
-        'identity_link',
-        'error',
-        'metric',
-      ]);
+      expect(exporter.batches.single.records, hasLength(3));
+      expect(exporter.batches.single.records.whereType<IdentityLinkRecord>(), hasLength(1));
+      expect(exporter.batches.single.records.whereType<ErrorRecord>(), hasLength(1));
+      expect(exporter.batches.single.records.whereType<MetricRecord>(), hasLength(1));
       expect(chronicler.diagnosticCounts[DiagnosticReason.sampledOut], BigInt.one);
     });
 

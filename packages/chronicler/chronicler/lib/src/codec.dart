@@ -104,23 +104,29 @@ final class ChroniclerCodec {
   /// Decodes one nonempty version-one batch atomically.
   DecodeResult<ChroniclerBatch> decodeBatch(Uint8List bytes) => _decoder.decodeBatch(bytes);
 
-  Map<String, Object?> _recordMap(ChroniclerRecord record) => {
-    'schemaVersion': 1,
-    'eventId': record.envelope.eventId,
-    'appId': record.envelope.appId,
-    'release': record.envelope.release,
-    'source': record.envelope.source.name,
-    'timestamp': formatRecordTimestamp(record.envelope.timestamp),
-    'buildId': ?record.envelope.buildId,
-    'userId': ?record.envelope.userId,
-    'anonymousId': ?record.envelope.anonymousId,
-    'sessionId': ?record.envelope.sessionId,
-    'traceId': ?record.envelope.traceId,
-    'spanId': ?record.envelope.spanId,
-    'parentSpanId': ?record.envelope.parentSpanId,
-    'kind': record.kind,
-    'payload': _payloadMap(record),
-  };
+  Map<String, Object?> _recordMap(ChroniclerRecord record) {
+    final kind = record.toMap()['kind'];
+    if (kind is! String) {
+      throw const ChroniclerEncodingException('record kind is invalid');
+    }
+    return {
+      'schemaVersion': 1,
+      'eventId': record.envelope.eventId,
+      'appId': record.envelope.appId,
+      'release': record.envelope.release,
+      'source': record.envelope.source.name,
+      'timestamp': formatRecordTimestamp(record.envelope.timestamp),
+      'buildId': ?record.envelope.buildId,
+      'userId': ?record.envelope.userId,
+      'anonymousId': ?record.envelope.anonymousId,
+      'sessionId': ?record.envelope.sessionId,
+      'traceId': ?record.envelope.traceId,
+      'spanId': ?record.envelope.spanId,
+      'parentSpanId': ?record.envelope.parentSpanId,
+      'kind': kind,
+      'payload': _payloadMap(record),
+    };
+  }
 
   Map<String, Object?> _payloadMap(ChroniclerRecord record) => switch (record) {
     LogRecord() => {

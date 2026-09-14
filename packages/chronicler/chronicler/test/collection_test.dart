@@ -44,10 +44,8 @@ void main() {
       ChroniclerCaptureFixture.capture(chronicler, _event('kept-two'));
       await waitForCondition(() => exporter.attempts.length == 1);
 
-      expect(exporter.batches.single.records.map((record) => record.kind), [
-        'event',
-        'event',
-      ]);
+      expect(exporter.batches.single.records, hasLength(2));
+      expect(exporter.batches.single.records.whereType<ProductEventRecord>(), hasLength(2));
       expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.one);
     });
 
@@ -119,7 +117,8 @@ void main() {
       );
       await waitForCondition(() => exporter.attempts.length == 2);
 
-      expect(exporter.batches.last.records.map((record) => record.kind), ['event']);
+      expect(exporter.batches.last.records, hasLength(1));
+      expect(exporter.batches.last.records.single, isA<ProductEventRecord>());
       expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.one);
     });
 

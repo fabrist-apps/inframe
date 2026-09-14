@@ -6,3 +6,7 @@ formatter:
 linter:
   rules:
     lines_longer_than_80_chars: false
+
+analyzer:
+  errors:
+    specify_nonobvious_property_types: ignore
