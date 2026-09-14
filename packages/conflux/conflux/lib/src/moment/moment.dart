@@ -2,7 +2,7 @@
 // ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
 
 import 'package:conflux/result.dart';
-
+import 'package:conflux/src/moment/local_resolution.dart';
 import 'package:conflux/src/moment/moment_error.dart';
 import 'package:conflux/src/moment/moment_parts.dart';
 import 'package:conflux/src/moment/parsing.dart';
@@ -31,6 +31,17 @@ sealed class Moment implements Comparable<Moment> {
     if (error != null) return Failure(error);
     return fromEpochMicroseconds(encodeParts(parts).microsecondsSinceEpoch);
   }
+
+  /// Resolves supplied local fields with an explicit gap/overlap policy.
+  static Result<ZonedMoment, MomentError> zoned(
+    MomentParts parts,
+    TimeZone zone, {
+    required Disambiguation disambiguation,
+  }) => resolveLocal(
+    parts,
+    zone,
+    disambiguation,
+  ).flatMap((micros) => fromEpochMicroseconds(micros).flatMap((utc) => utc.setZone(zone)));
 
   /// Parses strict ISO timestamps with 1–6 fractional digits and a required offset.
   ///
@@ -78,6 +89,18 @@ sealed class Moment implements Comparable<Moment> {
 
   /// UTC calendar fields independent of the retained zone.
   MomentParts get partsUtc => decodeParts(toDateTimeUtc());
+
+  /// Replaces all local fields, preserving the representation and zone.
+  ///
+  /// Use `parts.copyWith(...)` for partial changes. Unlike [setZone], this
+  /// resolves newly supplied clock fields and requires a gap/overlap policy.
+  Result<Moment, MomentError> withParts(
+    MomentParts parts, {
+    required Disambiguation disambiguation,
+  }) => switch (this) {
+    UtcMoment() => utc(parts),
+    ZonedMoment(:final zone) => zoned(parts, zone, disambiguation: disambiguation),
+  };
 
   /// Returns the same instant in UTC representation.
   UtcMoment toUtc() => switch (this) {
