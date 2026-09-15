@@ -1,6 +1,7 @@
 import 'dart:core';
 import 'dart:core' as core;
 
+import 'package:conflux/moment.dart';
 import 'package:conflux/src/val/collection_schema.dart';
 import 'package:conflux/src/val/membership_schema.dart';
 import 'package:conflux/src/val/numeric_schema.dart';
@@ -12,6 +13,10 @@ import 'package:conflux/src/val/union_schema.dart';
 
 /// Factories for immutable synchronous validation schemas.
 abstract final class Val {
+  /// Validates an existing Moment without changing its representation.
+  static Schema<Moment> moment({String? name, String? code, String? message}) =>
+      typeSchema(type: 'a Moment', name: name, code: code, message: message);
+
   /// Validates and copies non-null JSON-compatible values, allowing nested null.
   static Schema<Object> any({
     core.int maxDepth = 64,

@@ -565,3 +565,15 @@ nested null and finite numbers. It copies lists/maps, rejects non-string map key
 and arbitrary instances, and counts nested containers with a root container at
 one. Active-container revisits are cycles; shared acyclic siblings are allowed.
 Both APIs reject non-positive depth limits at construction.
+
+### Moments
+
+`Val.moment()` validates existing UTC/zoned Moments and returns the same value.
+Its inclusive `min`/`max` bounds compare instants across zone representations.
+`Val.string().datetime()` delegates to Moment's strict ISO parser and returns the
+original string; `.moment()` instead returns a typed Moment, preserving its
+precision and UTC/fixed-offset representation. String checks run before
+conversion, and later checks receive Moment values. Optional omission and
+nullable stage ordering survive conversion. No clock or timezone initialization
+is performed; pass time bounds explicitly. Parse failures produce one
+`INVALID_MOMENT` issue at the original structural path.

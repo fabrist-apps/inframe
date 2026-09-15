@@ -5,6 +5,7 @@ export 'src/val/collection_schema.dart' show ListChecks;
 export 'src/val/issue.dart'
     show Field, Index, IssueKind, PathSegment, ValidationException, ValidationIssue;
 export 'src/val/membership_schema.dart' show LiteralSchema;
+export 'src/val/moment_schema.dart';
 export 'src/val/numeric_schema.dart' show IntegerChecks, NumericChecks;
 export 'src/val/object_schema.dart' show ObjectRefinement, ObjectSchema;
 export 'src/val/schema.dart' show Schema, SchemaRefinement;

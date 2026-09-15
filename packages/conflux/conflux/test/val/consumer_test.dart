@@ -13,6 +13,15 @@ void main() {
       await fixtures.analyze('val_consumer', 'valid.dart');
       await fixtures.run('val_consumer', 'valid.dart');
     });
+    test('should retain conversion output types and reject string methods afterward', () async {
+      await fixtures.analyze('val_consumer', 'moment.dart');
+      await fixtures.run('val_consumer', 'moment.dart');
+      await fixtures.analyzeFails(
+        'val_consumer',
+        'invalid_moment_string.dart',
+        containing: 'UNDEFINED_METHOD',
+      );
+    });
     test('should reject non-string codes statically', () async {
       await fixtures.analyzeFails(
         'val_consumer',
