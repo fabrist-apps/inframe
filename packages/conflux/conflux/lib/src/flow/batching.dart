@@ -62,21 +62,17 @@ final class _CountBatchCursor<A, E> implements FlowSourceCursor<List<A>, E> {
   final int _count;
 
   @override
-  Effect<Option<List<A>>, E> next() => EffectAccess.create((execution) async {
+  Effect<Option<List<A>>, E> next() => Effect.build((resolve) async {
     final batch = <A>[];
     while (batch.length < _count) {
-      switch (await EffectAccess.evaluate(_upstream.next(), execution)) {
-        case Succeeded<Option<A>, E>(value: Some<A>(:final value)):
+      switch (await resolve(_upstream.next())) {
+        case Some(:final value):
           batch.add(value);
-        case Succeeded<Option<A>, E>(value: None()):
-          return Succeeded(
-            batch.isEmpty ? const None() : Some(List<A>.unmodifiable(batch)),
-          );
-        case Failed<Option<A>, E>(:final cause):
-          return Failed(cause);
+        case None():
+          return batch.isEmpty ? const None() : Some(List<A>.unmodifiable(batch));
       }
     }
-    return Succeeded(Some(List<A>.unmodifiable(batch)));
+    return Some(List<A>.unmodifiable(batch));
   });
 }
 
@@ -89,51 +85,27 @@ final class _TimeBatchCursor<A, E> implements FlowSourceCursor<List<A>, E> {
   _TimedValue<A>? _pending;
 
   @override
-  Effect<Option<List<A>>, E> next() => EffectAccess.create((execution) async {
+  Effect<Option<List<A>>, E> next() => Effect.build((resolve) async {
     final pending = _pending;
     _pending = null;
-    final first = pending == null
-        ? await EffectAccess.evaluate(_mailbox.take(), execution)
-        : Succeeded<Option<_TimedValue<A>>, E>(Some(pending));
-    switch (first) {
-      case Failed<Option<_TimedValue<A>>, E>(:final cause):
-        return Failed(cause);
-      case Succeeded<Option<_TimedValue<A>>, E>(value: None()):
-        return const Succeeded(None());
-      case Succeeded<Option<_TimedValue<A>>, E>(
-        value: Some<_TimedValue<A>>(:final value),
-      ):
-        final batch = <A>[value.value];
-        final deadline = value.receivedAt + _duration;
-        while (batch.length < _maxSize) {
-          switch (await EffectAccess.evaluate(_mailbox.takeUntil(deadline), execution)) {
-            case Failed<({bool elapsed, Option<_TimedValue<A>> value}), E>(
-              :final cause,
-            ):
-              return Failed(cause);
-            case Succeeded<({bool elapsed, Option<_TimedValue<A>> value}), E>(
-              value: (elapsed: true, value: _),
-            ):
-              return Succeeded(Some(List<A>.unmodifiable(batch)));
-            case Succeeded<({bool elapsed, Option<_TimedValue<A>> value}), E>(
-              value: (elapsed: false, value: None()),
-            ):
-              return Succeeded(Some(List<A>.unmodifiable(batch)));
-            case Succeeded<({bool elapsed, Option<_TimedValue<A>> value}), E>(
-              value: (
-                elapsed: false,
-                value: Some<_TimedValue<A>>(:final value),
-              ),
-            ):
-              if (value.receivedAt >= deadline) {
-                _pending = value;
-                return Succeeded(Some(List<A>.unmodifiable(batch)));
-              }
-              batch.add(value.value);
-          }
-        }
-        return Succeeded(Some(List<A>.unmodifiable(batch)));
+    final first = pending == null ? await resolve(_mailbox.take()) : Some(pending);
+    if (first case None()) return const None();
+
+    final value = (first as Some<_TimedValue<A>>).value;
+    final batch = <A>[value.value];
+    final deadline = value.receivedAt + _duration;
+    while (batch.length < _maxSize) {
+      final next = await resolve(_mailbox.takeUntil(deadline));
+      if (next.elapsed || next.value is None) break;
+
+      final value = (next.value as Some<_TimedValue<A>>).value;
+      if (value.receivedAt >= deadline) {
+        _pending = value;
+        break;
+      }
+      batch.add(value.value);
     }
+    return Some(List<A>.unmodifiable(batch));
   });
 }
 

@@ -42,9 +42,7 @@ void main() {
               maxSize: 2,
             )
             .runForEach(
-              (batch, _) =>
-                  Effect.sync((_) => batches.add(batch))
-                      .mapError((value, _) => _widenNever(value! as Never)),
+              (batch, _) => Effect.sync((_) => batches.add(batch)),
             ),
       );
 
@@ -77,9 +75,7 @@ void main() {
           .concat(Flow.fail('count failed'))
           .bufferCount(2)
           .runForEach(
-            (batch, _) =>
-                Effect.sync((_) => countBatches.add(batch))
-                    .mapError((value, _) => _widenNever(value! as Never)),
+            (batch, _) => Effect.sync((_) => countBatches.add(batch)),
           )
           .runFutureExit();
 
@@ -88,9 +84,7 @@ void main() {
           .concat(Flow.fail('time failed'))
           .bufferTime(const Duration(days: 1), maxSize: 2)
           .runForEach(
-            (batch, _) =>
-                Effect.sync((_) => timedBatches.add(batch))
-                    .mapError((value, _) => _widenNever(value! as Never)),
+            (batch, _) => Effect.sync((_) => timedBatches.add(batch)),
           )
           .runFutureExit();
 
@@ -165,9 +159,7 @@ void main() {
       final flow = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
           .tap(
-            (_, _) =>
-                Effect.sync((_) => pulled += 1)
-                    .mapError((value, _) => _widenNever(value! as Never)),
+            (_, _) => Effect.sync((_) => pulled += 1),
           )
           .bufferTime(
             const Duration(days: 1),
@@ -289,5 +281,3 @@ Future<void> _flushMicrotasks() async {
     await Future<void>.delayed(Duration.zero);
   }
 }
-
-String _widenNever(Never error) => error;

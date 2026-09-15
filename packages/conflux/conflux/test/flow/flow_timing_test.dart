@@ -94,9 +94,7 @@ void main() {
               const Duration(seconds: 5),
             )
             .runForEach(
-              (value, _) =>
-                  Effect.sync((_) => values.add(value))
-                      .mapError((value, _) => _widenNever(value! as Never)),
+              (value, _) => Effect.sync((_) => values.add(value)),
             ),
       );
 
@@ -133,9 +131,7 @@ void main() {
           .concat(Flow.fail('failed'))
           .debounce(const Duration(days: 1))
           .runForEach(
-            (value, _) =>
-                Effect.sync((_) => failedValues.add(value))
-                    .mapError((value, _) => _widenNever(value! as Never)),
+            (value, _) => Effect.sync((_) => failedValues.add(value)),
           )
           .runFutureExit();
 
@@ -218,9 +214,7 @@ void main() {
       final flow = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
           .tap(
-            (_, _) =>
-                Effect.sync((_) => pulled += 1)
-                    .mapError((value, _) => _widenNever(value! as Never)),
+            (_, _) => Effect.sync((_) => pulled += 1),
           )
           .debounce(Duration.zero, capacity: 1);
       final subscription = flow.subscribe((value, _) {
@@ -325,8 +319,6 @@ Future<void> _flushMicrotasks() async {
     await Future<void>.delayed(Duration.zero);
   }
 }
-
-String _widenNever(Never error) => error;
 
 Never _impossibleStreamError(Object error, StackTrace stackTrace) {
   throw StateError('Unexpected Stream error: $error');

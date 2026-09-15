@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
-import 'package:conflux/src/effect/execution.dart' show EffectExecution;
 import 'package:conflux/src/flow/flow.dart';
 import 'package:context/context.dart';
 
@@ -157,7 +156,13 @@ final class _StreamPump<A, E> {
     while (_paused && !_cancelled) {
       final resumed = _resumed;
       if (resumed == null) break;
-      final wait = await _waitUntilResumed(resumed, execution);
+      final wait = await EffectAccess.evaluate(
+        Effect.tryFuture<void, E>(
+          (_) => resumed.future,
+          onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
+        ),
+        execution,
+      );
       if (wait case Failed<void, E>()) return wait;
     }
     if (_cancelled || execution.cancellation.isCancelled) {
@@ -166,38 +171,6 @@ final class _StreamPump<A, E> {
     _controller.add(value);
     return const Succeeded(null);
   });
-
-  Future<Exit<void, E>> _waitUntilResumed(
-    Completer<void> resumed,
-    EffectExecution execution,
-  ) {
-    final result = Completer<Exit<void, E>>();
-    var settled = false;
-    void Function()? stopCancellation;
-
-    void complete(Exit<void, E> exit) {
-      if (settled) return;
-      settled = true;
-      stopCancellation?.call();
-      stopCancellation = null;
-      result.complete(exit);
-    }
-
-    final disposeCancellation = execution.cancellation.listen(
-      (reason) => complete(Failed(Interrupted(reason))),
-    );
-    stopCancellation = disposeCancellation;
-    if (settled) {
-      disposeCancellation();
-      stopCancellation = null;
-    }
-    unawaited(
-      resumed.future.then(
-        (_) => complete(const Succeeded(null)),
-      ),
-    );
-    return result.future;
-  }
 
   Future<void> _complete(Exit<void, E> exit) async {
     if (_cancelled) return;

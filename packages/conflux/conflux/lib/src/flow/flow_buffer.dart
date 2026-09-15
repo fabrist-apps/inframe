@@ -69,7 +69,7 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   final ListQueue<A> _values = ListQueue();
   final ListQueue<_PendingMailboxOffer<A, E>> _offers = ListQueue();
   CoordinationWaiter<Exit<Option<A>, E>>? _taker;
-  _MailboxTerminal<E>? _terminal;
+  Exit<Option<A>, E>? _terminal;
   var _closed = false;
 
   /// Offers [value] according to [overflow].
@@ -127,6 +127,7 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
       EffectAccess.create((execution) async {
         switch (_poll()) {
           case Some<Exit<Option<A>, E>>(:final value):
+            _acceptOffers();
             return switch (value) {
               Succeeded<Option<A>, E>(:final value) => Succeeded((
                 elapsed: false,
@@ -196,17 +197,11 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   Option<Exit<Option<A>, E>> _poll() {
     if (_values.isNotEmpty) {
       final value = _values.removeFirst();
-      _acceptOffers();
       return Some(Succeeded(Some(value)));
     }
     final terminal = _terminal;
     if (terminal == null) return const None();
-    return Some(
-      switch (terminal) {
-        _MailboxCompleted<E>() => const Succeeded(None()),
-        _MailboxFailed<E>(:final cause) => Failed(cause),
-      },
-    );
+    return Some(terminal);
   }
 
   void _startOffer(_PendingMailboxOffer<A, E> offer) {
@@ -253,12 +248,12 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   }
 
   /// Retains normal completion after already accepted values drain.
-  void complete() => _terminate(const _MailboxCompleted());
+  void complete() => _terminate(const Succeeded(None()));
 
   /// Retains [cause] after already accepted values drain.
-  void fail(Cause<E> cause) => _terminate(_MailboxFailed(cause));
+  void fail(Cause<E> cause) => _terminate(Failed(cause));
 
-  void _terminate(_MailboxTerminal<E> terminal) {
+  void _terminate(Exit<Option<A>, E> terminal) {
     if (_closed || _terminal != null) return;
     _terminal = terminal;
     while (_offers.isNotEmpty) {
@@ -270,21 +265,10 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   void _drain() {
     final taker = _taker;
     if (taker == null) return;
-    if (_values.isNotEmpty) {
+    if (_poll() case Some<Exit<Option<A>, E>>(:final value)) {
       _taker = null;
-      taker.succeed(Succeeded(Some(_values.removeFirst())));
+      taker.succeed(value);
       _acceptOffers();
-      return;
-    }
-    final terminal = _terminal;
-    if (terminal != null) {
-      _taker = null;
-      taker.succeed(
-        switch (terminal) {
-          _MailboxCompleted<E>() => const Succeeded(None()),
-          _MailboxFailed<E>(:final cause) => Failed(cause),
-        },
-      );
     }
   }
 
@@ -351,20 +335,6 @@ final class _PendingMailboxOffer<A, E> {
   final A value;
   final CoordinationWaiter<Exit<void, E>> waiter;
   final Context context;
-}
-
-sealed class _MailboxTerminal<E> {
-  const _MailboxTerminal();
-}
-
-final class _MailboxCompleted<E> extends _MailboxTerminal<E> {
-  const _MailboxCompleted();
-}
-
-final class _MailboxFailed<E> extends _MailboxTerminal<E> {
-  const _MailboxFailed(this.cause);
-
-  final Cause<E> cause;
 }
 
 E _widenNever<E>(Never error) => error;

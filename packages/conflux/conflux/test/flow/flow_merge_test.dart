@@ -162,9 +162,7 @@ void main() {
       final source = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
           .tap(
-            (_, _) =>
-                Effect.sync((_) => pulled += 1)
-                    .mapError((value, _) => _widenNever(value! as Never)),
+            (_, _) => Effect.sync((_) => pulled += 1),
           );
       final runtime = Runtime();
       addTearDown(runtime.close);
@@ -309,8 +307,6 @@ void main() {
     });
   });
 }
-
-String _widenNever(Never error) => error;
 
 Never _impossibleFutureError(Object error, StackTrace stackTrace) {
   throw StateError('Unexpected future failure: $error');

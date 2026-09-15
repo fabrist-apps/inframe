@@ -127,7 +127,7 @@ void main() {
                 ).tap(
                   (value, _) => Effect.sync((_) {
                     if (value == 11) secondLatestObserved.complete();
-                  }).mapError<String>((value, _) => _widenNever(value! as Never)),
+                  }),
                 ),
                 (trigger, latest, context) {
                   contexts.add(context.require(request));
@@ -224,5 +224,3 @@ Future<void> _flushMicrotasks() async {
     await Future<void>.delayed(Duration.zero);
   }
 }
-
-String _widenNever(Never error) => error;
