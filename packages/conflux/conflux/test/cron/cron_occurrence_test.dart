@@ -28,12 +28,9 @@ void main() {
           .getOrNull()!;
       for (final input in <Moment>[reference, fixed, named]) {
         final next = cron.next(input).getOrNull()!;
-        final previous = cron.previous(input).getOrNull()!;
         expect(next.toUtc(), utcMoment(2026, 1, 18, 14));
-        expect(previous.toUtc(), utcMoment(2026, 1, 17, 14));
         expect(identical((next.zone as NamedTimeZone).location, newYork), isTrue);
         expect(next.zone, TimeZone.fromLocation(newYork));
-        expect(previous.zone, next.zone);
         expect(next.parts.hour, 9);
         expect(cron.matches(next), isTrue);
         expect(cron.matches(next.toUtc()), isTrue);
@@ -68,16 +65,11 @@ void main() {
     test('should find occurrences when a rollback crosses midnight', () {
       final gooseBay = tz.getLocation('America/Goose_Bay');
       final lateEvening = parse('0 30 23 * * *', gooseBay);
-      final midnight = parse('0 0 0 * * *', gooseBay);
 
       // At 03:01 UTC, October 25 00:01 rolls back to October 24 23:01.
       expect(
         lateEvening.next(utcMoment(1987, 10, 25, 3)).getOrNull()?.toUtc(),
         utcMoment(1987, 10, 25, 3, 30),
-      );
-      expect(
-        midnight.previous(utcMoment(1987, 10, 25, 3, 30)).getOrNull()?.toUtc(),
-        utcMoment(1987, 10, 25, 3),
       );
     });
 
@@ -88,23 +80,15 @@ void main() {
         cron.next(utcMoment(1987, 10, 25, 2, 59)).getOrNull()?.toUtc(),
         utcMoment(1987, 10, 25, 3),
       );
-      expect(
-        cron.previous(utcMoment(1987, 10, 25, 4, 1)).getOrNull()?.toUtc(),
-        utcMoment(1987, 10, 25, 4),
-      );
     });
 
-    test('should find strict next and previous occurrences', () {
+    test('should find strict next occurrences', () {
       final cron = parse('0 */15 * * * *', utc);
       final input = utcMoment(2026, 9, 11, 10, 30);
 
       expect(
         (cron.next(input) as Success<ZonedMoment, CronError>).value.toUtc(),
         utcMoment(2026, 9, 11, 10, 45),
-      );
-      expect(
-        (cron.previous(input) as Success<ZonedMoment, CronError>).value.toUtc(),
-        utcMoment(2026, 9, 11, 10, 15),
       );
     });
 
@@ -117,27 +101,18 @@ void main() {
         utcMoment(2027),
       );
       expect(
-        (newYear.previous(utcMoment(2027)) as Success<ZonedMoment, CronError>).value.toUtc(),
-        utcMoment(2026),
-      );
-      expect(
         (leapDay.next(utcMoment(2025)) as Success<ZonedMoment, CronError>).value.toUtc(),
         utcMoment(2028, 2, 29),
       );
     });
 
-    test('should skip a nonexistent local time in both directions', () {
+    test('should skip a nonexistent local time', () {
       final cron = parse('0 30 2 * * *', newYork);
       final beforeGap = utcMoment(2024, 3, 9, 8);
-      final afterGap = utcMoment(2024, 3, 11, 6);
 
       expect(
         (cron.next(beforeGap) as Success<ZonedMoment, CronError>).value.toUtc(),
         utcMoment(2024, 3, 11, 6, 30),
-      );
-      expect(
-        (cron.previous(afterGap) as Success<ZonedMoment, CronError>).value.toUtc(),
-        utcMoment(2024, 3, 9, 7, 30),
       );
     });
 
@@ -151,11 +126,6 @@ void main() {
         first,
       );
       expect((cron.next(first) as Success<ZonedMoment, CronError>).value.toUtc(), second);
-      expect(
-        (cron.previous(utcMoment(2024, 11, 3, 7)) as Success<ZonedMoment, CronError>).value.toUtc(),
-        second,
-      );
-      expect((cron.previous(second) as Success<ZonedMoment, CronError>).value.toUtc(), first);
     });
 
     test('should retain valid occurrences beside UTC range edges in named zones', () {
@@ -163,9 +133,8 @@ void main() {
       final ny = parse('* * * * * *', newYork);
       expect(ny.next(end).getOrNull()?.toUtc(), utcMoment(9999, 12, 31, 23, 59, 59));
       final east = parse('* * * * * *', tz.getLocation('Asia/Kolkata'));
-      expect(east.previous(utcMoment(1, 1, 1, 0, 0, 1)).getOrNull()?.toUtc(), utcMoment(1));
+      expect(east.next(utcMoment(1)).getOrNull()?.toUtc(), utcMoment(1, 1, 1, 0, 0, 1));
       expect(ny.next(utcMoment(9999, 12, 31, 23, 59, 59)).isFailure, isTrue);
-      expect(east.previous(utcMoment(1)).isFailure, isTrue);
     });
 
     test('should return typed search failures at budget and date limits', () {
@@ -173,13 +142,8 @@ void main() {
       final everySecond = parse('* * * * * *', utc);
 
       expect(impossible.next(utcMoment(2026)), isA<Failure<ZonedMoment, CronError>>());
-      expect(impossible.previous(utcMoment(2026)), isA<Failure<ZonedMoment, CronError>>());
       expect(
         everySecond.next(utcMoment(9999, 12, 31, 23, 59, 59)),
-        isA<Failure<ZonedMoment, CronError>>(),
-      );
-      expect(
-        everySecond.previous(utcMoment(1)),
         isA<Failure<ZonedMoment, CronError>>(),
       );
     });

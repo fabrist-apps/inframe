@@ -33,7 +33,7 @@ void main() {
       expect(cron.months, {1, 3});
       expect(cron.weekdays, {1, 2, 3, 4, 5});
       expect(cron.location, same(utc));
-      expect(cron.format(), '0 */15 9,10,11,12,13,14,15,16,17 * 1,3 1,2,3,4,5');
+      expect(cron.format(), '0 */15 9-17 * jan,mar mon-fri');
     });
 
     test('should parse six fields with lists ranges steps and Sunday aliases', () {
@@ -119,26 +119,25 @@ void main() {
       expect(steppedDay.matches(utcMoment(2026, 1, 26)), isFalse);
     });
 
-    test('should preserve wildcard-sensitive semantics through format', () {
-      final original = (Cron.parse('0 0 0 */2 jan,mar mon', utc) as Success<Cron, CronError>).value;
-      final formatted = original.format();
-      final reparsed = (Cron.parse(formatted, utc) as Success<Cron, CronError>).value;
-
-      for (final instant in [
-        utcMoment(2026, 1, 19),
-        utcMoment(2026, 1, 20),
-        utcMoment(2026, 3, 2),
+    test('should retain normalized syntax and matching through formatting', () {
+      for (final expression in [
+        '  0   0 0 1 JAN SUN  ',
+        '0 0 0 1 1 7,0',
+        '0 0 0 */2,2 jan,mar mon',
+        '0 0 0 1,*/2 * mon',
       ]) {
-        expect(reparsed.matches(instant), original.matches(instant));
+        final original = Cron.parse(expression, utc).getOrNull()!;
+        final formatted = original.format();
+        final reparsed = Cron.parse(formatted, utc).getOrNull()!;
+
+        expect(formatted, expression.trim().toLowerCase().split(RegExp(r'\s+')).join(' '));
+        expect(reparsed.days, original.days);
+        expect(reparsed.weekdays, original.weekdays);
+        for (var day = 1; day <= 31; day++) {
+          final instant = utcMoment(2026, 1, day);
+          expect(reparsed.matches(instant), original.matches(instant));
+        }
       }
-    });
-
-    test('should canonicalize equivalent names aliases and duplicate values', () {
-      final named = (Cron.parse('0 0 0 1 JAN SUN', utc) as Success<Cron, CronError>).value;
-      final numeric = (Cron.parse('0 0 0 1 1 7,0', utc) as Success<Cron, CronError>).value;
-
-      expect(named.format(), '0 0 0 1 1 0');
-      expect(numeric.format(), named.format());
     });
   });
 }

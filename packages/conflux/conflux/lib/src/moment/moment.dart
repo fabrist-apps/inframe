@@ -30,21 +30,16 @@ sealed class Moment implements Comparable<Moment> {
       fromEpochMicroseconds(value.microsecondsSinceEpoch);
 
   /// Validates UTC fields without normalizing calendar overflow.
-  static Result<UtcMoment, MomentError> utc(MomentParts parts) {
-    final error = parts.validate();
-    if (error != null) return Failure(error);
-
-    return fromEpochMicroseconds(parts.encode().microsecondsSinceEpoch);
-  }
+  static Result<UtcMoment, MomentError> utc(MomentParts parts) =>
+      parts.encodeValidated().map(UtcMoment._);
 
   /// Resolves supplied local fields with an explicit gap/overlap policy.
   static Result<ZonedMoment, MomentError> zoned(
     MomentParts parts,
     TimeZone zone, {
     required Disambiguation disambiguation,
-  }) => zone
-      .resolveLocal(parts, disambiguation)
-      .flatMap((micros) => fromEpochMicroseconds(micros).flatMap((utc) => utc.setZone(zone)));
+  }) =>
+      zone.resolveLocal(parts, disambiguation).flatMap((micros) => _fromZonedMicros(micros, zone));
 
   /// Parses strict ISO timestamps with 1–6 fractional digits and a required offset.
   ///
@@ -53,14 +48,12 @@ sealed class Moment implements Comparable<Moment> {
   /// outside -9999–9999, such as `+010000`. Noncanonical year spellings,
   /// whitespace, leap seconds, calendar overflow and offset-free input fail.
   static Result<Moment, MomentError> parse(String input) => parseTimestamp(input).flatMap((parsed) {
-    final wallMicros = parsed.parts.encode().microsecondsSinceEpoch;
+    final wallMicros = parsed.wallMicros;
     final offset = parsed.offset;
     if (offset == null) return fromEpochMicroseconds(wallMicros);
 
     return TimeZone.fixed(offset).flatMap(
-      (zone) =>
-          fromEpochMicroseconds(wallMicros - offset.inMicroseconds)
-              .flatMap((utc) => utc.setZone(zone)),
+      (zone) => _fromZonedMicros(wallMicros - offset.inMicroseconds, zone),
     );
   });
 
@@ -115,11 +108,16 @@ sealed class Moment implements Comparable<Moment> {
   /// Preserves the instant and derives local fields in [zone], validating their range.
   ///
   /// This does not reinterpret clock fields and requires no DST policy.
-  Result<ZonedMoment, MomentError> setZone(TimeZone zone) {
-    final local = microsecondsSinceEpoch + zone.offsetAt(microsecondsSinceEpoch).inMicroseconds;
+  Result<ZonedMoment, MomentError> setZone(TimeZone zone) =>
+      _fromZonedMicros(microsecondsSinceEpoch, zone);
+
+  static Result<ZonedMoment, MomentError> _fromZonedMicros(int micros, TimeZone zone) {
+    if (!inMomentRange(micros)) return const Failure(MomentError.range);
+
+    final local = micros + zone.offsetAt(micros).inMicroseconds;
     if (!inMomentRange(local)) return const Failure(MomentError.range);
 
-    return Success(ZonedMoment._(microsecondsSinceEpoch, zone));
+    return Success(ZonedMoment._(micros, zone));
   }
 
   /// Converts explicitly to a native UTC date-time, preserving microseconds.
@@ -176,11 +174,10 @@ sealed class Moment implements Comparable<Moment> {
     }
 
     final micros = shifted.toInt();
-    final utc = UtcMoment._(micros);
 
     return switch (this) {
-      UtcMoment() => Success(utc),
-      ZonedMoment(:final zone) => utc.setZone(zone),
+      UtcMoment() => Success(UtcMoment._(micros)),
+      ZonedMoment(:final zone) => _fromZonedMicros(micros, zone),
     };
   }
 

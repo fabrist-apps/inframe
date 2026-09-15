@@ -8,19 +8,6 @@ T value<T>(Result<T, MomentError> result) => result.getOrThrowWith((e) => StateE
 void main() {
   group('Moment local resolution', () {
     setUpAll(data.initializeTimeZones);
-    test('should choose each side of a repeated New York local time', () {
-      final zone = value(TimeZone.named('America/New_York'));
-      const parts = MomentParts(year: 2025, month: 11, day: 2, hour: 1, minute: 30);
-      expect(
-        value(Moment.zoned(parts, zone, disambiguation: Disambiguation.earlier)).formatIso(),
-        '2025-11-02T05:30:00.000000Z',
-      );
-      expect(
-        value(Moment.zoned(parts, zone, disambiguation: Disambiguation.later)).formatIso(),
-        '2025-11-02T06:30:00.000000Z',
-      );
-    });
-
     test('should apply every policy to overlaps and gaps independently', () {
       final zone = value(TimeZone.named('America/New_York'));
       for (final policy in Disambiguation.values) {

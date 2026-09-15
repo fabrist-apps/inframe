@@ -1,6 +1,7 @@
 // All value fields are final; no annotation-only runtime dependency is needed.
 // ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
 
+import 'package:conflux/result.dart';
 import 'package:conflux/src/moment/moment_error.dart';
 
 /// Immutable local or UTC calendar fields, validated when constructing a Moment.
@@ -96,13 +97,15 @@ int calendarDaysInMonth(int year, int month) => switch (month) {
 
 /// Internal validation and native calendar encoding, excluded from the public entrypoint.
 extension MomentPartsEncoding on MomentParts {
-  /// Validates without allowing the native constructor to normalize input.
-  MomentError? validate() {
+  /// Validates and encodes fields without normalizing calendar overflow.
+  Result<int, MomentError> encodeValidated() {
     if (year < -271821 || year > 275760) {
-      return const MomentError(
-        MomentErrorKind.outOfRange,
-        'Year is outside Dart DateTime’s range.',
-        field: 'year',
+      return const Failure(
+        MomentError(
+          MomentErrorKind.outOfRange,
+          'Year is outside Dart DateTime’s range.',
+          field: 'year',
+        ),
       );
     }
     for (final (field, value, min, max) in [
@@ -115,21 +118,21 @@ extension MomentPartsEncoding on MomentParts {
       ('microsecond', microsecond, 0, 999),
     ]) {
       if (value < min || value > max) {
-        return MomentError(
-          MomentErrorKind.invalidField,
-          '$field must be $min–$max.',
-          field: field,
+        return Failure(
+          MomentError(MomentErrorKind.invalidField, '$field must be $min–$max.', field: field),
         );
       }
     }
     final micros = encodeCalendar();
     if (micros < BigInt.from(minimumMomentMicros) || micros > BigInt.from(maximumMomentMicros)) {
-      return const MomentError(
-        MomentErrorKind.outOfRange,
-        'Calendar fields are outside Dart DateTime’s range.',
+      return const Failure(
+        MomentError(
+          MomentErrorKind.outOfRange,
+          'Calendar fields are outside Dart DateTime’s range.',
+        ),
       );
     }
-    return null;
+    return Success(micros.toInt());
   }
 
   /// Encodes Gregorian fields exactly, including intermediate out-of-range dates.
@@ -157,7 +160,8 @@ extension MomentPartsEncoding on MomentParts {
   }
 
   /// Encodes already validated calendar fields, without resolving a local instant.
-  DateTime encode() => DateTime.fromMicrosecondsSinceEpoch(encodeCalendar().toInt(), isUtc: true);
+  DateTime encode() =>
+      DateTime.utc(year, month, day, hour, minute, second, millisecond, microsecond);
 }
 
 /// Extracts native calendar fields without changing their timezone.

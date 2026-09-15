@@ -160,7 +160,6 @@ void main() {
         final moment = value(Moment.utc(MomentParts(year: year, month: 1, day: 1)));
         expect(cron.matches(moment), isFalse);
         expect(cron.next(moment), isA<Failure<ZonedMoment, CronError>>());
-        expect(cron.previous(moment), isA<Failure<ZonedMoment, CronError>>());
       }
     });
   });

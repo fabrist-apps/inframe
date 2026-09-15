@@ -228,8 +228,8 @@ implementations must migrate their wall-time return type.
 
 The implementation starts at `moment.dart`: value and zone files own identity
 and conversion, `local_resolution.dart` resolves transitions, and `calendar.dart`
-owns calendar operations. Native calendar coordinates used during Cron search
-stay in the internal date-time module. JSON persistence, locale/custom formats,
+owns calendar operations. Cron uses native UTC dates as local calendar
+coordinates and shares timezone candidate resolution with Moment. JSON persistence, locale/custom formats,
 and ambient timezone services are outside this API.
 
 `Cron` is a pure calendar value with an explicit `timezone.Location`. The
@@ -267,11 +267,12 @@ Five-field expressions use second zero; six-field expressions put seconds
 first. Omitted `fromFields` values are wildcards, while explicit empty sets are
 invalid. When both day-of-month and weekday are restricted, either may match.
 When either begins with `*`, including `*/step`, both must match. `format`
-returns six fields and keeps the location separate.
+returns six fields and keeps the location separate. Parsed fields retain their
+syntax in lowercase, so equivalent expressions can format differently.
 
-`matches`, `next`, `previous`, and `sequence` accept `Moment`. Successful
+`matches`, `next`, and `sequence` accept `Moment`. Successful
 occurrence results are `ZonedMoment` retaining the configured Location.
-`next` and `previous` search strictly beyond the supplied instant. They verify
+`next` searches strictly after the supplied instant. It verifies
 each candidate's local fields against timezone transitions, so spring-forward
 gaps are skipped and both instants in a fall-back overlap can be returned. Each
 occurrence search examines at most 10,000 calendar-day candidates within years
