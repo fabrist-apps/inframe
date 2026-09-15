@@ -1,4 +1,5 @@
 import 'package:chronicler/chronicler.dart';
+import 'package:conflux/result.dart';
 import 'package:test/test.dart';
 
 import 'support/records.dart';
@@ -17,7 +18,7 @@ void main() {
         maxRecordBytes: 4,
       );
 
-      expect(schema.safeParse(record.payload.toMap()).isFail, isTrue);
+      expect(schema.safeParse(record.payload.toMap()).isFailure, isTrue);
       expect(
         LogPayload.schema().safeParse(record.payload.toMap()).getOrNull(),
         equals(record.payload.toMap()),
@@ -30,11 +31,13 @@ void main() {
       expect(
         schema
             .safeParse(UserPropertiesUnsetPayload(userId: 'user', keys: ['name', 'name']).toMap())
-            .isFail,
+            .isFailure,
         isTrue,
       );
       expect(
-        schema.safeParse(UserPropertiesUnsetPayload(userId: 'user', keys: ['name']).toMap()).isOk,
+        schema
+            .safeParse(UserPropertiesUnsetPayload(userId: 'user', keys: ['name']).toMap())
+            .isSuccess,
         isTrue,
       );
     });
@@ -43,13 +46,13 @@ void main() {
       final payload = testMetricRecord().payload;
       final schema = MetricPayload.schema();
 
-      expect(schema.safeParse(payload.copyWith(sum: -1).toMap()).isFail, isTrue);
+      expect(schema.safeParse(payload.copyWith(sum: -1).toMap()).isFailure, isTrue);
       expect(
         schema
             .safeParse(
               payload.copyWith(instrument: MetricInstrument.upDownCounter, sum: -1).toMap(),
             )
-            .isOk,
+            .isSuccess,
         isTrue,
       );
     });
@@ -58,11 +61,11 @@ void main() {
       final record = testMetricRecord();
       final schema = ChroniclerRecord.schema();
 
-      expect(schema.safeParse(record.toMap()).isOk, isTrue);
+      expect(schema.safeParse(record.toMap()).isSuccess, isTrue);
       expect(
         schema
             .safeParse(record.copyWith(envelope: record.envelope.copyWith(userId: 'user')).toMap())
-            .isFail,
+            .isFailure,
         isTrue,
       );
     });

@@ -1,7 +1,7 @@
 import 'dart:collection';
 import 'dart:convert';
 
-import 'package:ack/ack.dart';
+import 'package:conflux/val.dart';
 
 const _maxDepth = 5;
 
@@ -159,14 +159,18 @@ final class RecordValidator {
   }
 
   /// Validates an attribute dictionary with the snapshot resource safeguards.
-  AckSchema<JsonMap, JsonMap> attributesSchema({int? maxMetricAttributes}) =>
-      Ack.object({}).passthrough().refine((value) {
-        if (maxMetricAttributes case final maximum?) {
-          snapshotMetricAttributes(value, maxAttributes: maximum);
-        } else {
-          snapshotAttributes(value);
+  Schema<Map<String, Object?>> attributesSchema({int? maxMetricAttributes}) =>
+      Val.object({}).passthrough().refine((value) {
+        try {
+          if (maxMetricAttributes case final maximum?) {
+            snapshotMetricAttributes(value, maxAttributes: maximum);
+          } else {
+            snapshotAttributes(value);
+          }
+          return true;
+        } on RecordValidationException {
+          return false;
         }
-        return true;
       }, message: 'attributes are invalid');
 }
 

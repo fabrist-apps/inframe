@@ -378,7 +378,9 @@ Its internal implementation is organized by responsibility:
 [`src/codec.dart`](lib/src/codec.dart) owns canonical record encoding. Its
 [`codec/record_decoder.dart`](lib/src/codec/record_decoder.dart) parses untrusted bytes, and
 [`codec/record_schema.dart`](lib/src/codec/record_schema.dart) enforces the model contract in both
-directions. [`src/record_validation.dart`](lib/src/record_validation.dart) handles bounded attribute
+directions. Public model `schema()` methods return Conflux Val schemas; `safeParse` returns
+a Conflux `Result`. Import `package:conflux/result.dart` to use `isSuccess`, `isFailure`,
+and `getOrNull()`. [`src/record_validation.dart`](lib/src/record_validation.dart) handles bounded attribute
 snapshots shared by capture, metrics, and the codec. Text uses Dart's standard JSON/UTF-8 behavior,
 without extra Unicode validation. Attribute keys may be empty, and logs may carry both an error stack
 and a standalone stack. Metric names and units must be nonempty but have no ASCII or grammar restriction.

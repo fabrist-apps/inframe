@@ -1,7 +1,6 @@
 # Context
 
-A pure Dart package for passing typed, explicitly configured capabilities between operations.
-Independent packages can add named extensions on the same `Context` without changing its base API.
+A pure Dart package for passing typed capabilities explicitly between operations.
 
 ```dart
 import 'package:context/context.dart';
@@ -16,127 +15,60 @@ void main() {
 }
 ```
 
-## Binding and derivation
+## Bindings
 
-`Context()` is empty. Supply each value with `key.bind(value)` and pass it to `withBinding`.
-Always pass the returned context downstream: ignoring the return value leaves the original unchanged.
-All operations are synchronous.
+Each key has its own identity, even when two keys have the same diagnostic name.
+`read(key)` returns null when absent; `require(key)` throws `MissingContextValue`.
+Values must be non-null and match the key's type.
 
-Each `ContextKey<T>` has its own identity. Two keys named `request` do not refer to the same binding.
-`read(key)` returns the typed value or null. `require(key)` throws `MissingContextValue` when setup
-is missing; its `debugName` identifies the key's diagnostic label. There are no implicit defaults.
+`key.bind(value)` checks against the key's actual type, including when the key is
+accessed through a wider type such as `ContextKey<Object>`. Bindings cannot be
+constructed directly.
 
-Values cannot be null. Incompatible direct bindings fail analysis. Dart also rejects incompatible
-values passed through a covariantly widened key at runtime, before constructing a binding. Consumers
-cannot construct `ContextBinding` directly.
+`withBinding` copies the bindings and returns a new context. Pass that result
+downstream: the original and sibling contexts remain unchanged. Copying takes
+time and storage proportional to the number of bindings.
 
-Derivation copies an identity map, taking time and storage proportional to the number of bindings.
-Replacing a binding does not affect parents or siblings. Other values retain their original object
-references. Structural sharing is not implemented.
+## Feature extensions
 
-## Package-owned capabilities
-
-A feature keeps its private key in the same Dart library as its named extension. Its public
-entrypoint exports that extension and the capability type. For example, this excerpt belongs in
-an analytics package that owns `Analytics`:
+A feature owns its private key and exports a named extension:
 
 ```dart
 import 'package:context/context.dart';
 
-final _analyticsKey = ContextKey<Analytics>('analytics');
+final _eventsKey = ContextKey<List<String>>('events');
 
-extension AnalyticsContext on Context {
-  Analytics get analytics => require(_analyticsKey);
+extension EventsContext on Context {
+  List<String> get events => require(_eventsKey);
 
-  Context withAnalytics(Analytics analytics) =>
-      withBinding(_analyticsKey.bind(analytics));
+  Context withEvents(List<String> events) => withBinding(_eventsKey.bind(events));
 }
 ```
 
-A web server package follows the same pattern with a private `ContextKey<HttpExchange>`, an
-`http` getter, and `withHttp(HttpExchange exchange)`. Both features depend independently on `context`.
-Neither feature depends on or re-exports the other. The base has no feature imports or exports.
-
-The application supplies analytics once and the server derives a context for each exchange. This
-setup excerpt assumes the application and server have created their capability objects:
-
-```dart
-import 'package:analytics/analytics.dart';
-import 'package:context/context.dart';
-import 'package:web_server/web_server.dart';
-
-final base = Context().withAnalytics(analytics);
-final request = base.withHttp(exchange);
-request.analytics.track('page_view');
-request.http.respond('Hello');
-```
-
-Both getters read from the same `request`. Each concurrent request derives its own context from
-`base`, and middleware must pass any further derived context to its handler.
-
-### Import visibility and setup
-
-| Imports in a consumer library | Available API |
-| --- | --- |
-| `context` | Core operations |
-| `context` + `analytics` | Core operations and analytics extension |
-| `context` + `web_server` | Core operations and HTTP extension |
-| All three | Both feature extensions on one context |
-
-Visibility is per Dart library. Adding a dependency to `pubspec.yaml` does not import its extensions.
-A deliberate barrel re-export also exposes an extension; visibility is not a security boundary.
-Receivers need a static type such as `Context`; `dynamic` does not dispatch extension members.
-Named invocation, such as `AnalyticsContext(request).analytics`, or import combinators can resolve
-collisions between independently authored extensions.
-
-Imports make the API available at compile time. Setup supplies its value at runtime. A plain
-`Context` does not statically prove that any binding exists. Importing a feature without calling its
-setup helper compiles, then accessing the getter throws `MissingContextValue`.
+Importing the extension makes its API available; calling its setup method supplies
+the value. Access before setup throws `MissingContextValue`. Independent features
+can add extensions to the same context without depending on each other.
 
 ## Ownership
 
-Contexts borrow objects without copying or disposing them. If multiple branches borrow a mutable
-object, mutations are visible through all of them. That object must support its intended concurrent
-use. The creator of a resource owns its startup and cleanup, including failure paths. Context has
-no close operation.
+Contexts borrow values without copying or disposing them. Branches retain the same
+references to unchanged values, so mutations to a shared object are visible to
+all of them. The object's creator owns its lifecycle and cleanup.
 
-For an analytics/HTTP integration, the application owns analytics startup and shutdown. The server
-owns exchange creation and finalization, including handler failures. A production HTTP capability
-must reject operations after finalization even when a caller retains it or its context. Background
-analytics delivery must capture event data before request cleanup instead of retaining a live
-exchange. These obligations belong to future feature integrations; the fixtures only record events
-and responses in memory and do not implement resource lifecycles.
+Operations are synchronous. Context provides no ambient lookup, resource scopes,
+serialization, or cross-isolate sharing.
 
-These reference semantics apply within an isolate; the package provides no cross-isolate sharing,
-serialization, cancellation, deadlines, resource scopes, global registry, or ambient zone lookup.
-The base package has no Flutter, HTTP, analytics, or other runtime package dependency.
+## Tests
 
-## Verification
-
-From the repository root, using its Dart SDK:
+Run from the repository root:
 
 ```sh
 dart pub get
-dart analyze
+dart analyze packages/context
 dart test packages/context/test --chain-stack-traces
 ```
 
-The normal Dart tests cover binding semantics and run external consumer packages through the analyzer.
-Fixture sources under `test/fixtures/` use `.dart.txt` so intentionally invalid cases stay out of
-ordinary analysis. Tests stage them as `.dart` files in a temporary directory, resolve local path
-dependencies offline, check specific diagnostics, and execute valid consumers. No web tests are run.
-
-The `analytics` and `web_server` fixture packages each depend only on `context`. Four separate
-consumer packages declare both features as dependencies but import only the libraries used by their
-case, proving that imports control visibility. Valid cases execute the supplied objects; invalid
-cases assert the analyzer's specific missing-getter diagnostics.
-
-To run just the composition example, including concurrent request isolation and reversed setup order:
-
-```sh
-dart test packages/context/test/context_extensions_test.dart --name 'should compose both features'
-```
-
-The executable source is [the combined consumer fixture](test/fixtures/combined_consumer/valid.dart.txt).
-The test stages and runs it as an independent package. Analytics and HTTP here are local fixtures,
-not production packages or network clients.
+Ordinary tests cover binding behavior and extension composition. Three
+`.dart.txt` fixtures check that consumers cannot bind null, bind an incompatible
+value, or construct a binding directly. The analyzer tests stage them as Dart
+files in one temporary package and resolve its local dependency offline.

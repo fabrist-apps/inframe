@@ -1,8 +1,7 @@
-import 'package:ack/ack.dart';
-import 'package:ack_chrono_id/ack_chrono_id.dart';
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/record_validation.dart';
 import 'package:conflux/moment.dart';
+import 'package:conflux/val.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 
 part 'models.mapper.dart';
@@ -150,20 +149,20 @@ final class RecordEnvelope with RecordEnvelopeMappable {
   static const fromJson = RecordEnvelopeMapper.fromJson;
 
   /// Validates the mapped envelope, including Chrono IDs and trace pairing.
-  static AckSchema<JsonMap, JsonMap> schema() =>
-      Ack.object({
-        'eventId': Ack.string().chronoId(prefix: 'evt'),
-        'appId': Ack.string().notEmpty(),
-        'release': Ack.string().notEmpty(),
-        'source': Ack.enumString(ChroniclerSource.values.map((value) => value.name).toList()),
-        'timestamp': Ack.string(),
-        'buildId': Ack.string().notEmpty().nullable().optional(),
-        'userId': Ack.string().notEmpty().nullable().optional(),
-        'anonymousId': Ack.string().notEmpty().nullable().optional(),
-        'sessionId': Ack.string().notEmpty().nullable().optional(),
-        'traceId': Ack.string().chronoId(prefix: 'trc').nullable().optional(),
-        'spanId': Ack.string().chronoId(prefix: 'spn').nullable().optional(),
-        'parentSpanId': Ack.string().chronoId(prefix: 'spn').nullable().optional(),
+  static Schema<Map<String, Object?>> schema() =>
+      Val.object({
+        'eventId': Val.string().chronoId(prefix: 'evt'),
+        'appId': Val.string().notEmpty(),
+        'release': Val.string().notEmpty(),
+        'source': Val.enumString(ChroniclerSource.values.map((value) => value.name).toList()),
+        'timestamp': Val.string(),
+        'buildId': Val.string().notEmpty().nullable().optional(),
+        'userId': Val.string().notEmpty().nullable().optional(),
+        'anonymousId': Val.string().notEmpty().nullable().optional(),
+        'sessionId': Val.string().notEmpty().nullable().optional(),
+        'traceId': Val.string().chronoId(prefix: 'trc').nullable().optional(),
+        'spanId': Val.string().chronoId(prefix: 'spn').nullable().optional(),
+        'parentSpanId': Val.string().chronoId(prefix: 'spn').nullable().optional(),
       }).passthrough().refine(
         (value) => (value['traceId'] == null) == (value['spanId'] == null),
         message: 'trace correlation is invalid',
@@ -192,10 +191,10 @@ final class ErrorDetails with ErrorDetailsMappable {
   static const fromJson = ErrorDetailsMapper.fromJson;
 
   /// Validates mapped error details.
-  static ObjectSchema schema() => Ack.object({
-    'type': Ack.string().notEmpty(),
-    'message': Ack.string(),
-    'stackTrace': Ack.string().nullable().optional(),
+  static ObjectSchema schema() => Val.object({
+    'type': Val.string().notEmpty(),
+    'message': Val.string(),
+    'stackTrace': Val.string().nullable().optional(),
   }).passthrough();
 }
 
@@ -233,12 +232,12 @@ final class LogPayload with LogPayloadMappable {
   static const fromJson = LogPayloadMapper.fromJson;
 
   /// Validates mapped log fields and bounded attributes.
-  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Ack.object({
-    'severity': Ack.enumString(LogSeverity.values.map((value) => value.name).toList()),
-    'message': Ack.string(),
+  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Val.object({
+    'severity': Val.enumString(LogSeverity.values.map((value) => value.name).toList()),
+    'message': Val.string(),
     'attributes': RecordValidator(maxSnapshotBytes: maxRecordBytes).attributesSchema(),
     'error': ErrorDetails.schema().nullable().optional(),
-    'stackTrace': Ack.string().nullable().optional(),
+    'stackTrace': Val.string().nullable().optional(),
   }).passthrough();
 }
 
@@ -264,8 +263,8 @@ final class ProductEventPayload with ProductEventPayloadMappable {
   static const fromJson = ProductEventPayloadMapper.fromJson;
 
   /// Validates mapped event fields and bounded properties.
-  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Ack.object({
-    'name': Ack.string().notEmpty(),
+  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Val.object({
+    'name': Val.string().notEmpty(),
     'properties': RecordValidator(maxSnapshotBytes: maxRecordBytes).attributesSchema(),
   }).passthrough();
 }
@@ -289,9 +288,9 @@ final class IdentityLinkPayload with IdentityLinkPayloadMappable {
   static const fromJson = IdentityLinkPayloadMapper.fromJson;
 
   /// Validates mapped identity-link targets.
-  static ObjectSchema schema() => Ack.object({
-    'anonymousId': Ack.string().notEmpty(),
-    'userId': Ack.string().notEmpty(),
+  static ObjectSchema schema() => Val.object({
+    'anonymousId': Val.string().notEmpty(),
+    'userId': Val.string().notEmpty(),
   }).passthrough();
 }
 
@@ -317,8 +316,8 @@ final class UserPropertiesSetPayload with UserPropertiesSetPayloadMappable {
   static const fromJson = UserPropertiesSetPayloadMapper.fromJson;
 
   /// Validates mapped user-property updates.
-  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Ack.object({
-    'userId': Ack.string().notEmpty(),
+  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Val.object({
+    'userId': Val.string().notEmpty(),
     'properties': RecordValidator(maxSnapshotBytes: maxRecordBytes)
         .attributesSchema()
         .refine((value) => value.isNotEmpty, message: 'properties must be nonempty'),
@@ -345,9 +344,9 @@ final class UserPropertiesUnsetPayload with UserPropertiesUnsetPayloadMappable {
   static const fromJson = UserPropertiesUnsetPayloadMapper.fromJson;
 
   /// Validates mapped property removals.
-  static ObjectSchema schema() => Ack.object({
-    'userId': Ack.string().notEmpty(),
-    'keys': Ack.list(Ack.string()).notEmpty().unique(),
+  static ObjectSchema schema() => Val.object({
+    'userId': Val.string().notEmpty(),
+    'keys': Val.list(Val.string()).notEmpty().unique(),
   }).passthrough();
 }
 
@@ -385,11 +384,11 @@ final class SpanPayload with SpanPayloadMappable {
   static const fromJson = SpanPayloadMapper.fromJson;
 
   /// Validates mapped completed-span fields.
-  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Ack.object({
-    'name': Ack.string().notEmpty(),
-    'spanKind': Ack.enumString(SpanKind.values.map((value) => value.name).toList()),
-    'status': Ack.enumString(SpanStatus.values.map((value) => value.name).toList()),
-    'durationMicros': Ack.integer().min(0),
+  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Val.object({
+    'name': Val.string().notEmpty(),
+    'spanKind': Val.enumString(SpanKind.values.map((value) => value.name).toList()),
+    'status': Val.enumString(SpanStatus.values.map((value) => value.name).toList()),
+    'durationMicros': Val.int().min(0),
     'attributes': RecordValidator(maxSnapshotBytes: maxRecordBytes).attributesSchema(),
   }).passthrough();
 }
@@ -425,10 +424,10 @@ final class ErrorPayload with ErrorPayloadMappable {
   static const fromJson = ErrorPayloadMapper.fromJson;
 
   /// Validates mapped error occurrences and their bounded cause list.
-  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Ack.object({
+  static ObjectSchema schema({int maxRecordBytes = 64 * 1024}) => Val.object({
     'error': ErrorDetails.schema(),
-    'handled': Ack.boolean(),
-    'causes': Ack.list(ErrorDetails.schema()).maxItems(maxErrorCauses),
+    'handled': Val.boolean(),
+    'causes': Val.list(ErrorDetails.schema()).maxLength(maxErrorCauses),
     'attributes': RecordValidator(maxSnapshotBytes: maxRecordBytes).attributesSchema(),
   }).passthrough();
 }
@@ -517,23 +516,26 @@ final class MetricPayload with MetricPayloadMappable {
   static const fromJson = MetricPayloadMapper.fromJson;
 
   /// Validates mapped metric fields using the instrument as discriminator.
-  static AckSchema<JsonMap, JsonMap> schema({
+  static Schema<Map<String, Object?>> schema({
     MetricOptions metricOptions = const MetricOptions(),
     int maxRecordBytes = 64 * 1024,
   }) {
-    final absent = Ack.any().nullable().optional().refine(
-      (_) => false,
-      message: 'field is not used by this instrument',
-    );
-    final common = Ack.object({
-      'name': Ack.string().notEmpty(),
-      'unit': Ack.string().notEmpty(),
+    final absent = Val.any()
+        .refine(
+          (_) => false,
+          message: 'field is not used by this instrument',
+        )
+        .nullable()
+        .optional();
+    final common = Val.object({
+      'name': Val.string().notEmpty(),
+      'unit': Val.string().notEmpty(),
       'attributes': RecordValidator(maxSnapshotBytes: maxRecordBytes)
           .attributesSchema(maxMetricAttributes: metricOptions.maxAttributes),
-      'intervalStart': Ack.string(),
-      'intervalEnd': Ack.string(),
-      'durationMicros': Ack.integer().min(0),
-      'observationCount': Ack.integer().positive(),
+      'intervalStart': Val.string(),
+      'intervalEnd': Val.string(),
+      'durationMicros': Val.int().min(0),
+      'observationCount': Val.int().positive(),
       'temporality': absent,
       'sum': absent,
       'boundaries': absent,
@@ -545,28 +547,28 @@ final class MetricPayload with MetricPayloadMappable {
       'observedAt': absent,
     }).passthrough();
     final sum = common.extend({
-      'temporality': Ack.literal('delta'),
-      'sum': Ack.double().finite(),
+      'temporality': Val.literal('delta'),
+      'sum': Val.double(),
     });
-    return Ack.discriminated<JsonMap>(
+    return Val.discriminated(
       discriminatorKey: 'instrument',
       schemas: {
-        'counter': sum.extend({'sum': Ack.double().finite().min(0)}),
+        'counter': sum.extend({'sum': Val.double().min(0)}),
         'upDownCounter': sum,
         'gauge': common.extend({
-          'value': Ack.double().finite(),
-          'observedAt': Ack.string(),
+          'value': Val.double(),
+          'observedAt': Val.string(),
         }),
         'histogram': sum
             .extend({
-              'boundaries': Ack.list(Ack.double().finite())
+              'boundaries': Val.list(Val.double())
                   .notEmpty()
-                  .maxItems(metricOptions.maxHistogramBoundaries)
+                  .maxLength(metricOptions.maxHistogramBoundaries)
                   .refine(_strictlyIncreasing, message: 'histogram boundaries must increase'),
-              'bucketCounts': Ack.list(Ack.integer().min(0)),
-              'count': Ack.integer().positive(),
-              'min': Ack.double().finite(),
-              'max': Ack.double().finite(),
+              'bucketCounts': Val.list(Val.int().min(0)),
+              'count': Val.int().positive(),
+              'min': Val.double(),
+              'max': Val.double(),
             })
             .refine((value) {
               final buckets = value['bucketCounts']! as List<int>;
@@ -611,16 +613,16 @@ sealed class ChroniclerRecord with ChroniclerRecordMappable {
   /// Use `ChroniclerRecord.schema().safeParse(record.toMap())` for mapped data.
   /// Use `ChroniclerCodec.validateRecord` at runtime to also bound attributes
   /// before serialization.
-  static AckSchema<JsonMap, JsonMap> schema({
+  static Schema<Map<String, Object?>> schema({
     MetricOptions metricOptions = const MetricOptions(),
     int maxRecordBytes = 64 * 1024,
   }) {
     final envelope = RecordEnvelope.schema();
-    ObjectSchema record(AckSchema<JsonMap, JsonMap> payload) => Ack.object({
+    ObjectSchema record(Schema<Map<String, Object?>> payload) => Val.object({
       'envelope': envelope,
       'payload': payload,
     }).passthrough();
-    return Ack.discriminated<JsonMap>(
+    return Val.discriminated(
       discriminatorKey: 'kind',
       schemas: {
         'log': record(LogPayload.schema(maxRecordBytes: maxRecordBytes)),
@@ -631,7 +633,7 @@ sealed class ChroniclerRecord with ChroniclerRecordMappable {
         ),
         'user_properties_unset': record(UserPropertiesUnsetPayload.schema()),
         'span': record(SpanPayload.schema(maxRecordBytes: maxRecordBytes)).refine(
-          (value) => (value['envelope']! as JsonMap)['traceId'] != null,
+          (value) => (value['envelope']! as Map<String, Object?>)['traceId'] != null,
           message: 'span needs trace IDs',
         ),
         'error': record(ErrorPayload.schema(maxRecordBytes: maxRecordBytes)),
@@ -639,8 +641,8 @@ sealed class ChroniclerRecord with ChroniclerRecordMappable {
             record(
               MetricPayload.schema(metricOptions: metricOptions, maxRecordBytes: maxRecordBytes),
             ).refine((value) {
-              final envelope = value['envelope']! as JsonMap;
-              final payload = value['payload']! as JsonMap;
+              final envelope = value['envelope']! as Map<String, Object?>;
+              final payload = value['payload']! as Map<String, Object?>;
               return [
                     'userId',
                     'anonymousId',
@@ -651,7 +653,9 @@ sealed class ChroniclerRecord with ChroniclerRecordMappable {
             }, message: 'metric envelope is inconsistent'),
       },
     ).refine(
-      (value) => (value['envelope']! as JsonMap)['parentSpanId'] == null || value['kind'] == 'span',
+      (value) =>
+          (value['envelope']! as Map<String, Object?>)['parentSpanId'] == null ||
+          value['kind'] == 'span',
       message: 'parent span is invalid',
     );
   }

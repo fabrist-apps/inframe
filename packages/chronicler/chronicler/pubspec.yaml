@@ -8,8 +8,6 @@ environment:
   sdk: ^3.13.0
 
 dependencies:
-  ack: ^1.2.0
-  ack_chrono_id: ^0.1.0
   chrono_id: ^0.1.0
   conflux: ^0.1.0
   context: ^0.1.0

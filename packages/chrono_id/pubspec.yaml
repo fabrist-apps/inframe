@@ -1,10 +1,11 @@
-name: chrono_id_workspace
+name: chrono_id
+description: Timestamp-bearing string IDs with optional prefixes.
+version: 0.1.0
 publish_to: none
 resolution: workspace
 
 environment:
   sdk: ^3.13.0
 
-workspace:
-  - ack_chrono_id
-  - chrono_id
+dev_dependencies:
+  test: ^1.26.3

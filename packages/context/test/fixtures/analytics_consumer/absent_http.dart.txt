@@ -1,8 +1,0 @@
-import 'package:analytics/analytics.dart';
-import 'package:context/context.dart';
-
-void main() {
-  final context = Context().withAnalytics(Analytics());
-  context.analytics.track('page_view');
-  context.http;
-}

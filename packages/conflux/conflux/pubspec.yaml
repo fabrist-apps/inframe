@@ -9,7 +9,7 @@ environment:
 
 dependencies:
   chrono_id:
-    path: ../../chrono_id/chrono_id
+    path: ../../chrono_id
   context:
     path: ../../context
   dart_mappable: ^4.10.0
