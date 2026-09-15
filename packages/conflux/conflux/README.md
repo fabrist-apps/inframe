@@ -550,3 +550,18 @@ branches. Make the outer union optional to permit an absent field.
 direct object schema. Each branch must declare its registration key as a required,
 non-nullable literal string at the discriminator field. Invalid selection yields
 one field-path issue; selected branches retain their own issues and key policy.
+
+### Recursion and JSON values
+
+`Val.lazy<T>(() => schema, maxDepth: 64)` resolves on first parse and memoizes
+successful resolution. Throwing builders can be retried; builder re-entry throws
+`StateError`. Depth counts active entries into that lazy schema, with the root at
+one, and resets on every return or exception. Cyclic recursive inputs terminate
+at the bound. The outer lazy schema owns optionality and its own depth errors;
+target validation errors keep their original names and codes.
+
+`Val.any(maxDepth: 64)` validates non-null JSON-compatible roots, including
+nested null and finite numbers. It copies lists/maps, rejects non-string map keys
+and arbitrary instances, and counts nested containers with a root container at
+one. Active-container revisits are cycles; shared acyclic siblings are allowed.
+Both APIs reject non-positive depth limits at construction.

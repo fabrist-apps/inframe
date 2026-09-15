@@ -5,12 +5,30 @@ import 'package:conflux/src/val/collection_schema.dart';
 import 'package:conflux/src/val/membership_schema.dart';
 import 'package:conflux/src/val/numeric_schema.dart';
 import 'package:conflux/src/val/object_schema.dart';
+import 'package:conflux/src/val/recursive_schema.dart';
 import 'package:conflux/src/val/schema.dart';
 import 'package:conflux/src/val/string_schema.dart';
 import 'package:conflux/src/val/union_schema.dart';
 
 /// Factories for immutable synchronous validation schemas.
 abstract final class Val {
+  /// Validates and copies non-null JSON-compatible values, allowing nested null.
+  static Schema<Object> any({
+    core.int maxDepth = 64,
+    String? name,
+    String? code,
+    String? message,
+  }) => JsonSchema(maxDepth: maxDepth, name: name, code: code, message: message).schema();
+
+  /// Defers schema resolution until parsing and bounds active recursive entries.
+  static Schema<T> lazy<T>(
+    Schema<T> Function() build, {
+    core.int maxDepth = 64,
+    String? name,
+    String? code,
+    String? message,
+  }) => LazyResolver(build, maxDepth: maxDepth, name: name, code: code, message: message).schema();
+
   /// Selects a direct object branch through a required string literal field.
   static Schema<Map<String, Object?>> discriminated({
     required String discriminatorKey,
