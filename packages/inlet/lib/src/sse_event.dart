@@ -1,6 +1,6 @@
-part of 'inlet.dart';
+import 'dart:convert';
 
-/// One immutable event-stream frame delivered by [Response.sse].
+/// One immutable event-stream frame delivered by SSE responses.
 ///
 /// Event data is encoded as UTF-8 when this value is created. Line endings in
 /// data are normalized to LF and each line becomes one `data:` field.
@@ -114,4 +114,10 @@ final class SseEvent {
       ..write(':')
       ..write(value.isEmpty ? '\n' : ' $value\n');
   }
+}
+
+/// Encoding access for response construction, excluded from public exports.
+extension SseEventEncoding on SseEvent {
+  /// Pre-encoded event bytes; internal consumers must not mutate them.
+  List<int> get encoded => _encoded;
 }

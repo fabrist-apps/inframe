@@ -30,7 +30,7 @@ void main() {
       final closeFuture = chronicler.close();
       Context().withChronicler(chronicler.recorder).logs.info('blocked');
       expect(
-        () => chronicler.setPropagationEnabled(false),
+        () => chronicler.setPropagationEnabled(enabled: false),
         throwsA(isA<ChroniclerConfigurationException>()),
       );
       await waitForCondition(() => exporter.attempts.length == 1);

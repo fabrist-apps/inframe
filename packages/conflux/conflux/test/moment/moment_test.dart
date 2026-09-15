@@ -1,6 +1,3 @@
-// Tests exercise the exact Dart VM integer range and required inferred API types.
-// ignore_for_file: avoid_js_rounded_ints, omit_local_variable_types
-
 import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
 import 'package:timezone/data/latest_all.dart' as data;
@@ -163,8 +160,7 @@ void main() {
       expect(family(zero), 'zoned');
       expect(zoneFamily((zero as ZonedMoment).zone), 'fixed');
       expect(zoneFamily(named.zone), 'named');
-      final Result<UtcMoment, MomentError> mapped = Moment.parse('2026-01-18T10:30:00+08:00')
-          .map((v) => v.toUtc());
+      final mapped = Moment.parse('2026-01-18T10:30:00+08:00').map((v) => v.toUtc());
       expect(value(mapped).formatIso(), '2026-01-18T02:30:00.000000Z');
     });
 

@@ -109,9 +109,9 @@ void main() {
           timers.single.fire();
           counter.add(5);
 
-          chronicler.setCollectionEnabled(ChroniclerSignal.metrics, false);
+          chronicler.setCollectionEnabled(ChroniclerSignal.metrics, enabled: false);
           counter.add(10);
-          chronicler.setCollectionEnabled(ChroniclerSignal.metrics, true);
+          chronicler.setCollectionEnabled(ChroniclerSignal.metrics, enabled: true);
           expect(identical(metrics.counter('requests'), counter), isTrue);
           counter.add(2);
           final report = await chronicler.flush();
@@ -353,7 +353,7 @@ void main() {
               },
               metrics: MetricOptions(interval: Duration(milliseconds: 10)),
             ),
-          )..setCollectionEnabled(ChroniclerSignal.metrics, true);
+          )..setCollectionEnabled(ChroniclerSignal.metrics, enabled: true);
 
           expect(timers.where((timer) => timer.isActive), hasLength(1));
           await chronicler.close();

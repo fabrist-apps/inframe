@@ -1,6 +1,3 @@
-// These boundaries exercise exact signed 64-bit Dart VM integers.
-// ignore_for_file: avoid_js_rounded_ints
-
 import 'package:conflux/cron.dart';
 import 'package:conflux/moment.dart';
 import 'package:conflux/option.dart';

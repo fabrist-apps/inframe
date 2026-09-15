@@ -1,4 +1,29 @@
-part of 'inlet.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:inlet/src/body.dart';
+import 'package:inlet/src/headers.dart';
+import 'package:inlet/src/sse_event.dart';
+
+/// Runs application work for the full lifetime of an upgraded WebSocket.
+///
+/// Inlet closes the socket when this callback completes. Keep the returned
+/// future pending while application code uses the session.
+typedef WebSocketCallback = FutureOr<void> Function(WebSocket socket);
+
+/// Selects one of the subprotocols offered by a WebSocket client.
+///
+/// Inlet invokes the selector once with an immutable ordered list, including
+/// an empty list when the client offered no protocols. Return `null` to select
+/// none, return an offered value, or throw [WebSocketException] to reject the
+/// handshake with the default status 400 response.
+/// Invalid offered tokens also default to 400. Selecting an unoffered token
+/// or throwing another error uses the application error boundary (500 by
+/// default). An error hook may replace the rejection with an ordinary response,
+/// but cannot return another upgrade intent.
+typedef WebSocketProtocolSelector = FutureOr<String?> Function(List<String> offered);
 
 /// A response body that exceeded a consumer-selected buffering limit.
 final class ResponseBodyLimitExceededException implements Exception {
@@ -25,7 +50,7 @@ final class Response {
   factory Response.empty({
     int status = HttpStatus.noContent,
     Headers headers = const Headers.empty(),
-  }) => Response._create(status: status, headers: headers, body: _Body.bytes(const []));
+  }) => Response._create(status: status, headers: headers, body: Body.bytes(const []));
 
   /// Creates a binary response, copying [value] at construction.
   factory Response.bytes(
@@ -36,7 +61,7 @@ final class Response {
   }) => Response._create(
     status: status,
     headers: _withDefaultContentType(headers, contentType),
-    body: _Body.bytes(value),
+    body: Body.bytes(value),
   );
 
   /// Creates a UTF-8 text response.
@@ -47,7 +72,7 @@ final class Response {
   }) => Response._create(
     status: status,
     headers: _withDefaultContentType(headers, 'text/plain; charset=utf-8'),
-    body: _Body.bytes(utf8.encode(value)),
+    body: Body.bytes(utf8.encode(value)),
   );
 
   /// Creates a UTF-8 JSON response, encoding [value] immediately.
@@ -58,10 +83,14 @@ final class Response {
   }) => Response._create(
     status: status,
     headers: _withDefaultContentType(headers, 'application/json; charset=utf-8'),
-    body: _Body.bytes(utf8.encode(jsonEncode(value))),
+    body: Body.bytes(utf8.encode(jsonEncode(value))),
   );
 
   /// Creates a lazy binary response.
+  ///
+  /// Resources used by [value] must outlive the handler and remain available
+  /// until delivery finishes or is cancelled. HEAD, 204, 205, and 304 responses
+  /// never subscribe to a suppressed source.
   factory Response.stream(
     Stream<List<int>> value, {
     int status = HttpStatus.ok,
@@ -70,7 +99,7 @@ final class Response {
   }) => Response._create(
     status: status,
     headers: _withDefaultContentType(headers, contentType),
-    body: _Body(value),
+    body: Body(value),
   );
 
   /// Creates a lazy server-sent event response with fixed HTTP metadata.
@@ -83,13 +112,20 @@ final class Response {
   /// In process, each event is one complete body chunk. HTTP delivery commits
   /// headers before subscription and awaits one socket flush per event. Closing
   /// or cancelling delivery requests cancellation of the event source.
+  /// A flush does not guarantee delivery through a proxy to a client.
+  ///
+  /// Content encoding and transport-owned framing headers are rejected.
+  /// [withHeaders] restores SSE metadata while sharing the same source owner.
+  /// The producer owns heartbeat timing, replay, event limits, and slow-client
+  /// policy beyond transport backpressure. Inlet provides no output queue or
+  /// cancellation deadline; cancellation requires producer cooperation.
   factory Response.sse(
     Stream<SseEvent> events, {
     Headers headers = const Headers.empty(),
   }) => Response._(
     statusCode: HttpStatus.ok,
     headers: _sseHeaders(headers),
-    delivery: _SseDelivery(_Body(events.map((event) => event._encoded))),
+    delivery: ContentDelivery(Body(events.map((event) => event.encoded)), flushEvents: true),
   );
 
   /// Creates an inspectable intent to upgrade a GET request to WebSocket.
@@ -110,11 +146,16 @@ final class Response {
   /// neither callback runs. Body access throws [StateError]. Application
   /// headers are visible, but `sec-websocket-*` headers are handshake-owned and
   /// rejected.
+  ///
+  /// Middleware has unwound before [onConnect] runs; acquire session resources
+  /// inside the callback. Listener shutdown does not close or wait for upgraded
+  /// sockets. A HEAD fallback to a GET route returning this intent becomes an
+  /// empty 405 response with `Allow: GET`.
   factory Response.webSocket({
     required WebSocketCallback onConnect,
     Headers headers = const Headers.empty(),
     WebSocketProtocolSelector? selectProtocol,
-    int maxFrameBytes = _defaultBodyLimit,
+    int maxFrameBytes = defaultBodyLimit,
     CompressionOptions compression = CompressionOptions.compressionOff,
   }) {
     if (maxFrameBytes <= 0) {
@@ -124,8 +165,7 @@ final class Response {
     return Response._(
       statusCode: HttpStatus.switchingProtocols,
       headers: _webSocketHeaders(headers),
-      delivery: _WebSocketDelivery(
-        _Body.bytes(const []),
+      delivery: WebSocketDelivery(
         onConnect: onConnect,
         selectProtocol: selectProtocol,
         maxFrameBytes: maxFrameBytes,
@@ -134,14 +174,14 @@ final class Response {
     );
   }
 
-  factory Response._create({required int status, required Headers headers, required _Body body}) {
+  factory Response._create({required int status, required Headers headers, required Body body}) {
     _validateStatus(status);
     _validateResponseHeaders(headers);
 
     return Response._(
       statusCode: status,
       headers: headers,
-      delivery: _OrdinaryDelivery(body),
+      delivery: ContentDelivery(body),
       suppressBody: _statusSuppressesBody(status),
     );
   }
@@ -152,13 +192,16 @@ final class Response {
   /// Application response headers.
   final Headers headers;
 
-  final _ResponseDelivery _delivery;
+  final ResponseDelivery _delivery;
   final bool _suppressBody;
 
   /// Whether this response represents a WebSocket upgrade intent.
-  bool get isWebSocketUpgrade => _delivery is _WebSocketDelivery;
+  bool get isWebSocketUpgrade => _delivery is WebSocketDelivery;
 
-  _Body get _body => _delivery.body;
+  Body get _body => switch (_delivery) {
+    ContentDelivery(:final body) => body,
+    WebSocketDelivery() => throw StateError('A WebSocket upgrade response has no body.'),
+  };
 
   /// The body stream, claimed when it is first listened to.
   ///
@@ -174,9 +217,9 @@ final class Response {
   /// Creates a metadata view sharing this response's body owner.
   Response withHeaders(Headers headers) {
     final validatedHeaders = switch (_delivery) {
-      _OrdinaryDelivery() => _validateResponseHeaders(headers),
-      _SseDelivery() => _sseHeaders(headers),
-      _WebSocketDelivery() => _webSocketHeaders(headers),
+      ContentDelivery(flushEvents: true) => _sseHeaders(headers),
+      ContentDelivery() => _validateResponseHeaders(headers),
+      WebSocketDelivery() => _webSocketHeaders(headers),
     };
 
     return Response._(
@@ -187,45 +230,36 @@ final class Response {
     );
   }
 
-  Response _withoutBody() => _suppressBody
-      ? this
-      : Response._(
-          statusCode: statusCode,
-          headers: headers,
-          delivery: _delivery,
-          suppressBody: true,
-        );
-
   /// Buffers the body once and returns a private byte copy.
   ///
   /// A WebSocket upgrade intent has no body and throws [StateError].
-  Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
+  Future<List<int>> bytes({int maxBytes = defaultBodyLimit}) async {
     if (isWebSocketUpgrade) {
       throw StateError('A WebSocket upgrade response has no body.');
     }
 
-    _validateMaxBytes(maxBytes);
+    validateMaxBytes(maxBytes);
     if (_suppressBody) {
       return Uint8List(0);
     }
 
     try {
       return await _body.bytes(maxBytes: maxBytes);
-    } on _BodyLimitFailure catch (error) {
+    } on BodyLimitFailure catch (error) {
       throw ResponseBodyLimitExceededException(error.maxBytes);
     }
   }
 
   /// Strictly decodes the buffered body as UTF-8.
-  Future<String> text({int maxBytes = _defaultBodyLimit}) async =>
+  Future<String> text({int maxBytes = defaultBodyLimit}) async =>
       utf8.decode(await bytes(maxBytes: maxBytes), allowMalformed: false);
 
   /// Strictly decodes the buffered body as UTF-8 JSON.
-  Future<Object?> json({int maxBytes = _defaultBodyLimit}) async =>
+  Future<Object?> json({int maxBytes = defaultBodyLimit}) async =>
       jsonDecode(await text(maxBytes: maxBytes));
 
   /// Releases body resources without subscribing to an untouched source.
-  Future<void> close() => _body.close();
+  Future<void> close() => _delivery.close();
 
   static Headers _withDefaultContentType(Headers headers, String? contentType) {
     if (contentType == null || headers.contains(HttpHeaders.contentTypeHeader)) {
@@ -298,31 +332,75 @@ final class Response {
   }
 }
 
-sealed class _ResponseDelivery {
-  const _ResponseDelivery(this.body);
+/// Transport-only access, excluded from the public entrypoint.
+extension ResponseRuntime on Response {
+  /// Shared content or upgrade owner behind response metadata views.
+  ResponseDelivery get delivery => _delivery;
 
-  final _Body body;
+  /// Whether delivery must omit payload bytes, as for HEAD responses.
+  bool get suppressBody => _suppressBody;
+
+  /// Creates a bodyless view without replacing the shared delivery owner.
+  Response withoutBody() => _suppressBody
+      ? this
+      : Response._(
+          statusCode: statusCode,
+          headers: headers,
+          delivery: _delivery,
+          suppressBody: true,
+        );
 }
 
-final class _OrdinaryDelivery extends _ResponseDelivery {
-  const _OrdinaryDelivery(super.body);
+/// One shared delivery owner for every metadata view of a response.
+sealed class ResponseDelivery {
+  /// Base constructor for content and upgrade delivery owners.
+  const ResponseDelivery();
+
+  /// Releases pending delivery resources once across all response views.
+  Future<void> close();
 }
 
-final class _SseDelivery extends _ResponseDelivery {
-  const _SseDelivery(super.body);
+/// Byte content with an optional per-event flushing policy for SSE.
+final class ContentDelivery extends ResponseDelivery {
+  /// Owns [body] until response cleanup completes.
+  const ContentDelivery(this.body, {this.flushEvents = false});
+
+  /// Shared stream consumption and buffering state.
+  final Body body;
+
+  /// Whether transport flushes every chunk as an SSE event.
+  final bool flushEvents;
+
+  @override
+  Future<void> close() => body.close();
 }
 
-final class _WebSocketDelivery extends _ResponseDelivery {
-  const _WebSocketDelivery(
-    super.body, {
+/// Upgrade configuration and pre-handshake lifetime shared by response views.
+final class WebSocketDelivery extends ResponseDelivery {
+  /// Records negotiation and session settings without opening a socket.
+  WebSocketDelivery({
     required this.onConnect,
     required this.selectProtocol,
     required this.maxFrameBytes,
     required this.compression,
   });
 
+  /// Runs after a successful upgrade; transport owns the session lifetime.
   final WebSocketCallback onConnect;
+
+  /// Chooses a protocol from the client's offer, when supplied.
   final WebSocketProtocolSelector? selectProtocol;
+
+  /// Maximum received frame size in bytes.
   final int maxFrameBytes;
+
+  /// Compression settings passed to the platform handshake.
   final CompressionOptions compression;
+  Future<void>? _closeFuture;
+
+  /// Whether response cleanup has invalidated this pending upgrade.
+  bool get isClosed => _closeFuture != null;
+
+  @override
+  Future<void> close() => _closeFuture ??= Future<void>.value();
 }

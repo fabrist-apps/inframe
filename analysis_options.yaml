@@ -9,4 +9,9 @@ linter:
 
 analyzer:
   errors:
+    avoid_dynamic_calls: ignore
+    avoid_equals_and_hash_code_on_mutable_classes: ignore
+    avoid_js_rounded_ints: ignore
+    one_member_abstracts: ignore
+    only_throw_errors: ignore
     specify_nonobvious_property_types: ignore

@@ -1,5 +1,3 @@
-// Explicit types verify non-nullable versus nullable conversion results.
-// ignore_for_file: omit_local_variable_types
 import 'package:conflux/moment.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/val.dart';
@@ -48,7 +46,7 @@ void main() {
     test(
       'should parse strict ISO strings while retaining instant precision and representation',
       () {
-        final Schema<Moment> schema = Val.string(name: 'Start').moment();
+        final schema = Val.string(name: 'Start').moment();
         for (final input in ['2026-01-01T00:00:00.123456Z', '2026-01-01T05:30:00.123456+05:30']) {
           final result = schema.parse(input);
           expect(result, _moment(input));
@@ -100,7 +98,7 @@ void main() {
     });
     test('should retain optional and nullable ordering through conversion', () {
       var early = 0;
-      final Schema<Moment?> schema = Val.string(name: 'Start')
+      final schema = Val.string(name: 'Start')
           .refine((_) {
             early++;
             return false;

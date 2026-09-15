@@ -18,8 +18,6 @@ abstract interface class ChroniclerMetrics {
 }
 
 /// Records nonnegative changes into bounded interval aggregates.
-// The interface keeps construction and lifecycle control inside the runtime.
-// ignore: one_member_abstracts
 abstract interface class ChroniclerCounter {
   /// Adds [value] to the current interval for [attributes].
   ///
@@ -33,8 +31,6 @@ abstract interface class ChroniclerCounter {
 }
 
 /// Records signed changes into bounded interval aggregates.
-// The interface keeps construction and lifecycle control inside the runtime.
-// ignore: one_member_abstracts
 abstract interface class ChroniclerUpDownCounter {
   /// Adds [value] to the current interval for [attributes].
   ///
@@ -47,8 +43,6 @@ abstract interface class ChroniclerUpDownCounter {
 }
 
 /// Records the latest current value observed during each interval.
-// The interface keeps construction and lifecycle control inside the runtime.
-// ignore: one_member_abstracts
 abstract interface class ChroniclerGauge {
   /// Sets the latest [value] for [attributes] in the current interval.
   ///
@@ -60,8 +54,6 @@ abstract interface class ChroniclerGauge {
 }
 
 /// Records distributions using explicit upper-inclusive bucket boundaries.
-// The interface keeps construction and lifecycle control inside the runtime.
-// ignore: one_member_abstracts
 abstract interface class ChroniclerHistogram {
   /// Records [value] in the current interval for [attributes].
   void record(

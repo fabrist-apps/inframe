@@ -1,6 +1,3 @@
-// Explicit types exercise the public contract.
-// ignore_for_file: omit_local_variable_types
-
 import 'package:conflux/conflux.dart';
 import 'package:conflux/val.dart' as direct;
 import 'package:test/test.dart';
@@ -17,7 +14,7 @@ void main() {
     test('should return a validated string unchanged through both entrypoints', () {
       expect(Val.string().parse('hello'), 'hello');
       expect(direct.Val.string().parse('hello'), 'hello');
-      final Result<String, NonEmptyList<ValidationIssue>> result = Val.string().safeParse('x');
+      final result = Val.string().safeParse('x');
       expect(result.getOrNull(), 'x');
     });
     test('should skip incompatible checks and propagate callback exceptions', () {
@@ -38,7 +35,7 @@ void main() {
         early++;
         return false;
       });
-      final Schema<String?> nullable = base.nullable();
+      final nullable = base.nullable();
       expect(nullable.parse(null), isNull);
       expect(early, 0);
       expect(issues(nullable.refine((v) => v != null), null).single.message, 'Label is invalid');

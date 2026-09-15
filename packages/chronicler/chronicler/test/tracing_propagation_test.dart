@@ -214,13 +214,13 @@ void main() {
         'active',
         run: (active) async {
           final before = active.tracing.inject({})['chronicler-sampled']!;
-          chronicler.setCollectionEnabled(ChroniclerSignal.traces, false);
+          chronicler.setCollectionEnabled(ChroniclerSignal.traces, enabled: false);
           active.tracing
             ..setAttribute('discarded', true)
             ..setError();
           activeHeader = active.tracing.inject({})['chronicler-sampled']!;
           expect(activeHeader, before);
-          chronicler.setCollectionEnabled(ChroniclerSignal.traces, true);
+          chronicler.setCollectionEnabled(ChroniclerSignal.traces, enabled: true);
           await active.span(
             'suppressed child',
             run: (child) {
@@ -262,19 +262,19 @@ void main() {
       late String localTraceId;
       late String activeHeader;
 
-      chronicler.setPropagationEnabled(false);
+      chronicler.setPropagationEnabled(enabled: false);
       await base.trace(
         'local',
         parent: remote,
         run: (local) {
           expect(local.tracing.inject({'chronicler-sampled': 'stale'}), isEmpty);
           local.logs.info('local correlation');
-          chronicler.setPropagationEnabled(true);
+          chronicler.setPropagationEnabled(enabled: true);
           activeHeader = local.tracing.inject({})['chronicler-trace-id']!;
-          chronicler.setPropagationEnabled(false);
+          chronicler.setPropagationEnabled(enabled: false);
         },
       );
-      chronicler.setPropagationEnabled(true);
+      chronicler.setPropagationEnabled(enabled: true);
       await Future<void>.delayed(Duration.zero);
       localTraceId = (exporter.batches.single.records.single as LogRecord).envelope.traceId!;
 
@@ -298,7 +298,7 @@ void main() {
         options: const ChroniclerOptions(
           delivery: DeliveryOptions(maxBatchRecords: 1),
         ),
-      )..setCollectionEnabled(ChroniclerSignal.traces, false);
+      )..setCollectionEnabled(ChroniclerSignal.traces, enabled: false);
       late Map<String, String> headers;
 
       await Context()

@@ -88,11 +88,7 @@ void main() {
         executions++;
         return const [BatchSuccess<Object?>(true)];
       },
-    );
-    // A separate call keeps the pre-execution assertion explicit.
-    // A later invocation verifies that the next entry is rejected.
-    // ignore: cascade_invocations
-    batch.add(command('PING', true));
+    )..add(command('PING', true));
     expect(executions, 0);
 
     await batch.exec();
@@ -102,20 +98,17 @@ void main() {
   });
 
   test('builder enforces command and byte capacities before execution', () {
-    final batch = RedisBatch.internal(
-      maxCommands: 3,
-      maxBytes: encodeCommand(command('PING', true) as RedisCommand<Object?>).length * 2,
-      reservedCommands: 1,
-      reservedBytes: 0,
-      defaultTimeout: const Duration(seconds: 1),
-      executor: (_, _) async => const [],
-    );
-
-    // The following call separately verifies rejection beyond the exact limit.
-    // ignore: cascade_invocations
-    batch
-      ..add(command('PING', true))
-      ..add(command('PING', true));
+    final batch =
+        RedisBatch.internal(
+            maxCommands: 3,
+            maxBytes: encodeCommand(command('PING', true) as RedisCommand<Object?>).length * 2,
+            reservedCommands: 1,
+            reservedBytes: 0,
+            defaultTimeout: const Duration(seconds: 1),
+            executor: (_, _) async => const [],
+          )
+          ..add(command('PING', true))
+          ..add(command('PING', true));
     expect(() => batch.add(command('PING', true)), throwsStateError);
   });
 

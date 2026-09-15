@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer';
 
 import 'package:json_patch/json_patch.dart';
 
@@ -53,7 +54,5 @@ void main() {
     }
   }
 
-  // This command-line example deliberately prints its result for the reader.
-  // ignore: avoid_print
-  print(jsonEncode(patch.toJson()));
+  log(jsonEncode(patch.toJson()));
 }

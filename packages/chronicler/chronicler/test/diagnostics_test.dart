@@ -72,7 +72,7 @@ void main() {
               for (final operation in <void Function()>[
                 () => chronicler.flush(),
                 () => chronicler.close(),
-                () => chronicler.setCollectionEnabled(ChroniclerSignal.logs, false),
+                () => chronicler.setCollectionEnabled(ChroniclerSignal.logs, enabled: false),
               ]) {
                 try {
                   operation();
@@ -91,8 +91,8 @@ void main() {
       expect(errors, hasLength(3));
       expect(errors, everyElement(isA<ChroniclerConfigurationException>()));
       chronicler
-        ..setCollectionEnabled(ChroniclerSignal.logs, false)
-        ..setPropagationEnabled(false);
+        ..setCollectionEnabled(ChroniclerSignal.logs, enabled: false)
+        ..setPropagationEnabled(enabled: false);
       await chronicler.close();
     });
   });

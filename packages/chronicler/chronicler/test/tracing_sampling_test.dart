@@ -106,7 +106,7 @@ void main() {
         'disabled while active',
         attributes: {'secret': 'retained'},
         run: (active) {
-          recording.setCollectionEnabled(ChroniclerSignal.traces, false);
+          recording.setCollectionEnabled(ChroniclerSignal.traces, enabled: false);
           active.setSpanAttributes(unreadable);
         },
       );

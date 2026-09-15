@@ -24,3 +24,19 @@ bool _isTokenCodeUnit(int unit) {
 
   return unit > 0x20 && unit < 0x7f && !separators.contains(unit);
 }
+
+/// Returns a valid method token unchanged, preserving case.
+String validateMethod(String method) {
+  if (!isHttpToken(method)) {
+    throw ArgumentError.value(method, 'method', 'must be a nonempty HTTP token');
+  }
+
+  return method;
+}
+
+/// Checks a port range, including zero for ephemeral binding.
+void validatePort(int port, String name) {
+  if (port < 0 || port > 65535) {
+    throw ArgumentError.value(port, name, 'must be from 0 through 65535');
+  }
+}

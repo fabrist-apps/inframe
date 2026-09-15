@@ -25,11 +25,7 @@ void main() {
       expect(secondClock.reads, 1);
       final zone = TimeZone.fixed(const Duration(hours: 8))
           .getOrThrowWith((e) => StateError(e.message));
-      // The note's public composition shape retains both typed channels.
-      // ignore: omit_local_variable_types
-      final Effect<Result<ZonedMoment, MomentError>, Never> zoned = current.map(
-        (value, context) => value.setZone(zone),
-      );
+      final zoned = current.map((value, context) => value.setZone(zone));
       final result =
           (await first.run(zoned) as Succeeded<Result<ZonedMoment, MomentError>, Never>).value;
       expect(

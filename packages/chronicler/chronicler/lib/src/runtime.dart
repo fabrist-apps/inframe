@@ -57,15 +57,12 @@ final class Chronicler {
   bool isCollectionEnabled(ChroniclerSignal signal) => _runtime.isCollectionEnabled(signal);
 
   /// Enables or disables collection for [signal] synchronously.
-  // API contract uses a positional boolean for symmetric runtime toggles.
-  // ignore: avoid_positional_boolean_parameters
-  void setCollectionEnabled(ChroniclerSignal signal, bool enabled) =>
-      _runtime.setCollectionEnabled(signal, enabled);
+  void setCollectionEnabled(ChroniclerSignal signal, {required bool enabled}) =>
+      _runtime.setCollectionEnabled(signal, enabled: enabled);
 
   /// Enables or disables trace-context propagation independently of collection.
-  // API contract uses a positional boolean for symmetric runtime toggles.
-  // ignore: avoid_positional_boolean_parameters
-  void setPropagationEnabled(bool enabled) => _runtime.setPropagationEnabled(enabled);
+  void setPropagationEnabled({required bool enabled}) =>
+      _runtime.setPropagationEnabled(enabled: enabled);
 }
 
 /// Borrowed immutable attribution view over one Chronicler runtime.

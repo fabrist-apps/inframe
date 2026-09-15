@@ -239,9 +239,7 @@ final class ChroniclerRuntime {
   bool isCollectionEnabled(ChroniclerSignal signal) => _enabledSignals.contains(signal);
 
   /// Enables or disables collection for [signal].
-  // API contract uses a positional boolean for symmetric runtime toggles.
-  // ignore: avoid_positional_boolean_parameters
-  void setCollectionEnabled(ChroniclerSignal signal, bool enabled) {
+  void setCollectionEnabled(ChroniclerSignal signal, {required bool enabled}) {
     _requireRunningConfiguration();
     if (enabled == _enabledSignals.contains(signal)) return;
     if (enabled) {
@@ -258,9 +256,7 @@ final class ChroniclerRuntime {
   }
 
   /// Enables or disables trace-context propagation.
-  // API contract uses a positional boolean for symmetric runtime toggles.
-  // ignore: avoid_positional_boolean_parameters
-  void setPropagationEnabled(bool enabled) {
+  void setPropagationEnabled({required bool enabled}) {
     _requireRunningConfiguration();
     _propagationEnabled = enabled;
   }

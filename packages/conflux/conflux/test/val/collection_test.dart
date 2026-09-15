@@ -1,5 +1,3 @@
-// Explicit types prove nullable collection outputs.
-// ignore_for_file: omit_local_variable_types
 import 'package:conflux/moment.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/val.dart';
@@ -10,9 +8,9 @@ import 'schema_test.dart' show issues;
 void main() {
   group('Val collections', () {
     test('should preserve present null in typed lists and maps', () {
-      final Schema<List<String?>> list = Val.list(Val.string().nullable());
+      final list = Val.list(Val.string().nullable());
       expect(list.parse(['x', null]), ['x', null]);
-      final Schema<Map<String, String?>> map = Val.map(Val.string().nullable());
+      final map = Val.map(Val.string().nullable());
       expect(map.parse({'x': null}), {'x': null});
       expect(Val.list(Val.string().optional()).parse(['x']), ['x']);
       expect(issues(Val.list(Val.string().optional()), [null]).single.code, 'NOT_NULL');

@@ -1,6 +1,3 @@
-// All value fields are final; no annotation-only runtime dependency is needed.
-// ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
-
 import 'package:conflux/result.dart';
 import 'package:conflux/src/moment/moment_error.dart';
 import 'package:timezone/timezone.dart' as tz;

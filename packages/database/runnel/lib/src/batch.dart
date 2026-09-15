@@ -1,7 +1,3 @@
-// Public construction is named for package-internal collaborators, so initializing
-// formals would expose private parameter names across Dart libraries.
-// ignore_for_file: prefer_initializing_formals
-
 import 'dart:async';
 
 import 'package:runnel/src/command.dart';
@@ -75,22 +71,13 @@ final class BatchResults {
 final class RedisBatch {
   /// Creates a builder for Runnel's internal pipeline or transaction executor.
   RedisBatch.internal({
-    required int maxCommands,
-    required int maxBytes,
-    required int reservedCommands,
+    required this._maxCommands,
+    required this._maxBytes,
+    required this._reservedCommands,
     required int reservedBytes,
-    required Duration defaultTimeout,
-    required Future<List<BatchOutcome<Object?>>> Function(
-      List<RedisCommand<Object?>> commands,
-      Duration timeout,
-    )
-    executor,
-  }) : _maxCommands = maxCommands,
-       _maxBytes = maxBytes,
-       _reservedCommands = reservedCommands,
-       _encodedBytes = reservedBytes,
-       _defaultTimeout = defaultTimeout,
-       _executor = executor;
+    required this._defaultTimeout,
+    required this._executor,
+  }) : _encodedBytes = reservedBytes;
 
   final int _maxCommands;
   final int _maxBytes;

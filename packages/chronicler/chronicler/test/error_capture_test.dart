@@ -233,7 +233,7 @@ void main() {
       final chronicler = createErrorChronicler(exporter);
       final errors = Context().withChronicler(chronicler.recorder).errors;
 
-      chronicler.setCollectionEnabled(ChroniclerSignal.errors, false);
+      chronicler.setCollectionEnabled(ChroniclerSignal.errors, enabled: false);
       errors.capture('disabled');
       await Future<void>.delayed(Duration.zero);
       expect(exporter.batches, isEmpty);
@@ -242,7 +242,7 @@ void main() {
         BigInt.one,
       );
 
-      chronicler.setCollectionEnabled(ChroniclerSignal.errors, true);
+      chronicler.setCollectionEnabled(ChroniclerSignal.errors, enabled: true);
       errors.capture('enabled');
       await Future<void>.delayed(Duration.zero);
       expect(exporter.batches, hasLength(1));

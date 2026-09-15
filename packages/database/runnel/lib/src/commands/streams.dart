@@ -5,9 +5,6 @@ import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
-// StreamId is deeply immutable; keeping this package dependency-free avoids using @immutable.
-// ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
-
 final BigInt _maximumStreamIdComponent = (BigInt.one << 64) - BigInt.one;
 final RegExp _streamIdPattern = RegExp(r'^(\d+)-(\d+)$');
 

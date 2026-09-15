@@ -157,8 +157,6 @@ final class OptionMapper extends SimpleMapper1<Option<dynamic>> {
 
   @override
   Function get typeFactory {
-    // dart_mappable supplies a generic callback with a caller-specific return type.
-    // ignore: avoid_dynamic_calls
     return <T>(Function f) => f<Option<T>>();
   }
 

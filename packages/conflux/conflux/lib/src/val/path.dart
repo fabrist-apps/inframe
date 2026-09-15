@@ -1,6 +1,3 @@
-// All structural path fields are immutable.
-// ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
-
 import 'package:dart_mappable/dart_mappable.dart';
 
 /// One structural step from the parse root.
