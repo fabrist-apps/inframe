@@ -87,8 +87,8 @@ jobs:
       - name: Build the browser verification application
         working-directory: packages/database/turso
         run: |
-          dart run tool/install_web.dart example/web/turso
-          dart compile js example/web/main.dart -O1 -o example/web/main.dart.js
+          dart run tool/install_web.dart integration_test/web/turso
+          dart compile js integration_test/web/main.dart -O1 -o integration_test/web/main.dart.js
       - name: Install the browser driver
         run: |
           python3 -m venv "$RUNNER_TEMP/turso-selenium"
@@ -98,7 +98,7 @@ jobs:
         run: |
           google-chrome --version
           firefox --version
-          dart run tool/serve_web_example.dart 8080 > "$RUNNER_TEMP/turso-web-server.log" 2>&1 &
+          dart run tool/serve_web_verification.dart 8080 > "$RUNNER_TEMP/turso-web-server.log" 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           SERVER_READY=false
@@ -179,8 +179,8 @@ jobs:
       - name: Build the browser verification application
         working-directory: packages/database/turso
         run: |
-          dart run tool/install_web.dart example/web/turso
-          dart compile js example/web/main.dart -O1 -o example/web/main.dart.js
+          dart run tool/install_web.dart integration_test/web/turso
+          dart compile js integration_test/web/main.dart -O1 -o integration_test/web/main.dart.js
       - name: Enable Safari automation
         run: |
           sudo safaridriver --enable
@@ -192,7 +192,7 @@ jobs:
       - name: Run the complete Safari contract
         working-directory: packages/database/turso
         run: |
-          dart run tool/serve_web_example.dart 8080 > "$RUNNER_TEMP/turso-web-server.log" 2>&1 &
+          dart run tool/serve_web_verification.dart 8080 > "$RUNNER_TEMP/turso-web-server.log" 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           SERVER_READY=false

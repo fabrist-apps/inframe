@@ -3,7 +3,7 @@ import 'dart:io';
 Future<void> main(List<String> arguments) async {
   final port = arguments.isEmpty ? 8080 : int.parse(arguments.single);
   final packageRoot = File.fromUri(Platform.script).parent.parent;
-  final webRoot = Directory('${packageRoot.path}/example/web');
+  final webRoot = Directory('${packageRoot.path}/integration_test/web');
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
   stdout.writeln('Serving ${webRoot.path} at http://localhost:$port');
 

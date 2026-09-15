@@ -2,11 +2,12 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
-import 'package:turso/src/internal/backend.dart';
-import 'package:turso/src/internal/parameters.dart';
+import 'package:turso/src/backend.dart';
+import 'package:turso/src/parameters.dart';
 import 'package:turso/src/turso_exception.dart';
 import 'package:turso/src/turso_location.dart';
 import 'package:turso/src/turso_options.dart';
+import 'package:turso/src/turso_result.dart';
 import 'package:web/web.dart' as web;
 
 /// Opens the web backend selected by conditional import.
@@ -111,16 +112,16 @@ final class _WebBackend implements TursoBackend {
   }
 
   @override
-  Future<List<Object?>> query(String sql, SqlParameterSnapshot parameters) async {
+  Future<TursoQueryResult> query(String sql, SqlParameters parameters) async {
     final result = await _request('query', {
       'sql': sql,
       'parameters': _encodeParameters(parameters),
     });
-    return result! as List<Object?>;
+    return _decodeQueryResult(result! as List<Object?>);
   }
 
   @override
-  Future<BigInt> execute(String sql, SqlParameterSnapshot parameters) async {
+  Future<BigInt> execute(String sql, SqlParameters parameters) async {
     final result = await _request('execute', {
       'sql': sql,
       'parameters': _encodeParameters(parameters),
@@ -197,15 +198,37 @@ void _verifyBridgeVersion(String version) {
   }
 }
 
-Map<String, Object?> _encodeParameters(SqlParameterSnapshot parameters) {
-  return {
-    'named': parameters.named,
-    'values': parameters.named
-        ? [
-            for (final entry in parameters.values.cast<List<Object?>>())
-              [entry[0], _encodeValue(entry[1])],
-          ]
-        : [for (final value in parameters.values) _encodeValue(value)],
+Map<String, Object?> _encodeParameters(SqlParameters parameters) => switch (parameters) {
+  NamedParameters(:final values) => {
+    'named': true,
+    'values': [
+      for (final entry in values.entries) [entry.key, _encodeValue(entry.value)],
+    ],
+  },
+  PositionalParameters(:final values) => {
+    'named': false,
+    'values': [for (final value in values) _encodeValue(value)],
+  },
+};
+
+TursoQueryResult _decodeQueryResult(List<Object?> result) {
+  final columns = [
+    for (final column in (result[0]! as List<Object?>).cast<List<Object?>>())
+      TursoColumn(name: column[0]! as String, declaredType: column[1] as String?),
+  ];
+  final rows = [
+    for (final row in (result[1]! as List<Object?>).cast<List<Object?>>())
+      TursoRow(columns, row.map(_decodeValue).toList()),
+  ];
+  return TursoQueryResult(columns: columns, rows: rows);
+}
+
+Object? _decodeValue(Object? value) {
+  if (value is! List<Object?>) return value;
+  return switch (value[0]) {
+    'integer' => BigInt.parse(value[1]! as String),
+    'blob' => Uint8List.fromList((value[1]! as List<Object?>).cast<int>()),
+    _ => throw StateError('Unknown browser value encoding: ${value[0]}.'),
   };
 }
 

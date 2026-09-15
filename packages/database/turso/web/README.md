@@ -54,6 +54,21 @@ The public existence inspection traverses directories and requests the final fil
 `create: false`. It never creates a directory or file and never opens a database or synchronous
 access handle. The bridge remains version checked for this operation.
 
+## Ownership
+
+`turso_bridge.js` starts the worker without test configuration. `turso_worker.js` translates
+messages; `turso_database.js` owns the engine connection and statement execution. Its attachment
+owner in `turso_attachments.js` holds the registry, validates attachment locations, and completes or
+discards registrations after SQL execution. The database closes the engine before releasing files
+when execution or finalization has an uncertain outcome.
+
+`turso_sql_guard.js` owns parser WASM loading and metadata decoding. `turso_codec.js` translates
+values and errors across the JavaScript boundary. The upstream OPFS protocol remains isolated in
+`tool/web_bundle/wasm_common_patch.mjs`; no engine binary changes are part of this restructuring.
+
+The browser integration harness injects registration/finalization failures through its separate
+`fault_bridge.js`. Reinstall all production modules together when updating an application.
+
 ## Provenance
 
 | Asset | Source | SHA-256 |

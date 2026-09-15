@@ -256,3 +256,55 @@ function fakeDirectory({ calls, existingFile }) {
   };
   return directory;
 }
+
+test('attachment lifecycle shares canonical file ownership across encrypted URI aliases', async () => {
+  const { createAttachments } = await import('../../web/turso_attachments.js');
+  const calls = [];
+  const attachments = createAttachments('main.db', {
+    registerFile: async (path) => calls.push(['register', path]),
+    unregisterFile: async (path) => calls.push(['unregister', path]),
+    isWorkerUnavailable: () => false,
+  }, () => assert.fail('A successful attachment must not retire the connection.'));
+  const parameters = { named: false, values: [] };
+  const key = 'ab'.repeat(32);
+  const inspection = (filename, alias) => ({
+    kind: 'attach',
+    first: { form: 'direct', value: filename },
+    second: { form: 'direct', value: alias },
+  });
+  const encrypted = inspection(`file:folder/data.db?cipher=aegis256&hexkey=${key}`, 'first');
+  await attachments.complete(await attachments.prepare(encrypted, parameters));
+  await attachments.complete(await attachments.prepare(inspection('folder/data.db', 'second'), parameters));
+  assert.deepEqual(calls, [['register', 'folder/data.db'], ['register', 'folder/data.db-wal']]);
+  await attachments.complete({ kind: 'detach', alias: 'first' });
+  assert.equal(calls.length, 2);
+  await attachments.complete({ kind: 'detach', alias: 'second' });
+  assert.deepEqual(calls.slice(2), [['unregister', 'folder/data.db-wal'], ['unregister', 'folder/data.db']]);
+  const sanitized = attachments.sanitize(new Error(`Cannot open ${encrypted.first.value}: key ${key}`), encrypted, parameters);
+  assert.equal(sanitized.message, 'Cannot open [REDACTED]: key [REDACTED]');
+});
+
+test('discarding a failed ATTACH releases new files but preserves existing aliases', async () => {
+  const { createAttachments } = await import('../../web/turso_attachments.js');
+  const released = [];
+  const attachments = createAttachments('main.db', {
+    registerFile: async () => {},
+    unregisterFile: async (path) => released.push(path),
+    isWorkerUnavailable: () => false,
+  }, () => assert.fail('A known SQL failure must not retire the connection.'));
+  const parameters = { named: true, values: [[':file', 'attached.db'], [':alias', 'kept']] };
+  const inspection = {
+    kind: 'attach',
+    first: { form: 'bound', value: ':file' },
+    second: { form: 'bound', value: ':alias' },
+  };
+  const first = await attachments.prepare(inspection, parameters);
+  await attachments.complete(first);
+  await attachments.discard(await attachments.prepare(inspection, parameters));
+  assert.deepEqual(released, []);
+  parameters.values[0][1] = 'new.db';
+  await attachments.discard(await attachments.prepare(inspection, parameters));
+  assert.deepEqual(released, ['new.db-wal', 'new.db']);
+  await attachments.releaseAll();
+  assert.deepEqual(released.slice(2), ['attached.db-wal', 'attached.db']);
+});

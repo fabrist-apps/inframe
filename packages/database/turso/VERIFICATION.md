@@ -29,20 +29,33 @@ The recorded stable desktop browsers are:
 Safari's own WebDriver is used. A generic WebKit engine does not stand in for the Safari check.
 Mobile browsers are excluded; Android and iOS use their native Flutter targets.
 
+## Local restructuring verification (2026-09-15)
+
+The typed backend and ownership restructuring passed 38 native tests on macOS ARM64 with Dart
+3.13.3, all 13 Node attachment/OPFS tests, and the complete browser harness in headless Chrome
+153.0.8010.36. The browser run includes persisted attached data across reload, encrypted attachments,
+alias sharing, contention, injected registration/finalization failure, and shared transaction checks.
+
+Workspace formatting passed. Analysis reports only two existing documentation notices in Conflux;
+Turso has no analyzer findings. Firefox could not start locally because Selenium Manager failed to
+extract its downloaded browser archive (`cpio archive error: bad magic value encountered`). An
+isolated Firefox 156.0 installation also exited before testing with a macOS sandbox/profile startup
+error. Safari,
+mobile, Linux, and Windows were not rerun locally; the existing CI runtime matrix remains in place.
+
 ## Contract trace
 
 | Contract | Evidence |
 | --- | --- |
-| Native migration-lock exclusion, persistent sidecars, release, and process termination | `test/native_migration_lock_test.dart` on enabled desktop native targets (with the same Windows path ready for the recorded disabled job); independent-handle contention in `tool/flutter_native_runtime_test.dart.template` on Android and iOS |
 | Native values, bindings, persistence, memory opening, encryption failures, and lifecycle | `test/native_database_test.dart` on macOS and Linux, with Windows verified before its temporary CI disablement; `tool/flutter_native_runtime_test.dart.template` on Android and iOS |
 | Transactions, serialization, submitted-work draining, rollback/commit failure, and retirement | `test/transaction_test.dart` on desktop native targets; the representative transaction and lifecycle cases in the mobile integration suite |
 | Native encryption, FTS rollback/reopen, and vector functions | `test/feature_test.dart` on desktop native targets and both ciphers in the mobile integration suite |
 | Native ATTACH, caller-controlled foreign keys, detach/re-attach persistence, and file release | `test/native_database_test.dart` on desktop native targets and the attachment scenario in `tool/flutter_native_runtime_test.dart.template` on Android and iOS; Windows Flutter CI remains disabled as recorded above |
 | Flutter native artifact loading | Release Flutter application on Linux, Android emulator plus ARM64 APK, and iOS simulator plus device build; Windows is temporarily disabled as described above |
-| Browser persistence/reload, nested OPFS main and attachment paths, read-only file inspection, storage lock release, failed-open cleanup, and memory opening | `example/web/main.dart` in Chrome, Firefox, and Safari; focused path traversal tests in `tool/web_bundle/attachment_registry.test.mjs` |
-| Browser bindings, exact integers, immutable results, transactions, lifecycle, encryption, and vectors | `example/web/main.dart` in Chrome, Firefox, and Safari |
-| Browser memory ATTACH/DETACH, explicit foreign-key policy, attached-schema rollback, and encrypted connections | The memory attachment scenarios in `example/web/main.dart` through the installed bridge in Chrome, Firefox, and Safari |
-| Browser persistent ATTACH/DETACH, bound-parameter snapshots, encrypted and percent-encoded file URIs, OPFS ownership/contention, injected registration/finalization failures, retirement, explicit re-attach after reload, file release, and memory-main rejection | The persistent attachment scenarios in `example/web/main.dart` through the installed bridge in Chrome, Firefox, and Safari; focused registry boundary tests in `tool/web_bundle/attachment_registry.test.mjs` |
+| Browser persistence/reload, nested OPFS main and attachment paths, read-only file inspection, storage lock release, failed-open cleanup, and memory opening | `integration_test/web/main.dart` in Chrome, Firefox, and Safari; focused path traversal tests in `tool/web_bundle/attachment_registry.test.mjs` |
+| Browser bindings, exact integers, immutable results, transactions, lifecycle, encryption, and vectors | `integration_test/web/main.dart` in Chrome, Firefox, and Safari; shared value/transaction scenarios in `integration_test/support/sql_contract.dart` also run in `test/shared_contract_test.dart` on native |
+| Browser memory ATTACH/DETACH, explicit foreign-key policy, attached-schema rollback, and encrypted connections | The memory attachment scenarios in `integration_test/web/main.dart` through the installed bridge in Chrome, Firefox, and Safari |
+| Browser persistent ATTACH/DETACH, bound-parameter snapshots, encrypted and percent-encoded file URIs, OPFS ownership/contention, injected registration/finalization failures, retirement, explicit re-attach after reload, file release, and memory-main rejection | The persistent attachment scenarios in `integration_test/web/main.dart` through the installed bridge in Chrome, Firefox, and Safari; focused registry boundary tests in `tool/web_bundle/attachment_registry.test.mjs` |
 | Web FTS exclusion | The browser suite asserts `fts == false`; native suites execute FTS SQL |
 | Artifact selection and integrity | Native asset build-hook tests plus SHA-256 checks in the platform jobs |
 | Workspace integration | `dart pub get`, formatter, analyzer, and the repository's existing test jobs |

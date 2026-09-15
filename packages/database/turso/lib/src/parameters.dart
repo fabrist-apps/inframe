@@ -5,37 +5,55 @@ const int portableSafeInteger = 9007199254740991;
 final BigInt _minimumInt64 = BigInt.parse('-9223372036854775808');
 final BigInt _maximumInt64 = BigInt.parse('9223372036854775807');
 
-/// An immutable operation-time snapshot of SQL parameters and their binding mode.
-typedef SqlParameterSnapshot = ({bool named, List<Object?> values});
+/// Operation-time copies of normalized SQL values, retaining the binding mode.
+sealed class SqlParameters {
+  const SqlParameters();
+
+  /// Copies mutable values before the operation enters either queue.
+  factory SqlParameters.snapshot(
+    List<Object?> positional,
+    Map<String, Object?> named,
+  ) {
+    if (positional.isNotEmpty && named.isNotEmpty) {
+      throw ArgumentError('Positional and named parameters cannot both be nonempty.');
+    }
+    if (named.isNotEmpty) {
+      return NamedParameters(
+        Map.unmodifiable({
+          for (final entry in named.entries) entry.key: _normalize(entry.value),
+        }),
+      );
+    }
+    return PositionalParameters(List.unmodifiable(positional.map(_normalize)));
+  }
+}
+
+/// Parameters bound in SQL placeholder order.
+final class PositionalParameters extends SqlParameters {
+  /// Wraps an already normalized positional snapshot.
+  const PositionalParameters(this.values);
+
+  /// Values in placeholder order.
+  final List<Object?> values;
+}
+
+/// Parameters indexed by their full SQL placeholder spelling.
+final class NamedParameters extends SqlParameters {
+  /// Wraps an already normalized named snapshot.
+  const NamedParameters(this.values);
+
+  /// Values keyed by full placeholder spelling.
+  final Map<String, Object?> values;
+}
 
 /// An empty positional parameter snapshot.
-const SqlParameterSnapshot emptySqlParameters = (named: false, values: <Object?>[]);
+const emptySqlParameters = PositionalParameters([]);
 
 /// Rejects SQL text that cannot cross the native C string boundary intact.
 void validateSql(String sql) {
   if (sql.contains('\u0000')) {
     throw ArgumentError.value(sql, 'sql', 'Must not contain NUL characters.');
   }
-}
-
-/// Copies and normalizes arguments before an operation enters the queue.
-SqlParameterSnapshot snapshotParameters(
-  List<Object?> parameters,
-  Map<String, Object?> namedParameters,
-) {
-  if (parameters.isNotEmpty && namedParameters.isNotEmpty) {
-    throw ArgumentError('Positional and named parameters cannot both be nonempty.');
-  }
-
-  if (namedParameters.isNotEmpty) {
-    return (
-      named: true,
-      values: [
-        for (final entry in namedParameters.entries) [entry.key, _normalize(entry.value)],
-      ],
-    );
-  }
-  return (named: false, values: [for (final value in parameters) _normalize(value)]);
 }
 
 Object? _normalize(Object? value) {
