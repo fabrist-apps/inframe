@@ -16,7 +16,7 @@ void main() {
       addTearDown(() {
         if (directory.existsSync()) directory.deleteSync(recursive: true);
       });
-      final path = '${directory.path}/database.voxel.lock';
+      final path = '${directory.path}/database.turso.lock';
 
       final owner = NativeMigrationLock.tryAcquire(path);
       expect(owner, isNotNull);

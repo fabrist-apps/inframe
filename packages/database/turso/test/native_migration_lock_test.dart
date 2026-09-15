@@ -17,7 +17,7 @@ void main() {
       temporaryDirectory = Directory.systemTemp.createTempSync(
         'turso-native-lock-',
       );
-      lockPath = '${temporaryDirectory.path}/database.voxel.lock';
+      lockPath = '${temporaryDirectory.path}/database.turso.lock';
     });
 
     tearDown(() {

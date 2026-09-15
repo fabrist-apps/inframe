@@ -1,7 +1,0 @@
-builders:
-  rivet:
-    import: "package:rivet_generator/builder.dart"
-    builder_factories: ["rivetBuilder"]
-    build_extensions: {".dart": [".rivet.dart"]}
-    auto_apply: dependents
-    build_to: source

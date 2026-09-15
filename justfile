@@ -5,10 +5,6 @@ generate: build-runner
 build-runner: bindings
     cd packages/conflux/conflux && dart run build_runner build
     cd packages/chronicler/chronicler && dart run build_runner build
-    cd packages/database/rivet && dart run build_runner build
-    cd packages/database/rivet/test/fixtures/schema_package && dart run build_runner build
-    cd packages/database/rivet/test/fixtures/app_package && dart run build_runner build
-    cd packages/database/voxel && dart run build_runner build
     dart format .
 
 # Regenerate native bindings produced by ffigen.
