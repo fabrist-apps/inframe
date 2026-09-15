@@ -9,4 +9,4 @@ linter:
 
 analyzer:
   errors:
-    public_member_api_docs: ignore
+    specify_nonobvious_property_types: ignore

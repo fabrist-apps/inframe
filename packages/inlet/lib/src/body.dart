@@ -20,6 +20,7 @@ final class _Body {
 
   factory _Body.bytes(List<int> bytes) {
     final copied = _copyAndValidateBytes(bytes);
+
     return _Body(Stream.value(copied)).._knownLength = copied.length;
   }
 
@@ -44,15 +45,19 @@ final class _Body {
     if (_state is _ClosedBody) {
       throw StateError('The body was closed while it was being read.');
     }
+
     final failure = buffering.failure;
     if (failure != null) {
       Error.throwWithStackTrace(failure, buffering.failureStackTrace!);
     }
+
     final cached = buffering.cache;
     if (cached == null) {
       throw StateError('The body was closed while it was being read.');
     }
-    _checkLimit(cached.length, maxBytes);
+
+    if (cached.length > maxBytes) throw _BodyLimitFailure(maxBytes);
+
     return Uint8List.fromList(cached);
   }
 
@@ -62,6 +67,7 @@ final class _Body {
         final buffering = _BufferingBody(maxBytes);
         _state = buffering;
         _startBuffering(buffering);
+
         return buffering;
       case final _BufferingBody buffering:
         return buffering;
@@ -74,6 +80,7 @@ final class _Body {
 
   void _startBuffering(_BufferingBody buffering) {
     final source = _takeSource();
+
     try {
       final subscription = source.listen(
         (chunk) => _bufferChunk(buffering, chunk),
@@ -91,9 +98,8 @@ final class _Body {
   }
 
   void _bufferChunk(_BufferingBody buffering, List<int> chunk) {
-    if (!identical(_state, buffering) || buffering.isSettled) {
-      return;
-    }
+    if (!identical(_state, buffering) || buffering.isSettled) return;
+
     if (chunk.length > buffering.maxBytes - buffering.builder.length) {
       _failBuffering(
         buffering,
@@ -115,6 +121,7 @@ final class _Body {
     if (!identical(_state, buffering) || buffering.isSettled) {
       return;
     }
+
     final cache = buffering.builder.takeBytes();
     buffering
       ..cache = cache
@@ -123,14 +130,11 @@ final class _Body {
     _knownLength = cache.length;
   }
 
-  void _failBuffering(
-    _BufferingBody buffering,
-    Object error,
-    StackTrace stackTrace,
-  ) {
+  void _failBuffering(_BufferingBody buffering, Object error, StackTrace stackTrace) {
     if (!identical(_state, buffering) || buffering.isSettled) {
       return;
     }
+
     buffering
       ..builder.clear()
       ..failure = error
@@ -195,6 +199,7 @@ final class _Body {
     if (!identical(_state, raw) || raw.isSettled) {
       return;
     }
+
     try {
       raw.controller.add(_copyAndValidateBytes(chunk));
     } on Object catch (error, stackTrace) {
@@ -207,6 +212,7 @@ final class _Body {
     if (!identical(_state, raw) || raw.isSettled) {
       return;
     }
+
     raw.isSettled = true;
     raw.controller.close().ignore();
   }
@@ -215,6 +221,7 @@ final class _Body {
     if (!identical(_state, raw) || raw.isSettled) {
       return;
     }
+
     raw.isSettled = true;
     raw.controller
       ..addError(error, stackTrace)
@@ -249,15 +256,17 @@ final class _Body {
             ..isSettled = true
             ..settled.complete();
         }
+
         cleanup = buffering.source.cancel();
       case final _RawBody raw:
         final downstream = raw.downstream;
-        cleanup = downstream == null ? raw.source.cancel() : downstream.cancel();
+        cleanup = downstream?.cancel() ?? raw.source.cancel();
       case _ClosedBody():
         cleanup = Future<void>.value();
     }
 
     unawaited(cleanup.then(closed.complete, onError: closed.completeError));
+
     return closed.future;
   }
 
@@ -266,8 +275,20 @@ final class _Body {
     if (source == null) {
       throw StateError('The body source has already been claimed.');
     }
+
     _source = null;
+
     return source;
+  }
+
+  static Uint8List _copyAndValidateBytes(List<int> bytes) {
+    for (final byte in bytes) {
+      if (byte < 0 || byte > 255) {
+        throw ArgumentError('Body chunks must contain values from 0 through 255.');
+      }
+    }
+
+    return Uint8List.fromList(bytes);
   }
 }
 
@@ -342,10 +363,12 @@ final class _TrackedSubscription<T> {
       _completeCancellation();
       return;
     }
+
     _subscription = subscription;
     if (_paused) {
       subscription.pause();
     }
+
     if (_cancellation != null) {
       _startCancellation(subscription);
     }
@@ -366,6 +389,7 @@ final class _TrackedSubscription<T> {
     if (_paused || _finished) {
       return;
     }
+
     _paused = true;
     _subscription?.pause();
   }
@@ -374,6 +398,7 @@ final class _TrackedSubscription<T> {
     if (!_paused || _finished) {
       return;
     }
+
     _paused = false;
     _subscription?.resume();
   }
@@ -383,6 +408,7 @@ final class _TrackedSubscription<T> {
     if (existing != null) {
       return existing.future;
     }
+
     final cancellation = Completer<void>();
     _cancellation = cancellation;
     final subscription = _subscription;
@@ -391,6 +417,7 @@ final class _TrackedSubscription<T> {
     } else if (_finished || _cannotAttach) {
       cancellation.complete();
     }
+
     return cancellation.future;
   }
 
@@ -398,12 +425,14 @@ final class _TrackedSubscription<T> {
     _subscription = null;
     _finished = true;
     Future<void> cancellation;
+
     try {
       cancellation = subscription.cancel();
     } on Object catch (error, stackTrace) {
       _cancellation!.completeError(error, stackTrace);
       return;
     }
+
     unawaited(
       cancellation.then(_cancellation!.complete, onError: _cancellation!.completeError),
     );
@@ -417,23 +446,8 @@ final class _TrackedSubscription<T> {
   }
 }
 
-Uint8List _copyAndValidateBytes(List<int> bytes) {
-  for (final byte in bytes) {
-    if (byte < 0 || byte > 255) {
-      throw ArgumentError('Body chunks must contain values from 0 through 255.');
-    }
-  }
-  return Uint8List.fromList(bytes);
-}
-
 void _validateMaxBytes(int maxBytes) {
   if (maxBytes < 0) {
     throw ArgumentError.value(maxBytes, 'maxBytes', 'must not be negative');
-  }
-}
-
-void _checkLimit(int byteCount, int maxBytes) {
-  if (byteCount > maxBytes) {
-    throw _BodyLimitFailure(maxBytes);
   }
 }

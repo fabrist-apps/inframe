@@ -4,16 +4,16 @@ import 'package:test/test.dart';
 
 import 'support/exporter.dart';
 
-const traceId = '0af7651916cd43dd8448eb211c80319c';
-const parentId = 'b7ad6b7169203331';
+const traceId = 'trc_0123456789ABCDEFGHIJKLMN';
+const parentId = 'spn_0123456789ABCDEFGHIJKLMN';
 
 void main() {
   group('Chronicler tracing propagation', () {
-    test('should enforce input caps and truncate outbound state by whole entries', () async {
-      expect(TracePropagation.extract({'traceparent': 'x' * 1025}), isNull);
+    test('should replace stale correlation headers without changing the source', () async {
       final parent = TracePropagation.extract({
-        'traceparent': '00-$traceId-$parentId-01',
-        'tracestate': [for (var index = 0; index < 20; index++) 'v$index=${'x' * 24}'].join(','),
+        'chronicler-trace-id': traceId,
+        'chronicler-span-id': parentId,
+        'chronicler-sampled': '1',
       });
       final exporter = TestExporter();
       final chronicler = Chronicler(
@@ -29,22 +29,37 @@ void main() {
         'server',
         parent: parent,
         run: (server) {
-          final source = {'TraceParent': 'stale', 'TRACESTATE': 'stale', 'other': 'kept'};
+          final source = {
+            'Chronicler-Trace-Id': 'stale',
+            'CHRONICLER-SPAN-ID': 'stale',
+            'Chronicler-Sampled': 'stale',
+            'other': 'kept',
+          };
           injected = server.tracing.inject(source);
-          expect(source['TraceParent'], 'stale');
+          expect(source['Chronicler-Trace-Id'], 'stale');
         },
       );
 
       expect(injected['other'], 'kept');
-      expect(injected.keys, containsAll(['traceparent', 'tracestate']));
-      expect(injected['tracestate']!.length, lessThanOrEqualTo(512));
-      expect(injected.keys.where((key) => key.toLowerCase() == 'traceparent'), hasLength(1));
+      expect(
+        injected.keys,
+        unorderedEquals([
+          'other',
+          'chronicler-trace-id',
+          'chronicler-span-id',
+          'chronicler-sampled',
+        ]),
+      );
+      final extracted = TracePropagation.extract(injected)!;
+      expect(extracted.traceId, traceId);
+      expect(extracted.parentSpanId, isNot(parentId));
     });
 
     test('should continue incoming server and outgoing client spans', () async {
       final remote = TracePropagation.extract({
-        'traceparent': '00-$traceId-$parentId-01',
-        'tracestate': 'vendor=value',
+        'chronicler-trace-id': traceId,
+        'chronicler-span-id': parentId,
+        'chronicler-sampled': '1',
       });
       final exporter = TestExporter();
       final chronicler = Chronicler(
@@ -81,13 +96,42 @@ void main() {
       expect(server.envelope.traceId, traceId);
       expect(server.envelope.parentSpanId, parentId);
       expect(client.envelope.parentSpanId, server.envelope.spanId);
-      expect(outgoing['traceparent'], '00-$traceId-${client.envelope.spanId}-01');
-      expect(outgoing['tracestate'], 'vendor=value');
+      expect(outgoing, {
+        'content-type': 'application/json',
+        'chronicler-trace-id': traceId,
+        'chronicler-span-id': client.envelope.spanId,
+        'chronicler-sampled': '1',
+      });
+      final nextParent = TracePropagation.extract(outgoing)!;
+      expect(nextParent.traceId, traceId);
+      expect(nextParent.parentSpanId, client.envelope.spanId);
+
+      final receiverExporter = TestExporter();
+      final receiver = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: receiverExporter,
+        options: const ChroniclerOptions(delivery: DeliveryOptions(maxBatchRecords: 1)),
+      );
+      await receiver.recorder.trace(
+        'payments.receive',
+        parent: nextParent,
+        kind: SpanKind.server,
+        run: (_) {},
+      );
+      await Future<void>.delayed(Duration.zero);
+      final received = receiverExporter.batches.single.records.single as SpanRecord;
+      expect(received.envelope.traceId, traceId);
+      expect(received.envelope.parentSpanId, client.envelope.spanId);
+      expect(received.envelope.spanId, isNot(client.envelope.spanId));
     });
 
     test('should let a remote parent override the caller trace and sampling trust', () async {
       final remote = TracePropagation.extract({
-        'traceparent': '00-$traceId-$parentId-00',
+        'chronicler-trace-id': traceId,
+        'chronicler-span-id': parentId,
+        'chronicler-sampled': '0',
       });
       final trustedExporter = TestExporter();
       final trusted = Chronicler(
@@ -144,9 +188,11 @@ void main() {
       final base = Context().withChronicler(chronicler.recorder);
       late Context retained;
 
-      expect(base.tracing.inject({'TraceParent': 'stale', 'other': 'kept'}), {'other': 'kept'});
+      expect(base.tracing.inject({'Chronicler-Trace-Id': 'stale', 'other': 'kept'}), {
+        'other': 'kept',
+      });
       await base.span('ended', run: (span) => retained = span);
-      expect(retained.tracing.inject({'tracestate': 'stale'}), isEmpty);
+      expect(retained.tracing.inject({'chronicler-span-id': 'stale'}), isEmpty);
     });
 
     test('should suppress a live lineage without rewriting its outbound flag', () async {
@@ -167,18 +213,18 @@ void main() {
       await base.span(
         'active',
         run: (active) async {
-          final before = active.tracing.inject({})['traceparent']!;
+          final before = active.tracing.inject({})['chronicler-sampled']!;
           chronicler.setCollectionEnabled(ChroniclerSignal.traces, false);
           active.tracing
             ..setAttribute('discarded', true)
             ..setError();
-          activeHeader = active.tracing.inject({})['traceparent']!;
+          activeHeader = active.tracing.inject({})['chronicler-sampled']!;
           expect(activeHeader, before);
           chronicler.setCollectionEnabled(ChroniclerSignal.traces, true);
           await active.span(
             'suppressed child',
             run: (child) {
-              suppressedChildHeader = child.tracing.inject({})['traceparent']!;
+              suppressedChildHeader = child.tracing.inject({})['chronicler-sampled']!;
               child.logs.info('correlated without spans');
             },
           );
@@ -187,8 +233,8 @@ void main() {
       await base.trace('fresh boundary', run: (_) {});
       await Future<void>.delayed(Duration.zero);
 
-      expect(activeHeader, endsWith('-01'));
-      expect(suppressedChildHeader, endsWith('-00'));
+      expect(activeHeader, '1');
+      expect(suppressedChildHeader, '0');
       final records = exporter.batches.single.records;
       expect(records.whereType<SpanRecord>().single.payload.name, 'fresh boundary');
       expect(records.whereType<LogRecord>().single.envelope.traceId, isNotNull);
@@ -198,7 +244,9 @@ void main() {
 
     test('should toggle propagation independently and ignore parents while disabled', () async {
       final remote = TracePropagation.extract({
-        'traceparent': '00-$traceId-$parentId-01',
+        'chronicler-trace-id': traceId,
+        'chronicler-span-id': parentId,
+        'chronicler-sampled': '1',
       });
       final exporter = TestExporter();
       final chronicler = Chronicler(
@@ -219,10 +267,10 @@ void main() {
         'local',
         parent: remote,
         run: (local) {
-          expect(local.tracing.inject({'traceparent': 'stale'}), isEmpty);
+          expect(local.tracing.inject({'chronicler-sampled': 'stale'}), isEmpty);
           local.logs.info('local correlation');
           chronicler.setPropagationEnabled(true);
-          activeHeader = local.tracing.inject({})['traceparent']!;
+          activeHeader = local.tracing.inject({})['chronicler-trace-id']!;
           chronicler.setPropagationEnabled(false);
         },
       );
@@ -231,13 +279,15 @@ void main() {
       localTraceId = (exporter.batches.single.records.single as LogRecord).envelope.traceId!;
 
       expect(localTraceId, isNot(traceId));
-      expect(activeHeader, contains(localTraceId));
+      expect(activeHeader, localTraceId);
       expect(chronicler.isCollectionEnabled(ChroniclerSignal.traces), isTrue);
     });
 
     test('should let local collection disablement override a sampled remote parent', () async {
       final remote = TracePropagation.extract({
-        'traceparent': '00-$traceId-$parentId-01',
+        'chronicler-trace-id': traceId,
+        'chronicler-span-id': parentId,
+        'chronicler-sampled': '1',
       });
       final exporter = TestExporter();
       final chronicler = Chronicler(
@@ -249,7 +299,7 @@ void main() {
           delivery: DeliveryOptions(maxBatchRecords: 1),
         ),
       )..setCollectionEnabled(ChroniclerSignal.traces, false);
-      late String header;
+      late Map<String, String> headers;
 
       await Context()
           .withChronicler(chronicler.recorder)
@@ -257,14 +307,14 @@ void main() {
             'server',
             parent: remote,
             run: (server) {
-              header = server.tracing.inject({})['traceparent']!;
+              headers = server.tracing.inject({});
               server.logs.info('remote correlation');
             },
           );
       await Future<void>.delayed(Duration.zero);
 
-      expect(header, startsWith('00-$traceId-'));
-      expect(header, endsWith('-00'));
+      expect(headers['chronicler-trace-id'], traceId);
+      expect(headers['chronicler-sampled'], '0');
       expect(exporter.batches.single.records, everyElement(isA<LogRecord>()));
       expect(exporter.batches.single.records.single.envelope.traceId, traceId);
     });

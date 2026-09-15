@@ -114,7 +114,8 @@ no measurements produces none. Metric measurements are aggregated without random
 
 Names and units are case-sensitive. Values use finite double precision, so large integer inputs may
 be approximate and business-critical accounting belongs in application storage. Dimensions accept
-bounded strings, booleans, and portable finite numbers. Attribute order, `1` versus `1.0`, and signed
+strings, booleans, and finite numbers within the record byte budget. Integer dimensions retain their
+integer precision on native Dart; JavaScript targets retain their platform's numeric limitations. Attribute order, `1` versus `1.0`, and signed
 zero select the same series. Chronicler validates and redacts dimensions before series selection;
 different sensitive values replaced by `[REDACTED]` therefore intentionally share a series. The
 configured total and per-instrument series limits reject new dimensions while existing series remain
@@ -180,9 +181,13 @@ failed spans; neither creates an occurrence automatically.
 
 Supply causes explicitly from the immediate cause to the deepest cause. Chronicler preserves their
 order and repetitions, snapshots their converted text during capture, and does not walk application
-error objects for an implicit chain. By default, root and cause messages are limited to 8 KiB of
-UTF-8, stacks to 16 KiB, and a chain to four causes after the root. Exceeding a field, chain, or
-complete-record limit drops the whole occurrence without truncation.
+error objects for an implicit chain. A chain is limited to four causes after the root.
+Messages and stacks share the complete-record byte budget rather than separate field limits.
+Exceeding the chain or complete-record limit drops the whole occurrence without truncation.
+
+Attribute snapshots reject cycles and container nesting deeper than five levels, counting the root
+map as one. Their byte budget is checked while copying. IDs, labels, keys, strings, maps, and lists
+have no separate configurable size limits; `DeliveryOptions.maxRecordBytes` bounds the final record.
 
 Errors bypass random sampling but still obey collection, validation, redaction, queue, and delivery
 limits. A capture call creates a new occurrence ID, while retries preserve its ID, timestamp, and
@@ -199,8 +204,8 @@ Use `context.tracing.setError()` for a handled failure and `setAttribute` or `se
 atomic active-span updates. Chronicler ends spans when callbacks finish; there is no manual span
 lifecycle.
 
-Use W3C Trace Context at a transport boundary without giving headers identity or authorization
-meaning:
+Use Chronicler's correlation headers at a transport boundary without giving them identity or
+authorization meaning:
 
 ```dart
 final parent = TracePropagation.extract(requestHeaders);
@@ -216,16 +221,46 @@ await context.trace(
 );
 ```
 
-`inject` returns a mutable copy, removes stale trace headers case-insensitively, and inserts lowercase
-`traceparent` and valid `tracestate` for the active span. The input map is unchanged. Incoming
-sampling is honored by default; set `honorRemoteSampling` to false to use the local trace rate while
-keeping valid remote correlation.
+`inject` returns a mutable copy, removes stale Chronicler headers case-insensitively, and inserts
+these headers for the active span:
+
+- `chronicler-trace-id`: the shared trace's Chrono ID with the `trc` prefix.
+- `chronicler-span-id`: the sending span's Chrono ID with the `spn` prefix.
+- `chronicler-sampled`: `1` for sampled or `0` for unsampled.
+
+The input map and unrelated headers are unchanged. Without an active span, or when propagation
+is disabled, stale Chronicler headers are removed without replacement. Extraction requires all
+three headers and rejects duplicate or invalid values. The receiver uses the sending span's ID as
+its parent span ID. Incoming sampling is honored by default; set `honorRemoteSampling` to false
+to use the local trace rate while keeping valid remote correlation.
+
+All Chronicler-generated IDs use `chrono_id` with its default 24-character body: `evt` for records,
+`trc` for traces, and `spn` for spans. App, build, user, anonymous, and session IDs remain
+caller-supplied strings and can also use Chrono IDs.
+
+This replaces the earlier W3C `traceparent`/`tracestate` protocol and hexadecimal trace/span IDs.
+Client and server must update together; old trace/span IDs are no longer accepted by the codec.
+Chronicler does not read, write, or modify W3C headers.
 
 Trace sampling is chosen once at a root and inherited by descendants. Unsampled or collection-
 suppressed traces still run callbacks and keep lightweight IDs for propagation and independently
 captured logs, events, and errors. Disabling trace collection discards queued spans and permanently
 suppresses active lineages, even after re-enablement. New trace boundaries use the current policy.
 Propagation has its own runtime switch and can remain enabled while span collection is disabled.
+
+## Timestamps
+
+Record timestamps, metric interval boundaries, and gauge observation times use Conflux `Moment`.
+Import `package:conflux/moment.dart` when constructing records directly. Convert native timestamps
+explicitly with `Moment.fromDateTime(value)`, which returns a `Result`.
+
+The codec encodes timestamps as UTC ISO strings with six fractional digits and a trailing `Z`,
+using Moment's supported year range. Decoding delegates timestamp parsing and validation to Moment.
+It encodes zoned moments as their UTC instant. Generated model serialization uses
+`dart_mappable_conflux`; no mapper initialization is required from callers.
+
+Elapsed durations still use `Duration` and monotonic clocks. This migration does not change
+scheduling, retry, or shutdown behavior.
 
 ## Capture policy and privacy
 
@@ -344,7 +379,9 @@ Its internal implementation is organized by responsibility:
 [`codec/record_decoder.dart`](lib/src/codec/record_decoder.dart) parses untrusted bytes, and
 [`codec/record_schema.dart`](lib/src/codec/record_schema.dart) enforces the model contract in both
 directions. [`src/record_validation.dart`](lib/src/record_validation.dart) handles bounded attribute
-snapshots and Unicode validation shared by capture, metrics, and the codec.
+snapshots shared by capture, metrics, and the codec. Text uses Dart's standard JSON/UTF-8 behavior,
+without extra Unicode validation. Attribute keys may be empty, and logs may carry both an error stack
+and a standalone stack. Metric names and units must be nonempty but have no ASCII or grammar restriction.
 
 [`src/models.dart`](lib/src/models.dart) keeps the sealed record family and mapped payloads with their
 generated mapper library. The handwritten codec defines the version-one wire format; generated

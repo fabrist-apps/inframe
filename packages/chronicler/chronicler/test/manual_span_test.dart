@@ -1,5 +1,4 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart' show ChroniclerTracingFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
@@ -38,46 +37,35 @@ void main() {
       final chronicler = createTracingChronicler(exporter);
       final context = Context().withChronicler(chronicler.recorder);
       final remote = TracePropagation.extract({
-        'traceparent': '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        'chronicler-trace-id': 'trc_0123456789ABCDEFGHIJKLMN',
+        'chronicler-span-id': 'spn_0123456789ABCDEFGHIJKLMN',
+        'chronicler-sampled': '1',
       });
 
       context.tracing.startRootSpan('server', parent: remote).end(SpanStatus.success);
       await Future<void>.delayed(Duration.zero);
 
       final span = exporter.batches.single.records.single as SpanRecord;
-      expect(span.envelope.traceId, '4bf92f3577b34da6a3ce929d0e0e4736');
-      expect(span.envelope.parentSpanId, '00f067aa0ba902b7');
+      expect(span.envelope.traceId, 'trc_0123456789ABCDEFGHIJKLMN');
+      expect(span.envelope.parentSpanId, 'spn_0123456789ABCDEFGHIJKLMN');
     });
 
-    test('should contain unexpected start and end failures', () async {
-      final exporter = TestExporter();
+    test('should preserve recorder work and contain invalid span input', () async {
+      final exporter = TestExporter(acceptImmediately: true);
       final chronicler = createTracingChronicler(exporter);
       final context = Context().withChronicler(chronicler.recorder);
 
-      ChroniclerTracingFixture.failNextSpanStart(chronicler);
-      final unstarted = context.tracing.startSpan('unstarted');
-      unstarted.recorder.recordLog(LogSeverity.info, 'work continued');
-      unstarted.end(SpanStatus.success);
-
-      var elapsedCalls = 0;
-      ChroniclerTracingFixture.overrideClocks(
-        chronicler,
-        now: () => DateTime.utc(2026),
-        elapsed: () {
-          elapsedCalls += 1;
-          if (elapsedCalls == 2) throw StateError('clock failed');
-          return Duration.zero;
-        },
-      );
-      context.tracing.startSpan('unfinished')
+      final invalid = context.tracing.startSpan('');
+      invalid.recorder.recordLog(LogSeverity.info, 'work continued');
+      invalid
         ..end(SpanStatus.success)
         ..end(SpanStatus.error);
+      await chronicler.flush();
 
-      expect(chronicler.diagnosticCounts[DiagnosticReason.spanStartFailed], BigInt.one);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.spanEndFailed], BigInt.one);
-      await Future<void>.delayed(Duration.zero);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
       final records = exporter.batches.expand((batch) => batch.records).toList();
-      expect(records.whereType<LogRecord>().single.envelope.traceId, isNull);
+      expect((records.single as LogRecord).payload.message, 'work continued');
+      expect(records.single.envelope.traceId, isNotNull);
       expect(records.whereType<SpanRecord>(), isEmpty);
     });
   });

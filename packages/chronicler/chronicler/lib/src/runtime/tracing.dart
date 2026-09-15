@@ -5,7 +5,7 @@ import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/record_validation.dart';
 import 'package:chronicler/src/runtime/record_processing.dart';
 import 'package:chronicler/src/trace_propagation.dart';
-import 'package:chrono_id/chrono_id.dart';
+import 'package:conflux/moment.dart';
 
 /// Owns active spans, sampling lineage, attribute updates, and finalization.
 final class TraceController {
@@ -26,7 +26,7 @@ final class TraceController {
     required this._now,
     required this._elapsed,
     required this._nextRandom,
-    required this._nextSecureByte,
+    required this._generateId,
     required this._finalize,
   });
 
@@ -42,16 +42,12 @@ final class TraceController {
   final bool Function() _canStart;
   final bool Function() _collectionEnabled;
   final bool Function() _propagationEnabled;
-  final DateTime Function() _now;
+  final Moment Function() _now;
   final Duration Function() _elapsed;
   final double Function() _nextRandom;
-  final int Function() _nextSecureByte;
+  final String Function(String prefix) _generateId;
   final void Function(SpanRecord) _finalize;
   final _liveSpans = <ActiveSpan>{};
-  bool _failNextStart = false;
-
-  /// Makes the next start throw for deterministic containment tests.
-  void failNextStartForTest() => _failNextStart = true;
 
   /// Discards live payloads and stops recording descendants of existing spans.
   void disableCollection() {
@@ -86,18 +82,14 @@ final class TraceController {
     required bool forceRoot,
     required RemoteTraceParent? remoteParent,
   }) {
-    if (_failNextStart) {
-      _failNextStart = false;
-      throw StateError('Injected span start failure.');
-    }
     if (!_canStart()) return null;
     final acceptedRemote = forceRoot && _propagationEnabled() ? remoteParent : null;
     final activeParent = !forceRoot && current != null && !current._ended ? current : null;
     late final String traceId;
     late final String spanId;
     try {
-      traceId = acceptedRemote?.traceId ?? activeParent?.traceId ?? _traceId();
-      spanId = _spanId();
+      traceId = acceptedRemote?.traceId ?? activeParent?.traceId ?? _generateId('trc');
+      spanId = _generateId('spn');
     } on Object {
       _diagnostics.record(DiagnosticReason.invalidRecord);
       return null;
@@ -116,12 +108,11 @@ final class TraceController {
     _SpanRecordingState? recording;
     if (lineageRecording) {
       try {
-        _validator.validateString(name, _options.limits.maxLabelBytes, 'span name');
         if (name.isEmpty) {
           throw const RecordValidationException('span name must be nonempty');
         }
         recording = _SpanRecordingState(
-          eventId: ChronoID.generate(prefix: 'evt'),
+          eventId: _generateId('evt'),
           name: name,
           kind: kind,
           attributes: _processor.redactAttributes(_validator.snapshotAttributes(attributes)),
@@ -141,7 +132,6 @@ final class TraceController {
       parentSpanId: acceptedRemote?.parentSpanId ?? activeParent?.spanId,
       lineageRecording: lineageRecording,
       sampled: sampled,
-      tracestate: acceptedRemote?.tracestate ?? activeParent?._tracestate ?? const [],
       recording: recording,
     );
     _liveSpans.add(state);
@@ -189,7 +179,7 @@ final class TraceController {
         span,
         recording,
         status: SpanStatus.cancelled,
-        durationMicros: 9007199254740991,
+        durationMicros: 9223372036854775807,
         attributes: snapshot,
       );
       _codec
@@ -245,10 +235,6 @@ final class TraceController {
     );
   }
 
-  String _traceId() => _randomHex(16);
-
-  String _spanId() => _randomHex(8);
-
   bool _selectLocalTraceSampling() {
     final rate = _options.sampling.traces;
     final sampled = rate == 1 || rate > 0 && _nextRandom() < rate;
@@ -269,22 +255,16 @@ final class TraceController {
   Map<String, String> inject(ActiveSpan? span, Map<String, String> headers) {
     final result = <String, String>{
       for (final MapEntry(:key, :value) in headers.entries)
-        if (key.toLowerCase() != 'traceparent' && key.toLowerCase() != 'tracestate') key: value,
+        if (key.toLowerCase() != TracePropagation.traceIdHeader &&
+            key.toLowerCase() != TracePropagation.spanIdHeader &&
+            key.toLowerCase() != TracePropagation.sampledHeader)
+          key: value,
     };
     if (!_propagationEnabled() || span == null || span._ended) return result;
-    result['traceparent'] = '00-${span.traceId}-${span.spanId}-${span._sampled ? '01' : '00'}';
-    if (span._tracestate.isNotEmpty) result['tracestate'] = span._tracestate.join(',');
+    result[TracePropagation.traceIdHeader] = span.traceId;
+    result[TracePropagation.spanIdHeader] = span.spanId;
+    result[TracePropagation.sampledHeader] = span._sampled ? '1' : '0';
     return result;
-  }
-
-  String _randomHex(int byteCount) {
-    for (var attempt = 0; attempt < 8; attempt++) {
-      final bytes = List<int>.generate(byteCount, (_) => _nextSecureByte());
-      if (bytes.any((byte) => byte != 0)) {
-        return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
-      }
-    }
-    throw StateError('Secure randomness produced only zero identifiers');
   }
 }
 
@@ -296,7 +276,6 @@ final class ActiveSpan {
     required this._parentSpanId,
     required this._lineageRecording,
     required this._sampled,
-    required this._tracestate,
     required this._recording,
   });
 
@@ -308,13 +287,9 @@ final class ActiveSpan {
   final String? _parentSpanId;
   bool _lineageRecording;
   final bool _sampled;
-  final List<String> _tracestate;
   _SpanRecordingState? _recording;
   bool _ended = false;
   bool _explicitError = false;
-
-  /// Attribute retention visible to internal lifecycle tests.
-  int get retainedAttributeCount => _recording?.attributes.length ?? 0;
 }
 
 final class _SpanRecordingState {
@@ -335,7 +310,7 @@ final class _SpanRecordingState {
   final SpanKind kind;
   Map<String, Object?> attributes;
   final Duration startedAt;
-  final DateTime timestamp;
+  final Moment timestamp;
   final String? userId;
   final String? anonymousId;
   final String? sessionId;

@@ -1,12 +1,9 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart'
-    show ChroniclerCaptureFixture, ChroniclerDeliveryFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/async.dart';
 import 'support/exporter.dart';
-import 'support/records.dart';
 import 'support/runtime.dart';
 
 void main() {
@@ -14,9 +11,11 @@ void main() {
     test('disabled logs never enter delivery and toggles are independent', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter);
+      final span = chronicler.recorder.startSpan('propagation');
+      addTearDown(() => span.end(SpanStatus.success));
 
       expect(chronicler.isCollectionEnabled(ChroniclerSignal.logs), isTrue);
-      expect(ChroniclerDeliveryFixture.propagationEnabled(chronicler), isTrue);
+      expect(TracePropagation.extract(span.recorder.injectTrace({})), isNotNull);
       chronicler
         ..setCollectionEnabled(ChroniclerSignal.logs, false)
         ..setCollectionEnabled(ChroniclerSignal.logs, false)
@@ -25,7 +24,7 @@ void main() {
 
       expect(chronicler.isCollectionEnabled(ChroniclerSignal.logs), isFalse);
       expect(chronicler.isCollectionEnabled(ChroniclerSignal.events), isTrue);
-      expect(ChroniclerDeliveryFixture.propagationEnabled(chronicler), isFalse);
+      expect(span.recorder.injectTrace({}), isEmpty);
       expect(exporter.batches, isEmpty);
       expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.one);
     });
@@ -38,16 +37,14 @@ void main() {
         batchInterval: const Duration(seconds: 1),
       );
       Context().withChronicler(chronicler.recorder).logs.info('discard');
-      ChroniclerCaptureFixture.capture(chronicler, _event('kept-one'));
+      chronicler.recorder.recordEvent('kept-one');
 
       chronicler.setCollectionEnabled(ChroniclerSignal.logs, false);
-      ChroniclerCaptureFixture.capture(chronicler, _event('kept-two'));
+      chronicler.recorder.recordEvent('kept-two');
       await waitForCondition(() => exporter.attempts.length == 1);
 
-      expect(exporter.batches.single.records.map((record) => record.kind), [
-        'event',
-        'event',
-      ]);
+      expect(exporter.batches.single.records, hasLength(2));
+      expect(exporter.batches.single.records.whereType<ProductEventRecord>(), hasLength(2));
       expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.one);
     });
 
@@ -56,33 +53,35 @@ void main() {
       final chronicler = _chronicler(exporter)
         ..setCollectionEnabled(ChroniclerSignal.events, false);
 
-      for (final record in [_identity(), _propertiesSet(), _propertiesUnset()]) {
-        ChroniclerCaptureFixture.capture(chronicler, record);
-      }
+      chronicler.recorder
+        ..identify(anonymousId: 'anonymous', userId: 'user')
+        ..setUserProperties(userId: 'user', properties: {'name': 'A'})
+        ..unsetUserProperties(userId: 'user', keys: ['name']);
 
       expect(exporter.batches, isEmpty);
       expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.from(3));
       expect(chronicler.isCollectionEnabled(ChroniclerSignal.logs), isTrue);
-      expect(ChroniclerDeliveryFixture.propagationEnabled(chronicler), isTrue);
     });
 
-    test('each signal switch uses the record signal classification', () {
-      for (final entry in <ChroniclerSignal, ChroniclerRecord>{
-        ChroniclerSignal.logs: _log(),
-        ChroniclerSignal.events: _event('event'),
-        ChroniclerSignal.traces: _span(),
-        ChroniclerSignal.errors: _error(),
-        ChroniclerSignal.metrics: testMetricRecord(),
+    test('each signal switch should suppress capture through its public API', () async {
+      for (final entry in <ChroniclerSignal, void Function(ChroniclerRecorder)>{
+        ChroniclerSignal.logs: (recorder) => recorder.recordLog(LogSeverity.info, 'log'),
+        ChroniclerSignal.events: (recorder) => recorder.recordEvent('event'),
+        ChroniclerSignal.traces: (recorder) => recorder.startSpan('span').end(SpanStatus.success),
+        ChroniclerSignal.errors: (recorder) => recorder.recordError(StateError('failed')),
+        ChroniclerSignal.metrics: (recorder) => recorder.metrics.counter('count').add(1),
       }.entries) {
         final exporter = TestExporter();
         final chronicler = _chronicler(exporter)..setCollectionEnabled(entry.key, false);
 
-        ChroniclerCaptureFixture.capture(chronicler, entry.value);
+        entry.value(chronicler.recorder);
+        await chronicler.flush();
 
         expect(exporter.batches, isEmpty, reason: entry.key.name);
         expect(
           chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled],
-          BigInt.one,
+          // Disabled spans still establish correlation without retaining a payload.
+          entry.key == ChroniclerSignal.traces ? isNull : BigInt.one,
           reason: entry.key.name,
         );
         expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], isNull);
@@ -99,9 +98,8 @@ void main() {
     test('disabled in-flight records stay ineligible while unaffected records retry', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter, maxBatchRecords: 2);
-      ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
       Context().withChronicler(chronicler.recorder).logs.info('log');
-      ChroniclerCaptureFixture.capture(chronicler, _event('event'));
+      chronicler.recorder.recordEvent('event');
       await waitForCondition(() => exporter.attempts.length == 1);
       final records = exporter.batches.single.records;
 
@@ -119,7 +117,8 @@ void main() {
       );
       await waitForCondition(() => exporter.attempts.length == 2);
 
-      expect(exporter.batches.last.records.map((record) => record.kind), ['event']);
+      expect(exporter.batches.last.records, hasLength(1));
+      expect(exporter.batches.last.records.single, isA<ProductEventRecord>());
       expect(chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled], BigInt.one);
     });
 
@@ -196,53 +195,4 @@ Chronicler _chronicler(
     ),
   ),
   exporter,
-);
-
-ProductEventRecord _event(String name) => ProductEventRecord(
-  envelope: testEnvelope(),
-  payload: ProductEventPayload(name: name),
-);
-
-LogRecord _log() => LogRecord(
-  envelope: testEnvelope(),
-  payload: LogPayload(severity: LogSeverity.info, message: 'log'),
-);
-
-SpanRecord _span() => SpanRecord(
-  envelope: testEnvelope().copyWith(
-    traceId: '0123456789abcdef0123456789abcdef',
-    spanId: '0123456789abcdef',
-  ),
-  payload: SpanPayload(
-    name: 'span',
-    spanKind: SpanKind.internal,
-    status: SpanStatus.success,
-    durationMicros: 1,
-  ),
-);
-
-ErrorRecord _error() => ErrorRecord(
-  envelope: testEnvelope(),
-  payload: ErrorPayload(
-    error: const ErrorDetails(type: 'Exception', message: 'failed'),
-    handled: true,
-  ),
-);
-
-IdentityLinkRecord _identity() => IdentityLinkRecord(
-  envelope: testEnvelope(),
-  payload: const IdentityLinkPayload(anonymousId: 'anonymous', userId: 'user'),
-);
-
-UserPropertiesSetRecord _propertiesSet() => UserPropertiesSetRecord(
-  envelope: testEnvelope(),
-  payload: UserPropertiesSetPayload(
-    userId: 'user',
-    properties: const {'name': 'A'},
-  ),
-);
-
-UserPropertiesUnsetRecord _propertiesUnset() => UserPropertiesUnsetRecord(
-  envelope: testEnvelope(),
-  payload: UserPropertiesUnsetPayload(userId: 'user', keys: const ['name']),
 );

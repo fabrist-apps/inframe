@@ -1,30 +1,9 @@
-import 'dart:math';
-
 import 'package:chronicler/src/configuration.dart';
-import 'package:chronicler/src/record_validation.dart';
 
-/// Validates a required application label against its configured byte bound.
-void validateConfiguredLabel(
-  RecordValidator validator,
-  String value,
-  String setting,
-  int maxBytes,
-) {
-  try {
-    if (value.isEmpty) throw const RecordValidationException('must be nonempty');
-    validator.validateString(value, maxBytes, setting);
-  } on RecordValidationException {
+/// Validates a required application label.
+void validateConfiguredLabel(String value, String setting) {
+  if (value.isEmpty) {
     throw ChroniclerConfigurationException(setting, 'is invalid');
-  }
-}
-
-/// Creates and probes secure randomness before accepting runtime ownership.
-Random createSecureRandom(Random Function()? factory) {
-  try {
-    final random = (factory?.call() ?? Random.secure())..nextInt(256);
-    return random;
-  } on Object {
-    throw const ChroniclerConfigurationException('secureRandom', 'is unavailable');
   }
 }
 
@@ -80,24 +59,6 @@ ChroniclerOptions validateAndSnapshotOptions(ChroniclerOptions options) {
       'must fit maxRecordBytes and batch framing',
     );
   }
-  final limits = options.limits;
-  final limitValues = <String, int>{
-    'maxIdBytes': limits.maxIdBytes,
-    'maxLabelBytes': limits.maxLabelBytes,
-    'maxMapEntries': limits.maxMapEntries,
-    'maxListItems': limits.maxListItems,
-    'maxDepth': limits.maxDepth,
-    'maxKeyBytes': limits.maxKeyBytes,
-    'maxStringBytes': limits.maxStringBytes,
-    'maxErrorMessageBytes': limits.maxErrorMessageBytes,
-    'maxStackTraceBytes': limits.maxStackTraceBytes,
-  };
-  for (final MapEntry(:key, :value) in limitValues.entries) {
-    if (value <= 0) throw ChroniclerConfigurationException(key, 'must be positive');
-  }
-  if (limits.maxCauses < 0) {
-    throw const ChroniclerConfigurationException('maxCauses', 'must be nonnegative');
-  }
   for (final MapEntry(:key, :value) in {
     'logs': options.sampling.logs,
     'events': options.sampling.events,
@@ -140,7 +101,6 @@ ChroniclerOptions validateAndSnapshotOptions(ChroniclerOptions options) {
   }
   return ChroniclerOptions(
     delivery: delivery,
-    limits: limits,
     sampling: options.sampling,
     redaction: RedactionOptions(
       fieldTerms: Set.unmodifiable(terms),

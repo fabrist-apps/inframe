@@ -35,7 +35,6 @@ final class DeliveryQueue {
   var _nextSequence = 0;
   var _pumpScheduled = false;
   Timer? _wakeTimer;
-  Duration Function(int attempt, Duration ceiling)? _retryDelayOverride;
   ChroniclerRuntimeState _state = ChroniclerRuntimeState.running;
   bool _deliveryOpen = true;
   Future<DeliveryReport>? _closeFuture;
@@ -45,16 +44,6 @@ final class DeliveryQueue {
 
   /// Current lifecycle state shared with capture gating.
   ChroniclerRuntimeState get state => _state;
-
-  /// Number of flush snapshots waiting for disposition.
-  int get activeFlushes => _flushWaiters.length;
-
-  /// Replaces jitter selection for deterministic delivery tests.
-  // Test control is an operation rather than readable runtime configuration.
-  // ignore: use_setters_to_change_properties
-  void selectRetryDelay(Duration Function(int attempt, Duration ceiling) selector) {
-    _retryDelayOverride = selector;
-  }
 
   /// Creates terminal accounting for a record rejected before enqueueing.
   DeliveryDisposition dropped(DropReason reason) {
@@ -453,24 +442,21 @@ final class DeliveryQueue {
       return;
     }
     final ceiling = _retryCeiling(record.attempts);
-    final delay = _chooseRetryDelay(record.attempts, ceiling);
+    final delay = _chooseRetryDelay(ceiling);
     record
       ..isRetry = true
       ..readyAt = _elapsed() + delay;
     _pending.add(record);
   }
 
-  Duration _chooseRetryDelay(int attempt, Duration ceiling) {
+  Duration _chooseRetryDelay(Duration ceiling) {
     try {
-      final override = _retryDelayOverride;
-      final delay = override == null
-          ? Duration(
-              microseconds: min(
-                (_nextRandom() * (ceiling.inMicroseconds + 1)).floor(),
-                ceiling.inMicroseconds,
-              ),
-            )
-          : override(attempt, ceiling);
+      final delay = Duration(
+        microseconds: min(
+          (_nextRandom() * (ceiling.inMicroseconds + 1)).floor(),
+          ceiling.inMicroseconds,
+        ),
+      );
       if (delay < Duration.zero || delay > ceiling) {
         throw StateError('Retry delay must be between zero and its ceiling.');
       }

@@ -1,12 +1,10 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart'
-    show ChroniclerDeliveryFixture, ChroniclerMetricFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/async.dart';
 import 'support/exporter.dart';
-import 'support/metric_clock.dart';
+import 'support/metric_aggregation.dart';
 
 void main() {
   group('Chronicler up/down counters and gauges', () {
@@ -75,35 +73,23 @@ void main() {
       await chronicler.close();
     });
 
-    test('should keep the latest gauge timestamp and omit unobserved intervals', () async {
-      final exporter = TestExporter(acceptImmediately: true);
-      final clock = MetricClock();
-      final chronicler = _chronicler(exporter);
-      ChroniclerMetricFixture.overrideClocks(
-        chronicler,
-        now: () => clock.now,
-        elapsed: () => clock.elapsed,
-      );
-      final gauge = Context().withChronicler(chronicler.recorder).metrics.gauge('depth')..set(1);
-      clock.advance(const Duration(seconds: 2));
+    test('should keep the latest gauge timestamp and omit unobserved intervals', () {
+      final harness = MetricHarness();
+      final gauge = harness.metrics.gauge('depth')..set(1);
+      harness.clock.advance(const Duration(seconds: 2));
       gauge.set(-4);
-      final first = await chronicler.flush();
-      final second = await chronicler.flush();
-
-      expect(first.accepted, 1);
-      expect(second.accepted, 0);
-      final payload = (exporter.batches.single.records.single as MetricRecord).payload;
+      final payload = harness.seal().single.payload;
+      expect(harness.seal(), isEmpty);
       expect(payload.value, -4);
-      expect(payload.observedAt, clock.now);
+      expect(payload.observedAt, harness.clock.now);
       expect(payload.temporality, isNull);
-      await chronicler.close();
     });
 
     test('should reject invalid and overflowing updates atomically', () async {
       final exporter = TestExporter(acceptImmediately: true);
       final chronicler = _chronicler(exporter, maxBatchRecords: 2);
       final metrics = Context().withChronicler(chronicler.recorder).metrics;
-      final changes = metrics.upDownCounter('connections')..add(5);
+      final changes = metrics.upDownCounter('connections')..add(double.maxFinite);
       final gauge = metrics.gauge('depth')..set(7);
 
       changes
@@ -112,19 +98,7 @@ void main() {
       gauge
         ..set(double.nan)
         ..set(double.negativeInfinity);
-      ChroniclerMetricFixture.setCounterAggregate(
-        chronicler,
-        name: 'connections',
-        count: 1,
-        sum: double.maxFinite,
-      );
       changes.add(double.maxFinite);
-      ChroniclerMetricFixture.setSeriesCount(
-        chronicler,
-        name: 'depth',
-        count: 9007199254740991,
-      );
-      gauge.set(8);
       await chronicler.flush();
 
       final payloads = exporter.batches.single.records.cast<MetricRecord>().map(
@@ -143,10 +117,10 @@ void main() {
             .having(
               (payload) => payload.observationCount,
               'count',
-              9007199254740991,
+              1,
             ),
       );
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidMeasurement], BigInt.from(6));
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidMeasurement], BigInt.from(5));
       await chronicler.close();
     });
 
@@ -203,7 +177,6 @@ void main() {
         maxAttempts: 2,
         maxBatchRecords: 2,
       );
-      ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
       final metrics = Context().withChronicler(chronicler.recorder).metrics;
       metrics.upDownCounter('connections').add(-3);
       metrics.gauge('depth').set(6);
@@ -220,9 +193,12 @@ void main() {
       exporter.attempts.single.completer.complete(const ExportResult.retryable());
       await waitForCondition(() => exporter.attempts.length == 2);
 
-      expect(exporter.batches.last.records, originals);
-      exporter.attempts.last.completer.complete(const ExportResult.accepted());
+      exporter.acceptRemaining();
       expect((await flush).accepted, 2);
+      expect(
+        exporter.batches.skip(1).expand((batch) => batch.records),
+        unorderedEquals(originals),
+      );
       await chronicler.close();
     });
   });

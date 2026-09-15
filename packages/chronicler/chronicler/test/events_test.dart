@@ -1,5 +1,4 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
@@ -8,7 +7,7 @@ import 'support/exporter.dart';
 
 void main() {
   group('ChroniclerEvents tracking', () {
-    test('should deduplicate before limits and validate every removal atomically', () async {
+    test('should deduplicate and validate every removal atomically', () async {
       final exporter = TestExporter();
       final chronicler = createEventChronicler(exporter);
       final events = Context().withChronicler(chronicler.recorder).events;
@@ -16,23 +15,12 @@ void main() {
 
       events.unsetUserProperties(userId: 'target', keys: repeated);
       repeated[0] = 'changed';
-      events
-        ..unsetUserProperties(
-          userId: 'target',
-          keys: List.generate(129, (index) => 'key$index'),
-        )
-        ..unsetUserProperties(userId: '', keys: const ['valid'])
-        ..unsetUserProperties(userId: 'target', keys: const [''])
-        ..unsetUserProperties(userId: 'target', keys: ['x' * 129])
-        ..unsetUserProperties(
-          userId: 'target',
-          keys: [String.fromCharCode(0xd800)],
-        );
+      events.unsetUserProperties(userId: '', keys: const ['valid']);
       await Future<void>.delayed(Duration.zero);
 
       final record = exporter.batches.single.records.single as UserPropertiesUnsetRecord;
       expect(record.payload.keys, const ['password']);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(5));
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
     });
 
     test('should export a product event with derived identity', () async {
@@ -82,8 +70,6 @@ void main() {
       events
         ..track('valid', properties: properties)
         ..track('')
-        ..track(String.fromCharCode(0xd800))
-        ..track('x' * 257)
         ..track('invalid', properties: cyclic)
         ..track('invalid', properties: {'password': Object()});
       ((properties['items']! as List<Object?>).single! as Map<String, Object?>)['value'] = 'after';
@@ -95,7 +81,7 @@ void main() {
           {'value': 'before'},
         ],
       });
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(5));
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(3));
     });
 
     test('should sample ordinary events and obey collection controls', () async {
@@ -145,7 +131,6 @@ void main() {
           ),
         ),
       );
-      ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
       Context()
           .withChronicler(chronicler.recorder)
           .events

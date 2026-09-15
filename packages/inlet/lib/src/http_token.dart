@@ -21,5 +21,6 @@ bool _isTokenCodeUnit(int unit) {
     0x7b,
     0x7d,
   };
+
   return unit > 0x20 && unit < 0x7f && !separators.contains(unit);
 }

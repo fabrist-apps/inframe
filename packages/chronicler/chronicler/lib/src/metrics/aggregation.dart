@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/metrics.dart';
@@ -7,8 +6,7 @@ import 'package:chronicler/src/metrics/dimensions.dart';
 import 'package:chronicler/src/metrics/instruments.dart';
 import 'package:chronicler/src/metrics/series.dart';
 import 'package:chronicler/src/models.dart';
-
-final _instrumentName = RegExp(r'^[A-Za-z][A-Za-z0-9_.\-/]{0,254}$');
+import 'package:conflux/moment.dart';
 
 /// Registry of metric instruments owned by one Chronicler runtime.
 final class MetricAggregation implements ChroniclerMetrics {
@@ -17,15 +15,15 @@ final class MetricAggregation implements ChroniclerMetrics {
   /// Application code obtains this object through `context.metrics`.
   MetricAggregation({
     required this._options,
-    required this._limits,
     required this._canRecord,
     required this._diagnose,
     required this._redact,
     required this._createRecord,
     required this._finalize,
     required bool startEnabled,
-    required DateTime Function() now,
+    required Moment Function() now,
     required Duration Function() elapsed,
+    this._maxRecordBytes = 64 * 1024,
   }) : _now = now,
        _elapsed = elapsed,
        _intervalStart = now(),
@@ -35,16 +33,16 @@ final class MetricAggregation implements ChroniclerMetrics {
   }
 
   final MetricOptions _options;
-  final ChroniclerLimits _limits;
+  final int _maxRecordBytes;
   final bool Function() _canRecord;
   final void Function(DiagnosticReason reason) _diagnose;
   final Map<String, Object?> Function(Map<String, Object?> attributes) _redact;
   final MetricRecord Function(MetricPayload payload) _createRecord;
   final void Function(MetricRecord record) _finalize;
-  final DateTime Function() _now;
+  final Moment Function() _now;
   final Duration Function() _elapsed;
   final _instruments = <String, RegisteredInstrument>{};
-  late DateTime _intervalStart;
+  late Moment _intervalStart;
   late Duration _intervalElapsed;
   Timer? _timer;
   var _generation = 0;
@@ -177,20 +175,16 @@ final class MetricAggregation implements ChroniclerMetrics {
   }
 
   void _validateDefinition(String name, String unit) {
-    if (!_instrumentName.hasMatch(name) || utf8.encode(name).length > _limits.maxLabelBytes) {
+    if (name.isEmpty) {
       throw const ChroniclerConfigurationException(
         'metric name',
-        'must match the Chronicler instrument name grammar and shared label limit',
+        'must be nonempty',
       );
     }
-    final unitBytes = utf8.encode(unit);
-    if (unitBytes.isEmpty ||
-        unitBytes.length > 63 ||
-        unitBytes.length > _limits.maxLabelBytes ||
-        unit.codeUnits.any((unit) => unit < 0x20 || unit > 0x7e)) {
+    if (unit.isEmpty) {
       throw const ChroniclerConfigurationException(
         'metric unit',
-        'must be printable ASCII within the metric and shared label limits',
+        'must be nonempty',
       );
     }
   }
@@ -230,7 +224,9 @@ final class MetricAggregation implements ChroniclerMetrics {
     }
     late final Map<String, Object?> dimensions;
     try {
-      dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
+      dimensions = _redact(
+        snapshotMetricDimensions(attributes, _options, maxRecordBytes: _maxRecordBytes),
+      );
     } on Object {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
@@ -257,7 +253,9 @@ final class MetricAggregation implements ChroniclerMetrics {
     }
     late final Map<String, Object?> dimensions;
     try {
-      dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
+      dimensions = _redact(
+        snapshotMetricDimensions(attributes, _options, maxRecordBytes: _maxRecordBytes),
+      );
     } on Object {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
@@ -284,7 +282,9 @@ final class MetricAggregation implements ChroniclerMetrics {
     }
     late final Map<String, Object?> dimensions;
     try {
-      dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
+      dimensions = _redact(
+        snapshotMetricDimensions(attributes, _options, maxRecordBytes: _maxRecordBytes),
+      );
     } on Object {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
@@ -373,7 +373,7 @@ final class MetricAggregation implements ChroniclerMetrics {
   }
 
   void _evictExpired(
-    DateTime intervalEnd,
+    Moment intervalEnd,
     Duration elapsedEnd, {
     required bool finalizePending,
   }) {
@@ -426,62 +426,5 @@ final class MetricAggregation implements ChroniclerMetrics {
     _generation++;
     _enabled = false;
     _timer = null;
-  }
-
-  /// Rotates once and stops the next timer for deterministic package tests.
-  void rotateForTesting() {
-    seal().forEach(_finalize);
-    stop();
-  }
-
-  /// Replaces an existing counter aggregate for overflow boundary tests.
-  void setCounterAggregateForTesting({
-    required String name,
-    required Map<String, Object?> attributes,
-    required int count,
-    required double sum,
-  }) {
-    final instrument = _instruments[name];
-    final dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
-    final series = instrument?.series[metricSeriesKey(dimensions)];
-    if (series is! SumSeries) throw StateError('counter series does not exist');
-    series
-      ..count = count
-      ..sum = sum;
-  }
-
-  /// Replaces an existing series count for portable-boundary tests.
-  void setSeriesCountForTesting({
-    required String name,
-    required Map<String, Object?> attributes,
-    required int count,
-  }) {
-    final instrument = _instruments[name];
-    final dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
-    final series = instrument?.series[metricSeriesKey(dimensions)];
-    if (series == null) throw StateError('metric series does not exist');
-    series.count = count;
-  }
-
-  /// Replaces an existing histogram aggregate for atomic-overflow tests.
-  void setHistogramAggregateForTesting({
-    required String name,
-    required Map<String, Object?> attributes,
-    required int count,
-    required List<int> bucketCounts,
-    required double sum,
-    required double min,
-    required double max,
-  }) {
-    final instrument = _instruments[name];
-    final dimensions = _redact(snapshotMetricDimensions(attributes, _limits, _options));
-    final series = instrument?.series[metricSeriesKey(dimensions)];
-    if (series is! HistogramSeries) throw StateError('histogram series does not exist');
-    series
-      ..count = count
-      ..sum = sum
-      ..min = min
-      ..max = max;
-    series.bucketCounts.setAll(0, bucketCounts);
   }
 }

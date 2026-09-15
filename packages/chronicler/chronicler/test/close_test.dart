@@ -1,13 +1,11 @@
 import 'dart:async';
 
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart' show ChroniclerDeliveryFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/async.dart';
 import 'support/exporter.dart';
-import 'support/records.dart';
 
 void main() {
   group('Chronicler close', () {
@@ -25,13 +23,9 @@ void main() {
 
     test('seals finalization after blocking recording and configuration', () async {
       final exporter = TestExporter();
-      final chronicler = _chronicler(exporter, maxBatchRecords: 10)
-        ..setCollectionEnabled(ChroniclerSignal.metrics, false);
+      final chronicler = _chronicler(exporter, maxBatchRecords: 10);
       Context().withChronicler(chronicler.recorder).logs.info('queued');
-      ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
-        testLogRecord('finalized'),
-        testMetricRecord(),
-      ]);
+      chronicler.recorder.metrics.counter('finalized').add(1);
 
       final closeFuture = chronicler.close();
       Context().withChronicler(chronicler.recorder).logs.info('blocked');
@@ -45,7 +39,7 @@ void main() {
       final report = await closeFuture;
 
       expect(report.accepted, 2);
-      expect(report.dropped, {DropReason.collectionDisabled: 1});
+      expect(report.dropped, isEmpty);
       expect(report.runtimeState, ChroniclerRuntimeState.closed);
       expect(chronicler.diagnosticCounts[DiagnosticReason.runtimeClosed], BigInt.one);
       expect(exporter.closeCount, 1);

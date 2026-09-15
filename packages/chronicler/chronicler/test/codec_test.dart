@@ -1,7 +1,11 @@
 import 'dart:convert';
 
 import 'package:chronicler/chronicler.dart';
+import 'package:conflux/moment.dart';
+import 'package:conflux/result.dart';
 import 'package:test/test.dart';
+
+import 'support/moments.dart';
 
 void main() {
   group('ChroniclerCodec', () {
@@ -12,7 +16,7 @@ void main() {
           appId: 'app',
           release: 'release',
           source: ChroniclerSource.server,
-          timestamp: DateTime.utc(2026, 9, 12, 10, 20, 30, 123, 456),
+          timestamp: utcMoment(2026, 9, 12, 10, 20, 30, 123, 456),
         ),
         payload: LogPayload(
           severity: LogSeverity.info,
@@ -38,6 +42,32 @@ void main() {
       expect((decoded as Decoded<ChroniclerRecord>).value, record);
     });
 
+    test('should serialize offset Moments as UTC and decode Moment timestamps', () {
+      final timestamp = Moment.parse('2026-09-12T15:50:30.123456+05:30')
+          .getOrThrowWith((error) => StateError('$error'));
+      final record = LogRecord(
+        envelope: RecordEnvelope(
+          eventId: 'evt_000000000000000000000000',
+          appId: 'app',
+          release: 'release',
+          source: ChroniclerSource.server,
+          timestamp: timestamp,
+        ),
+        payload: LogPayload(severity: LogSeverity.info, message: 'offset'),
+      );
+      const codec = ChroniclerCodec();
+
+      final encoded = codec.encodeRecord(record);
+      final map = jsonDecode(utf8.decode(encoded)) as Map<String, Object?>;
+      expect(map['timestamp'], '2026-09-12T10:20:30.123456Z');
+      final decoded = codec.decodeRecord(encoded);
+      expect(decoded, isA<Decoded<ChroniclerRecord>>());
+      expect(
+        (decoded as Decoded<ChroniclerRecord>).value.envelope.timestamp,
+        timestamp.toUtc(),
+      );
+    });
+
     test('should enforce exact encoded record and batch byte bounds', () {
       final records = List.generate(
         3,
@@ -47,7 +77,7 @@ void main() {
             appId: 'app',
             release: 'release',
             source: ChroniclerSource.server,
-            timestamp: DateTime.utc(2026),
+            timestamp: utcMoment(2026),
           ),
           payload: LogPayload(
             severity: LogSeverity.info,

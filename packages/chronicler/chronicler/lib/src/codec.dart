@@ -13,15 +13,11 @@ export 'package:chronicler/src/codec/results.dart';
 final class ChroniclerCodec {
   /// Creates a version-one codec with explicit decode and encode limits.
   const ChroniclerCodec({
-    this.limits = const ChroniclerLimits(),
     this.metricOptions = const MetricOptions(),
     this.maxRecordBytes = 64 * 1024,
     this.maxBatchBytes = 512 * 1024,
     this.maxBatchRecords = 100,
   });
-
-  /// Record schema and caller-data limits.
-  final ChroniclerLimits limits;
 
   /// Metric-specific schema and dimension limits.
   final MetricOptions metricOptions;
@@ -36,10 +32,9 @@ final class ChroniclerCodec {
   final int maxBatchRecords;
 
   RecordSchema get _schema =>
-      RecordSchema(limits: limits, metricOptions: metricOptions, maxRecordBytes: maxRecordBytes);
+      RecordSchema(metricOptions: metricOptions, maxRecordBytes: maxRecordBytes);
 
   RecordDecoder get _decoder => RecordDecoder(
-    limits: limits,
     metricOptions: metricOptions,
     maxRecordBytes: maxRecordBytes,
     maxBatchBytes: maxBatchBytes,
@@ -104,23 +99,25 @@ final class ChroniclerCodec {
   /// Decodes one nonempty version-one batch atomically.
   DecodeResult<ChroniclerBatch> decodeBatch(Uint8List bytes) => _decoder.decodeBatch(bytes);
 
-  Map<String, Object?> _recordMap(ChroniclerRecord record) => {
-    'schemaVersion': 1,
-    'eventId': record.envelope.eventId,
-    'appId': record.envelope.appId,
-    'release': record.envelope.release,
-    'source': record.envelope.source.name,
-    'timestamp': formatRecordTimestamp(record.envelope.timestamp),
-    'buildId': ?record.envelope.buildId,
-    'userId': ?record.envelope.userId,
-    'anonymousId': ?record.envelope.anonymousId,
-    'sessionId': ?record.envelope.sessionId,
-    'traceId': ?record.envelope.traceId,
-    'spanId': ?record.envelope.spanId,
-    'parentSpanId': ?record.envelope.parentSpanId,
-    'kind': record.kind,
-    'payload': _payloadMap(record),
-  };
+  Map<String, Object?> _recordMap(ChroniclerRecord record) {
+    return {
+      'schemaVersion': 1,
+      'eventId': record.envelope.eventId,
+      'appId': record.envelope.appId,
+      'release': record.envelope.release,
+      'source': record.envelope.source.name,
+      'timestamp': record.envelope.timestamp.formatIso(),
+      'buildId': ?record.envelope.buildId,
+      'userId': ?record.envelope.userId,
+      'anonymousId': ?record.envelope.anonymousId,
+      'sessionId': ?record.envelope.sessionId,
+      'traceId': ?record.envelope.traceId,
+      'spanId': ?record.envelope.spanId,
+      'parentSpanId': ?record.envelope.parentSpanId,
+      'kind': record.toMap()['kind'],
+      'payload': _payloadMap(record),
+    };
+  }
 
   Map<String, Object?> _payloadMap(ChroniclerRecord record) => switch (record) {
     LogRecord() => {
@@ -155,13 +152,11 @@ final class ChroniclerCodec {
     },
     MetricRecord() => {
       'name': record.payload.name,
-      'instrument': record.payload.instrument == MetricInstrument.upDownCounter
-          ? 'up_down_counter'
-          : record.payload.instrument.name,
+      'instrument': record.payload.instrument.name,
       'unit': record.payload.unit,
       'attributes': record.payload.attributes,
-      'intervalStart': formatRecordTimestamp(record.payload.intervalStart),
-      'intervalEnd': formatRecordTimestamp(record.payload.intervalEnd),
+      'intervalStart': record.payload.intervalStart.formatIso(),
+      'intervalEnd': record.payload.intervalEnd.formatIso(),
       'durationMicros': record.payload.durationMicros,
       'observationCount': record.payload.observationCount,
       'temporality': ?record.payload.temporality?.name,
@@ -172,8 +167,7 @@ final class ChroniclerCodec {
       'min': ?record.payload.min,
       'max': ?record.payload.max,
       'value': ?record.payload.value,
-      if (record.payload.observedAt case final observedAt?)
-        'observedAt': formatRecordTimestamp(observedAt),
+      if (record.payload.observedAt case final observedAt?) 'observedAt': observedAt.formatIso(),
     },
   };
 

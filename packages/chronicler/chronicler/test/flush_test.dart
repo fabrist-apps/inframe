@@ -1,11 +1,9 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart' show ChroniclerDeliveryFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/async.dart';
 import 'support/exporter.dart';
-import 'support/records.dart';
 import 'support/runtime.dart';
 
 void main() {
@@ -62,7 +60,6 @@ void main() {
     test('preserves uncertainty from a failed attempt before rejection', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter, maxAttempts: 2);
-      ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
       Context().withChronicler(chronicler.recorder).logs.info('uncertain');
       final reportFuture = chronicler.flush();
       await waitForCondition(() => exporter.attempts.length == 1);
@@ -112,7 +109,9 @@ void main() {
       expect(secondReport.accepted, 2);
       expect(secondReport.timedOut, isFalse);
       expect(exporter.batches, hasLength(2));
-      expect(ChroniclerDeliveryFixture.activeFlushes(chronicler), 0);
+      final subsequent = await chronicler.flush();
+      _expectCompleteAccounting(subsequent, 0);
+      expect(subsequent.timedOut, isFalse);
     });
 
     test('timeout leaves records queued and freezes its report', () async {
@@ -130,17 +129,31 @@ void main() {
       await settleAsync();
       expect(report.pending, 1);
       expect(report.accepted, 0);
-      expect(ChroniclerDeliveryFixture.activeFlushes(chronicler), 0);
+      final subsequent = await chronicler.flush();
+      _expectCompleteAccounting(subsequent, 0);
+      expect(subsequent.timedOut, isFalse);
     });
 
     test('includes records and immediate drops finalized by that call', () async {
       final exporter = TestExporter();
-      final chronicler = _chronicler(exporter)
-        ..setCollectionEnabled(ChroniclerSignal.metrics, false);
-      ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
-        testLogRecord('finalized'),
-        testMetricRecord(),
-      ]);
+      final chronicler = closeAfterTest(
+        Chronicler(
+          appId: 'app',
+          release: 'release',
+          source: ChroniclerSource.server,
+          exporter: exporter,
+          options: ChroniclerOptions(
+            delivery: const DeliveryOptions(maxBatchRecords: 10),
+            redaction: RedactionOptions(
+              beforeRecord: (record) =>
+                  record is MetricRecord && record.payload.name == 'discarded' ? null : record,
+            ),
+          ),
+        ),
+        exporter,
+      );
+      chronicler.recorder.metrics.counter('accepted').add(1);
+      chronicler.recorder.metrics.counter('discarded').add(1);
 
       final reportFuture = chronicler.flush();
       await waitForCondition(() => exporter.attempts.length == 1);
@@ -148,20 +161,16 @@ void main() {
       final report = await reportFuture;
 
       expect(report.accepted, 1);
-      expect(report.dropped, {DropReason.collectionDisabled: 1});
+      expect(report.dropped, {DropReason.hookDropped: 1});
       expect(report.pending, 0);
       _expectCompleteAccounting(report, 2);
     });
 
-    test('includes every internal finalization batch queued for that call', () async {
+    test('includes every metric interval finalized by that call', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter, maxBatchRecords: 2);
-      ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
-        testLogRecord('first'),
-      ]);
-      ChroniclerDeliveryFixture.finalizeOnNextFlush(chronicler, [
-        testLogRecord('second'),
-      ]);
+      chronicler.recorder.metrics.counter('first').add(1);
+      chronicler.recorder.metrics.counter('second').add(2);
 
       final reportFuture = chronicler.flush();
       await waitForCondition(() => exporter.attempts.isNotEmpty);
@@ -171,7 +180,7 @@ void main() {
       expect(report.accepted, 2);
       _expectCompleteAccounting(report, 2);
       expect(
-        exporter.batches.single.records.cast<LogRecord>().map((record) => record.payload.message),
+        exporter.batches.single.records.cast<MetricRecord>().map((record) => record.payload.name),
         ['first', 'second'],
       );
     });

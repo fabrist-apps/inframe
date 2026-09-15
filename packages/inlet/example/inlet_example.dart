@@ -7,6 +7,7 @@ Future<void> main() async {
   final application = Inlet()
     ..post('/echo', (_, request) async {
       final document = await request.json(maxBytes: 64 * 1024);
+
       return Response.json(document);
     });
 
@@ -21,6 +22,7 @@ Future<void> _runInProcess(Inlet application) async {
     body: Stream.value(utf8.encode('{"source":"in-process"}')),
   );
   Response? response;
+
   try {
     response = await application.handle(request);
     stdout.writeln(jsonEncode(await response.json()));
@@ -36,6 +38,7 @@ Future<void> _runInProcess(Inlet application) async {
 Future<void> _runOverHttp(Inlet application) async {
   final server = await application.serve(port: 0);
   final client = HttpClient();
+
   try {
     final request = await client.post(
       server.address.address,

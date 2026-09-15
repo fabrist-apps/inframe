@@ -1,12 +1,12 @@
 import 'dart:async';
 
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart' show ChroniclerTracingFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/exporter.dart';
-
+import 'support/moments.dart';
+import 'support/trace_controller.dart';
 import 'support/tracing_support.dart';
 
 void main() {
@@ -280,30 +280,18 @@ void main() {
       expect(span.envelope.timestamp.isUtc, isTrue);
     });
 
-    test('should measure duration with a monotonic clock', () async {
-      final exporter = TestExporter();
-      final chronicler = createTracingChronicler(exporter);
+    test('should measure duration with a monotonic clock', () {
       var elapsed = Duration.zero;
-      var wallClock = DateTime.utc(2026, 9, 12, 10);
-      ChroniclerTracingFixture.overrideClocks(
-        chronicler,
-        now: () => wallClock,
-        elapsed: () => elapsed,
-      );
+      var wallClock = utcMoment(2026, 9, 12, 10);
+      final bed = TraceControllerTestBed(now: () => wallClock, elapsed: () => elapsed);
 
-      await Context()
-          .withChronicler(chronicler.recorder)
-          .span(
-            'clock',
-            run: (_) {
-              wallClock = DateTime.utc(2020);
-              elapsed = const Duration(microseconds: 1234);
-            },
-          );
-      await Future<void>.delayed(Duration.zero);
+      final active = bed.start('clock');
+      wallClock = utcMoment(2020);
+      elapsed = const Duration(microseconds: 1234);
+      bed.controller.finish(active, SpanStatus.success);
 
-      final span = exporter.batches.single.records.single as SpanRecord;
-      expect(span.envelope.timestamp, DateTime.utc(2026, 9, 12, 10));
+      final span = bed.records.single;
+      expect(span.envelope.timestamp, utcMoment(2026, 9, 12, 10));
       expect(span.payload.durationMicros, 1234);
     });
   });

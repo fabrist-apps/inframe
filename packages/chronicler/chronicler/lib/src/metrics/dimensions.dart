@@ -6,11 +6,11 @@ import 'package:chronicler/src/record_validation.dart';
 /// Validates, snapshots, sorts, and normalizes metric dimensions.
 Map<String, Object?> snapshotMetricDimensions(
   Map<String, Object?> attributes,
-  ChroniclerLimits limits,
-  MetricOptions options,
-) {
+  MetricOptions options, {
+  required int maxRecordBytes,
+}) {
   final snapshot = RecordValidator(
-    limits,
+    maxSnapshotBytes: maxRecordBytes,
   ).snapshotMetricAttributes(attributes, maxAttributes: options.maxAttributes);
   final names = snapshot.keys.toList()..sort();
   final result = <String, Object?>{};
@@ -19,7 +19,14 @@ Map<String, Object?> snapshotMetricDimensions(
     result[name] = switch (value) {
       String() => value,
       bool() => value,
-      num() => value.toDouble() == 0 ? 0.0 : value.toDouble(),
+      int() => value,
+      double() when value == 0 => 0,
+      double()
+          when value >= -9223372036854775808.0 &&
+              value < 9223372036854775808.0 &&
+              value == value.truncateToDouble() =>
+        value.toInt(),
+      double() => value,
       _ => throw StateError('validated metric dimension has an unsupported type'),
     };
   }
@@ -34,7 +41,7 @@ String metricSeriesKey(Map<String, Object?> attributes) => jsonEncode([
       switch (value) {
         String() => 'string',
         bool() => 'boolean',
-        double() => 'number',
+        num() => 'number',
         _ => throw StateError('metric dimension was not canonicalized'),
       },
       value,

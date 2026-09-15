@@ -3,6 +3,7 @@ generate: build-runner
 
 # Run build_runner in each package that owns generated source.
 build-runner: bindings
+    cd packages/conflux/dart_mappable_conflux && dart run build_runner build
     cd packages/chronicler/chronicler && dart run build_runner build
     cd packages/database/rivet && dart run build_runner build
     cd packages/database/rivet/test/fixtures/schema_package && dart run build_runner build

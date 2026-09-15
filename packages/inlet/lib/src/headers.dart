@@ -17,19 +17,18 @@ final class Headers {
         _validateValue(value);
         copiedValues.add(value);
       }
+
       final existingValues = normalized[normalizedName] ?? const [];
       normalized[normalizedName] = List.unmodifiable([...existingValues, ...copiedValues]);
     }
+
     return Headers._(Map.unmodifiable(normalized));
   }
 
   final Map<String, List<String>> _values;
 
   /// Returns the first value for [name], or null when absent.
-  String? operator [](String name) {
-    final values = _values[name.toLowerCase()];
-    return values == null || values.isEmpty ? null : values.first;
-  }
+  String? operator [](String name) => all(name).firstOrNull;
 
   /// Returns every value for [name] in insertion order.
   List<String> all(String name) => _values[name.toLowerCase()] ?? const [];
@@ -41,6 +40,7 @@ final class Headers {
   Headers set(String name, String value) {
     final normalizedName = _validateName(name);
     _validateValue(value);
+
     return _replace(normalizedName, [value]);
   }
 
@@ -48,6 +48,7 @@ final class Headers {
   Headers append(String name, String value) {
     final normalizedName = _validateName(name);
     _validateValue(value);
+
     return _replace(normalizedName, [...all(normalizedName), value]);
   }
 
@@ -57,7 +58,9 @@ final class Headers {
     if (!_values.containsKey(normalizedName)) {
       return this;
     }
+
     final copied = Map<String, List<String>>.of(_values)..remove(normalizedName);
+
     return Headers._(Map.unmodifiable(copied));
   }
 
@@ -66,21 +69,23 @@ final class Headers {
 
   Headers _replace(String name, List<String> values) {
     final copied = Map<String, List<String>>.of(_values)..[name] = List.unmodifiable(values);
+
     return Headers._(Map.unmodifiable(copied));
   }
-}
 
-String _validateName(String name) {
-  if (!isHttpToken(name)) {
-    throw ArgumentError.value(name, 'name', 'must be a nonempty HTTP token');
+  static String _validateName(String name) {
+    if (!isHttpToken(name)) {
+      throw ArgumentError.value(name, 'name', 'must be a nonempty HTTP token');
+    }
+
+    return name.toLowerCase();
   }
-  return name.toLowerCase();
-}
 
-void _validateValue(String value) {
-  for (final unit in value.codeUnits) {
-    if (unit != 0x09 && (unit < 0x20 || unit > 0x7e)) {
-      throw ArgumentError.value(value, 'value', 'must contain printable ASCII or horizontal tab');
+  static void _validateValue(String value) {
+    for (final unit in value.codeUnits) {
+      if (unit != 0x09 && (unit < 0x20 || unit > 0x7e)) {
+        throw ArgumentError.value(value, 'value', 'must contain printable ASCII or horizontal tab');
+      }
     }
   }
 }

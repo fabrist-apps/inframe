@@ -32,6 +32,7 @@ Stream<SseEvent> documentUpdates() async* {
     const Duration(milliseconds: 10),
     heartbeat.complete,
   );
+
   try {
     yield SseEvent.json(
       {'title': 'Ready'},

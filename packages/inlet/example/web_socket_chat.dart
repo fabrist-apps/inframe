@@ -12,10 +12,12 @@ Future<void> main() async {
           if (offered.contains('chat.v1')) {
             return 'chat.v1';
           }
+
           throw const WebSocketException('chat.v1 is required.');
         },
         onConnect: (socket) async {
           sessions.add(socket);
+
           try {
             await for (final message in socket) {
               for (final session in sessions) {
@@ -73,6 +75,7 @@ Future<void> _waitUntil(bool Function() condition) async {
     if (DateTime.now().isAfter(deadline)) {
       throw TimeoutException('Chat sessions did not settle.');
     }
+
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
 }

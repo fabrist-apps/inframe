@@ -1,11 +1,13 @@
 import 'dart:math';
 
+import 'package:ack/ack.dart';
 import 'package:conflux/cron.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/moment.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
+import 'package:conflux/src/validation.dart';
 import 'package:context/context.dart';
 
 /// The result of stepping a [ScheduleDriver].
@@ -47,14 +49,37 @@ final class Schedule<I, O, E> {
   const Schedule.fromDriver(this._createDriver);
   final ScheduleDriver<I, O, E> Function() _createDriver;
 
+  /// Validates the base delay and multiplier of an exponential schedule.
+  static ObjectSchema exponentialArgumentsSchema() =>
+      Ack.object({'base': durationSchema(), 'factor': factorSchema()});
+
+  /// Encodes and decodes a non-negative duration as integer microseconds.
+  static CodecSchema<int, Duration> durationSchema() => Ack.integer()
+      .min(0)
+      .codec<Duration>(
+        decode: (microseconds) => Duration(microseconds: microseconds),
+        encode: (duration) => duration.inMicroseconds,
+      );
+
+  /// Validates a non-negative count.
+  static IntegerSchema recurrencesSchema() => Ack.integer().min(0);
+
+  /// Validates an exponential delay multiplier.
+  static DoubleSchema factorSchema() => Ack.double().finite().positive();
+
+  /// Validates a random sample used for delay jitter.
+  static DoubleSchema _randomSchema() => Ack.double().finite().min(0).lessThan(1);
+
+  /// Validates a computed delay before converting to Duration.
+  static NumberSchema _delayMicrosecondsSchema() =>
+      Ack.number().finite().max(_maxDurationMicroseconds);
+
   /// Creates fresh iteration state for one consumer.
   ScheduleDriver<I, O, E> driver() => _createDriver();
 
   /// Permits [times] continuing decisions without adding delay.
   static Schedule<I, int, Never> recurs<I>(int times) {
-    if (times < 0) {
-      throw ArgumentError.value(times, 'times', 'Must not be negative.');
-    }
+    validateArgument(recurrencesSchema(), times, debugName: 'times');
     return Schedule.fromDriver(() {
       var recurrences = 0;
       return ScheduleDriver((_) {
@@ -68,7 +93,7 @@ final class Schedule<I, O, E> {
 
   /// Continues forever, spacing starts by [duration] from prior completion.
   static Schedule<I, int, Never> spaced<I>(Duration duration) {
-    _requireNonNegativeDuration(duration);
+    validateArgument(Schedule.durationSchema(), duration, debugName: 'duration');
     return Schedule.fromDriver(() {
       var recurrences = 0;
       return ScheduleDriver((_) {
@@ -80,7 +105,7 @@ final class Schedule<I, O, E> {
 
   /// Continues forever on the next anchored [interval], skipping missed ticks.
   static Schedule<I, int, Never> fixed<I>(Duration interval) {
-    _requireNonNegativeDuration(interval);
+    validateArgument(durationSchema(), interval, debugName: 'interval');
     return Schedule.fromDriver(() {
       Duration? anchor;
       var recurrence = 0;
@@ -108,10 +133,7 @@ final class Schedule<I, O, E> {
     Duration base, {
     double factor = 2,
   }) {
-    _requireNonNegativeDuration(base);
-    if (!factor.isFinite || factor <= 0) {
-      throw ArgumentError.value(factor, 'factor', 'Must be finite and positive.');
-    }
+    validateArgument(exponentialArgumentsSchema(), {'base': base, 'factor': factor});
     return Schedule.fromDriver(() {
       var recurrence = 0;
       return ScheduleDriver(
@@ -279,7 +301,7 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
             ScheduleStop<O>() => decision,
             ScheduleContinue<O>(:final output, :final delay) => () {
               final transformed = transform(delay, context);
-              _requireNonNegativeDuration(transformed);
+              validateArgument(Schedule.durationSchema(), transformed, debugName: 'duration');
               return ScheduleContinue(output, transformed);
             }(),
           };
@@ -296,7 +318,7 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
     final nextRandom = random ?? Random().nextDouble;
     return modifyDelay((delay, _) {
       final value = nextRandom();
-      if (!value.isFinite || value < 0 || value >= 1) {
+      if (Schedule._randomSchema().safeParse(value).isFail) {
         throw StateError('Random values must be in [0, 1).');
       }
       return _scaledDuration(delay, 0.8 + (0.4 * value));
@@ -308,7 +330,7 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
   /// The budget uses monotonic elapsed time and does not interrupt work that
   /// already started.
   Schedule<I, O, E> within(Duration duration) {
-    _requireNonNegativeDuration(duration);
+    validateArgument(Schedule.durationSchema(), duration, debugName: 'duration');
     return Schedule.fromDriver(() {
       final source = driver();
       Duration? startedAt;
@@ -389,12 +411,6 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
   }
 }
 
-void _requireNonNegativeDuration(Duration duration) {
-  if (duration.isNegative) {
-    throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
-  }
-}
-
 Duration _nextFixedDelay(Duration anchor, Duration now, Duration interval) {
   final elapsed = now - anchor;
   final remainder = elapsed.inMicroseconds % interval.inMicroseconds;
@@ -406,7 +422,7 @@ const _maxDurationMicroseconds = 0x7FFFFFFFFFFFFFFF;
 
 Duration _scaledDuration(Duration duration, double factor) {
   final microseconds = duration.inMicroseconds * factor;
-  if (!microseconds.isFinite || microseconds > _maxDurationMicroseconds) {
+  if (Schedule._delayMicrosecondsSchema().safeParse(microseconds).isFail) {
     throw RangeError('The computed delay exceeds the supported Duration range.');
   }
   return Duration(microseconds: microseconds.floor());

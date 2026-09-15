@@ -1,5 +1,4 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
@@ -76,7 +75,6 @@ void main() {
           ),
         ),
       );
-      ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
 
       Context()
           .withChronicler(chronicler.recorder)
@@ -128,7 +126,7 @@ void main() {
               final update = record as UserPropertiesUnsetRecord;
               return update.copyWith(
                 payload: update.payload.copyWith(
-                  keys: List.generate(129, (index) => 'key$index'),
+                  keys: List.generate(100, (index) => '$index${'x' * 1024}'),
                 ),
               );
             },
@@ -143,7 +141,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.recordTooLarge], BigInt.one);
     });
 
     test('should emit explicit user properties without changing Context identity', () async {
@@ -233,7 +231,6 @@ void main() {
           ),
         ),
       );
-      ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
       Context()
           .withChronicler(chronicler.recorder)
           .withIdentity(userId: 'caller')

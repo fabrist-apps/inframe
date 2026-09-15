@@ -1,5 +1,4 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart' show ChroniclerCaptureFixture;
 import 'package:chrono_id/chrono_id.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
@@ -59,25 +58,11 @@ void main() {
     test('should redact nested maps with erased generic types', () async {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter: exporter);
-      final now = DateTime.now().toUtc();
-
-      ChroniclerCaptureFixture.capture(
-        chronicler,
-        ProductEventRecord(
-          envelope: RecordEnvelope(
-            eventId: ChronoID.generate(prefix: 'evt'),
-            appId: 'app',
-            release: 'release',
-            source: ChroniclerSource.server,
-            timestamp: now,
-          ),
-          payload: ProductEventPayload(
-            name: 'fixture',
-            properties: <String, Object?>{
-              'nested': <dynamic, dynamic>{'access_token': 'secret'},
-            },
-          ),
-        ),
+      chronicler.recorder.recordEvent(
+        'event',
+        properties: {
+          'nested': <dynamic, dynamic>{'access_token': 'secret'},
+        },
       );
       await Future<void>.delayed(Duration.zero);
 
@@ -209,7 +194,7 @@ void main() {
       final failed = await capture((_) => throw StateError('sensitive'));
       final invalid = await capture((record) {
         final log = record as LogRecord;
-        return log.copyWith(payload: log.payload.copyWith(message: 'x' * 9000));
+        return log.copyWith(payload: log.payload.copyWith(attributes: {'value': Object()}));
       });
       final protected = await capture((record) {
         final log = record as LogRecord;
@@ -247,85 +232,27 @@ void main() {
     });
 
     test('should sample ordinary events but not identity, errors, or metrics', () async {
-      final exporter = TestExporter();
+      final exporter = TestExporter(acceptImmediately: true);
       final chronicler = _chronicler(
         exporter: exporter,
         sampling: const SamplingOptions(events: 0),
         maxBatchRecords: 3,
       );
-      final now = DateTime.now().toUtc();
-      final envelope = RecordEnvelope(
-        eventId: ChronoID.generate(prefix: 'evt'),
-        appId: 'app',
-        release: 'release',
-        source: ChroniclerSource.server,
-        timestamp: now,
-      );
+      chronicler.recorder
+        ..recordEvent('sampled-event')
+        ..identify(anonymousId: 'anonymous', userId: 'user')
+        ..recordError(StateError('failed'));
+      chronicler.recorder.metrics.counter('count').add(1);
+      await chronicler.flush();
 
-      ChroniclerCaptureFixture.capture(
-        chronicler,
-        ProductEventRecord(
-          envelope: envelope,
-          payload: ProductEventPayload(name: 'sampled-event'),
-        ),
-      );
-      ChroniclerCaptureFixture.capture(
-        chronicler,
-        IdentityLinkRecord(
-          envelope: envelope.copyWith(eventId: ChronoID.generate(prefix: 'evt')),
-          payload: const IdentityLinkPayload(anonymousId: 'anonymous', userId: 'user'),
-        ),
-      );
-      ChroniclerCaptureFixture.capture(
-        chronicler,
-        ErrorRecord(
-          envelope: envelope.copyWith(eventId: ChronoID.generate(prefix: 'evt')),
-          payload: ErrorPayload(
-            error: const ErrorDetails(type: 'Error', message: 'failed'),
-            handled: true,
-          ),
-        ),
-      );
-      ChroniclerCaptureFixture.capture(
-        chronicler,
-        MetricRecord(
-          envelope: envelope.copyWith(
-            eventId: ChronoID.generate(prefix: 'evt'),
-            timestamp: now,
-          ),
-          payload: MetricPayload(
-            name: 'count',
-            instrument: MetricInstrument.counter,
-            unit: '1',
-            intervalStart: now.subtract(const Duration(seconds: 1)),
-            intervalEnd: now,
-            durationMicros: 1000000,
-            observationCount: 1,
-            temporality: MetricTemporality.delta,
-            sum: 1,
-          ),
-        ),
-      );
-      await Future<void>.delayed(Duration.zero);
-
-      expect(exporter.batches.single.records.map((record) => record.kind), [
-        'identity_link',
-        'error',
-        'metric',
-      ]);
+      expect(exporter.batches.single.records, hasLength(3));
+      expect(exporter.batches.single.records.whereType<IdentityLinkRecord>(), hasLength(1));
+      expect(exporter.batches.single.records.whereType<ErrorRecord>(), hasLength(1));
+      expect(exporter.batches.single.records.whereType<MetricRecord>(), hasLength(1));
       expect(chronicler.diagnosticCounts[DiagnosticReason.sampledOut], BigInt.one);
     });
 
     test('should allow identity removal and reject protected field changes', () async {
-      final now = DateTime.now().toUtc();
-      RecordEnvelope envelope({String? userId}) => RecordEnvelope(
-        eventId: ChronoID.generate(prefix: 'evt'),
-        appId: 'app',
-        release: 'release',
-        source: ChroniclerSource.server,
-        timestamp: now,
-        userId: userId,
-      );
       final removingExporter = TestExporter();
       final removing = _chronicler(
         exporter: removingExporter,
@@ -336,13 +263,7 @@ void main() {
           },
         ),
       );
-      ChroniclerCaptureFixture.capture(
-        removing,
-        ProductEventRecord(
-          envelope: envelope(userId: 'external-user'),
-          payload: ProductEventPayload(name: 'event'),
-        ),
-      );
+      removing.recorder.withIdentity(userId: 'external-user').recordEvent('event');
       await Future<void>.delayed(Duration.zero);
       expect(removingExporter.batches.single.records.single.envelope.userId, isNull);
 
@@ -355,13 +276,7 @@ void main() {
           },
         ),
       );
-      ChroniclerCaptureFixture.capture(
-        adding,
-        ProductEventRecord(
-          envelope: envelope(),
-          payload: ProductEventPayload(name: 'event'),
-        ),
-      );
+      adding.recorder.recordEvent('event');
       expect(adding.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
 
       final metric = _chronicler(
@@ -373,23 +288,8 @@ void main() {
           },
         ),
       );
-      ChroniclerCaptureFixture.capture(
-        metric,
-        MetricRecord(
-          envelope: envelope(),
-          payload: MetricPayload(
-            name: 'original',
-            instrument: MetricInstrument.counter,
-            unit: '1',
-            intervalStart: now,
-            intervalEnd: now,
-            durationMicros: 0,
-            observationCount: 1,
-            temporality: MetricTemporality.delta,
-            sum: 1,
-          ),
-        ),
-      );
+      metric.recorder.metrics.counter('original').add(1);
+      await metric.flush();
       expect(metric.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
     });
 

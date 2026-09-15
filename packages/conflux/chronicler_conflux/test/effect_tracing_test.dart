@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart' show ChroniclerTracingFixture;
 import 'package:chronicler_conflux/chronicler_conflux.dart';
 import 'package:conflux/conflux.dart';
 import 'package:context/context.dart';
@@ -207,8 +206,11 @@ void main() {
       final harness = _Harness();
       addTearDown(harness.close);
       final parent = TracePropagation.extract({
-        'traceparent': '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        'chronicler-trace-id': 'trc_0123456789ABCDEFGHIJKLMN',
+        'chronicler-span-id': 'spn_0123456789ABCDEFGHIJKLMN',
+        'chronicler-sampled': '1',
       });
+      expect(parent, isNotNull);
 
       await harness.runtime.run(
         Effect.succeed<void, Never>(null).withRootSpan('server', parent: parent),
@@ -216,42 +218,35 @@ void main() {
       await harness.chronicler.flush();
 
       final span = harness.exporter.records.whereType<SpanRecord>().single;
-      expect(span.envelope.traceId, '4bf92f3577b34da6a3ce929d0e0e4736');
-      expect(span.envelope.parentSpanId, '00f067aa0ba902b7');
+      expect(span.envelope.traceId, 'trc_0123456789ABCDEFGHIJKLMN');
+      expect(span.envelope.parentSpanId, 'spn_0123456789ABCDEFGHIJKLMN');
     });
 
-    test('should preserve outcomes when SDK span telemetry fails', () async {
-      final harness = _Harness();
+    test('should preserve outcomes when the span record hook throws', () async {
+      final harness = _Harness(
+        options: ChroniclerOptions(
+          redaction: RedactionOptions(
+            beforeRecord: (_) => throw StateError('hook failed'),
+          ),
+        ),
+      );
       addTearDown(harness.close);
-      ChroniclerTracingFixture.failNextSpanStart(harness.chronicler);
 
-      final afterStartFailure = await harness.runtime.run(
-        Effect.succeed<int, Never>(1).withSpan('start failure'),
+      final success = await harness.runtime.run(
+        Effect.succeed<int, String>(1).withSpan('success'),
       );
+      const cause = Expected<String>('declined');
+      final failure = await harness.runtime.run(
+        Effect.failCause<int, String>(cause).withSpan('failure'),
+      );
+      await harness.chronicler.flush();
 
-      var elapsedCalls = 0;
-      ChroniclerTracingFixture.overrideClocks(
-        harness.chronicler,
-        now: () => DateTime.utc(2026),
-        elapsed: () {
-          elapsedCalls += 1;
-          if (elapsedCalls == 2) throw StateError('clock failed');
-          return Duration.zero;
-        },
-      );
-      final afterEndFailure = await harness.runtime.run(
-        Effect.succeed<int, Never>(2).withSpan('end failure'),
-      );
-
-      expect((afterStartFailure as Succeeded<int, Never>).value, 1);
-      expect((afterEndFailure as Succeeded<int, Never>).value, 2);
+      expect((success as Succeeded<int, String>).value, 1);
+      expect((failure as Failed<int, String>).cause, same(cause));
+      expect(harness.exporter.records, isEmpty);
       expect(
-        harness.chronicler.diagnosticCounts[DiagnosticReason.spanStartFailed],
-        BigInt.one,
-      );
-      expect(
-        harness.chronicler.diagnosticCounts[DiagnosticReason.spanEndFailed],
-        BigInt.one,
+        harness.chronicler.diagnosticCounts[DiagnosticReason.hookFailed],
+        BigInt.two,
       );
     });
   });

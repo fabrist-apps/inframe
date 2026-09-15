@@ -1,16 +1,40 @@
 import 'dart:async';
 
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart'
-    show ChroniclerDeliveryFixture, ChroniclerMetricFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/async.dart';
 import 'support/exporter.dart';
+import 'support/metric_aggregation.dart';
 
 void main() {
   group('Chronicler metric lifecycle', () {
+    test('should reject oversized dimensions before retaining a series', () async {
+      final exporter = TestExporter(acceptImmediately: true);
+      final chronicler = Chronicler(
+        appId: 'app',
+        release: 'release',
+        source: ChroniclerSource.server,
+        exporter: exporter,
+        options: const ChroniclerOptions(
+          delivery: DeliveryOptions(maxRecordBytes: 1024),
+          metrics: MetricOptions(maxSeries: 1, maxSeriesPerInstrument: 1),
+        ),
+      );
+      addTearDown(chronicler.close);
+      chronicler.recorder.metrics.counter('requests')
+        ..add(1, attributes: {'route': 'x' * 1024})
+        ..add(2, attributes: {'route': '/orders'});
+
+      final report = await chronicler.flush();
+
+      expect(report.accepted, 1);
+      expect(_sums(exporter), [2]);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidMeasurement], BigInt.one);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.seriesLimitReached], isNull);
+    });
+
     test('should seal a partial interval into the calling flush snapshot', () async {
       final exporter = TestExporter(acceptImmediately: true);
       final chronicler = _chronicler(exporter);
@@ -70,30 +94,45 @@ void main() {
 
     test('should discard unfinished and queued metrics while retaining handles', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final chronicler = _chronicler(
-        exporter,
-        maxBatchRecords: 10,
-        batchInterval: const Duration(minutes: 1),
-      );
-      final metrics = Context().withChronicler(chronicler.recorder).metrics;
-      final counter = metrics.counter('requests')..add(1);
-      ChroniclerMetricFixture.rotate(chronicler);
-      counter.add(5);
+      final timers = <_ManualTimer>[];
+      const interval = Duration(seconds: 17);
+      await runZoned(
+        () async {
+          final chronicler = _chronicler(
+            exporter,
+            maxBatchRecords: 10,
+            batchInterval: const Duration(minutes: 1),
+            metricInterval: interval,
+          );
+          final metrics = chronicler.recorder.metrics;
+          final counter = metrics.counter('requests')..add(1);
+          timers.single.fire();
+          counter.add(5);
 
-      chronicler.setCollectionEnabled(ChroniclerSignal.metrics, false);
-      counter.add(10);
-      chronicler.setCollectionEnabled(ChroniclerSignal.metrics, true);
-      expect(identical(metrics.counter('requests'), counter), isTrue);
-      counter.add(2);
-      final report = await chronicler.flush();
+          chronicler.setCollectionEnabled(ChroniclerSignal.metrics, false);
+          counter.add(10);
+          chronicler.setCollectionEnabled(ChroniclerSignal.metrics, true);
+          expect(identical(metrics.counter('requests'), counter), isTrue);
+          counter.add(2);
+          final report = await chronicler.flush();
 
-      expect(report.accepted, 1);
-      expect(_sums(exporter), [2]);
-      expect(
-        chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled],
-        BigInt.from(2),
+          expect(report.accepted, 1);
+          expect(_sums(exporter), [2]);
+          expect(
+            chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled],
+            BigInt.from(2),
+          );
+          await chronicler.close();
+        },
+        zoneSpecification: ZoneSpecification(
+          createTimer: (self, parent, zone, duration, callback) {
+            if (duration != interval) return parent.createTimer(zone, duration, callback);
+            final timer = _ManualTimer(callback);
+            timers.add(timer);
+            return timer;
+          },
+        ),
       );
-      await chronicler.close();
     });
 
     test('should seal pending metrics during close after blocking new recording', () async {
@@ -139,7 +178,6 @@ void main() {
         maxAttempts: 2,
         retryDelay: const Duration(milliseconds: 1),
       );
-      ChroniclerDeliveryFixture.selectRetryDelay(chronicler, (_, _) => Duration.zero);
       final counter = Context().withChronicler(chronicler.recorder).metrics.counter('requests')
         ..add(1);
 
@@ -190,23 +228,22 @@ void main() {
       await chronicler.close();
     });
 
-    test('should contain record construction failures and start a fresh interval', () async {
-      final exporter = TestExporter(acceptImmediately: true);
-      final chronicler = _chronicler(exporter);
-      final counter = Context().withChronicler(chronicler.recorder).metrics.counter('requests')
-        ..add(1);
-      ChroniclerMetricFixture.failNextRecordCreation(chronicler);
-
-      final failed = await chronicler.flush();
+    test('should contain record construction failures and start a fresh interval', () {
+      var fail = true;
+      final harness = MetricHarness(
+        createRecord: (payload) {
+          if (fail) {
+            fail = false;
+            throw StateError('record construction failed');
+          }
+          return MetricHarness.record(payload);
+        },
+      );
+      final counter = harness.metrics.counter('requests')..add(1);
+      expect(harness.seal(), isEmpty);
       counter.add(2);
-      final recovered = await chronicler.flush();
-
-      expect(failed.accepted, 0);
-      expect(failed.dropped, isEmpty);
-      expect(recovered.accepted, 1);
-      expect(_sums(exporter), [2]);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
-      await chronicler.close();
+      expect(harness.seal().single.payload.sum, 2);
+      expect(harness.reasons, [DiagnosticReason.invalidRecord]);
     });
 
     test('should validate finalized dimensions with the metric attribute limit', () async {
@@ -217,7 +254,6 @@ void main() {
         source: ChroniclerSource.server,
         exporter: exporter,
         options: const ChroniclerOptions(
-          limits: ChroniclerLimits(maxMapEntries: 1),
           metrics: MetricOptions(maxAttributes: 2),
         ),
       );

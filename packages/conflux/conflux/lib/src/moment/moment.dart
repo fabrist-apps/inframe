@@ -1,6 +1,7 @@
 // All value fields are final; no annotation-only runtime dependency is needed.
 // ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
 
+import 'package:ack/ack.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/moment/local_resolution.dart';
 import 'package:conflux/src/moment/moment_error.dart';
@@ -15,9 +16,15 @@ import 'package:conflux/src/moment/time_zone.dart';
 sealed class Moment implements Comparable<Moment> {
   const Moment._(this.microsecondsSinceEpoch);
 
+  /// Validates signed epoch microseconds against Dart DateTime's inclusive bounds.
+  static AckSchema<int, int> epochMicrosecondsSchema() =>
+      Ack.integer().min(minimumMomentMicros).max(maximumMomentMicros);
+
   /// Constructs UTC from signed microseconds since the Unix epoch.
   static Result<UtcMoment, MomentError> fromEpochMicroseconds(int value) {
-    if (!inMomentRange(value)) return const Failure(MomentError.range);
+    if (epochMicrosecondsSchema().safeParse(value).isFail) {
+      return const Failure(MomentError.range);
+    }
 
     return Success(UtcMoment._(value));
   }

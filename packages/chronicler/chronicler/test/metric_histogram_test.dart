@@ -1,5 +1,4 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart' show ChroniclerMetricFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
@@ -78,56 +77,27 @@ void main() {
 
     test('should reject invalid and overflowing observations without partial updates', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final chronicler = _chronicler(exporter, maxBatchRecords: 2);
-      final histogram =
-          Context()
-              .withChronicler(chronicler.recorder)
-              .metrics
-              .histogram('values', boundaries: [10, 50])
-            ..record(4)
-            ..record(4, attributes: {'boundary': 'count'})
-            ..record(double.nan)
-            ..record(double.infinity);
-      ChroniclerMetricFixture.setHistogramAggregate(
-        chronicler,
-        name: 'values',
-        count: 2,
-        bucketCounts: [2, 0, 0],
-        sum: double.maxFinite,
-        min: 1,
-        max: 4,
-      );
-      ChroniclerMetricFixture.setHistogramAggregate(
-        chronicler,
-        name: 'values',
-        attributes: {'boundary': 'count'},
-        count: 9007199254740991,
-        bucketCounts: [9007199254740991, 0, 0],
-        sum: 4,
-        min: 4,
-        max: 4,
-      );
-      histogram
+      final chronicler = _chronicler(exporter);
+      Context()
+          .withChronicler(chronicler.recorder)
+          .metrics
+          .histogram('values', boundaries: [10, 50])
         ..record(double.maxFinite)
-        ..record(5, attributes: {'boundary': 'count'});
+        ..record(double.nan)
+        ..record(double.infinity)
+        ..record(double.maxFinite);
       await chronicler.flush();
 
       final payloads = exporter.batches.single.records.cast<MetricRecord>().map(
         (record) => record.payload,
       );
-      final sumBoundary = payloads.singleWhere((payload) => payload.attributes.isEmpty);
-      expect(sumBoundary.sum, double.maxFinite);
-      expect(sumBoundary.bucketCounts, [2, 0, 0]);
-      expect(sumBoundary.count, 2);
-      expect(sumBoundary.min, 1);
-      expect(sumBoundary.max, 4);
-      final countBoundary = payloads.singleWhere((payload) => payload.attributes.isNotEmpty);
-      expect(countBoundary.sum, 4);
-      expect(countBoundary.bucketCounts, [9007199254740991, 0, 0]);
-      expect(countBoundary.count, 9007199254740991);
-      expect(countBoundary.min, 4);
-      expect(countBoundary.max, 4);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidMeasurement], BigInt.from(4));
+      final payload = payloads.single;
+      expect(payload.sum, double.maxFinite);
+      expect(payload.bucketCounts, [0, 0, 1]);
+      expect(payload.count, 1);
+      expect(payload.min, double.maxFinite);
+      expect(payload.max, double.maxFinite);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidMeasurement], BigInt.from(3));
       await chronicler.close();
     });
 

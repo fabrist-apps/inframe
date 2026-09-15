@@ -27,23 +27,26 @@ final class InletServer {
   /// closes them nor waits for their session callbacks.
   Future<void> close({bool force = false}) {
     _adapter.beginClosing(force: force);
+
     if (force && !_forced) {
       _forced = true;
+      // Escalation closes active connections without replacing the shared future.
       final forceClose = _closeTransport(force: true);
       _observeAdditionalClose(forceClose);
-      final existing = _closeFuture;
-      if (existing != null) {
-        return existing;
-      }
-      return _closeFuture = forceClose;
+
+      return _closeFuture ??= forceClose;
     }
+
     final existing = _closeFuture;
+
     if (existing != null) {
       return existing;
     }
 
     final closing = Completer<void>();
     _closeFuture = closing.future;
+
+    // Defer transport shutdown so requests already queued can receive 503.
     Timer.run(() async {
       try {
         await _closeTransport(force: false);
@@ -53,6 +56,7 @@ final class InletServer {
         closing.completeError(error, stackTrace);
       }
     });
+
     return closing.future;
   }
 
@@ -80,8 +84,10 @@ extension on Inlet {
   }) async {
     _validateServerOptions(port, backlog, idleTimeout);
     final bindAddress = address ?? InternetAddress.loopbackIPv4;
+
     return _freezeAfter(() async {
       HttpServer? server;
+
       try {
         server = (await bind(bindAddress))
           ..autoCompress = false
@@ -95,8 +101,9 @@ extension on Inlet {
           _report,
           isSecure: isSecure,
         )..start();
+
         return InletServer._(server, adapter, isSecure: isSecure);
-      } on Object catch (error, stackTrace) {
+      } on Object {
         if (server != null) {
           try {
             await server.close(force: true);
@@ -104,9 +111,25 @@ extension on Inlet {
             _report(cleanupError, cleanupStackTrace);
           }
         }
-        Error.throwWithStackTrace(error, stackTrace);
+        rethrow;
       }
     });
+  }
+
+  void _validateServerOptions(int port, int backlog, Duration? idleTimeout) {
+    _validatePort(port, 'port');
+
+    if (backlog < 0) {
+      throw ArgumentError.value(backlog, 'backlog', 'must not be negative');
+    }
+
+    if (idleTimeout != null && idleTimeout.isNegative) {
+      throw ArgumentError.value(
+        idleTimeout,
+        'idleTimeout',
+        'must not be negative',
+      );
+    }
   }
 }
 
@@ -141,9 +164,11 @@ final class _ServerAdapter {
 
   void beginClosing({required bool force}) {
     _closing = true;
+
     if (!force || _forceClosing) {
       return;
     }
+
     _forceClosing = true;
     final responses = _detachedResponses.toList();
     _detachedResponses.clear();
@@ -158,6 +183,7 @@ final class _ServerAdapter {
 
   Future<void> _handle(HttpRequest incoming) async {
     final input = _HttpRequestBody(incoming);
+
     if (_closing) {
       try {
         await _sendEmpty(
@@ -175,6 +201,7 @@ final class _ServerAdapter {
     }
 
     late final Request request;
+
     try {
       request = _adapt(incoming, input);
     } on Object {
@@ -190,6 +217,7 @@ final class _ServerAdapter {
 
     _DispatchResult? dispatch;
     Response? response;
+
     try {
       dispatch = await _dispatch(request);
       response = dispatch.response;
@@ -210,10 +238,12 @@ final class _ServerAdapter {
           failure.error,
           failure.stackTrace,
         );
+
         if (response.isWebSocketUpgrade) {
           await _cleanUp(response.close);
           response = Response.empty(status: HttpStatus.internalServerError);
         }
+
         try {
           await _deliver(
             incoming,
@@ -224,6 +254,7 @@ final class _ServerAdapter {
           );
         } on _DeliveryFailure catch (replacementFailure) {
           _report(replacementFailure.error, replacementFailure.stackTrace);
+
           if (!replacementFailure.committed) {
             await _cleanUp(() => _abortUncommitted(incoming.response));
           }
@@ -231,6 +262,7 @@ final class _ServerAdapter {
       }
     } on Object catch (error, stackTrace) {
       _report(error, stackTrace);
+
       try {
         await _sendEmpty(
           incoming.response,
@@ -244,7 +276,9 @@ final class _ServerAdapter {
       if (response != null) {
         await _cleanUp(response.close);
       }
+
       await _cleanUp(request.close);
+
       if (!input.isFinishStarted) {
         await _cleanUp(input.finish);
       }
@@ -265,6 +299,7 @@ final class _ServerAdapter {
             localPort: socket.localPort,
             isSecure: isSecure,
           );
+
     return Request(
       method: incoming.method,
       uri: incoming.uri,
@@ -283,6 +318,7 @@ final class _ServerAdapter {
   }) async {
     final target = incoming.response;
     var committed = false;
+
     try {
       if (response._delivery case final _WebSocketDelivery webSocket) {
         if (incoming.method != 'GET' ||
@@ -292,16 +328,19 @@ final class _ServerAdapter {
             'Invalid WebSocket upgrade request.',
           );
         }
+
         if (!response._body.isUntouched) {
           throw StateError('The WebSocket response has already been closed.');
         }
+
         final offeredProtocols = _parseWebSocketProtocols(incoming.headers);
         final selectedProtocol = await _selectWebSocketProtocol(
           webSocket.selectProtocol,
           offeredProtocols,
         );
         _validateWebSocketExtensions(incoming.headers, webSocket.compression);
-        _prepareWebSocketTarget(target, response.headers);
+        target.bufferOutput = false;
+        _applyResponseHeaders(target, response.headers);
 
         final upgrading = WebSocketTransformer.upgrade(
           incoming,
@@ -320,13 +359,16 @@ final class _ServerAdapter {
       }
 
       final suppressBody = response._suppressBody || isHead;
+
       if (!suppressBody && !response._body.isUntouched) {
         throw StateError('The response body has already been consumed or closed.');
       }
+
       _prepareTarget(target, input, reset: resetTarget);
       target.statusCode = response.statusCode;
       _applyResponseHeaders(target, response.headers);
       final knownLength = response._body.knownLength;
+
       if (response.statusCode == HttpStatus.noContent ||
           response.statusCode == HttpStatus.notModified) {
         target.persistentConnection = false;
@@ -337,6 +379,7 @@ final class _ServerAdapter {
         await socket.close();
         return;
       }
+
       if (response.statusCode == HttpStatus.resetContent) {
         target.contentLength = 0;
         final close = target.close();
@@ -344,16 +387,20 @@ final class _ServerAdapter {
         await close;
         return;
       }
+
       if (isHead) {
         target.headers.chunkedTransferEncoding = false;
+
         if (knownLength != null) {
           target.contentLength = knownLength;
         }
+
         final close = target.close();
         committed = true;
         await close;
         return;
       }
+
       if (response._delivery is _SseDelivery) {
         target
           ..persistentConnection = false
@@ -363,9 +410,11 @@ final class _ServerAdapter {
         await _deliverSse(await detach, response.body);
         return;
       }
+
       if (knownLength != null) {
         target.contentLength = knownLength;
       }
+
       final delivery = target.addStream(response.body);
       committed = true;
       await delivery;
@@ -377,17 +426,19 @@ final class _ServerAdapter {
 
   Future<void> _deliverSse(Socket socket, Stream<List<int>> body) async {
     final response = _DetachedSseResponse(socket, body);
-    if (!_ownDetachedResponse(response)) return;
+
+    if (_forceClosing) {
+      response.abort().ignore();
+      return;
+    }
+
+    _detachedResponses.add(response);
+
     try {
       await response.deliver();
     } finally {
       _detachedResponses.remove(response);
     }
-  }
-
-  void _prepareWebSocketTarget(HttpResponse target, Headers headers) {
-    target.bufferOutput = false;
-    _applyResponseHeaders(target, headers);
   }
 
   void _applyResponseHeaders(HttpResponse target, Headers headers) {
@@ -411,6 +462,30 @@ final class _ServerAdapter {
     }
   }
 
+  List<String> _parseWebSocketProtocols(HttpHeaders headers) {
+    final values = headers['sec-websocket-protocol'];
+
+    if (values == null) {
+      return const [];
+    }
+
+    final protocols = <String>[];
+    for (final value in values) {
+      for (final rawProtocol in value.split(',')) {
+        final protocol = rawProtocol.trim();
+
+        if (!isHttpToken(protocol)) {
+          throw const _WebSocketHandshakeRejected(
+            'Invalid Sec-WebSocket-Protocol header.',
+          );
+        }
+        protocols.add(protocol);
+      }
+    }
+
+    return List.unmodifiable(protocols);
+  }
+
   Future<String?> _selectWebSocketProtocol(
     WebSocketProtocolSelector? selector,
     List<String> offeredProtocols,
@@ -420,6 +495,7 @@ final class _ServerAdapter {
     }
 
     late final String? selectedProtocol;
+
     try {
       selectedProtocol = await selector(offeredProtocols);
     } on WebSocketException catch (error, stackTrace) {
@@ -428,11 +504,13 @@ final class _ServerAdapter {
         stackTrace,
       );
     }
+
     if (selectedProtocol != null && !offeredProtocols.contains(selectedProtocol)) {
       throw StateError(
         'Selected WebSocket protocol "$selectedProtocol" was not offered.',
       );
     }
+
     return selectedProtocol;
   }
 
@@ -440,6 +518,7 @@ final class _ServerAdapter {
     if (socket.readyState != WebSocket.open) {
       return;
     }
+
     try {
       await socket.close(code);
     } on Object catch (error, stackTrace) {
@@ -455,21 +534,14 @@ final class _ServerAdapter {
       headers.value('sec-websocket-extensions') ?? '',
       valueSeparator: ',',
     );
+
     if (compression.enabled && extension.value == 'permessage-deflate') {
       final windowBits = extension.parameters['server_max_window_bits'];
+
       if (windowBits != null && windowBits.length >= 2 && windowBits.startsWith('0')) {
         throw ArgumentError('Illegal 0 padding on value.');
       }
     }
-  }
-
-  bool _ownDetachedResponse(_DetachedSseResponse response) {
-    if (_forceClosing) {
-      response.abort().ignore();
-      return false;
-    }
-    _detachedResponses.add(response);
-    return true;
   }
 
   Future<void> _sendEmpty(
@@ -500,7 +572,9 @@ final class _ServerAdapter {
         ..persistentConnection = wasPersistent;
       target.headers.chunkedTransferEncoding = wasChunked;
     }
+
     target.bufferOutput = false;
+
     if (closeConnection || !input.isComplete) {
       input.pause();
       target.persistentConnection = false;
@@ -526,6 +600,7 @@ final class _DetachedSseResponse {
 
   final Socket _socket;
   final StreamIterator<List<int>> _events;
+  Future<void>? _abortFuture;
 
   Future<void> deliver() async {
     try {
@@ -535,14 +610,13 @@ final class _DetachedSseResponse {
         _socket.add(_events.current);
         await _socket.flush();
       }
+
       await _socket.close();
     } on Object {
       abort().ignore();
       rethrow;
     }
   }
-
-  Future<void>? _abortFuture;
 
   Future<void> abort() => _abortFuture ??= _abort();
 
@@ -568,27 +642,6 @@ final class _WebSocketHandshakeRejected extends WebSocketException {
   const _WebSocketHandshakeRejected(super.message);
 }
 
-List<String> _parseWebSocketProtocols(HttpHeaders headers) {
-  final values = headers['sec-websocket-protocol'];
-  if (values == null) {
-    return const [];
-  }
-
-  final protocols = <String>[];
-  for (final value in values) {
-    for (final rawProtocol in value.split(',')) {
-      final protocol = rawProtocol.trim();
-      if (!isHttpToken(protocol)) {
-        throw const _WebSocketHandshakeRejected(
-          'Invalid Sec-WebSocket-Protocol header.',
-        );
-      }
-      protocols.add(protocol);
-    }
-  }
-  return List.unmodifiable(protocols);
-}
-
 final class _HttpRequestBody extends Stream<List<int>> {
   _HttpRequestBody(HttpRequest request) {
     try {
@@ -602,6 +655,7 @@ final class _HttpRequestBody extends Stream<List<int>> {
       final hasNoBody =
           request.contentLength == 0 ||
           (request.contentLength < 0 && !request.headers.chunkedTransferEncoding);
+
       if (hasNoBody) {
         _resumePhysical();
         _completeCleanly = true;
@@ -641,6 +695,7 @@ final class _HttpRequestBody extends Stream<List<int>> {
     if (_listened) {
       throw StateError('The HTTP request body can be listened to only once.');
     }
+
     _listened = true;
 
     final controller = StreamController<List<int>>(sync: true);
@@ -657,6 +712,7 @@ final class _HttpRequestBody extends Stream<List<int>> {
     );
 
     final terminalError = _terminalError;
+
     if (terminalError != null) {
       controller.addError(terminalError, _terminalStackTrace);
       unawaited(controller.close());
@@ -665,6 +721,7 @@ final class _HttpRequestBody extends Stream<List<int>> {
     } else {
       _resumePhysical();
     }
+
     return downstream;
   }
 
@@ -676,11 +733,13 @@ final class _HttpRequestBody extends Stream<List<int>> {
     if (_terminalError != null || _completeCleanly) {
       return;
     }
+
     _terminalError = error;
     _terminalStackTrace = stackTrace;
     final controller = _controller;
+
     if (controller != null) {
-      controller.addError(_terminalError!, stackTrace);
+      controller.addError(error, stackTrace);
       unawaited(controller.close());
     }
   }
@@ -689,8 +748,10 @@ final class _HttpRequestBody extends Stream<List<int>> {
     if (_terminalError != null || _completeCleanly) {
       return;
     }
+
     _completeCleanly = true;
     final close = _controller?.close();
+
     if (close != null) {
       unawaited(close);
     }
@@ -700,6 +761,7 @@ final class _HttpRequestBody extends Stream<List<int>> {
     if (_paused || _completeCleanly) {
       return;
     }
+
     _paused = true;
     _subscription?.pause();
   }
@@ -708,33 +770,24 @@ final class _HttpRequestBody extends Stream<List<int>> {
     if (!_paused || _completeCleanly) {
       return;
     }
+
     _paused = false;
     _subscription?.resume();
   }
 
   Future<void> finish() {
     final existing = _finishFuture;
+
     if (existing != null) {
       return existing;
     }
+
     if (_completeCleanly) {
       return _finishFuture = Future<void>.value();
     }
-    final subscription = _subscription;
-    return _finishFuture = subscription == null ? Future<void>.value() : subscription.cancel();
-  }
-}
 
-void _validateServerOptions(int port, int backlog, Duration? idleTimeout) {
-  _validatePort(port, 'port');
-  if (backlog < 0) {
-    throw ArgumentError.value(backlog, 'backlog', 'must not be negative');
-  }
-  if (idleTimeout != null && idleTimeout.isNegative) {
-    throw ArgumentError.value(
-      idleTimeout,
-      'idleTimeout',
-      'must not be negative',
-    );
+    final subscription = _subscription;
+
+    return _finishFuture = subscription == null ? Future<void>.value() : subscription.cancel();
   }
 }
