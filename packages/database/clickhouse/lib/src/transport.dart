@@ -1,88 +1,95 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:clickhouse/src/clickhouse_deadline.dart';
-import 'package:clickhouse/src/clickhouse_exception.dart';
+import 'package:clickhouse/src/deadline.dart';
+import 'package:clickhouse/src/exception.dart';
+import 'package:clickhouse/src/response.dart';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 
 /// Owns the HTTP connection pool and transport details for a ClickHouse client.
 final class ClickHouseHttpTransport {
   /// Creates a transport with fixed credentials and a response limit.
-  factory ClickHouseHttpTransport({
+  ClickHouseHttpTransport({
     required String username,
     required String password,
-    required int maxResponseBytes,
-  }) => ClickHouseHttpTransport._(
-    username,
-    password,
-    maxResponseBytes,
-    HttpClient()..autoUncompress = true,
-  );
+    required this._maxResponseBytes,
+  }) : _dio = DioForNative(
+         BaseOptions(
+           headers: {
+             'x-clickhouse-user': username,
+             'x-clickhouse-key': password,
+             'x-clickhouse-format': 'JSON',
+           },
+           contentType: 'text/plain; charset=utf-8',
+           responseType: ResponseType.stream,
+           validateStatus: (_) => true,
+         ),
+       );
 
-  ClickHouseHttpTransport._(
-    this._username,
-    this._password,
-    this._maxResponseBytes,
-    this._httpClient,
-  );
-
-  final String _username;
-  final String _password;
   final int _maxResponseBytes;
-  final HttpClient _httpClient;
+  final Dio _dio;
 
   /// Sends one request and returns its completely buffered response.
-  Future<({int statusCode, List<int> body, String? queryId, int? clickHouseCode})> send(
-    Uri uri,
-    List<int> body,
-    ClickHouseDeadline deadline,
-  ) async {
-    HttpClientRequest? request;
+  Future<ClickHouseResponse> send(Uri uri, List<int> body, ClickHouseDeadline deadline) async {
+    final cancellation = CancelToken();
     var requestState = ClickHouseRequestState.notSent;
     String? queryId;
-    try {
-      final openRequest = _httpClient.postUrl(uri);
-      final openedRequest = await deadline.wait(
-        openRequest,
-        requestState,
-        onLateValue: (lateRequest) => lateRequest.abort(),
-      );
-      request = openedRequest;
-      openedRequest.headers
-        ..set('x-clickhouse-user', _username)
-        ..set('x-clickhouse-key', _password)
-        ..set('x-clickhouse-format', 'JSON')
-        ..contentType = ContentType.text;
+
+    // The native adapter consumes this only after opening the connection.
+    // Mark the outcome uncertain before handing it any request bytes.
+    Stream<Uint8List> requestBody() async* {
       deadline.check(requestState);
       requestState = ClickHouseRequestState.mayHaveReachedServer;
-      openedRequest
-        ..contentLength = body.length
-        ..add(body);
+      yield Uint8List.fromList(body);
+    }
 
+    try {
+      deadline.check(requestState);
       final response = await deadline.wait(
-        openedRequest.close(),
+        _dio.postUri<ResponseBody>(
+          uri,
+          data: requestBody(),
+          options: Options(headers: {Headers.contentLengthHeader: body.length}),
+          cancelToken: cancellation,
+        ),
         requestState,
-        onTimeout: openedRequest.abort,
+        onTimeout: cancellation.cancel,
+        onLateValue: (_) => cancellation.cancel(),
       );
+      final responseBody = response.data!;
       queryId = response.headers.value('x-clickhouse-query-id');
-      final responseBody = await _consumeResponse(
-        response,
-        openedRequest,
-        deadline,
-        queryId,
-      );
-      return (
-        statusCode: response.statusCode,
-        body: responseBody,
+      final bytes = await _consumeResponse(responseBody, cancellation, deadline, queryId);
+
+      return ClickHouseResponse(
+        statusCode: responseBody.statusCode,
+        body: bytes,
         queryId: queryId,
         clickHouseCode: int.tryParse(
           response.headers.value('x-clickhouse-exception-code') ?? '',
         ),
       );
-    } on ClickHouseException catch (error) {
-      request?.abort(error);
+    } on ClickHouseTimeoutException {
+      cancellation.cancel();
+      throw deadline.timeoutException(requestState, queryId: queryId);
+    } on ClickHouseException {
+      cancellation.cancel();
       rethrow;
+    } on DioException catch (error) {
+      cancellation.cancel();
+      final cause = error.error ?? error;
+      if (cause is ClickHouseException) {
+        Error.throwWithStackTrace(cause, error.stackTrace);
+      }
+      throw ClickHouseTransportException(
+        message: 'ClickHouse HTTP transport failed: $cause',
+        requestState: requestState,
+        queryId: queryId,
+        cause: cause,
+      );
     } on IOException catch (error) {
-      request?.abort(error);
+      cancellation.cancel();
       throw ClickHouseTransportException(
         message: 'ClickHouse HTTP transport failed: $error',
         requestState: requestState,
@@ -93,11 +100,11 @@ final class ClickHouseHttpTransport {
   }
 
   /// Releases every connection owned by this transport.
-  void close() => _httpClient.close();
+  void close() => _dio.close();
 
   Future<List<int>> _consumeResponse(
-    HttpClientResponse response,
-    HttpClientRequest request,
+    ResponseBody response,
+    CancelToken cancellation,
     ClickHouseDeadline deadline,
     String? queryId,
   ) {
@@ -116,11 +123,11 @@ final class ClickHouseHttpTransport {
       }
       timer.cancel();
       unawaited(subscription.cancel());
-      request.abort(error);
+      cancellation.cancel();
       completer.completeError(error, stackTrace);
     }
 
-    subscription = response.listen(
+    subscription = response.stream.listen(
       (chunk) {
         responseBody.addAll(chunk);
         if (responseBody.length > _maxResponseBytes) {

@@ -5,8 +5,27 @@ import 'dart:io';
 import 'package:clickhouse/clickhouse.dart';
 import 'package:test/test.dart';
 
+import 'support/http_server.dart';
+
 void main() {
   group('ClickHouseClient failures', () {
+    test('should report connection refusal before transmission', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final client = createClient(serverUrl(server));
+      await server.close(force: true);
+      addTearDown(client.close);
+      await expectLater(
+        client.command('SELECT 1'),
+        throwsA(
+          isA<ClickHouseTransportException>().having(
+            (error) => error.requestState,
+            'requestState',
+            ClickHouseRequestState.notSent,
+          ),
+        ),
+      );
+    });
+
     test(
       'should allow request bodies at the limit and reject larger bodies before sending',
       () async {
@@ -38,7 +57,7 @@ void main() {
         final acceptedServer = await responseServer(responseBytes);
         addTearDown(() => acceptedServer.close(force: true));
         final acceptedClient = createClient(
-          acceptedServer,
+          serverUrl(acceptedServer),
           maxResponseBytes: responseBytes.length,
         );
         addTearDown(acceptedClient.close);
@@ -48,7 +67,7 @@ void main() {
         final rejectedServer = await responseServer(responseBytes);
         addTearDown(() => rejectedServer.close(force: true));
         final rejectedClient = createClient(
-          rejectedServer,
+          serverUrl(rejectedServer),
           maxResponseBytes: responseBytes.length - 1,
         );
         addTearDown(rejectedClient.close);
@@ -88,7 +107,7 @@ void main() {
         contentEncoding: 'gzip',
       );
       addTearDown(() => compressedServer.close(force: true));
-      final compressedClient = createClient(compressedServer, maxResponseBytes: 100);
+      final compressedClient = createClient(serverUrl(compressedServer), maxResponseBytes: 100);
       addTearDown(compressedClient.close);
 
       await expectLater(
@@ -101,7 +120,7 @@ void main() {
         statusCode: HttpStatus.badRequest,
       );
       addTearDown(() => errorServer.close(force: true));
-      final errorClient = createClient(errorServer, maxResponseBytes: 100);
+      final errorClient = createClient(serverUrl(errorServer), maxResponseBytes: 100);
       addTearDown(errorClient.close);
 
       await expectLater(
@@ -117,7 +136,7 @@ void main() {
         queryId: 'query-id',
       );
       addTearDown(() => server.close(force: true));
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
 
       await expectLater(
@@ -143,7 +162,7 @@ void main() {
         exceptionCode: 516,
       );
       addTearDown(() => server.close(force: true));
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
 
       await expectLater(
@@ -163,7 +182,7 @@ void main() {
         utf8.encode('$validResult\nCode: 241. DB::Exception: Memory limit exceeded'),
       );
       addTearDown(() => server.close(force: true));
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
 
       await expectLater(
@@ -179,7 +198,7 @@ void main() {
     test('should reject unexpected command output', () async {
       final server = await responseServer(utf8.encode('unexpected'));
       addTearDown(() => server.close(force: true));
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
 
       await expectLater(
@@ -198,7 +217,7 @@ void main() {
         request.response.write(requestCount == 1 ? '{"meta":[' : validResult);
         await request.response.close();
       });
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
 
       await expectLater(client.query('SELECT broken'), throwsA(isA<ClickHouseProtocolException>()));
@@ -287,48 +306,6 @@ void main() {
   });
 }
 
-const validResult = '{"meta":[{"name":"value","type":"UInt8"}],"data":[{"value":1}],"rows":1}';
-
-ClickHouseClient createClient(
-  HttpServer server, {
-  int maxRequestBytes = 16 * 1024 * 1024,
-  int maxResponseBytes = 16 * 1024 * 1024,
-}) => ClickHouseClient(
-  endpoint: 'http://${server.address.host}:${server.port}',
-  database: 'analytics',
-  username: 'tester',
-  password: 'secret',
-  maxRequestBytes: maxRequestBytes,
-  maxResponseBytes: maxResponseBytes,
-  allowInsecureHttp: true,
-);
-
-Future<HttpServer> responseServer(
-  List<int> body, {
-  int statusCode = HttpStatus.ok,
-  String? contentEncoding,
-  String? queryId,
-  int? exceptionCode,
-}) async {
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-  server.listen((request) async {
-    await request.drain<void>();
-    request.response.statusCode = statusCode;
-    if (contentEncoding != null) {
-      request.response.headers.set(HttpHeaders.contentEncodingHeader, contentEncoding);
-    }
-    if (queryId != null) {
-      request.response.headers.set('x-clickhouse-query-id', queryId);
-    }
-    if (exceptionCode != null) {
-      request.response.headers.set('x-clickhouse-exception-code', exceptionCode);
-    }
-    request.response.add(body);
-    await request.response.close();
-  });
-  return server;
-}
-
 Future<void> expectRequestBoundary({
   required String body,
   required Future<Object?> Function(ClickHouseClient client) invoke,
@@ -336,7 +313,7 @@ Future<void> expectRequestBoundary({
 }) async {
   final bodyBytes = utf8.encode(body);
   final acceptedServer = await responseServer(utf8.encode(responseBody));
-  final acceptedClient = createClient(acceptedServer, maxRequestBytes: bodyBytes.length);
+  final acceptedClient = createClient(serverUrl(acceptedServer), maxRequestBytes: bodyBytes.length);
   addTearDown(acceptedClient.close);
   addTearDown(() => acceptedServer.close(force: true));
 
@@ -350,7 +327,10 @@ Future<void> expectRequestBoundary({
     request.response.write(responseBody);
     await request.response.close();
   });
-  final rejectedClient = createClient(rejectedServer, maxRequestBytes: bodyBytes.length - 1);
+  final rejectedClient = createClient(
+    serverUrl(rejectedServer),
+    maxRequestBytes: bodyBytes.length - 1,
+  );
   addTearDown(rejectedClient.close);
   addTearDown(() => rejectedServer.close(force: true));
 

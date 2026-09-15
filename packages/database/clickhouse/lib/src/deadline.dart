@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:clickhouse/src/clickhouse_exception.dart';
+import 'package:clickhouse/src/exception.dart';
 
 /// Tracks the remaining time for one internal ClickHouse operation.
 final class ClickHouseDeadline {

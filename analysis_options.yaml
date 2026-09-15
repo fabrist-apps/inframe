@@ -9,6 +9,7 @@ linter:
 
 analyzer:
   errors:
+    avoid_catching_errors: ignore
     avoid_dynamic_calls: ignore
     avoid_equals_and_hash_code_on_mutable_classes: ignore
     avoid_js_rounded_ints: ignore

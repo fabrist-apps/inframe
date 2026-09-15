@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:clickhouse/clickhouse.dart';
 import 'package:test/test.dart';
 
+import 'support/http_server.dart';
+
 void main() {
   group('ClickHouseClient', () {
     test('should require HTTPS unless plaintext HTTP is explicitly allowed', () async {
@@ -293,35 +295,4 @@ void main() {
       }
     });
   });
-}
-
-ClickHouseClient createClient(
-  String endpoint, {
-  String password = 'secret',
-  Duration timeout = const Duration(seconds: 30),
-  int maxRequestBytes = 16 * 1024 * 1024,
-  int maxResponseBytes = 16 * 1024 * 1024,
-}) => ClickHouseClient(
-  endpoint: endpoint,
-  database: 'analytics',
-  username: 'tester',
-  password: password,
-  timeout: timeout,
-  maxRequestBytes: maxRequestBytes,
-  maxResponseBytes: maxResponseBytes,
-  allowInsecureHttp: true,
-);
-
-String serverUrl(HttpServer server) => 'http://${server.address.host}:${server.port}';
-
-Future<HttpServer> jsonServer(Object? body) async {
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-  server.listen((request) async {
-    request.response
-      ..statusCode = HttpStatus.ok
-      ..headers.contentType = ContentType.json
-      ..write(jsonEncode(body));
-    await request.response.close();
-  });
-  return server;
 }

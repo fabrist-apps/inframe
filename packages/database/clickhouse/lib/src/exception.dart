@@ -18,11 +18,7 @@ enum ClickHouseSizeLimitDirection {
 
 /// Base class for failures reported by ClickHouse operations.
 sealed class ClickHouseException implements Exception {
-  const ClickHouseException({
-    required this.message,
-    required this.requestState,
-    this.queryId,
-  });
+  const ClickHouseException({required this.message, required this.requestState, this.queryId});
 
   /// Human-readable failure description.
   final String message;

@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:clickhouse/src/clickhouse_deadline.dart';
-import 'package:clickhouse/src/clickhouse_exception.dart';
-import 'package:clickhouse/src/clickhouse_http_transport.dart';
-import 'package:clickhouse/src/clickhouse_protocol.dart' as protocol;
-import 'package:clickhouse/src/clickhouse_query_result.dart';
+import 'package:clickhouse/src/deadline.dart';
+import 'package:clickhouse/src/exception.dart';
+import 'package:clickhouse/src/insert.dart' as insertion;
+import 'package:clickhouse/src/query_result.dart';
+import 'package:clickhouse/src/transport.dart';
 
 /// A reusable HTTP client for bounded ClickHouse operations.
 final class ClickHouseClient {
@@ -27,19 +26,13 @@ final class ClickHouseClient {
     int maxResponseBytes = 16 * 1024 * 1024,
     bool allowInsecureHttp = false,
   }) {
-    final parsedEndpoint = protocol.parseEndpoint(
+    final parsedEndpoint = _parseEndpoint(
       endpoint,
       allowInsecureHttp: allowInsecureHttp,
     );
-    final validatedTimeout = protocol.requirePositiveDuration(timeout, 'timeout');
-    final validatedMaxRequestBytes = protocol.requirePositiveInt(
-      maxRequestBytes,
-      'maxRequestBytes',
-    );
-    final validatedMaxResponseBytes = protocol.requirePositiveInt(
-      maxResponseBytes,
-      'maxResponseBytes',
-    );
+    final validatedTimeout = _requirePositiveDuration(timeout, 'timeout');
+    final validatedMaxRequestBytes = _requirePositiveInt(maxRequestBytes, 'maxRequestBytes');
+    final validatedMaxResponseBytes = _requirePositiveInt(maxResponseBytes, 'maxResponseBytes');
     return ClickHouseClient._(
       endpoint: parsedEndpoint,
       database: database,
@@ -66,7 +59,6 @@ final class ClickHouseClient {
   final Duration _timeout;
   final int _maxRequestBytes;
   final ClickHouseHttpTransport _transport;
-  var _closing = false;
   var _activeOperations = 0;
   Completer<void>? _becameIdle;
   Future<void>? _closeFuture;
@@ -121,8 +113,8 @@ final class ClickHouseClient {
     String? deduplicationToken,
     Duration? timeout,
   }) => _runOperation(timeout, 'insert', (deadline) async {
-    final quotedTable = protocol.quoteIdentifier(table);
-    final encodedRows = protocol.encodeRows(rows);
+    final quotedTable = insertion.quoteIdentifier(table);
+    final encodedRows = insertion.encodeRows(rows);
     deadline.check(ClickHouseRequestState.notSent);
     if (rows.isEmpty) {
       return;
@@ -149,16 +141,7 @@ final class ClickHouseClient {
   /// New work fails with [StateError] as soon as shutdown begins. Accepted
   /// operations keep their existing deadlines. Repeated calls return the same
   /// shutdown future.
-  Future<void> close() {
-    final existing = _closeFuture;
-    if (existing != null) {
-      return existing;
-    }
-    _closing = true;
-    final shutdown = _closeWhenIdle();
-    _closeFuture = shutdown;
-    return shutdown;
-  }
+  Future<void> close() => _closeFuture ??= _closeWhenIdle();
 
   Future<void> _closeWhenIdle() async {
     if (_activeOperations > 0) {
@@ -168,48 +151,14 @@ final class ClickHouseClient {
     _transport.close();
   }
 
-  Future<ClickHouseQueryResult> _query(
-    Uri uri,
-    List<int> body,
-    ClickHouseDeadline deadline,
-  ) async {
+  Future<ClickHouseQueryResult> _query(Uri uri, List<int> body, ClickHouseDeadline deadline) async {
     final response = await _transport.send(uri, body, deadline);
-    if (response.statusCode != HttpStatus.ok) {
-      throw protocol.serverException(
-        response.statusCode,
-        response.body,
-        response.queryId,
-        response.clickHouseCode,
-      );
-    }
-
-    late final String responseText;
-    try {
-      responseText = utf8.decode(response.body);
-      final result = protocol.decodeQueryResult(responseText);
-      deadline.check(
-        ClickHouseRequestState.mayHaveReachedServer,
-        queryId: response.queryId,
-      );
-      return result;
-    } on FormatException catch (error) {
-      final responseTextForError = utf8.decode(response.body, allowMalformed: true);
-      final errorCode = protocol.errorCode(responseTextForError);
-      if (errorCode != null) {
-        throw ClickHouseServerException(
-          message: responseTextForError.trim(),
-          requestState: ClickHouseRequestState.mayHaveReachedServer,
-          queryId: response.queryId,
-          statusCode: response.statusCode,
-          clickHouseCode: errorCode,
-        );
-      }
-      throw ClickHouseProtocolException(
-        message: 'ClickHouse returned a malformed query result: $error',
-        requestState: ClickHouseRequestState.mayHaveReachedServer,
-        queryId: response.queryId,
-      );
-    }
+    final result = response.decodeQuery();
+    deadline.check(
+      ClickHouseRequestState.mayHaveReachedServer,
+      queryId: response.queryId,
+    );
+    return result;
   }
 
   Future<void> _runVoidOperation({
@@ -219,32 +168,7 @@ final class ClickHouseClient {
     required ClickHouseDeadline deadline,
   }) async {
     final response = await _transport.send(uri, body, deadline);
-    if (response.statusCode != HttpStatus.ok) {
-      throw protocol.serverException(
-        response.statusCode,
-        response.body,
-        response.queryId,
-        response.clickHouseCode,
-      );
-    }
-    final responseText = utf8.decode(response.body, allowMalformed: true).trim();
-    final errorCode = protocol.errorCode(responseText);
-    if (errorCode != null) {
-      throw ClickHouseServerException(
-        message: responseText,
-        requestState: ClickHouseRequestState.mayHaveReachedServer,
-        queryId: response.queryId,
-        statusCode: response.statusCode,
-        clickHouseCode: errorCode,
-      );
-    }
-    if (responseText.isNotEmpty) {
-      throw ClickHouseProtocolException(
-        message: 'ClickHouse returned unexpected output for a $operation.',
-        requestState: ClickHouseRequestState.mayHaveReachedServer,
-        queryId: response.queryId,
-      );
-    }
+    response.expectEmpty(operation);
     deadline.check(
       ClickHouseRequestState.mayHaveReachedServer,
       queryId: response.queryId,
@@ -259,35 +183,31 @@ final class ClickHouseClient {
       'database': _database,
       ...settings,
       for (final entry in parameters.entries)
-        'param_${entry.key}': protocol.escapeParameterValue(entry.value),
+        'param_${entry.key}': _escapeParameterValue(entry.value),
     },
   );
-
-  Duration _operationTimeout(Duration? timeout) =>
-      timeout == null ? _timeout : protocol.requirePositiveDuration(timeout, 'timeout');
 
   Future<T> _runOperation<T>(
     Duration? timeout,
     String operation,
     Future<T> Function(ClickHouseDeadline deadline) run,
-  ) {
-    late final ClickHouseDeadline deadline;
-    try {
-      _ensureOpen();
-      deadline = ClickHouseDeadline(operation, _operationTimeout(timeout));
-    } on Object catch (error, stackTrace) {
-      return Future<T>.error(error, stackTrace);
+  ) async {
+    if (_closeFuture != null) {
+      throw StateError('The ClickHouse client is closing or closed.');
     }
+    final deadline = ClickHouseDeadline(
+      operation,
+      timeout == null ? _timeout : _requirePositiveDuration(timeout, 'timeout'),
+    );
     _activeOperations += 1;
-    final result = Future<T>.sync(() => run(deadline));
-    return result.whenComplete(_finishOperation);
-  }
-
-  void _finishOperation() {
-    _activeOperations -= 1;
-    if (_activeOperations == 0) {
-      _becameIdle?.complete();
-      _becameIdle = null;
+    try {
+      return await run(deadline);
+    } finally {
+      _activeOperations -= 1;
+      if (_activeOperations == 0) {
+        _becameIdle?.complete();
+        _becameIdle = null;
+      }
     }
   }
 
@@ -301,10 +221,47 @@ final class ClickHouseClient {
       );
     }
   }
-
-  void _ensureOpen() {
-    if (_closing) {
-      throw StateError('The ClickHouse client is closing or closed.');
-    }
-  }
 }
+
+/// Parses and validates a ClickHouse HTTPS endpoint.
+Uri _parseEndpoint(String endpoint, {required bool allowInsecureHttp}) {
+  final uri = Uri.tryParse(endpoint);
+  if (uri == null ||
+      (uri.scheme != 'https' && !(allowInsecureHttp && uri.scheme == 'http')) ||
+      !uri.hasAuthority ||
+      uri.host.isEmpty ||
+      _hasCredentialDelimiter(endpoint) ||
+      uri.hasQuery ||
+      uri.hasFragment) {
+    throw ArgumentError.value(
+      endpoint,
+      'endpoint',
+      'Must be an HTTPS URL with a host and no credentials, query, or fragment. '
+          'Plaintext HTTP requires allowInsecureHttp.',
+    );
+  }
+  return uri.path.isEmpty ? uri.replace(path: '/') : uri;
+}
+
+bool _hasCredentialDelimiter(String endpoint) =>
+    RegExp('^https?://[^/?#]*@', caseSensitive: false).hasMatch(endpoint);
+
+/// Validates a positive duration and returns it unchanged.
+Duration _requirePositiveDuration(Duration value, String name) {
+  if (value <= Duration.zero) {
+    throw ArgumentError.value(value, name, 'Must be positive.');
+  }
+  return value;
+}
+
+/// Validates a positive integer and returns it unchanged.
+int _requirePositiveInt(int value, String name) {
+  if (value <= 0) {
+    throw ArgumentError.value(value, name, 'Must be positive.');
+  }
+  return value;
+}
+
+/// Applies ClickHouse's HTTP query-parameter escaping to one textual value.
+String _escapeParameterValue(String value) =>
+    value.replaceAll(r'\', r'\\').replaceAll('\t', r'\t').replaceAll('\n', r'\n');
