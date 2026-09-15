@@ -9,6 +9,8 @@ import 'package:runnel/src/pubsub.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 import 'package:test/test.dart';
 
+import 'support/resp_peer.dart';
+
 void main() {
   group('Publishing commands', () {
     test('should preserve binary input and decode the broker subscriber count', () {
@@ -293,21 +295,20 @@ Future<void> _eventually(bool Function() condition) async {
 }
 
 final class _PubSubPeer {
-  _PubSubPeer._(this._server);
-
-  final ServerSocket _server;
+  late final RespPeer _peer;
   final List<_PeerCommand> commands = [];
-  final List<Socket> _sockets = [];
+  List<Socket> get _sockets => _peer.sockets;
   final List<_PendingAcknowledgement> _acknowledgements = [];
   bool holdAcknowledgements = false;
 
-  int get port => _server.port;
+  int get port => _peer.port;
   int get connectionCount => _sockets.length;
 
   static Future<_PubSubPeer> start() async {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final peer = _PubSubPeer._(server);
-    server.listen(peer._accept);
+    final peer = _PubSubPeer();
+    peer._peer = await RespPeer.start(
+      onCommand: (command) => peer._handle(command.socket, command.arguments),
+    );
     return peer;
   }
 
@@ -329,20 +330,6 @@ final class _PubSubPeer {
       ...payload,
       ...ascii.encode('\r\n'),
     ]);
-  }
-
-  void _accept(Socket socket) {
-    _sockets.add(socket);
-    var buffer = <int>[];
-    socket.listen((bytes) {
-      buffer.addAll(bytes);
-      while (true) {
-        final parsed = _parseCommand(buffer);
-        if (parsed == null) return;
-        buffer = buffer.sublist(parsed.consumed);
-        _handle(socket, parsed.arguments);
-      }
-    });
   }
 
   void _handle(Socket socket, List<Uint8List> rawArguments) {
@@ -375,12 +362,7 @@ final class _PubSubPeer {
     ]);
   }
 
-  Future<void> close() async {
-    for (final socket in _sockets) {
-      socket.destroy();
-    }
-    await _server.close();
-  }
+  Future<void> close() => _peer.close();
 }
 
 final class _PeerCommand {
@@ -396,32 +378,4 @@ final class _PendingAcknowledgement {
   final Socket socket;
   final String kind;
   final String channel;
-}
-
-({List<Uint8List> arguments, int consumed})? _parseCommand(List<int> buffer) {
-  if (buffer.isEmpty || buffer.first != 42) return null;
-  final countLine = _lineEnd(buffer, 1);
-  if (countLine < 0) return null;
-  final count = int.parse(ascii.decode(buffer.sublist(1, countLine)));
-  var offset = countLine + 2;
-  final arguments = <Uint8List>[];
-  for (var index = 0; index < count; index++) {
-    if (offset >= buffer.length || buffer[offset] != 36) return null;
-    final lengthLine = _lineEnd(buffer, offset + 1);
-    if (lengthLine < 0) return null;
-    final length = int.parse(ascii.decode(buffer.sublist(offset + 1, lengthLine)));
-    final valueStart = lengthLine + 2;
-    final valueEnd = valueStart + length;
-    if (valueEnd + 2 > buffer.length) return null;
-    arguments.add(Uint8List.fromList(buffer.sublist(valueStart, valueEnd)));
-    offset = valueEnd + 2;
-  }
-  return (arguments: arguments, consumed: offset);
-}
-
-int _lineEnd(List<int> bytes, int start) {
-  for (var index = start; index + 1 < bytes.length; index++) {
-    if (bytes[index] == 13 && bytes[index + 1] == 10) return index;
-  }
-  return -1;
 }

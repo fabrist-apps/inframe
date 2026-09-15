@@ -99,6 +99,34 @@ incoming frame, and 64 aggregate nesting levels. Pub/Sub defaults allow 1,024 un
 Runnel reconnects ordinary and Pub/Sub connections with capped full-jitter backoff and repeats the
 complete authentication, RESP3, and database handshake. It never replays uncertain operations.
 
+## Implementation reading path
+
+Start with [client.dart](lib/src/client.dart). It owns the ordinary connection, reconnects, and
+child-session lifetimes. Follow the operation into its owner:
+
+| Responsibility | Implementation |
+| --- | --- |
+| Endpoint parsing and handshake commands | [connection/configuration.dart](lib/src/connection/configuration.dart) |
+| Socket establishment and cancellation | [connection/socket.dart](lib/src/connection/socket.dart), [connection/connection_attempt.dart](lib/src/connection/connection_attempt.dart) |
+| Ordinary command admission, reply order, and pending deadlines | [connection/redis_connection.dart](lib/src/connection/redis_connection.dart) |
+| Typed batch results and MULTI/EXEC decoding | [batch.dart](lib/src/batch.dart), [transaction.dart](lib/src/transaction.dart) |
+| Subscription intent, control operations, and recovery | [pubsub/session.dart](lib/src/pubsub/session.dart) |
+| Pub/Sub socket replies and acknowledgements | [pubsub/transport.dart](lib/src/pubsub/transport.dart) |
+| Bounded delivery, pause/resume, and terminal events | [pubsub/event_stream.dart](lib/src/pubsub/event_stream.dart) |
+| Command construction and common reply shapes | [commands/](lib/src/commands/), [commands/reply_decoding.dart](lib/src/commands/reply_decoding.dart) |
+
+The event stream owns the only Pub/Sub delivery queue, including paused delivery. The session owns
+overflow policy and channel reconciliation. Keeping those responsibilities separate makes buffer
+limits enforceable without coupling the stream subscription to connection recovery.
+
+Commands snapshot arguments at construction. `RedisCommand.encodedLength` measures the exact wire
+size without building the encoded command, so batch and subscription admission can check capacity
+before allocating transmission buffers. Public binary getters still return owned copies.
+
+Tests share a disposable TCP peer in [test/support/resp_peer.dart](test/support/resp_peer.dart).
+Each scenario supplies its own replies, delayed acknowledgements, or disconnect behavior. The peer
+parses outgoing commands independently of the production RESP parser.
+
 ## Topology
 
 Runnel connects to one externally managed primary endpoint. It does not discover Cluster or

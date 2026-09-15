@@ -10,6 +10,8 @@ import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:test/test.dart';
 
+import 'support/resp_peer.dart';
+
 void main() {
   group('BlockingSession', () {
     test('should encode fractional pop waits and return exact typed values', () async {
@@ -282,20 +284,30 @@ Future<RedisConnection> _openConnection(_BlockingPeer peer) => RedisConnection.o
 );
 
 final class _BlockingPeer {
-  _BlockingPeer._(this._server) {
-    _server.listen(_accept);
+  late final RespPeer _peer;
+
+  static Future<_BlockingPeer> start() async {
+    final peer = _BlockingPeer();
+    peer._peer = await RespPeer.start(
+      onConnect: (socket) => peer._connections.add(_PeerConnection(socket)),
+      onDisconnect: (socket) => peer._connections
+          .firstWhere((connection) => identical(connection.socket, socket))
+          .disconnected
+          .complete(),
+      onCommand: (command) {
+        peer.commandCount++;
+        peer._addCommand(_PeerCommand(command.socket, command.arguments));
+      },
+    );
+    return peer;
   }
 
-  static Future<_BlockingPeer> start() async =>
-      _BlockingPeer._(await ServerSocket.bind(InternetAddress.loopbackIPv4, 0));
-
-  final ServerSocket _server;
   final List<_PeerCommand> _commands = [];
   final List<Completer<_PeerCommand>> _commandWaiters = [];
   final List<_PeerConnection> _connections = [];
   int commandCount = 0;
 
-  int get port => _server.port;
+  int get port => _peer.port;
   int get connectionCount => _connections.length;
 
   Future<void> waitForLatestDisconnect() => _connections.last.disconnected.future;
@@ -307,26 +319,6 @@ final class _BlockingPeer {
     return waiter.future;
   }
 
-  void _accept(Socket socket) {
-    final peerConnection = _PeerConnection(socket);
-    _connections.add(peerConnection);
-    var buffer = <int>[];
-    socket.listen(
-      (bytes) {
-        buffer.addAll(bytes);
-        while (true) {
-          final parsed = _parseCommand(buffer);
-          if (parsed == null) return;
-          buffer = buffer.sublist(parsed.consumed);
-          commandCount++;
-          _addCommand(_PeerCommand(socket, parsed.arguments));
-        }
-      },
-      onError: (_) {},
-      onDone: peerConnection.disconnected.complete,
-    );
-  }
-
   void _addCommand(_PeerCommand command) {
     if (_commandWaiters.isNotEmpty) {
       _commandWaiters.removeAt(0).complete(command);
@@ -336,15 +328,12 @@ final class _BlockingPeer {
   }
 
   Future<void> close() async {
-    for (final connection in _connections) {
-      connection.socket.destroy();
-    }
     for (final waiter in _commandWaiters) {
       if (!waiter.isCompleted) {
         waiter.completeError(StateError('The peer closed before receiving the command.'));
       }
     }
-    await _server.close();
+    await _peer.close();
   }
 }
 
@@ -365,31 +354,4 @@ final class _PeerCommand {
 
   void reply(String frame) => _socket.add(latin1.encode(frame));
   void destroy() => _socket.destroy();
-}
-
-({List<Uint8List> arguments, int consumed})? _parseCommand(List<int> bytes) {
-  if (bytes.isEmpty || bytes.first != 42) return null;
-  final headerEnd = _findCrlf(bytes, 0);
-  if (headerEnd < 0) return null;
-  final count = int.parse(ascii.decode(bytes.sublist(1, headerEnd)));
-  var offset = headerEnd + 2;
-  final arguments = <Uint8List>[];
-  for (var index = 0; index < count; index++) {
-    if (offset >= bytes.length || bytes[offset] != 36) return null;
-    final lengthEnd = _findCrlf(bytes, offset);
-    if (lengthEnd < 0) return null;
-    final length = int.parse(ascii.decode(bytes.sublist(offset + 1, lengthEnd)));
-    offset = lengthEnd + 2;
-    if (bytes.length < offset + length + 2) return null;
-    arguments.add(Uint8List.fromList(bytes.sublist(offset, offset + length)));
-    offset += length + 2;
-  }
-  return (arguments: arguments, consumed: offset);
-}
-
-int _findCrlf(List<int> bytes, int start) {
-  for (var index = start; index + 1 < bytes.length; index++) {
-    if (bytes[index] == 13 && bytes[index + 1] == 10) return index;
-  }
-  return -1;
 }

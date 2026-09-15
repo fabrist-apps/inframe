@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/commands/reply_decoding.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// Controls whether Redis applies a SET operation.
@@ -80,7 +81,7 @@ final class Get extends RedisCommand<String?> {
   Get(String key)
     : super(
         [RedisArgument.text('GET'), RedisArgument.text(key)],
-        _decodeNullableText,
+        (reply) => reply.nullableText,
       );
 }
 
@@ -121,7 +122,7 @@ RedisCommand<List<String?>> mgetCommand(Iterable<String> keys) {
   final snapshot = _nonEmpty(keys, 'keys');
   return RedisCommand<List<String?>>(
     [RedisArgument.text('MGET'), ...snapshot.map(RedisArgument.text)],
-    _decodeNullableTextList,
+    (reply) => reply.nullableTextList,
   );
 }
 
@@ -135,7 +136,7 @@ RedisCommand<void> msetCommand(Map<String, String> values) {
       RedisArgument.text(entry.key),
       RedisArgument.text(entry.value),
     ],
-  ], _decodeOkay);
+  ], (reply) => reply.requireOkay(message: 'Expected an OK status reply.'));
 }
 
 /// Builds an INCR command.
@@ -145,10 +146,7 @@ RedisCommand<int> incrCommand(String key) => Incr(key);
 final class Incr extends RedisCommand<int> {
   /// Creates an INCR command for [key].
   Incr(String key)
-    : super(
-        [RedisArgument.text('INCR'), RedisArgument.text(key)],
-        _decodeInteger,
-      );
+    : super([RedisArgument.text('INCR'), RedisArgument.text(key)], (reply) => reply.integer);
 }
 
 /// Builds an INCRBY command.
@@ -345,7 +343,7 @@ RedisCommand<int> _keysCommand(String name, Iterable<String> keys) {
 RedisCommand<int> _integerCommand(String name, Iterable<String> arguments) => RedisCommand<int>([
   RedisArgument.text(name),
   ...arguments.map(RedisArgument.text),
-], _decodeInteger);
+], (reply) => reply.integer);
 
 RedisCommand<bool> _predicateCommand(String name, Iterable<String> arguments) =>
     RedisCommand<bool>([
@@ -359,11 +357,6 @@ List<String> _nonEmpty(Iterable<String> values, String name) {
   return snapshot;
 }
 
-String? _decodeNullableText(RespValue reply) => switch (reply) {
-  RespNull() => null,
-  _ => respText(reply),
-};
-
 Uint8List? _decodeNullableBytes(RespValue reply) => switch (reply) {
   RespNull() => null,
   RespBlobString(:final value) => Uint8List.fromList(value),
@@ -376,29 +369,11 @@ bool _decodeSet(RespValue reply) => switch (reply) {
   _ => throw FormatException('Expected an OK or null SET reply, received ${reply.runtimeType}.'),
 };
 
-void _decodeOkay(RespValue reply) {
-  if (respText(reply) != 'OK') {
-    throw const FormatException('Expected an OK status reply.');
-  }
-}
-
-int _decodeInteger(RespValue reply) => switch (reply) {
-  RespInteger(:final value) => value,
-  _ => throw FormatException('Expected an integer reply, received ${reply.runtimeType}.'),
-};
-
 bool _decodePredicate(RespValue reply) => switch (reply) {
   RespInteger(value: 0) => false,
   RespInteger(value: 1) => true,
   _ => throw FormatException('Expected a zero-or-one reply, received ${reply.runtimeType}.'),
 };
-
-List<String?> _decodeNullableTextList(RespValue reply) {
-  if (reply is! RespArray) {
-    throw FormatException('Expected an array reply, received ${reply.runtimeType}.');
-  }
-  return List.unmodifiable(reply.values.map(_decodeNullableText));
-}
 
 ScanPage _decodeScanPage(RespValue reply) {
   if (reply case RespArray(values: [final cursorReply, RespArray(:final values)])) {

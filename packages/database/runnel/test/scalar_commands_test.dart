@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
+
+import 'support/resp_peer.dart';
 
 void main() {
   group('Scalar command builders', () {
@@ -297,41 +298,25 @@ List<String> _texts(RedisCommand<Object?> command) => command.arguments
     .toList(growable: false);
 
 final class _ScalarPeer {
-  _ScalarPeer._(this._server);
+  late final RespPeer _peer;
 
-  final ServerSocket _server;
-  final List<List<String>> commands = [];
-  final List<Socket> _sockets = [];
-
-  String get endpoint => 'redis://127.0.0.1:${_server.port}';
+  String get endpoint => _peer.endpoint;
+  List<List<String>> get commands =>
+      _peer.commands.map((command) => command.textArguments).toList();
 
   static Future<_ScalarPeer> start() async {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final peer = _ScalarPeer._(server);
-    server.listen(peer._accept);
+    final peer = _ScalarPeer();
+    peer._peer = await RespPeer.start(
+      onCommand: (command) {
+        if (!command.replyToHandshake()) command.reply(peer._reply(command.textArguments));
+      },
+    );
     return peer;
   }
 
-  int commandCount(String name) => commands.where((parts) => parts.first == name).length;
-
-  void _accept(Socket socket) {
-    _sockets.add(socket);
-    var buffer = <int>[];
-    socket.listen((bytes) {
-      buffer.addAll(bytes);
-      while (true) {
-        final parsed = _parseCommand(buffer);
-        if (parsed == null) return;
-        buffer = buffer.sublist(parsed.consumed);
-        final parts = parsed.arguments.map(utf8.decode).toList(growable: false);
-        commands.add(parts);
-        socket.add(ascii.encode(_reply(parts)));
-      }
-    });
-  }
+  int commandCount(String name) => _peer.commands.where((command) => command.name == name).length;
 
   String _reply(List<String> parts) => switch (parts.first) {
-    'HELLO' => '%1\r\n+proto\r\n:3\r\n',
     'MGET' => r'*3\r\n$3\r\none\r\n_\r\n$3\r\ntwo\r\n'.replaceAll(r'\r\n', '\r\n'),
     'MSET' => '+OK\r\n',
     'SET' when parts[1] == 'conditional-miss' => '_\r\n',
@@ -356,38 +341,5 @@ final class _ScalarPeer {
     _ => '-ERR unsupported\r\n',
   };
 
-  Future<void> close() async {
-    for (final socket in _sockets) {
-      await socket.close();
-    }
-    await _server.close();
-  }
-}
-
-({List<Uint8List> arguments, int consumed})? _parseCommand(List<int> bytes) {
-  if (bytes.isEmpty || bytes.first != 42) return null;
-  final headerEnd = _findCrlf(bytes, 0);
-  if (headerEnd == null) return null;
-  final count = int.parse(ascii.decode(bytes.sublist(1, headerEnd)));
-  var offset = headerEnd + 2;
-  final arguments = <Uint8List>[];
-  for (var index = 0; index < count; index++) {
-    if (offset >= bytes.length || bytes[offset] != 36) return null;
-    final lengthEnd = _findCrlf(bytes, offset);
-    if (lengthEnd == null) return null;
-    final length = int.parse(ascii.decode(bytes.sublist(offset + 1, lengthEnd)));
-    final valueStart = lengthEnd + 2;
-    final valueEnd = valueStart + length;
-    if (valueEnd + 2 > bytes.length) return null;
-    arguments.add(Uint8List.fromList(bytes.sublist(valueStart, valueEnd)));
-    offset = valueEnd + 2;
-  }
-  return (arguments: arguments, consumed: offset);
-}
-
-int? _findCrlf(List<int> bytes, int start) {
-  for (var index = start; index + 1 < bytes.length; index++) {
-    if (bytes[index] == 13 && bytes[index + 1] == 10) return index;
-  }
-  return null;
+  Future<void> close() => _peer.close();
 }

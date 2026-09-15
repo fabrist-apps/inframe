@@ -97,7 +97,7 @@ final class RedisBatch {
   BatchRef<T> add<T>(RedisCommand<T> command) {
     if (_executed) throw StateError('This batch has already executed.');
     validateOrdinaryCommand(command as RedisCommand<Object?>);
-    final encodedBytes = encodeCommand(command).length;
+    final encodedBytes = command.encodedLength;
     if (_commands.length + _reservedCommands >= _maxCommands) {
       throw StateError('The batch would exceed the configured command limit.');
     }

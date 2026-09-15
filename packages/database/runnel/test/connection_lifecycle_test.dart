@@ -7,6 +7,8 @@ import 'package:runnel/runnel.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:test/test.dart';
 
+import 'support/resp_peer.dart';
+
 void main() {
   group('Runnel connection lifecycle', () {
     test('should enforce and release exact pending command and byte limits', () async {
@@ -514,10 +516,8 @@ RedisCommand<bool> _pingCommand() => RedisCommand<bool>(
 );
 
 final class _LifecyclePeer {
-  _LifecyclePeer._(this._server);
-
-  final ServerSocket _server;
-  final List<_PeerSocket> _connections = [];
+  late final RespPeer _peer;
+  List<Socket> get _connections => _peer.sockets;
   final List<_HeldReply> _held = [];
   final List<_HeldReply> _heldHandshakes = [];
   final List<String> _commands = [];
@@ -528,52 +528,41 @@ final class _LifecyclePeer {
 
   int get connectionCount => _connections.length;
   int get activeConnections => connectionCount - _closedConnections;
-  String get endpoint => 'redis://127.0.0.1:${_server.port}';
-  String get hostnameEndpoint => 'redis://localhost:${_server.port}';
+  String get endpoint => 'redis://127.0.0.1:${_peer.port}';
+  String get hostnameEndpoint => 'redis://localhost:${_peer.port}';
   List<String> get ordinaryCommands =>
       _commands.where((command) => command != 'HELLO' && command != 'SELECT').toList();
 
   static Future<_LifecyclePeer> start() async {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final peer = _LifecyclePeer._(server);
-    server.listen(peer._accept);
+    final peer = _LifecyclePeer();
+    peer._peer = await RespPeer.start(
+      onCommand: peer._handle,
+      onDisconnect: (_) => peer._closedConnections++,
+    );
     return peer;
   }
 
   int commandCount(String name) => _commands.where((command) => command == name).length;
 
-  void _accept(Socket socket) {
-    final peerSocket = _PeerSocket(socket);
-    _connections.add(peerSocket);
-    socket.listen(
-      (bytes) {
-        peerSocket.buffer.addAll(bytes);
-        while (true) {
-          final parsed = _parseCommand(peerSocket.buffer);
-          if (parsed == null) return;
-          peerSocket.buffer = peerSocket.buffer.sublist(parsed.consumed);
-          final command = ascii.decode(parsed.arguments.first).toUpperCase();
-          _commands.add(command);
-          if (command == 'HELLO') {
-            if (rejectHandshakes) {
-              socket.add(ascii.encode('-WRONGPASS denied\r\n'));
-            } else if (holdHandshakes) {
-              _heldHandshakes.add(_HeldReply(socket, parsed.arguments));
-            } else {
-              socket.add(ascii.encode('%1\r\n+proto\r\n:3\r\n'));
-            }
-          } else if (command == 'SELECT') {
-            socket.add(ascii.encode('+OK\r\n'));
-          } else if (holdCommands) {
-            _held.add(_HeldReply(socket, parsed.arguments));
-          } else if (command == 'PING') {
-            socket.add(ascii.encode('+PONG\r\n'));
-          }
-        }
-      },
-      onError: (_) {},
-      onDone: () => _closedConnections++,
-    );
+  void _handle(RespPeerCommand received) {
+    final socket = received.socket;
+    final command = received.name;
+    _commands.add(command);
+    if (command == 'HELLO') {
+      if (rejectHandshakes) {
+        socket.add(ascii.encode('-WRONGPASS denied\r\n'));
+      } else if (holdHandshakes) {
+        _heldHandshakes.add(_HeldReply(socket, received.arguments));
+      } else {
+        socket.add(ascii.encode('%1\r\n+proto\r\n:3\r\n'));
+      }
+    } else if (command == 'SELECT') {
+      socket.add(ascii.encode('+OK\r\n'));
+    } else if (holdCommands) {
+      _held.add(_HeldReply(socket, received.arguments));
+    } else if (command == 'PING') {
+      socket.add(ascii.encode('+PONG\r\n'));
+    }
   }
 
   void replyToNextHeld(String frame) {
@@ -592,25 +581,14 @@ final class _LifecyclePeer {
     held.socket.add(ascii.encode('%1\r\n+proto\r\n:3\r\n'));
   }
 
-  void destroyLatest() => _connections.last.socket.destroy();
+  void destroyLatest() => _connections.last.destroy();
 
   Future<void> waitForConnections(int count) => _eventually(() async => connectionCount >= count);
 
   Future<void> waitForCommandCount(String command, int count) =>
       _eventually(() async => commandCount(command) >= count);
 
-  Future<void> close() async {
-    for (final connection in _connections) {
-      connection.socket.destroy();
-    }
-    await _server.close();
-  }
-}
-
-final class _PeerSocket {
-  _PeerSocket(this.socket);
-  final Socket socket;
-  List<int> buffer = [];
+  Future<void> close() => _peer.close();
 }
 
 final class _HeldReply {
@@ -626,31 +604,4 @@ Future<void> _eventually(FutureOr<bool> Function() condition) async {
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
   fail('Condition did not become true before the test deadline.');
-}
-
-({List<Uint8List> arguments, int consumed})? _parseCommand(List<int> bytes) {
-  if (bytes.isEmpty || bytes.first != 42) return null;
-  final headerEnd = _findCrlf(bytes, 0);
-  if (headerEnd < 0) return null;
-  final count = int.parse(ascii.decode(bytes.sublist(1, headerEnd)));
-  var offset = headerEnd + 2;
-  final arguments = <Uint8List>[];
-  for (var index = 0; index < count; index++) {
-    if (offset >= bytes.length || bytes[offset] != 36) return null;
-    final lengthEnd = _findCrlf(bytes, offset);
-    if (lengthEnd < 0) return null;
-    final length = int.parse(ascii.decode(bytes.sublist(offset + 1, lengthEnd)));
-    offset = lengthEnd + 2;
-    if (bytes.length < offset + length + 2) return null;
-    arguments.add(Uint8List.fromList(bytes.sublist(offset, offset + length)));
-    offset += length + 2;
-  }
-  return (arguments: arguments, consumed: offset);
-}
-
-int _findCrlf(List<int> bytes, int start) {
-  for (var index = start; index + 1 < bytes.length; index++) {
-    if (bytes[index] == 13 && bytes[index + 1] == 10) return index;
-  }
-  return -1;
 }

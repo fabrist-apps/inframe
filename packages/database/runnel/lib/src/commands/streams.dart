@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/commands/reply_decoding.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 final BigInt _maximumStreamIdComponent = (BigInt.one << 64) - BigInt.one;
@@ -231,13 +232,13 @@ RedisCommand<int> xtrimCommand(String key, StreamTrim trim) => RedisCommand<int>
   RedisArgument.text('XTRIM'),
   RedisArgument.text(key),
   ..._trimArguments(trim),
-], _integerReply);
+], (reply) => reply.integer);
 
 /// Builds an XLEN command.
 RedisCommand<int> xlenCommand(String key) => RedisCommand<int>([
   RedisArgument.text('XLEN'),
   RedisArgument.text(key),
-], _integerReply);
+], (reply) => reply.integer);
 
 /// Builds a nonblocking XREAD command from concrete per-key cursors.
 RedisCommand<List<StreamRead>> xreadCommand(Map<String, StreamId> after, {int? count}) {
@@ -363,14 +364,8 @@ void _checkCount(int? count) {
   }
 }
 
-int _integerReply(RespValue reply) => switch (reply) {
-  RespInteger(:final value) => value,
-  _ => throw FormatException('Expected an integer reply, received ${reply.runtimeType}.'),
-};
-
-List<StreamEntry> _entriesReply(RespValue reply) => List.unmodifiable(
-  _arrayValues(reply, 'Stream entries').map(_streamEntry),
-);
+List<StreamEntry> _entriesReply(RespValue reply) =>
+    List.unmodifiable(_arrayValues(reply, 'Stream entries').map(_streamEntry));
 
 StreamEntry _streamEntry(RespValue reply) {
   final entry = _arrayValues(reply, 'Stream entry');

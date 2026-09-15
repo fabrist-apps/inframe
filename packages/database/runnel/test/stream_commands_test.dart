@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
+import 'support/resp_peer.dart';
+
 void main() {
   group('StreamId', () {
     test('should preserve and compare unsigned 64-bit components exactly', () {
@@ -240,41 +242,24 @@ void main() {
 }
 
 final class _StreamPeer {
-  _StreamPeer._(this._server);
-
-  final ServerSocket _server;
-  final List<List<Uint8List>> commands = [];
-  final List<Socket> _sockets = [];
+  late final RespPeer _peer;
   var _xreadCount = 0;
 
-  int get port => _server.port;
+  int get port => _peer.port;
+  List<List<Uint8List>> get commands => _peer.commands.map((command) => command.arguments).toList();
 
   static Future<_StreamPeer> start() async {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final peer = _StreamPeer._(server);
-    server.listen(peer._accept);
+    final peer = _StreamPeer();
+    peer._peer = await RespPeer.start(
+      onCommand: (command) {
+        if (!command.replyToHandshake()) peer._reply(command.socket, command.arguments);
+      },
+    );
     return peer;
-  }
-
-  void _accept(Socket socket) {
-    _sockets.add(socket);
-    var buffer = <int>[];
-    socket.listen((bytes) {
-      buffer.addAll(bytes);
-      while (true) {
-        final parsed = _parseCommand(buffer);
-        if (parsed == null) return;
-        buffer = buffer.sublist(parsed.consumed);
-        commands.add(parsed.arguments);
-        _reply(socket, parsed.arguments);
-      }
-    });
   }
 
   void _reply(Socket socket, List<Uint8List> arguments) {
     switch (ascii.decode(arguments.first)) {
-      case 'HELLO':
-        socket.add(ascii.encode('%1\r\n+proto\r\n:3\r\n'));
       case 'XADD':
         final id = ascii.decode(arguments[2]) == 'MAXLEN' ? '1-0' : ascii.decode(arguments[2]);
         socket.add(_blob(id));
@@ -300,12 +285,7 @@ final class _StreamPeer {
     }
   }
 
-  Future<void> close() async {
-    for (final socket in _sockets) {
-      await socket.close();
-    }
-    await _server.close();
-  }
+  Future<void> close() => _peer.close();
 }
 
 List<int> _entriesReply({required String id}) => [
@@ -326,31 +306,3 @@ List<int> _blobBytes(List<int> bytes) => [
   13,
   10,
 ];
-
-({List<Uint8List> arguments, int consumed})? _parseCommand(List<int> bytes) {
-  if (bytes.isEmpty || bytes.first != 42) return null;
-  final headerEnd = _findCrlf(bytes, 0);
-  if (headerEnd < 0) return null;
-  final count = int.parse(ascii.decode(bytes.sublist(1, headerEnd)));
-  var offset = headerEnd + 2;
-  final arguments = <Uint8List>[];
-  for (var index = 0; index < count; index++) {
-    if (offset >= bytes.length || bytes[offset] != 36) return null;
-    final lengthEnd = _findCrlf(bytes, offset);
-    if (lengthEnd < 0) return null;
-    final length = int.parse(ascii.decode(bytes.sublist(offset + 1, lengthEnd)));
-    final valueStart = lengthEnd + 2;
-    final valueEnd = valueStart + length;
-    if (valueEnd + 2 > bytes.length) return null;
-    arguments.add(Uint8List.fromList(bytes.sublist(valueStart, valueEnd)));
-    offset = valueEnd + 2;
-  }
-  return (arguments: arguments, consumed: offset);
-}
-
-int _findCrlf(List<int> bytes, int start) {
-  for (var index = start; index + 1 < bytes.length; index++) {
-    if (bytes[index] == 13 && bytes[index + 1] == 10) return index;
-  }
-  return -1;
-}

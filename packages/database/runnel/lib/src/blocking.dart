@@ -43,7 +43,6 @@ final class BlockingSession {
 
   bool _active = false;
   bool _closed = false;
-  bool _didNotifyClosed = false;
   Future<void>? _closing;
 
   /// Removes and returns the first available element from [keys].
@@ -164,9 +163,8 @@ final class BlockingSession {
   }
 
   void _markClosed() {
+    if (_closed) return;
     _closed = true;
-    if (_didNotifyClosed) return;
-    _didNotifyClosed = true;
     _onClosed?.call(this);
   }
 }

@@ -42,6 +42,7 @@ final class RedisConnection {
   var _pendingBytes = 0;
   var _flushScheduled = false;
   var _closed = false;
+  Completer<void>? _idle;
 
   /// Whether this physical connection has released its socket.
   bool get isClosed => _closed;
@@ -96,40 +97,21 @@ final class RedisConnection {
       return Future.error(const RedisClosedException(message: 'The Redis connection is closed.'));
     }
     final encoded = encodeCommand(command as RedisCommand<Object?>);
-    if (enforceLimits && _pending.length == _limits.maxPendingCommands) {
-      return Future.error(
-        RedisLimitException(
-          message: 'The connection already has ${_limits.maxPendingCommands} pending commands.',
-          deliveryStatus: RedisDeliveryStatus.notSent,
-          limit: _limits.maxPendingCommands,
-        ),
+    try {
+      final remaining = _admit(
+        count: 1,
+        bytes: encoded.length,
+        acceptedAt: acceptedAt,
+        timeout: timeout,
+        enforceLimits: enforceLimits,
+        batch: false,
       );
+      final pending = _register(command, encoded, acceptedAt, timeout, remaining);
+      _scheduleFlush();
+      return pending.completer.future;
+    } on RunnelException catch (error, stackTrace) {
+      return Future.error(error, stackTrace);
     }
-    if (enforceLimits && _pendingBytes + encoded.length > _limits.maxPendingBytes) {
-      return Future.error(
-        RedisLimitException(
-          message: 'The command would exceed ${_limits.maxPendingBytes} pending encoded bytes.',
-          deliveryStatus: RedisDeliveryStatus.notSent,
-          limit: _limits.maxPendingBytes,
-        ),
-      );
-    }
-    final remaining = timeout - acceptedAt.elapsed;
-    if (remaining <= Duration.zero) {
-      return Future.error(
-        const RedisTimeoutException(
-          message: 'The Redis command deadline expired during local encoding.',
-          deliveryStatus: RedisDeliveryStatus.notSent,
-        ),
-      );
-    }
-
-    final pending = _Pending<T>(command, encoded, acceptedAt, timeout);
-    _pending.add(pending as _Pending<Object?>);
-    _pendingBytes += encoded.length;
-    pending.timer = Timer(remaining, () => _timeout(pending as _Pending<Object?>));
-    _scheduleFlush();
-    return pending.completer.future;
   }
 
   /// Atomically reserves capacity for [commands] and queues them in order.
@@ -143,38 +125,72 @@ final class RedisConnection {
     }
     final encoded = commands.map(encodeCommand).toList(growable: false);
     final encodedBytes = encoded.fold<int>(0, (total, bytes) => total + bytes.length);
-    if (_pending.length + commands.length > _limits.maxPendingCommands) {
+    final remaining = _admit(
+      count: commands.length,
+      bytes: encodedBytes,
+      acceptedAt: acceptedAt,
+      timeout: timeout,
+      enforceLimits: true,
+      batch: true,
+    );
+    final accepted = <_Pending<Object?>>[
+      for (var index = 0; index < commands.length; index++)
+        _register(commands[index], encoded[index], acceptedAt, timeout, remaining),
+    ];
+    _scheduleFlush();
+    return List.unmodifiable(accepted.map((pending) => pending.completer.future));
+  }
+
+  Duration _admit({
+    required int count,
+    required int bytes,
+    required Stopwatch acceptedAt,
+    required Duration timeout,
+    required bool enforceLimits,
+    required bool batch,
+  }) {
+    if (enforceLimits &&
+        (batch
+            ? _pending.length + count > _limits.maxPendingCommands
+            : _pending.length == _limits.maxPendingCommands)) {
       throw RedisLimitException(
-        message: 'The batch would exceed ${_limits.maxPendingCommands} pending commands.',
+        message: batch
+            ? 'The batch would exceed ${_limits.maxPendingCommands} pending commands.'
+            : 'The connection already has ${_limits.maxPendingCommands} pending commands.',
         deliveryStatus: RedisDeliveryStatus.notSent,
         limit: _limits.maxPendingCommands,
       );
     }
-    if (_pendingBytes + encodedBytes > _limits.maxPendingBytes) {
+    if (enforceLimits && _pendingBytes + bytes > _limits.maxPendingBytes) {
       throw RedisLimitException(
-        message: 'The batch would exceed ${_limits.maxPendingBytes} pending encoded bytes.',
+        message:
+            'The ${batch ? 'batch' : 'command'} would exceed ${_limits.maxPendingBytes} pending encoded bytes.',
         deliveryStatus: RedisDeliveryStatus.notSent,
         limit: _limits.maxPendingBytes,
       );
     }
     final remaining = timeout - acceptedAt.elapsed;
     if (remaining <= Duration.zero) {
-      throw const RedisTimeoutException(
-        message: 'The Redis batch deadline expired during local encoding.',
+      throw RedisTimeoutException(
+        message: 'The Redis ${batch ? 'batch' : 'command'} deadline expired during local encoding.',
         deliveryStatus: RedisDeliveryStatus.notSent,
       );
     }
+    return remaining;
+  }
 
-    final accepted = <_Pending<Object?>>[];
-    for (var index = 0; index < commands.length; index++) {
-      final pending = _Pending<Object?>(commands[index], encoded[index], acceptedAt, timeout);
-      _pending.add(pending);
-      accepted.add(pending);
-      _pendingBytes += encoded[index].length;
-      pending.timer = Timer(remaining, () => _timeout(pending));
-    }
-    _scheduleFlush();
-    return List.unmodifiable(accepted.map((pending) => pending.completer.future));
+  _Pending<T> _register<T>(
+    RedisCommand<T> command,
+    Uint8List encoded,
+    Stopwatch acceptedAt,
+    Duration timeout,
+    Duration remaining,
+  ) {
+    final pending = _Pending<T>(command, encoded, acceptedAt, timeout);
+    _pending.add(pending as _Pending<Object?>);
+    _pendingBytes += encoded.length;
+    pending.timer = Timer(remaining, () => _timeout(pending as _Pending<Object?>));
+    return pending;
   }
 
   void _scheduleFlush() {
@@ -288,6 +304,7 @@ final class RedisConnection {
     if (!_pending.remove(pending)) return;
     pending.timer?.cancel();
     _pendingBytes -= pending.encoded.length;
+    if (_pending.isEmpty) _notifyIdle();
   }
 
   void _onError(Object error, StackTrace stackTrace) => _terminate(
@@ -313,15 +330,26 @@ final class RedisConnection {
   void _terminate(Object cause, StackTrace stackTrace) {
     if (_closed) return;
     _closed = true;
+    _notifyIdle();
     unawaited(_subscription.cancel());
     _socket.destroy();
-    final pending = List<_Pending<Object?>>.of(_pending);
-    for (final operation in pending) {
-      final submitted = operation.submitted;
-      _remove(operation);
-      operation.completer.completeError(_failureFor(cause, submitted: submitted), stackTrace);
-    }
+    _failPending(cause, stackTrace);
     _onTerminated(this, cause);
+  }
+
+  void _failPending(Object cause, [StackTrace? stackTrace]) {
+    for (final operation in List<_Pending<Object?>>.of(_pending)) {
+      _remove(operation);
+      operation.completer.completeError(
+        _failureFor(cause, submitted: operation.submitted),
+        stackTrace,
+      );
+    }
+  }
+
+  void _notifyIdle() {
+    _idle?.complete();
+    _idle = null;
   }
 
   Object _failureFor(Object cause, {required bool submitted}) {
@@ -357,10 +385,9 @@ final class RedisConnection {
   }
 
   /// Completes when every accepted command settles or the connection closes.
-  Future<void> waitUntilIdle() async {
-    while (!_closed && _pending.isNotEmpty) {
-      await Future<void>.delayed(Duration.zero);
-    }
+  Future<void> waitUntilIdle() {
+    if (_closed || _pending.isEmpty) return Future.value();
+    return (_idle ??= Completer<void>()).future;
   }
 
   /// Releases this socket and fails any remaining commands.
@@ -370,25 +397,16 @@ final class RedisConnection {
   Future<void> close({bool commandsAreUncertain = false}) async {
     if (_closed) return;
     _closed = true;
+    _notifyIdle();
     await _subscription.cancel();
     if (commandsAreUncertain) {
       _socket.destroy();
     } else {
       await _socket.close();
     }
-    final pending = List<_Pending<Object?>>.of(_pending);
-    for (final operation in pending) {
-      final submitted = operation.submitted;
-      _remove(operation);
-      operation.completer.completeError(
-        RedisClosedException(
-          message: 'The Redis connection closed before replying.',
-          deliveryStatus: submitted
-              ? RedisDeliveryStatus.outcomeUnknown
-              : RedisDeliveryStatus.notSent,
-        ),
-      );
-    }
+    _failPending(
+      const RedisClosedException(message: 'The Redis connection closed before replying.'),
+    );
   }
 }
 

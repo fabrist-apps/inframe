@@ -1,10 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
+
+import 'support/resp_peer.dart';
 
 void main() {
   group('RunnelCollectionCommands', () {
@@ -272,75 +271,26 @@ void main() {
 }
 
 final class _CommandPeer {
-  _CommandPeer._(this._server);
-
-  final ServerSocket _server;
-  final List<List<String>> commands = [];
+  late final RespPeer _peer;
   final List<String> _replies = [];
-  Socket? _socket;
 
-  String get endpoint => 'redis://127.0.0.1:${_server.port}';
+  String get endpoint => _peer.endpoint;
+  List<List<String>> get commands => _peer.commands
+      .where((command) => command.name != 'HELLO')
+      .map((command) => command.textArguments)
+      .toList();
 
   static Future<_CommandPeer> start() async {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final peer = _CommandPeer._(server);
-    server.listen(peer._accept);
+    final peer = _CommandPeer();
+    peer._peer = await RespPeer.start(
+      onCommand: (command) {
+        if (!command.replyToHandshake()) command.reply(peer._replies.removeAt(0));
+      },
+    );
     return peer;
   }
 
   void queueReplies(Iterable<String> replies) => _replies.addAll(replies);
 
-  void _accept(Socket socket) {
-    _socket = socket;
-    var buffer = <int>[];
-    socket.listen((bytes) {
-      buffer.addAll(bytes);
-      while (true) {
-        final parsed = _parseCommand(buffer);
-        if (parsed == null) return;
-        buffer = buffer.sublist(parsed.consumed);
-        final command = parsed.arguments
-            .map((argument) => utf8.decode(argument))
-            .toList(growable: false);
-        if (command.first == 'HELLO') {
-          socket.add(ascii.encode('%1\r\n+proto\r\n:3\r\n'));
-        } else {
-          commands.add(command);
-          socket.add(ascii.encode(_replies.removeAt(0)));
-        }
-      }
-    });
-  }
-
-  Future<void> close() async {
-    await _socket?.close();
-    await _server.close();
-  }
-}
-
-({List<Uint8List> arguments, int consumed})? _parseCommand(List<int> bytes) {
-  if (bytes.isEmpty || bytes.first != 42) return null;
-  final headerEnd = _findCrlf(bytes, 0);
-  if (headerEnd < 0) return null;
-  final count = int.parse(ascii.decode(bytes.sublist(1, headerEnd)));
-  var offset = headerEnd + 2;
-  final arguments = <Uint8List>[];
-  for (var index = 0; index < count; index++) {
-    if (offset >= bytes.length || bytes[offset] != 36) return null;
-    final lengthEnd = _findCrlf(bytes, offset);
-    if (lengthEnd < 0) return null;
-    final length = int.parse(ascii.decode(bytes.sublist(offset + 1, lengthEnd)));
-    offset = lengthEnd + 2;
-    if (bytes.length < offset + length + 2) return null;
-    arguments.add(Uint8List.fromList(bytes.sublist(offset, offset + length)));
-    offset += length + 2;
-  }
-  return (arguments: arguments, consumed: offset);
-}
-
-int _findCrlf(List<int> bytes, int start) {
-  for (var index = start; index + 1 < bytes.length; index++) {
-    if (bytes[index] == 13 && bytes[index + 1] == 10) return index;
-  }
-  return -1;
+  Future<void> close() => _peer.close();
 }
