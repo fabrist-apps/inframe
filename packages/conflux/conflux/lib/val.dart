@@ -3,6 +3,8 @@ library;
 
 export 'src/val/issue.dart'
     show Field, Index, IssueKind, PathSegment, ValidationException, ValidationIssue;
+export 'src/val/membership_schema.dart' show LiteralSchema;
+export 'src/val/numeric_schema.dart' show IntegerChecks, NumericChecks;
 export 'src/val/object_schema.dart' show ObjectRefinement, ObjectSchema;
 export 'src/val/schema.dart' show Schema, SchemaRefinement;
 export 'src/val/string_schema.dart';

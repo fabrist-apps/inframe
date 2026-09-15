@@ -502,3 +502,22 @@ Callback exceptions propagate, and repeated parsing may invoke callbacks again.
 Implementation reading path: `val.dart` → factories in `src/val/val.dart` →
 typed stages in `schema.dart` → primitive and container validators. Foundational
 Result/Option modules do not depend on Val.
+
+### Scalars and formats
+
+`Val.int`, `double`, `number`, and `boolean` follow Dart runtime type tests and
+never coerce inputs. Numeric schemas require finite values before checking
+inclusive `min`/`max`, exclusive `greaterThan`/`lessThan`, or sign aliases.
+Integers also support exact `multipleOf` and the inclusive JavaScript `safe`
+range, ±9007199254740991. Invalid bounds or divisors throw `ArgumentError`
+when the schema is built.
+
+`literal<T>` requires both `value is T` and equality. `enumString` and
+`enumValues` copy nonempty, duplicate-free membership lists; enum instances are
+not parsed from strings. `instance<T>` returns the same borrowed instance.
+
+String formats are explicit profiles and do not normalize inputs: `email`,
+canonical `uuid` (versions 1–8, nil, and all ones), absolute `url` with a scheme
+and host, `ip`/`ipv4`/`ipv6`, `matches(RegExp)`, and literal
+`startsWith`/`endsWith`/`contains`. Regex matching uses `hasMatch`; anchors are
+caller-owned. IPv4 rejects leading zeros; IPv6 rejects brackets and zone IDs.
