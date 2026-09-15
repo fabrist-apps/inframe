@@ -7,7 +7,7 @@ export 'src/schedule/schedule.dart'
         Schedule,
         ScheduleContinue,
         ScheduleDecision,
-        ScheduleDriver,
         ScheduleErrorMapping,
         ScheduleOperations,
+        ScheduleStep,
         ScheduleStop;

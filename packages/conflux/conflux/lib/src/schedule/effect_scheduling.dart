@@ -9,7 +9,7 @@ extension EffectScheduling<A, E> on Effect<A, E> {
   /// Retries this Effect after expected failures while [schedule] continues.
   Effect<A, E> retry<O>(Schedule<E, O, E> schedule) {
     return EffectAccess.create((execution) async {
-      final driver = schedule.driver();
+      final driver = schedule.createStep();
       while (true) {
         final attempt = await _runAttempt(this, execution);
         switch (attempt) {
@@ -20,7 +20,7 @@ extension EffectScheduling<A, E> on Effect<A, E> {
             if (primary is! Some<E>) return attempt;
             final value = primary.value;
             final stepped = await EffectAccess.evaluate(
-              driver.step(value),
+              driver(value),
               execution,
             );
             switch (stepped) {
@@ -44,7 +44,7 @@ extension EffectScheduling<A, E> on Effect<A, E> {
   /// Repeats this Effect after successes and returns the final policy output.
   Effect<O, E> repeat<O>(Schedule<A, O, E> schedule) {
     return EffectAccess.create((execution) async {
-      final driver = schedule.driver();
+      final driver = schedule.createStep();
       while (true) {
         final attempt = await _runAttempt(this, execution);
         switch (attempt) {
@@ -52,7 +52,7 @@ extension EffectScheduling<A, E> on Effect<A, E> {
             return Failed(cause);
           case Succeeded<A, E>(:final value):
             final stepped = await EffectAccess.evaluate(
-              driver.step(value),
+              driver(value),
               execution,
             );
             switch (stepped) {
@@ -67,40 +67,6 @@ extension EffectScheduling<A, E> on Effect<A, E> {
               ):
                 final waitFailure = await _wait<E>(delay, execution);
                 if (waitFailure != null) return Failed(waitFailure);
-            }
-        }
-      }
-    });
-  }
-
-  /// Consults [policy] before the first and after each successful execution.
-  Effect<O, E> schedule<O>(Schedule<Option<A>, O, E> policy) {
-    return EffectAccess.create((execution) async {
-      final driver = policy.driver();
-      Option<A> input = const None();
-      while (true) {
-        final stepped = await EffectAccess.evaluate(
-          driver.step(input),
-          execution,
-        );
-        switch (stepped) {
-          case Failed<ScheduleDecision<O>, E>(:final cause):
-            return Failed(cause);
-          case Succeeded<ScheduleDecision<O>, E>(
-            value: ScheduleStop<O>(:final output),
-          ):
-            return Succeeded(output);
-          case Succeeded<ScheduleDecision<O>, E>(
-            value: ScheduleContinue<O>(:final delay),
-          ):
-            final waitFailure = await _wait<E>(delay, execution);
-            if (waitFailure != null) return Failed(waitFailure);
-            final attempt = await _runAttempt(this, execution);
-            switch (attempt) {
-              case Failed<A, E>(:final cause):
-                return Failed(cause);
-              case Succeeded<A, E>(:final value):
-                input = Some(value);
             }
         }
       }

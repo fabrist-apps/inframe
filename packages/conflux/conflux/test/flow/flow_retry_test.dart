@@ -49,13 +49,13 @@ void main() {
     test('should step with the primary expected error and preserve stop failure', () async {
       final inputs = <String>[];
       var attempts = 0;
-      final policy = Schedule<String, int, String>.fromDriver(
-        () => ScheduleDriver((input) {
+      final policy = Schedule<String, int, String>(
+        () => (input) {
           inputs.add(input);
           return Effect.succeed(
             attempts == 1 ? const ScheduleContinue(0, Duration.zero) : const ScheduleStop(1),
           );
-        }),
+        },
       );
       final stopped = Sequential<String>([
         const Expected('final first'),
@@ -81,11 +81,11 @@ void main() {
 
     test('should preserve a fatal cause without consulting the policy', () async {
       var steps = 0;
-      final policy = Schedule<String, int, String>.fromDriver(
-        () => ScheduleDriver((_) {
+      final policy = Schedule<String, int, String>(
+        () => (_) {
           steps += 1;
           return Effect.succeed(const ScheduleContinue(0, Duration.zero));
-        }),
+        },
       );
       final cause = Sequential<String>([
         const Expected('failed'),
@@ -104,8 +104,9 @@ void main() {
 
     test('should expose mapped schedule failure without retrying that step', () async {
       var attempts = 0;
-      final policy = Schedule<String, int, int>.fromDriver(
-        () => ScheduleDriver((_) => Effect.fail(7)),
+      final policy = Schedule<String, int, int>(
+        () =>
+            (_) => Effect.fail(7),
       ).mapError((error, _) => 'policy $error');
       final flow = Flow.defer<int, String>((_) {
         attempts += 1;

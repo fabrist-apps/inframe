@@ -14,7 +14,7 @@ abstract final class RetryFlowSource {
     OpenFlowCursor<A, E> upstream,
     Schedule<E, O, E> schedule,
   ) => EffectAccess.create((execution) async {
-    final cursor = _RetryCursor(upstream, schedule.driver());
+    final cursor = _RetryCursor(upstream, schedule.createStep());
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
       cursor.close(),
@@ -30,7 +30,7 @@ final class _RetryCursor<A, E, O> implements FlowSourceCursor<A, E> {
   _RetryCursor(this._upstream, this._driver);
 
   final OpenFlowCursor<A, E> _upstream;
-  final ScheduleDriver<E, O, E> _driver;
+  final ScheduleStep<E, O, E> _driver;
   _RetryAttempt<A, E>? _attempt;
   var _completed = false;
 
@@ -84,7 +84,7 @@ final class _RetryCursor<A, E, O> implements FlowSourceCursor<A, E> {
   ) async {
     final primary = attemptCause.primaryError;
     if (primary is! Some<E>) return Some(Failed(attemptCause));
-    final stepped = await EffectAccess.evaluate(_driver.step(primary.value), execution);
+    final stepped = await EffectAccess.evaluate(_driver(primary.value), execution);
     switch (stepped) {
       case Failed<ScheduleDecision<O>, E>(:final cause):
         return Some(Failed(cause));

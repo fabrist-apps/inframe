@@ -17,6 +17,7 @@ void main() {
         expect(Val.string().chronoId(prefix: prefix, size: size).parse(id), id);
       }
     });
+
     test('should keep format overrides independent of type and presence errors', () {
       final schema = Val.string(name: ' User ID ').chronoId(code: 'ID');
       final error = issues(schema, 'bad').single;
@@ -33,6 +34,7 @@ void main() {
       expect(Val.object({'id': schema.optional()}).parse({}), isEmpty);
       expect(schema.nullable().parse(null), isNull);
     });
+
     test('should preserve constraints and specialized methods without mutating the source', () {
       final source = Val.string().minLength(1);
       final schema = source.chronoId().endsWith('0');

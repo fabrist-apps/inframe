@@ -33,13 +33,11 @@ Future<void> main() async {
 
   final Schedule<_BaseError, int, Never> retries = Schedule.recurs(1);
   final Effect<int, _BaseError> retried = widened.retry(retries);
-  final Schedule<int, int, _BaseError> mappedPolicy = Schedule<int, int, _SpecificError>.fromDriver(
-    () => ScheduleDriver(
-      (_) => Effect.fail(const _SpecificError()),
-    ),
+  final Schedule<int, int, _BaseError> mappedPolicy = Schedule<int, int, _SpecificError>(
+    () => (_) => Effect.fail(const _SpecificError()),
   ).mapError<_BaseError>((error, _) => error);
   await Runtime().run(retried);
-  await Runtime().run(mappedPolicy.driver().step(0));
+  await Runtime().run(mappedPolicy.createStep()(0));
 
   final Flow<String, _BaseError> flow = Flow.fromIterable([1, 2])
       .widenError<_BaseError>()
@@ -87,10 +85,10 @@ Future<void> main() async {
     location: tz.UTC,
     seconds: const {0},
   ) as Success<Cron, CronError>).value;
-  final Schedule<Option<int?>, Duration, _BaseError> calendar = Schedule.cron<Option<int?>>(cron)
+  final Schedule<int?, Duration, _BaseError> calendar = Schedule.cron<int?>(cron)
       .mapError<_BaseError>((error, _) => _CalendarError(error));
   final Effect<int?, _BaseError> nullable = Effect.succeed(null);
-  await nullable.schedule(calendar.within(Duration.zero)).runFuture();
+  await nullable.repeat(Schedule.max(calendar, Schedule.recurs<int?>(0))).runFuture();
 
   final cacheProgram = Effect.build<void, _BaseError>(($) async {
     final cache = await $(

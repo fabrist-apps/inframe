@@ -46,27 +46,6 @@ void main() {
       expect(clock.activeWaits, 0);
     });
 
-    test('should schedule its first execution tomorrow at 9am', () async {
-      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 11));
-      final executions = <UtcMoment>[];
-      final Effect<int?, CronError> operation = Effect.sync((_) {
-        executions.add(clock.wallTime());
-        return null;
-      });
-      final fiber = Runtime(clock: clock).fork(
-        operation.schedule(Schedule.cron<Option<int?>>(parse('0 0 9 * * *'))),
-      );
-      await flush();
-
-      expect(executions, isEmpty);
-      expect(clock.activeWaits, 1);
-      clock.advance(const Duration(hours: 22));
-      await flush();
-
-      expect(executions, [utcMoment(2026, 9, 12, 9)]);
-      await fiber.interrupt('test complete');
-    });
-
     test('should execute one overdue wait then skip the backlog', () async {
       final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 8));
       final executions = <UtcMoment>[];
@@ -74,32 +53,32 @@ void main() {
         executions.add(clock.wallTime());
       });
       final fiber = Runtime(clock: clock).fork(
-        operation.schedule(Schedule.cron<Option<void>>(parse('0 0 9 * * *'))),
+        operation.repeat(Schedule.cron<void>(parse('0 0 9 * * *'))),
       );
       await flush();
 
       clock.advance(const Duration(hours: 25));
       await flush();
-      expect(executions, [utcMoment(2026, 9, 12, 9)]);
+      expect(executions, [utcMoment(2026, 9, 11, 8), utcMoment(2026, 9, 12, 9)]);
       expect(clock.activeWaits, 1);
 
       clock.advance(const Duration(hours: 23));
       await flush();
-      expect(executions, hasLength(1));
+      expect(executions, hasLength(2));
       clock.advance(const Duration(hours: 1));
       await flush();
-      expect(executions, hasLength(2));
+      expect(executions, hasLength(3));
 
       await fiber.interrupt('test complete');
     });
 
     test('should preserve nullable schedule inputs and current wall delays', () async {
       final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 8, 30));
-      final driver = Schedule.cron<Option<int?>>(parse('0 0 9 * * *')).driver();
+      final driver = Schedule.cron<Option<int?>>(parse('0 0 9 * * *')).createStep();
 
-      final first = await driver.step(const None()).runFuture(clock: clock);
+      final first = await driver(const None()).runFuture(clock: clock);
       clock.adjustWall(const Duration(minutes: 15));
-      final second = await driver.step(const Some<int?>(null)).runFuture(clock: clock);
+      final second = await driver(const Some<int?>(null)).runFuture(clock: clock);
 
       expect((first as ScheduleContinue<Duration>).delay, const Duration(minutes: 30));
       expect((second as ScheduleContinue<Duration>).delay, const Duration(minutes: 15));
@@ -110,7 +89,7 @@ void main() {
       var executions = 0;
       final Effect<int, CronError> operation = Effect.sync((_) => ++executions);
       final fiber = Runtime(clock: clock).fork(
-        operation.schedule(Schedule.cron<Option<int>>(parse('0 0 9 * * *'))),
+        operation.repeat(Schedule.cron<int>(parse('0 0 9 * * *'))),
       );
       await flush();
 
@@ -119,7 +98,7 @@ void main() {
       await flush();
 
       expect((exit as Failed<Duration, CronError>).cause, isA<Interrupted<CronError>>());
-      expect(executions, 0);
+      expect(executions, 1);
       expect(clock.activeWaits, 0);
     });
 
@@ -128,15 +107,15 @@ void main() {
       final clock = FakeClock(wallTime: utcMoment(2026));
       var executions = 0;
       final Effect<int, _OperationError> operation = Effect.sync((_) => ++executions);
-      final policy = Schedule.cron<Option<int>>(
+      final policy = Schedule.cron<int>(
         impossible,
       ).mapError<_OperationError>((error, _) => _CalendarError(error));
 
-      final exit = await operation.schedule(policy).runFutureExit(clock: clock);
+      final exit = await operation.repeat(policy).runFutureExit(clock: clock);
 
       final cause = (exit as Failed<Duration, _OperationError>).cause;
       expect((cause as Expected<_OperationError>).error, isA<_CalendarError>());
-      expect(executions, 0);
+      expect(executions, 1);
     });
 
     test('should await cleanup and retain its defect after a failed Cron step', () async {
@@ -155,7 +134,7 @@ void main() {
           ),
         );
         final operation = Effect.succeed<int, CronError>(1);
-        return $(operation.schedule(Schedule.cron<Option<int>>(impossible)));
+        return $(operation.repeat(Schedule.cron<int>(impossible)));
       });
       final fiber = Runtime(
         clock: FakeClock(wallTime: utcMoment(2026)),
@@ -177,17 +156,6 @@ void main() {
       expect(cause.containsFatal, isTrue);
     });
 
-    test('should compose wall-time Cron with a monotonic within limit', () async {
-      final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 11));
-      final driver = Schedule.cron<Object?>(
-        parse('0 0 9 * * *'),
-      ).within(const Duration(hours: 21)).driver();
-
-      final decision = await driver.step(null).runFuture(clock: clock);
-
-      expect(decision, isA<ScheduleStop<Duration>>());
-    });
-
     test('should run operations in inherited Context and child Scopes', () async {
       final key = ContextKey<String>('service');
       final clock = FakeClock(wallTime: utcMoment(2026, 9, 11, 8));
@@ -204,14 +172,14 @@ void main() {
           ).fork(
             operation
                 .tap((value, _) => Effect.sync((_) => values.add(value)))
-                .schedule(Schedule.cron<Option<String>>(parse('0 0 9 * * *'))),
+                .repeat(Schedule.cron<String>(parse('0 0 9 * * *'))),
           );
       await flush();
       clock.advance(const Duration(hours: 1));
       await flush();
 
-      expect(values, ['inherited']);
-      expect(cleanups, 1);
+      expect(values, ['inherited', 'inherited']);
+      expect(cleanups, 2);
       await fiber.interrupt('test complete');
     });
   });

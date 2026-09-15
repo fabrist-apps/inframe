@@ -169,10 +169,9 @@ Durations must be non-negative. Conflux passes their microsecond value to the
 configured `Clock` without rounding; that Clock and its platform timer determine
 effective precision.
 
-`Schedule` values are reusable policy descriptions; every `retry`, `repeat`,
-or `schedule` execution creates a fresh driver. `retry` feeds expected errors
-to its driver, `repeat` runs immediately and feeds successful values, and
-`schedule` asks the driver before the first execution using `None`:
+`Schedule` values are reusable policy descriptions; every `retry` or `repeat`
+execution creates a fresh step function. `retry` feeds expected errors
+to that function, `repeat` runs immediately and feeds successful values:
 
 ```dart
 var attempts = 0;
@@ -185,15 +184,14 @@ final value = await loaded.runFuture();
 ```
 
 `recurs(n)` permits `n` continuing decisions, so retry and repeat can execute
-once initially plus `n` additional times. `Effect.schedule` can execute at most
-`n` times because it consults the policy first. A failed schedule step uses its
+once initially plus `n` additional times. A failed schedule step uses its
 expected-error channel and ends the operation; it is distinct from
 `ScheduleStop`.
 
 `spaced` measures each delay from the prior completion. `fixed` instead keeps an
 anchored cadence and skips missed ticks. Exponential delays have no implicit
 cap; add one explicitly with `modifyDelay` when the operation needs it. Schedule
-callbacks receive the consuming driver's execution `Context` as their final
+callbacks receive the consuming step's execution `Context` as their final
 argument:
 
 ```dart
@@ -212,11 +210,7 @@ Exponential scaling and jitter round down to whole microseconds and fail with a
 defect if the computed delay exceeds Dart's signed 64-bit `Duration` range.
 `Schedule.max` continues while both policies continue and waits for their later
 delay. `Schedule.min` continues while either policy continues, reports stopped
-branches as `None`, and waits for the earliest active delay. `within` uses the
-runtime's monotonic clock to prevent a new start beyond its budget; work that
-already started is allowed to finish. `whileInput`, `concat`, and `tap` support
-input gates, sequential policies with fresh state, and effectful observation of
-continuing decisions.
+branches as `None`, and waits for the earliest active delay.
 
 ### Moment date and time
 
@@ -328,9 +322,7 @@ occurrence search examines at most 10,000 calendar-day candidates within years
 that no occurrence exists. `sequence` searches lazily without timers or an end
 date; it yields one terminal failure and then stops if a search is exhausted.
 
-Attach a validated Cron to an Effect through `Schedule.cron`. `repeat` performs
-the operation immediately, while `schedule` waits for the first future
-occurrence. Map calendar search failures into the operation's domain error
+Attach a validated Cron to an Effect through `Schedule.cron`. `repeat` performs the operation immediately and waits for future occurrences between subsequent executions. Map calendar search failures into the operation's domain error
 before attaching the policy:
 
 ```dart

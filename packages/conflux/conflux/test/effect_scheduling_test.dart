@@ -6,23 +6,6 @@ import 'support/fake_clock.dart';
 
 void main() {
   group('Effect scheduling', () {
-    test('should evaluate retry policy callbacks in the nested region', () async {
-      final request = ContextKey<String>('request');
-      final outer = Context().withBinding(request.bind('outer'));
-      final inner = outer.withBinding(request.bind('inner'));
-      late String observed;
-      final policy = Schedule.recurs<String>(1).whileInput((_, context) {
-        observed = context.require(request);
-        return false;
-      });
-
-      await Runtime(context: outer).run(
-        Effect.fail<int, String>('failed').retry(policy).withContext(inner),
-      );
-
-      expect(observed, 'inner');
-    });
-
     test('should retry at most three times before succeeding', () async {
       var attempts = 0;
       final effect = Effect.defer<int, String>((_) {
@@ -63,65 +46,16 @@ void main() {
       expect(executions, 8);
     });
 
-    test('should schedule only after the first continuing decision', () async {
-      var executions = 0;
-      final effect = Effect.sync<int>((_) => ++executions).schedule(
-        Schedule.recurs(3),
-      );
-
-      final exit = await effect.runFutureExit();
-
-      expect((exit as Succeeded<int, Never>).value, 3);
-      expect(executions, 3);
-    });
-
-    test('should distinguish zero repeat recurrences from zero scheduled runs', () async {
-      var repeated = 0;
-      var scheduled = 0;
-
-      final repeatOutput = await Effect.sync((_) => ++repeated)
-          .repeat(Schedule.recurs(0))
-          .runFuture();
-      final scheduleOutput = await Effect.sync((_) => ++scheduled)
-          .schedule(Schedule.recurs(0))
-          .runFuture();
-
-      expect(repeatOutput, 0);
-      expect(repeated, 1);
-      expect(scheduleOutput, 0);
-      expect(scheduled, 0);
-    });
-
-    test('should preserve None and nullable Some schedule inputs', () async {
-      final inputs = <Option<int?>>[];
-      var decisions = 0;
-      final policy = Schedule<Option<int?>, int, Never>.fromDriver(
-        () => ScheduleDriver((input) {
-          inputs.add(input);
-          decisions += 1;
-          return Effect.succeed(
-            decisions <= 2 ? ScheduleContinue(decisions, Duration.zero) : ScheduleStop(decisions),
-          );
-        }),
-      );
-
-      final exit = await Effect.succeed<int?, Never>(null).schedule(policy).runFutureExit();
-
-      expect((exit as Succeeded<int, Never>).value, 3);
-      expect(inputs, [isA<None>(), isA<Some<int?>>(), isA<Some<int?>>()]);
-      expect((inputs[1] as Some<int?>).value, isNull);
-    });
-
     test('should pass only the primary expected error to retry policy', () async {
       final inputs = <String>[];
       var attempts = 0;
-      final policy = Schedule<String, int, String>.fromDriver(
-        () => ScheduleDriver((input) {
+      final policy = Schedule<String, int, String>(
+        () => (input) {
           inputs.add(input);
           return Effect.succeed(
             const ScheduleContinue(0, Duration.zero),
           );
-        }),
+        },
       );
       final effect = Effect.defer<int, String>((_) {
         attempts += 1;
@@ -140,13 +74,13 @@ void main() {
 
     test('should not retry a cause containing a defect', () async {
       var policySteps = 0;
-      final policy = Schedule<String, int, String>.fromDriver(
-        () => ScheduleDriver((_) {
+      final policy = Schedule<String, int, String>(
+        () => (_) {
           policySteps += 1;
           return Effect.succeed(
             const ScheduleContinue(0, Duration.zero),
           );
-        }),
+        },
       );
       final cause = Sequential<String>([
         const Expected('failed'),
@@ -161,8 +95,9 @@ void main() {
 
     test('should stop on a failed schedule step', () async {
       var attempts = 0;
-      final policy = Schedule<String, int, String>.fromDriver(
-        () => ScheduleDriver((_) => Effect.fail('policy failed')),
+      final policy = Schedule<String, int, String>(
+        () =>
+            (_) => Effect.fail('policy failed'),
       );
       final effect = Effect.defer<int, String>((_) {
         attempts += 1;
@@ -180,18 +115,20 @@ void main() {
       final context = Context().withBinding(request.bind('driver'));
       late String observed;
       final failed =
-          Schedule<int, int, String>.fromDriver(
-            () => ScheduleDriver((_) => Effect.fail('cron failed')),
+          Schedule<int, int, String>(
+            () =>
+                (_) => Effect.fail('cron failed'),
           ).mapError((error, context) {
             observed = context.require(request);
             return 'domain: $error';
           });
-      final defective = Schedule<int, int, String>.fromDriver(
-        () => ScheduleDriver((_) => Effect.fail('cron failed')),
+      final defective = Schedule<int, int, String>(
+        () =>
+            (_) => Effect.fail('cron failed'),
       ).mapError<int>((_, _) => throw StateError('mapper'));
 
-      final failedExit = await failed.driver().step(0).runFutureExit(context: context);
-      final defectiveExit = await defective.driver().step(0).runFutureExit();
+      final failedExit = await failed.createStep()(0).runFutureExit(context: context);
+      final defectiveExit = await defective.createStep()(0).runFutureExit();
 
       expect(
         ((failedExit as Failed<ScheduleDecision<int>, String>).cause as Expected<String>).error,
@@ -257,13 +194,12 @@ void main() {
 
     test('should await failed schedule cleanup before returning', () async {
       var cleaned = false;
-      final policy = Schedule<String, int, String>.fromDriver(
-        () => ScheduleDriver(
-          (_) => Effect.build<ScheduleDecision<int>, String>(($) {
-            $.addFinalizer(Effect.sync((_) => cleaned = true));
-            return $.sync(const Failure('policy failed'));
-          }),
-        ),
+      final policy = Schedule<String, int, String>(
+        () =>
+            (_) => Effect.build<ScheduleDecision<int>, String>(($) {
+              $.addFinalizer(Effect.sync((_) => cleaned = true));
+              return $.sync(const Failure('policy failed'));
+            }),
       );
 
       final exit = await Effect.fail<int, String>('operation failed').retry(policy).runFutureExit();
@@ -272,12 +208,22 @@ void main() {
       expect(cleaned, isTrue);
     });
 
-    test('should reject negative recurrence and spacing configuration', () {
+    test('should reject invalid schedule configuration', () {
       expect(() => Schedule.recurs<Object?>(-1), throwsArgumentError);
       expect(
         () => Schedule.spaced<Object?>(const Duration(microseconds: -1)),
         throwsArgumentError,
       );
+      expect(
+        () => Schedule.fixed<Object?>(const Duration(microseconds: -1)),
+        throwsArgumentError,
+      );
+      for (final factor in [0.0, -1.0, double.nan, double.infinity]) {
+        expect(
+          () => Schedule.exponential<Object?>(Duration.zero, factor: factor),
+          throwsArgumentError,
+        );
+      }
     });
   });
 }

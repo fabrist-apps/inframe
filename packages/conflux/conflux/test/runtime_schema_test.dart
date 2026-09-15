@@ -34,7 +34,6 @@ void main() {
   group('Runtime duration schemas', () {
     for (final (name, schema) in [
       ('Effect', Effect.durationSchema()),
-      ('Schedule', Schedule.durationSchema()),
       ('CacheExpiry', CacheExpiry.durationSchema()),
     ]) {
       group(name, () {
@@ -62,9 +61,9 @@ void main() {
         const Duration(microseconds: 0x7FFFFFFFFFFFFFFF),
       );
 
-      final driver = schedule.driver();
-      await Runtime().run(driver.step(null));
-      final exit = await Runtime().run(driver.step(null));
+      final driver = schedule.createStep();
+      await Runtime().run(driver(null));
+      final exit = await Runtime().run(driver(null));
 
       expect(
         exit,

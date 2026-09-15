@@ -1,63 +1,26 @@
 import 'package:conflux/conflux.dart';
-import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/fake_clock.dart';
 
 void main() {
   group('Schedule composition', () {
-    test('should evaluate callbacks in each driver step context', () async {
-      final request = ContextKey<String>('request');
-      final seen = <String>[];
-      final schedule =
-          Schedule.spaced<int>(
-                const Duration(seconds: 1),
-              )
-              .modifyDelay((delay, context) {
-                seen.add('delay:${context.require(request)}');
-                return delay;
-              })
-              .whileInput((_, context) {
-                seen.add('input:${context.require(request)}');
-                return true;
-              })
-              .tap((decision, context) {
-                seen.add('tap:${context.require(request)}');
-                return Effect.succeed(null);
-              });
-
-      expect(seen, isEmpty);
-      for (final name in ['first', 'second']) {
-        final context = Context().withBinding(request.bind(name));
-        await Runtime(context: context).run(schedule.driver().step(1));
-      }
-
-      expect(seen, [
-        'delay:first',
-        'input:first',
-        'tap:first',
-        'delay:second',
-        'input:second',
-        'tap:second',
-      ]);
-    });
-
     test('should distinguish anchored fixed delays from spaced delays', () async {
       final clock = FakeClock();
       final fixed = Schedule.fixed<String>(
         const Duration(seconds: 10),
-      ).driver();
+      ).createStep();
       final spaced = Schedule.spaced<String>(
         const Duration(seconds: 10),
-      ).driver();
+      ).createStep();
 
-      final first = await fixed.step('first').runFuture(clock: clock);
-      await spaced.step('first').runFuture(clock: clock);
+      final first = await fixed('first').runFuture(clock: clock);
+      await spaced('first').runFuture(clock: clock);
       clock.advance(const Duration(seconds: 25));
-      final second = await fixed.step('second').runFuture(clock: clock);
-      final spacedSecond = await spaced.step('second').runFuture(clock: clock);
+      final second = await fixed('second').runFuture(clock: clock);
+      final spacedSecond = await spaced('second').runFuture(clock: clock);
       clock.advance(const Duration(seconds: 5));
-      final third = await fixed.step('third').runFuture(clock: clock);
+      final third = await fixed('third').runFuture(clock: clock);
 
       expect((first as ScheduleContinue<int>).delay, const Duration(seconds: 10));
       expect((second as ScheduleContinue<int>).delay, const Duration(seconds: 5));
@@ -71,11 +34,11 @@ void main() {
     test('should double exponential delays by default', () async {
       final driver = Schedule.exponential<Object?>(
         const Duration(milliseconds: 100),
-      ).driver();
+      ).createStep();
 
-      final first = await driver.step(null).runFuture();
-      final second = await driver.step(null).runFuture();
-      final third = await driver.step(null).runFuture();
+      final first = await driver(null).runFuture();
+      final second = await driver(null).runFuture();
+      final third = await driver(null).runFuture();
 
       expect((first as ScheduleContinue<Duration>).delay, const Duration(milliseconds: 100));
       expect((second as ScheduleContinue<Duration>).delay, const Duration(milliseconds: 200));
@@ -85,7 +48,7 @@ void main() {
     test('should modify exponential delay without adding an automatic cap', () async {
       final uncapped = Schedule.exponential<Object?>(
         const Duration(milliseconds: 100),
-      ).driver();
+      ).createStep();
       final capped =
           Schedule.exponential<Object?>(
                 const Duration(milliseconds: 100),
@@ -95,12 +58,12 @@ void main() {
                     ? const Duration(milliseconds: 150)
                     : delay,
               )
-              .driver();
+              .createStep();
 
-      await uncapped.step(null).runFuture();
-      final uncappedSecond = await uncapped.step(null).runFuture();
-      await capped.step(null).runFuture();
-      final cappedSecond = await capped.step(null).runFuture();
+      await uncapped(null).runFuture();
+      final uncappedSecond = await uncapped(null).runFuture();
+      await capped(null).runFuture();
+      final cappedSecond = await capped(null).runFuture();
 
       expect(
         (uncappedSecond as ScheduleContinue<Duration>).delay,
@@ -111,9 +74,9 @@ void main() {
       final tripled = Schedule.exponential<Object?>(
         const Duration(milliseconds: 100),
         factor: 3,
-      ).driver();
-      await tripled.step(null).runFuture();
-      final tripledSecond = await tripled.step(null).runFuture();
+      ).createStep();
+      await tripled(null).runFuture();
+      final tripledSecond = await tripled(null).runFuture();
       expect(
         (tripledSecond as ScheduleContinue<Duration>).delay,
         const Duration(milliseconds: 300),
@@ -132,84 +95,22 @@ void main() {
                   return values.current;
                 },
               )
-              .driver();
+              .createStep();
 
-      final low = await driver.step(null).runFuture();
-      final high = await driver.step(null).runFuture();
+      final low = await driver(null).runFuture();
+      final high = await driver(null).runFuture();
 
       expect((low as ScheduleContinue<int>).delay, const Duration(milliseconds: 800));
       expect((high as ScheduleContinue<int>).delay.inMicroseconds, 1199999);
-    });
-
-    test('should stop when the next start exceeds a monotonic budget', () async {
-      final clock = FakeClock();
-      final driver = Schedule.spaced<Object?>(
-        const Duration(seconds: 10),
-      ).within(const Duration(seconds: 25)).driver();
-
-      final first = await driver.step(null).runFuture(clock: clock);
-      clock.advance(const Duration(seconds: 10));
-      final second = await driver.step(null).runFuture(clock: clock);
-      clock
-        ..adjustWall(const Duration(days: 1))
-        ..advanceMonotonic(const Duration(seconds: 10));
-      final third = await driver.step(null).runFuture(clock: clock);
-
-      expect(first, isA<ScheduleContinue<int>>());
-      expect(second, isA<ScheduleContinue<int>>());
-      expect(third, isA<ScheduleStop<int>>());
-    });
-
-    test('should let started work finish before enforcing its budget', () async {
-      final clock = FakeClock();
-      var executions = 0;
-      final program =
-          Effect.sync((_) {
-            executions += 1;
-            if (executions == 2) {
-              clock.advance(const Duration(seconds: 30));
-            }
-          }).repeat<int>(
-            Schedule.spaced<Null>(
-              const Duration(seconds: 10),
-            ).within(const Duration(seconds: 25)),
-          );
-
-      final fiber = Runtime(clock: clock).fork(program);
-      await Future<void>.delayed(Duration.zero);
-      clock.advance(const Duration(seconds: 10));
-      final exit = await fiber.join();
-
-      expect(exit, isA<Succeeded<int, Never>>());
-      expect(executions, 2);
-    });
-
-    test('should include effectful driver work in its elapsed budget', () async {
-      final clock = FakeClock();
-      final driver =
-          Schedule.spaced<Object?>(
-                const Duration(seconds: 10),
-              )
-              .tap((_, _) {
-                return Effect.sync((_) {
-                  clock.advanceMonotonic(const Duration(seconds: 20));
-                });
-              })
-              .within(const Duration(seconds: 25))
-              .driver();
-
-      final decision = await driver.step(null).runFuture(clock: clock);
-
-      expect(decision, isA<ScheduleStop<int>>());
     });
 
     test('should combine both-alive policies with the later delay', () async {
       final driver = Schedule.max(
         Schedule.spaced<Object?>(const Duration(seconds: 2)),
         Schedule.spaced<Object?>(const Duration(seconds: 5)),
-      ).driver();
+      ).createStep();
 
-      final decision = await driver.step(null).runFuture();
+      final decision = await driver(null).runFuture();
       final continued = decision as ScheduleContinue<({int left, int right})>;
 
       expect(continued.output, (left: 0, right: 0));
@@ -220,9 +121,9 @@ void main() {
       final driver = Schedule.max(
         Schedule.recurs<Object?>(0),
         Schedule.spaced<Object?>(const Duration(seconds: 5)),
-      ).driver();
+      ).createStep();
 
-      final decision = await driver.step(null).runFuture();
+      final decision = await driver(null).runFuture();
 
       expect(decision, isA<ScheduleStop<({int left, int right})>>());
     });
@@ -231,9 +132,9 @@ void main() {
       final driver = Schedule.min(
         Schedule.recurs<Object?>(0),
         Schedule.spaced<Object?>(const Duration(seconds: 5)),
-      ).driver();
+      ).createStep();
 
-      final decision = await driver.step(null).runFuture();
+      final decision = await driver(null).runFuture();
       final continued = decision as ScheduleContinue<({Option<int> left, Option<int> right})>;
 
       expect(continued.output.left, isA<None>());
@@ -245,9 +146,9 @@ void main() {
       final driver = Schedule.min(
         Schedule.spaced<Object?>(const Duration(seconds: 2)),
         Schedule.spaced<Object?>(const Duration(seconds: 5)),
-      ).driver();
+      ).createStep();
 
-      final decision = await driver.step(null).runFuture();
+      final decision = await driver(null).runFuture();
 
       expect(
         (decision as ScheduleContinue<({Option<int> left, Option<int> right})>).delay,
@@ -259,103 +160,13 @@ void main() {
       final driver = Schedule.min(
         Schedule.recurs<Object?>(0),
         Schedule.recurs<Object?>(0),
-      ).driver();
+      ).createStep();
 
-      final decision = await driver.step(null).runFuture();
+      final decision = await driver(null).runFuture();
 
       expect(
         decision,
         isA<ScheduleStop<({Option<int> left, Option<int> right})>>(),
-      );
-    });
-
-    test('should stop before another execution when input is rejected', () async {
-      final driver = Schedule.spaced<int>(
-        const Duration(seconds: 1),
-      ).whileInput((input, _) => input > 0).driver();
-
-      final accepted = await driver.step(1).runFuture();
-      final rejected = await driver.step(0).runFuture();
-
-      expect(accepted, isA<ScheduleContinue<int>>());
-      expect(rejected, isA<ScheduleStop<int>>());
-    });
-
-    test('should start concat second policy with fresh state', () async {
-      final driver = Schedule.recurs<Object?>(1).concat(Schedule.recurs<Object?>(1)).driver();
-
-      final first = await driver.step(null).runFuture();
-      final second = await driver.step(null).runFuture();
-      final third = await driver.step(null).runFuture();
-
-      expect((first as ScheduleContinue<int>).output, 0);
-      expect((second as ScheduleContinue<int>).output, 0);
-      expect((third as ScheduleStop<int>).output, 1);
-    });
-
-    test('should tap only continuing decisions', () async {
-      final observed = <int>[];
-      final driver = Schedule.recurs<Object?>(1)
-          .tap(
-            (decision, _) => Effect.sync((_) => observed.add(decision.output)),
-          )
-          .driver();
-
-      await driver.step(null).runFuture();
-      await driver.step(null).runFuture();
-
-      expect(observed, [0]);
-    });
-
-    test('should retain a tap defect', () async {
-      final driver = Schedule.recurs<Object?>(1)
-          .tap(
-            (_, _) => Effect.sync((_) => throw StateError('tap failed')),
-          )
-          .driver();
-
-      final exit = await driver.step(null).runFutureExit();
-
-      expect((exit as Failed<ScheduleDecision<int>, Never>).cause, isA<Defect<Never>>());
-    });
-
-    test('should retain tap interruption', () async {
-      final driver = Schedule.recurs<Object?>(1)
-          .tap(
-            (_, _) => Effect.failCause<void, Never>(const Interrupted('hook')),
-          )
-          .driver();
-
-      final exit = await driver.step(null).runFutureExit();
-
-      expect(
-        (exit as Failed<ScheduleDecision<int>, Never>).cause,
-        isA<Interrupted<Never>>(),
-      );
-    });
-
-    test('should reject invalid policy configuration', () async {
-      expect(
-        () => Schedule.fixed<Object?>(const Duration(microseconds: -1)),
-        throwsArgumentError,
-      );
-      expect(
-        () => Schedule.exponential<Object?>(Duration.zero, factor: 0),
-        throwsArgumentError,
-      );
-      expect(
-        () => Schedule.spaced<Object?>(
-          const Duration(seconds: 1),
-        ).within(const Duration(microseconds: -1)),
-        throwsArgumentError,
-      );
-      final invalidJitter = Schedule.spaced<Object?>(
-        const Duration(seconds: 1),
-      ).jittered(random: () => 1).driver();
-      final exit = await invalidJitter.step(null).runFutureExit();
-      expect(
-        (exit as Failed<ScheduleDecision<int>, Never>).cause,
-        isA<Defect<Never>>(),
       );
     });
   });

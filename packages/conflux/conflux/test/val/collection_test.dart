@@ -17,6 +17,7 @@ void main() {
       expect(Val.list(Val.string().optional()).parse(['x']), ['x']);
       expect(issues(Val.list(Val.string().optional()), [null]).single.code, 'NOT_NULL');
     });
+
     test('should flatten nested failures in key and index order', () {
       final schema = Val.map(Val.list(Val.object({'name': Val.string(name: 'Name')})));
       final errors = issues(schema, {
@@ -35,6 +36,7 @@ void main() {
       ]);
       expect(errors.map((e) => e.code), ['INVALID_TYPE', 'REQUIRED', 'NOT_NULL']);
     });
+
     test('should reject non-string keys before validating any map values', () {
       var calls = 0;
       final schema = Val.map(
@@ -47,6 +49,7 @@ void main() {
       expect(calls, 0);
       expect(schema.parse(<Object?, Object?>{'x': 'ok'}), {'x': 'ok'});
     });
+
     test('should skip list and map checks until all children succeed', () {
       var calls = 0;
       final list = Val.list(Val.string()).minLength(4).unique().refine((_) {
@@ -64,6 +67,7 @@ void main() {
       expect(issues(map, {'x': 'bad'}).single.code, 'INVALID_TYPE');
       expect(calls, before);
     });
+
     test('should measure list counts', () {
       expect(Val.list(Val.string()).minLength(1).maxLength(1).length(1).parse(['😀']), ['😀']);
       expect(
@@ -85,6 +89,7 @@ void main() {
         'Counts must not be null',
       );
     });
+
     test('should use parsed equality and emit one uniqueness issue', () {
       final lists = Val.list(Val.list(Val.int())).unique();
       expect(
@@ -111,6 +116,7 @@ void main() {
       expect(Val.list(Val.instance<Moment>()).unique().parse([utc, fixed]), [utc, fixed]);
       expect(issues(Val.list(Val.instance<Moment>()).unique(), [utc, utc]).single.path, isEmpty);
     });
+
     test('should detach containers, borrow instances, and isolate derivation and reuse', () {
       final input = <String, List<String>>{
         'x': ['a'],
