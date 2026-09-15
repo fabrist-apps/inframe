@@ -22,6 +22,10 @@ void main() {
         containing: 'UNDEFINED_METHOD',
       );
     });
+    test('should serialize issues without consumer generation', () async {
+      await fixtures.analyze('val_consumer', 'issues.dart');
+      await fixtures.run('val_consumer', 'issues.dart');
+    });
     test('should reject non-string codes statically', () async {
       await fixtures.analyzeFails(
         'val_consumer',

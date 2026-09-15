@@ -587,3 +587,24 @@ Invalid configuration throws while constructing the schema. Format validation
 accepts structurally valid future timestamps, performs no normalization, and
 reads neither clocks nor randomness. Factory code/message overrides apply to
 format errors; customize type errors through `Val.string(...)` first.
+
+### Issue serialization
+
+Validation issues ship with generated `dart_mappable` support; consumers need no
+build step. Use `issue.toMap()` or `issue.toJson()`, and
+`ValidationIssueMapper.fromMap(...)` / `fromJson(...)` to restore issues.
+
+```json
+{"code":"PASSWORD_TOO_SHORT","message":"Password must contain at least 8 characters","kind":"tooSmall","path":["users",0,"password"]}
+```
+
+The wire format contains exactly `code`, `message`, `kind`, and `path`. Fields
+encode as strings and indices as non-negative integers; root paths are empty
+lists. Malformed required fields, unknown kinds, and invalid path segments fail
+decoding instead of becoming validation results. Paths remain immutable after
+decoding or `copyWith`. Raw inputs, callbacks, schemas, and stack traces are not
+part of the wire format.
+
+Conflux maintainers regenerate the committed issue mapper from
+`packages/conflux/conflux` with `dart run build_runner build
+--build-filter='lib/src/val/issue.mapper.dart'`, then format the generated file.

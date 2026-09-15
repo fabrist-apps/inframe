@@ -4,7 +4,14 @@ library;
 export 'src/val/chrono_id_schema.dart';
 export 'src/val/collection_schema.dart' show ListChecks;
 export 'src/val/issue.dart'
-    show Field, Index, IssueKind, PathSegment, ValidationException, ValidationIssue;
+    show
+        Field,
+        Index,
+        IssueKind,
+        PathSegment,
+        ValidationException,
+        ValidationIssue,
+        ValidationIssueMapper;
 export 'src/val/membership_schema.dart' show LiteralSchema;
 export 'src/val/moment_schema.dart';
 export 'src/val/numeric_schema.dart' show IntegerChecks, NumericChecks;

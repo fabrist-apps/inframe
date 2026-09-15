@@ -1,100 +1,83 @@
-// Path values are immutable without an annotation-only dependency.
-// ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
-
 import 'package:conflux/non_empty_list.dart';
+import 'package:conflux/src/val/path.dart' hide Field;
+import 'package:conflux/src/val/path.dart' as structural show Field;
+import 'package:dart_mappable/dart_mappable.dart';
+
+export 'package:conflux/src/val/path.dart';
+
+part 'issue.mapper.dart';
 
 /// The category of a validation failure, independent of its application code.
+@MappableEnum()
 enum IssueKind {
   /// An absent required field.
+  @MappableValue('missing')
   missing,
 
   /// An incompatible input type or rejected null.
+  @MappableValue('invalidType')
   invalidType,
 
   /// A value outside a literal or enum's membership.
+  @MappableValue('invalidValue')
   invalidValue,
 
   /// A malformed string.
+  @MappableValue('invalidFormat')
   invalidFormat,
 
   /// A value below a lower bound.
+  @MappableValue('tooSmall')
   tooSmall,
 
   /// A value above an upper bound.
+  @MappableValue('tooBig')
   tooBig,
 
   /// An incorrect exact length.
+  @MappableValue('invalidLength')
   invalidLength,
 
   /// An integer not divisible by the configured divisor.
+  @MappableValue('notMultipleOf')
   notMultipleOf,
 
   /// An integer outside JavaScript's exact range.
+  @MappableValue('unsafeInteger')
   unsafeInteger,
 
   /// NaN or infinity.
+  @MappableValue('notFinite')
   notFinite,
 
   /// Duplicate list elements.
+  @MappableValue('notUnique')
   notUnique,
 
   /// An unknown object key.
+  @MappableValue('unrecognizedKey')
   unrecognizedKey,
 
   /// No alternative accepted the input.
+  @MappableValue('invalidUnion')
   invalidUnion,
 
   /// A discriminator could not select a branch.
+  @MappableValue('invalidDiscriminator')
   invalidDiscriminator,
 
   /// A recursive traversal exceeded its bound.
+  @MappableValue('maxDepth')
   maxDepth,
 
   /// A caller predicate rejected a value.
+  @MappableValue('custom')
   custom,
 }
 
-/// One structural step from the parse root.
-sealed class PathSegment {
-  const PathSegment();
-}
-
-/// An object field or map key, including the empty string.
-final class Field extends PathSegment {
-  /// Identifies [name] without using a schema's human-readable label.
-  const Field(this.name);
-
-  /// The original key.
-  final String name;
-
-  @override
-  bool operator ==(Object other) => other is Field && other.name == name;
-  @override
-  int get hashCode => Object.hash(Field, name);
-  @override
-  String toString() => name;
-}
-
-/// A non-negative list position.
-final class Index extends PathSegment {
-  /// Throws [ArgumentError] for a negative index.
-  Index(this.index) {
-    if (index < 0) throw ArgumentError.value(index, 'index', 'Must be non-negative');
-  }
-
-  /// The zero-based position.
-  final int index;
-
-  @override
-  bool operator ==(Object other) => other is Index && other.index == index;
-  @override
-  int get hashCode => Object.hash(Index, index);
-  @override
-  String toString() => '[$index]';
-}
-
 /// A validation failure with an immutable structural location.
-final class ValidationIssue {
+@MappableClass(includeCustomMappers: [_PathSegmentMapper()], hook: _IssueWireHook())
+final class ValidationIssue with ValidationIssueMappable {
   /// Copies [path]; codes and messages are retained verbatim.
   ValidationIssue({
     required this.code,
@@ -165,5 +148,49 @@ final class IssueTemplate {
       kind: kind,
       path: path,
     );
+  }
+}
+
+// Compact paths are a wire contract, independent of Dart class discriminators.
+final class _PathSegmentMapper extends SimpleMapper<PathSegment> {
+  const _PathSegmentMapper();
+  @override
+  PathSegment decode(Object value) => switch (value) {
+    final String field => structural.Field(field),
+    final int index when index >= 0 => Index(index),
+    _ => throw const FormatException('Path segments must be strings or non-negative integers'),
+  };
+  @override
+  Object encode(PathSegment self) => switch (self) {
+    structural.Field(:final name) => name,
+    Index(:final index) => index,
+  };
+}
+
+// dart_mappable normally coerces primitive strings. Reject malformed wire
+// fields before decoding so numeric application codes cannot silently change.
+final class _IssueWireHook extends MappingHook {
+  const _IssueWireHook();
+  @override
+  Object? beforeDecode(Object? value) {
+    if (value is ValidationIssue) return value;
+    if (value is! Map ||
+        value['code'] is! String ||
+        value['message'] is! String ||
+        value['kind'] is! String ||
+        value['path'] is! List) {
+      throw const FormatException(
+        'Validation issues require string code, message, kind, and a list path',
+      );
+    }
+    final path = value['path'];
+    if (path is List) {
+      for (final segment in path) {
+        if (segment is! String && !(segment is int && segment >= 0)) {
+          throw const FormatException('Path segments must be strings or non-negative integers');
+        }
+      }
+    }
+    return value;
   }
 }

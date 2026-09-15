@@ -40,3 +40,6 @@ doc/api/
 *.voxel.dart
 *.voxel_migrations.dart
 *_generated.dart
+
+# Val consumers serialize issues without running code generation.
+!packages/conflux/conflux/lib/src/val/issue.mapper.dart
