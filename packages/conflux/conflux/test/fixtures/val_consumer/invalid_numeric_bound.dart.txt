@@ -1,0 +1,2 @@
+import 'package:conflux/val.dart';
+final schema = Val.int().min(1.5);

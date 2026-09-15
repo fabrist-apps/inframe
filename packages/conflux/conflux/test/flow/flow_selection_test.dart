@@ -29,7 +29,7 @@ void main() {
           isA<ArgumentError>()
               .having((error) => error.name, 'name', 'count')
               .having((error) => error.invalidValue, 'invalidValue', -1)
-              .having((error) => error.message, 'message', 'Must be at least 0, got -1.'),
+              .having((error) => error.message, 'message', 'Must be non-negative'),
         ),
       );
     });

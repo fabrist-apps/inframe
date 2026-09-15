@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
@@ -148,24 +147,20 @@ final class _MergeCoordinator<A, E> {
 
   final FlowMailbox<A, E> _mailbox;
   final EffectExecution _execution;
-  final Map<int, ({Fiber<void, E> fiber, _PumpKind kind})> _pumps = {};
+  final Map<int, ({Fiber<void, E> fiber, bool releasesPermit})> _pumps = {};
   var _nextId = 0;
-  var _remainingSources = 0;
-  var _activeInners = 0;
-  var _outerFinished = false;
   var _terminalizing = false;
   var _closed = false;
   _ConcurrencyGate? _gate;
 
   void startSources(Iterable<OpenFlowCursor<A, E>> sources) {
     final sourceList = List<OpenFlowCursor<A, E>>.of(sources);
-    _remainingSources = sourceList.length;
     if (sourceList.isEmpty) {
       _mailbox.complete();
       return;
     }
     for (final source in sourceList) {
-      _startPump(source, _mailbox.offer, _PumpKind.source);
+      _startPump(source, _mailbox.offer);
     }
   }
 
@@ -184,37 +179,34 @@ final class _MergeCoordinator<A, E> {
                 gate.release();
                 return;
               }
-              _activeInners += 1;
               _startPump(
                 () => Effect.defer((_) => transform(value, context)()),
                 _mailbox.offer,
-                _PumpKind.inner,
+                releasesPermit: true,
               );
             }).mapError<E>((value, _) => _widenNever(value! as Never));
           }),
-      _PumpKind.outer,
     );
   }
 
   void _startPump<B>(
     OpenFlowCursor<B, E> open,
-    Effect<void, E> Function(B value) emit,
-    _PumpKind kind,
-  ) {
+    Effect<void, E> Function(B value) emit, {
+    bool releasesPermit = false,
+  }) {
     final id = _nextId++;
     final fiber = ScopeAccess.fork(
       _execution.scope,
       pumpFlow(open, emit),
       _execution,
     );
-    _pumps[id] = (fiber: fiber, kind: kind);
+    _pumps[id] = (fiber: fiber, releasesPermit: releasesPermit);
     unawaited(fiber.exit.then((exit) => _finished(id, exit)));
   }
 
   Future<void> _finished(int id, Exit<void, E> exit) async {
-    final kind = _pumps.remove(id)?.kind;
-    if (kind == _PumpKind.inner) {
-      _activeInners -= 1;
+    final pump = _pumps.remove(id);
+    if (pump?.releasesPermit ?? false) {
       _gate?.release();
     }
     if (_closed || _execution.cancellation.isCancelled || _terminalizing) return;
@@ -223,22 +215,7 @@ final class _MergeCoordinator<A, E> {
       case Failed<void, E>(:final cause):
         await _fail(cause);
       case Succeeded<void, E>():
-        _completePump(kind);
-    }
-  }
-
-  void _completePump(_PumpKind? kind) {
-    switch (kind) {
-      case _PumpKind.source:
-        _remainingSources -= 1;
-        if (_remainingSources == 0) _mailbox.complete();
-      case _PumpKind.outer:
-        _outerFinished = true;
-        if (_activeInners == 0) _mailbox.complete();
-      case _PumpKind.inner:
-        if (_outerFinished && _activeInners == 0) _mailbox.complete();
-      case null:
-        break;
+        if (_pumps.isEmpty) _mailbox.complete();
     }
   }
 
@@ -256,8 +233,6 @@ final class _MergeCoordinator<A, E> {
     _closed = true;
   }
 }
-
-enum _PumpKind { source, outer, inner }
 
 final class _SwitchCoordinator<Outer, A, E> {
   _SwitchCoordinator(
@@ -614,7 +589,8 @@ final class _ConcurrencyGate {
   _ConcurrencyGate(this.limit);
 
   final int limit;
-  final ListQueue<CoordinationWaiter<void>> _waiters = ListQueue();
+  // Only the sequential outer pump acquires permits.
+  CoordinationWaiter<void>? _waiter;
   var _active = 0;
   var _closed = false;
 
@@ -628,17 +604,21 @@ final class _ConcurrencyGate {
           _active += 1;
           waiter.succeed(null);
         } else {
-          _waiters.addLast(waiter);
+          _waiter = waiter;
         }
       },
-      onCancel: () => _waiters.remove(waiter),
+      onCancel: () {
+        if (identical(_waiter, waiter)) _waiter = null;
+      },
     );
   });
 
   void release() {
     if (_active == 0) return;
-    while (_waiters.isNotEmpty) {
-      _waiters.removeFirst().succeed(null);
+    final waiter = _waiter;
+    _waiter = null;
+    if (waiter != null) {
+      waiter.succeed(null);
       return;
     }
     _active -= 1;
@@ -646,9 +626,8 @@ final class _ConcurrencyGate {
 
   void close() {
     _closed = true;
-    while (_waiters.isNotEmpty) {
-      _waiters.removeFirst().interrupt(const ConcurrentFlowClosed());
-    }
+    _waiter?.interrupt(const ConcurrentFlowClosed());
+    _waiter = null;
   }
 }
 

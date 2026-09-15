@@ -1,7 +1,6 @@
 // All value fields are final; no annotation-only runtime dependency is needed.
 // ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
 
-import 'package:ack/ack.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/moment/moment_error.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -39,7 +38,8 @@ sealed class TimeZone {
   /// Validates a whole-second offset with an absolute value below 24 hours.
   static Result<FixedTimeZone, MomentError> fixed(Duration offset) {
     final zone = FixedTimeZone._(offset);
-    if (FixedTimeZone.schema().safeEncode(zone).isFail) {
+    if (offset.inMicroseconds % Duration.microsecondsPerSecond != 0 ||
+        offset.inMicroseconds.abs() >= Duration.microsecondsPerDay) {
       return const Failure(
         MomentError(
           MomentErrorKind.invalidOffset,
@@ -80,18 +80,6 @@ final class NamedTimeZone extends TimeZone {
 /// A constant offset, including fixed zero as distinct from UTC representation.
 final class FixedTimeZone extends TimeZone {
   const FixedTimeZone._(this.offset) : super._();
-
-  /// Decodes epoch-offset microseconds and validates fixed zones when encoding.
-  ///
-  /// Offsets must be whole seconds with magnitude below 24 hours.
-  static AckSchema<int, FixedTimeZone> schema() => Ack.integer()
-      .multipleOf(Duration.microsecondsPerSecond)
-      .greaterThan(-Duration.microsecondsPerDay)
-      .lessThan(Duration.microsecondsPerDay)
-      .codec<FixedTimeZone>(
-        decode: (micros) => FixedTimeZone._(Duration(microseconds: micros)),
-        encode: (zone) => zone.offset.inMicroseconds,
-      );
 
   /// The fixed offset east of UTC.
   final Duration offset;

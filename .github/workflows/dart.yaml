@@ -29,15 +29,15 @@ jobs:
       - name: Resolve workspace dependencies
         run: dart pub get
 
+      - name: Generate Conflux mappers
+        working-directory: packages/conflux/conflux
+        run: |
+          dart run build_runner build
+          dart format lib/src/val/issue.mapper.dart test/serialization/mappers_serialization_test.mapper.dart
+
       - name: Generate Chronicler models
         working-directory: packages/chronicler/chronicler
         run: dart run build_runner build
-
-      - name: Generate Conflux mapping fixtures
-        working-directory: packages/conflux/dart_mappable_conflux
-        run: |
-          dart run build_runner build
-          dart format .
 
       - name: Generate Turso native bindings
         working-directory: packages/database/turso
@@ -92,7 +92,6 @@ jobs:
         run: |
           dart test packages/conflux/conflux/test --chain-stack-traces
           dart test packages/conflux/chronicler_conflux/test --chain-stack-traces
-          dart test packages/conflux/dart_mappable_conflux/test --chain-stack-traces
 
       - name: Run Chrono ID tests
         run: |

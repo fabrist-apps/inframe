@@ -1,0 +1,9 @@
+import 'package:conflux/conflux.dart';
+void main() {
+  final Schema<Moment> converted = Val.string().optional().moment();
+  final Moment value = converted.parse('2026-01-01T00:00:00Z');
+  final Schema<Moment?> nullable = Val.string().nullable().moment();
+  final Moment? cleared = nullable.parse(null);
+  final Schema<String> timestamp = Val.string().datetime();
+  if (cleared != null || timestamp.parse(value.formatIso()) != value.formatIso()) throw StateError('Invalid types');
+}

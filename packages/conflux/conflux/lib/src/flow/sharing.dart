@@ -151,8 +151,8 @@ final class _SharedConnection<A, E> {
 
   bool get hasSubscribers => _subscribers.isNotEmpty;
 
-  List<A> attach(_SharedSubscriber<A, E> subscriber) {
-    final retained = List<A>.of(_replay);
+  ListQueue<A> attach(_SharedSubscriber<A, E> subscriber) {
+    final retained = ListQueue<A>.of(_replay);
     _subscribers.add(subscriber);
     switch (_terminal) {
       case Succeeded<void, E>():
@@ -238,7 +238,7 @@ final class _SharedSubscriber<A, E> {
 }
 
 final class _SharedCursor<A, E> implements FlowSourceCursor<A, E> {
-  _SharedCursor(this._mailbox, Iterable<A> retained) : _retained = ListQueue<A>.of(retained);
+  _SharedCursor(this._mailbox, this._retained);
 
   final FlowMailbox<A, E> _mailbox;
   final ListQueue<A> _retained;

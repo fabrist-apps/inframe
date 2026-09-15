@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:ack/ack.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/pubsub.dart';
@@ -35,21 +34,9 @@ final class Flow<A, E> {
 
   final OpenFlowCursor<A, E> _openCursor;
 
-  /// Validates counts, allowing zero for selection and replay by default.
-  static IntegerSchema countSchema({bool allowZero = true}) =>
-      allowZero ? Ack.integer().min(0) : Ack.integer().positive();
-
-  /// Validates nonnegative durations, encoded as exact microseconds.
-  static CodecSchema<int, Duration> durationSchema() => Ack.integer()
-      .min(0)
-      .codec<Duration>(
-        decode: (micros) => Duration(microseconds: micros),
-        encode: (duration) => duration.inMicroseconds,
-      );
-
   /// Creates a Flow that completes without emitting a value.
   static Flow<A, E> empty<A, E>() => Flow._(
-    () => Effect.succeed(_EmptyCursor<A, E>()),
+    () => Effect.succeed(_CallbackCursor<A, E>(() => Effect.succeed(const None()))),
   );
 
   /// Creates a Flow that emits [value] once, including when it is `null`.
@@ -59,7 +46,7 @@ final class Flow<A, E> {
 
   /// Creates a Flow that terminates with expected [error].
   static Flow<A, E> fail<A, E>(E error) => Flow._(
-    () => Effect.succeed(_FailureCursor<A, E>(error)),
+    () => Effect.succeed(_CallbackCursor<A, E>(() => Effect.fail(error))),
   );
 
   /// Creates a cold Flow whose iterator is acquired for each consumption.
@@ -224,13 +211,21 @@ final class Flow<A, E> {
 
   /// Transforms each emitted value while preserving the failure channel.
   Flow<B, E> map<B>(B Function(A value, Context context) transform) => Flow._(
-    () => open().map((cursor, _) => _MapCursor(cursor, transform)),
+    () => open().map(
+      (cursor, _) => _CallbackCursor(
+        () => cursor.next().map(
+          (option, context) => switch (option) {
+            Some<A>(:final value) => Some(transform(value, context)),
+            None() => const None(),
+          },
+        ),
+      ),
+    ),
   );
 
   /// Emits only values accepted by [predicate].
-  Flow<A, E> filter(bool Function(A value, Context context) predicate) => Flow._(
-    () => open().map((cursor, _) => _FilterCursor(cursor, predicate)),
-  );
+  Flow<A, E> filter(bool Function(A value, Context context) predicate) =>
+      filterMap((value, context) => predicate(value, context) ? Some(value) : const None());
 
   /// Transforms values and emits only present results.
   Flow<B, E> filterMap<B>(Option<B> Function(A value, Context context) transform) => Flow._(
@@ -239,7 +234,7 @@ final class Flow<A, E> {
 
   /// Discards the first [count] values.
   Flow<A, E> skip(int count) {
-    validateArgument(countSchema(), count, debugName: 'count');
+    checkNonNegative(count, 'count');
     if (count == 0) return this;
     return Flow._(
       () => open().map((cursor, _) => _SkipCursor(cursor, count)),
@@ -301,7 +296,18 @@ final class Flow<A, E> {
   Flow<B, E> mapEffect<B>(
     Effect<B, E> Function(A value, Context context) transform,
   ) => Flow._(
-    () => open().map((cursor, _) => _MapEffectCursor(cursor, transform)),
+    () => open().map(
+      (cursor, _) => _CallbackCursor(
+        () => Effect.build((resolve) async {
+          return switch (await resolve(cursor.next())) {
+            Some<A>(:final value) => Some(
+              await resolve(Effect.defer((context) => transform(value, context))),
+            ),
+            None() => const None(),
+          };
+        }),
+      ),
+    ),
   );
 
   /// Consumes each transformed inner Flow fully before opening the next one.
@@ -322,7 +328,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateArgument(countSchema(allowZero: false), concurrency, debugName: 'concurrency');
+    checkPositive(concurrency, 'concurrency');
     FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => ConcurrentFlowSource.openMergeMap(
@@ -415,7 +421,7 @@ final class Flow<A, E> {
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
     FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
-    validateArgument(countSchema(), replay, debugName: 'replay');
+    checkNonNegative(replay, 'replay');
     final shared = SharedFlowSource.create<A, E>(
       open,
       capacity: capacity,
@@ -431,7 +437,7 @@ final class Flow<A, E> {
   /// [count] must be positive. Normal completion flushes a non-empty partial
   /// batch, while failure discards it and preserves the complete failure cause.
   Flow<List<A>, E> bufferCount(int count) {
-    validateArgument(countSchema(allowZero: false), count, debugName: 'count');
+    checkPositive(count, 'count');
     return Flow._(() => BatchingFlowSource.openCount(open, count));
   }
 
@@ -448,8 +454,8 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateArgument(durationSchema(), duration, debugName: 'duration');
-    validateArgument(countSchema(allowZero: false), maxSize, debugName: 'maxSize');
+    checkDuration(duration, 'duration');
+    checkPositive(maxSize, 'maxSize');
     FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => BatchingFlowSource.openTime(
@@ -474,7 +480,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateArgument(durationSchema(), duration, debugName: 'duration');
+    checkDuration(duration, 'duration');
     FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => FlowSchedulingSource.openDebounce(
@@ -498,7 +504,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateArgument(durationSchema(), duration, debugName: 'duration');
+    checkDuration(duration, 'duration');
     FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => FlowSchedulingSource.openThrottle(
@@ -513,7 +519,7 @@ final class Flow<A, E> {
 
   /// Resubscribes after expected failures while [schedule] continues.
   ///
-  /// Every consumption creates a fresh Schedule driver, and every retry waits
+  /// Every consumption creates a fresh Schedule step, and every retry waits
   /// for the failed attempt's cleanup before the policy delay and next source
   /// factory call. Values delivered before failure may be delivered again.
   /// Repeatable factories and idempotent external operations remain the caller's
@@ -529,8 +535,8 @@ final class Flow<A, E> {
   /// Transforms every expected error leaf while preserving cause structure.
   Flow<A, F> mapError<F>(F Function(E error, Context context) transform) => Flow._(
     () => open()
-        .mapError((value, context) => transform(value, context))
-        .map((cursor, _) => _MapErrorCursor(cursor, transform)),
+        .mapError(transform)
+        .map((cursor, _) => _CallbackCursor(() => cursor.next().mapError(transform))),
   );
 
   /// Recovers once from an all-expected terminal cause.
@@ -541,19 +547,16 @@ final class Flow<A, E> {
   );
 
   /// Runs an effectful observer after each value and retains that value.
-  Flow<A, E> tap(
-    Effect<void, E> Function(A value, Context context) observe,
-  ) => Flow._(
-    () => open().map((cursor, _) => _TapCursor(cursor, observe)),
-  );
+  Flow<A, E> tap(Effect<void, E> Function(A value, Context context) observe) =>
+      mapEffect((value, context) => observe(value, context).map((_, _) => value));
 
   /// Observes the primary expected error without recovering it.
   Flow<A, E> tapError(
     Effect<void, Never> Function(E error, Context context) observe,
   ) => Flow._(
     () => open()
-        .tapError((value, context) => observe(value, context))
-        .map((cursor, _) => _TapErrorCursor(cursor, observe)),
+        .tapError(observe)
+        .map((cursor, _) => _CallbackCursor(() => cursor.next().tapError(observe))),
   );
 
   /// Observes a complete terminal cause without recovering it.
@@ -561,8 +564,8 @@ final class Flow<A, E> {
     Effect<void, Never> Function(Cause<E> cause, Context context) observe,
   ) => Flow._(
     () => open()
-        .tapCause((value, context) => observe(value, context))
-        .map((cursor, _) => _TapCauseCursor(cursor, observe)),
+        .tapCause(observe)
+        .map((cursor, _) => _CallbackCursor(() => cursor.next().tapCause(observe))),
   );
 
   /// Runs [finalizer] once after every terminal outcome.
@@ -577,7 +580,7 @@ final class Flow<A, E> {
 
   /// Emits at most the first [count] values and then closes upstream.
   Flow<A, E> take(int count) {
-    validateArgument(countSchema(), count, debugName: 'count');
+    checkNonNegative(count, 'count');
     if (count == 0) return Flow.empty();
     return Flow._(
       () => open().map((cursor, _) => _TakeCursor(cursor, count)),
@@ -855,9 +858,13 @@ final class _ManagedFlowCursor<A, E> implements FlowCursor<A, E> {
   }
 }
 
-final class _EmptyCursor<A, E> implements FlowSourceCursor<A, E> {
+final class _CallbackCursor<A, E> implements FlowSourceCursor<A, E> {
+  const _CallbackCursor(this._next);
+
+  final Effect<Option<A>, E> Function() _next;
+
   @override
-  Effect<Option<A>, E> next() => Effect.succeed(const None());
+  Effect<Option<A>, E> next() => _next();
 }
 
 final class _ValueCursor<A, E> implements FlowSourceCursor<A, E> {
@@ -874,15 +881,6 @@ final class _ValueCursor<A, E> implements FlowSourceCursor<A, E> {
   });
 }
 
-final class _FailureCursor<A, E> implements FlowSourceCursor<A, E> {
-  _FailureCursor(this._error);
-
-  final E _error;
-
-  @override
-  Effect<Option<A>, E> next() => Effect.fail(_error);
-}
-
 final class _IteratorCursor<A, E> implements FlowSourceCursor<A, E> {
   _IteratorCursor(this._iterator);
 
@@ -892,48 +890,6 @@ final class _IteratorCursor<A, E> implements FlowSourceCursor<A, E> {
   Effect<Option<A>, E> next() => EffectAccess.create((_) async {
     return _iterator.moveNext() ? Succeeded(Some(_iterator.current)) : const Succeeded(None());
   });
-}
-
-final class _MapCursor<A, B, E> implements FlowSourceCursor<B, E> {
-  _MapCursor(this._upstream, this._transform);
-
-  final FlowSourceCursor<A, E> _upstream;
-  final B Function(A value, Context context) _transform;
-
-  @override
-  Effect<Option<B>, E> next() => _upstream.next().map((option, context) {
-    return switch (option) {
-      Some<A>(:final value) => Some(_transform(value, context)),
-      None() => const None(),
-    };
-  });
-}
-
-final class _MapEffectCursor<A, B, E> implements FlowSourceCursor<B, E> {
-  _MapEffectCursor(this._upstream, this._transform);
-
-  final FlowSourceCursor<A, E> _upstream;
-  final Effect<B, E> Function(A value, Context context) _transform;
-
-  @override
-  Effect<Option<B>, E> next() => Effect.build(($) async {
-    return switch (await $(_upstream.next())) {
-      Some<A>(:final value) => Some(
-        await $(Effect.defer((context) => _transform(value, context))),
-      ),
-      None() => const None(),
-    };
-  });
-}
-
-final class _MapErrorCursor<A, E, F> implements FlowSourceCursor<A, F> {
-  _MapErrorCursor(this._upstream, this._transform);
-
-  final FlowSourceCursor<A, E> _upstream;
-  final F Function(E error, Context context) _transform;
-
-  @override
-  Effect<Option<A>, F> next() => _upstream.next().mapError(_transform);
 }
 
 final class _CatchErrorCursor<A, E> implements FlowSourceCursor<A, E> {
@@ -966,41 +922,6 @@ final class _CatchErrorCursor<A, E> implements FlowSourceCursor<A, E> {
       return cursor.next();
     });
   }
-}
-
-final class _TapCursor<A, E> implements FlowSourceCursor<A, E> {
-  _TapCursor(this._upstream, this._observe);
-
-  final FlowSourceCursor<A, E> _upstream;
-  final Effect<void, E> Function(A value, Context context) _observe;
-
-  @override
-  Effect<Option<A>, E> next() => _upstream.next().flatMap((option, context) {
-    return switch (option) {
-      Some<A>(:final value) => Effect.defer((_) => _observe(value, context)).map((_, _) => option),
-      None() => Effect.succeed(const None()),
-    };
-  });
-}
-
-final class _TapErrorCursor<A, E> implements FlowSourceCursor<A, E> {
-  _TapErrorCursor(this._upstream, this._observe);
-
-  final FlowSourceCursor<A, E> _upstream;
-  final Effect<void, Never> Function(E error, Context context) _observe;
-
-  @override
-  Effect<Option<A>, E> next() => _upstream.next().tapError(_observe);
-}
-
-final class _TapCauseCursor<A, E> implements FlowSourceCursor<A, E> {
-  _TapCauseCursor(this._upstream, this._observe);
-
-  final FlowSourceCursor<A, E> _upstream;
-  final Effect<void, Never> Function(Cause<E> cause, Context context) _observe;
-
-  @override
-  Effect<Option<A>, E> next() => _upstream.next().tapCause(_observe);
 }
 
 final class _ExitHookCursor<A, E> implements FlowSourceCursor<A, E>, _FlowSourceCursorFinalizer<E> {
@@ -1037,28 +958,6 @@ final class _ConcatMapCursor<A, B, E> implements FlowSourceCursor<B, E> {
           _inner = await $(
             Effect.defer((context) => _transform(value, context).open()),
           );
-        case None():
-          return const None();
-      }
-    }
-  });
-}
-
-final class _FilterCursor<A, E> implements FlowSourceCursor<A, E> {
-  _FilterCursor(this._upstream, this._predicate);
-
-  final FlowSourceCursor<A, E> _upstream;
-  final bool Function(A value, Context context) _predicate;
-
-  @override
-  Effect<Option<A>, E> next() => Effect.build(($) async {
-    while (true) {
-      final option = await $(_upstream.next());
-      switch (option) {
-        case Some<A>(:final value) when _predicate(value, $.context):
-          return option;
-        case Some<A>():
-          continue;
         case None():
           return const None();
       }

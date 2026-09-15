@@ -1,8 +1,8 @@
 import 'dart:collection';
 
-import 'package:ack/ack.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/src/coordination/waiter.dart';
+import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/validation.dart';
 
 /// Identifies interruption caused by a [PubSub] shutting down.
@@ -31,11 +31,8 @@ final class PubSubSubscriptionClosed {
 /// the isolate that acquires the PubSub.
 final class PubSub<A> {
   PubSub._(this._capacity) {
-    validateArgument(capacitySchema(), _capacity, debugName: 'capacity');
+    checkPositive(_capacity, 'capacity');
   }
-
-  /// Validates a positive buffer capacity.
-  static IntegerSchema capacitySchema() => Ack.integer().positive();
 
   /// Lazily acquires a PubSub and registers shutdown with the current scope.
   ///
@@ -61,9 +58,8 @@ final class PubSub<A> {
   }
 
   final int _capacity;
-  final LinkedHashSet<PubSubSubscription<A>> _subscriptions = LinkedHashSet();
+  final _subscriptions = <PubSubSubscription<A>>{};
   final ListQueue<_PendingPublication<A>> _publications = ListQueue();
-  final ListQueue<CoordinationWaiter<void>> _shutdownWaiters = ListQueue();
   var _isShutdown = false;
 
   /// Whether shutdown bookkeeping and waiter notification have completed.
@@ -105,40 +101,26 @@ final class PubSub<A> {
   ///
   /// Scope exit unsubscribes automatically. A subscription receives only
   /// publications whose execution began while it was active.
-  Effect<PubSubSubscription<A>, Never> subscribe() => Effect.defer((_) {
-    if (_isShutdown) return _shutdownEffect();
-
+  Effect<PubSubSubscription<A>, Never> subscribe() {
     return Effect.build<PubSubSubscription<A>, Never>(($) async {
-      final acquired = await $.acquireRelease(
-        Effect.sync<PubSubSubscription<A>?>(
-          (_) => _isShutdown ? null : _createSubscription(),
-        ),
-        release: (subscription, _) => subscription?.unsubscribe() ?? Effect.succeed(null),
+      return $.acquireRelease(
+        EffectAccess.create<PubSubSubscription<A>, Never>((_) async {
+          if (_isShutdown) {
+            return const Failed(Interrupted(PubSubShutdown()));
+          }
+
+          return Succeeded(_createSubscription());
+        }),
+        release: (subscription, _) => subscription.unsubscribe(),
       );
-      return $(acquired == null ? _shutdownEffect() : Effect.succeed(acquired));
     });
-  });
+  }
 
   /// Lazily shuts down immediately, discarding messages and waking waiters.
   ///
   /// Repeated shutdown is harmless. Blocked and subsequent operations are
   /// interrupted with [PubSubShutdown].
   Effect<void, Never> shutdown() => Effect.sync((_) => _shutdown());
-
-  /// Lazily waits until shutdown bookkeeping and waiter notification finish.
-  Effect<void, Never> awaitShutdown() => Effect.defer((_) {
-    final waiter = CoordinationWaiter<void>();
-    return waiter.awaitValue(
-      onStart: () {
-        if (_isShutdown) {
-          waiter.succeed(null);
-          return;
-        }
-        _shutdownWaiters.addLast(waiter);
-      },
-      onCancel: () => _shutdownWaiters.remove(waiter),
-    );
-  });
 
   PubSubSubscription<A> _createSubscription() {
     final subscription = PubSubSubscription._(this);
@@ -156,14 +138,15 @@ final class PubSub<A> {
   void _drainPublications() {
     while (!_isShutdown && _publications.isNotEmpty) {
       final publication = _publications.first;
-      final activeTargets = publication.targets
-          .where((target) => target._isActive)
-          .toList(growable: false);
-      if (activeTargets.any((target) => !target._hasCapacity)) return;
+      for (final target in publication.targets) {
+        if (target._isActive && !target._hasCapacity) return;
+      }
 
       _publications.removeFirst();
-      for (final target in activeTargets) {
-        target._enqueue(publication.item);
+      // Capacity checking and delivery are synchronous: no target can close
+      // or receive another publication between these two passes.
+      for (final target in publication.targets) {
+        if (target._isActive) target._enqueue(publication.item);
       }
       publication.waiter.succeed(null);
     }
@@ -175,27 +158,16 @@ final class PubSub<A> {
     while (_publications.isNotEmpty) {
       _publications.removeFirst().waiter.interrupt(const PubSubShutdown());
     }
-    final subscriptions = List<PubSubSubscription<A>>.of(_subscriptions);
-    _subscriptions.clear();
-    for (final subscription in subscriptions) {
+    for (final subscription in _subscriptions) {
       subscription._close(const PubSubShutdown());
     }
-    while (_shutdownWaiters.isNotEmpty) {
-      _shutdownWaiters.removeFirst().succeed(null);
-    }
-  }
-
-  static Effect<T, Never> _shutdownEffect<T>() {
-    return Effect.failCause(const Interrupted(PubSubShutdown()));
+    _subscriptions.clear();
   }
 }
 
 /// A scoped subscription receiving publications in their common order.
 final class PubSubSubscription<A> {
   PubSubSubscription._(this._owner);
-
-  /// Validates a non-negative count.
-  static IntegerSchema limitSchema() => Ack.integer().min(0);
 
   final PubSub<A> _owner;
   final ListQueue<A> _items = ListQueue();
@@ -237,7 +209,7 @@ final class PubSubSubscription<A> {
   Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer((_) {
     final closedReason = _closedReason;
     if (closedReason != null) return _interrupted(closedReason);
-    validateArgument(limitSchema(), limit, debugName: 'limit');
+    checkNonNegative(limit, 'limit');
 
     final count = limit < _items.length ? limit : _items.length;
     final items = <A>[
@@ -253,7 +225,6 @@ final class PubSubSubscription<A> {
   Effect<void, Never> unsubscribe() => Effect.sync((_) => _owner._unsubscribe(this));
 
   void _enqueue(A item) {
-    if (!_isActive) return;
     if (_takers.isNotEmpty) {
       _takers.removeFirst().succeed(item);
       return;

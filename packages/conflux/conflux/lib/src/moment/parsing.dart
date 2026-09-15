@@ -8,7 +8,7 @@ final _timestamp = RegExp(
 );
 
 /// Strictly decodes syntax; a null offset denotes the UTC marker, not fixed zero.
-Result<({MomentParts parts, Duration? offset}), MomentError> parseTimestamp(String input) {
+Result<({int wallMicros, Duration? offset}), MomentError> parseTimestamp(String input) {
   final match = _timestamp.firstMatch(input);
   if (match == null || match.end != input.length) {
     return const Failure(
@@ -42,8 +42,8 @@ Result<({MomentParts parts, Duration? offset}), MomentError> parseTimestamp(Stri
     microsecond: fraction % 1000,
   );
 
-  final error = parts.validate();
-  if (error != null) return Failure(error);
+  final encoded = parts.encodeValidated();
+  if (encoded case Failure(:final error)) return Failure(error);
 
   Duration? offset;
   if (match[8] != 'Z') {
@@ -65,7 +65,7 @@ Result<({MomentParts parts, Duration? offset}), MomentError> parseTimestamp(Stri
     );
   }
 
-  return Success((parts: parts, offset: offset));
+  return encoded.map((wallMicros) => (wallMicros: wallMicros, offset: offset));
 }
 
 /// Internal ISO formatting for calendar fields.

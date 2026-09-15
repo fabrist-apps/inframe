@@ -120,22 +120,34 @@ final class Fiber<A, E> {
 
 /// Creates Fibers without exposing their runtime-only constructor.
 abstract final class FiberAccess {
-  /// Creates a Fiber around [exit] and its [cancellation] handle.
-  static Fiber<A, E> create<A, E>(
-    EffectCancellation cancellation,
-    Future<Exit<A, E>> exit,
-  ) => Fiber._(cancellation, exit);
-}
-
-/// Type-erased ownership callback for a running Effect.
-final class OwnedEffect {
-  /// Creates type-erased ownership around an interrupt callback.
-  OwnedEffect(this._interrupt);
-
-  final Future<Cause<Never>?> Function(Object? reason) _interrupt;
-
-  /// Interrupts owned work and returns cleanup defects after it completes.
-  Future<Cause<Never>?> interruptAndJoin(Object? reason) => _interrupt(reason);
+  /// Starts scoped work, registering ownership before user code can run.
+  static Fiber<A, E> start<A, E>(
+    Effect<A, E> effect, {
+    required Context context,
+    required Clock clock,
+    required Set<Fiber<Object?, Object?>> owner,
+    EffectCancellation? parentCancellation,
+  }) {
+    final cancellation = EffectCancellation();
+    final execution = EffectExecution(
+      context: context,
+      scope: Scope._(),
+      clock: clock,
+      cancellation: cancellation,
+    );
+    final stopParentCancellation = parentCancellation?.listen(cancellation.cancel);
+    late final Fiber<A, E> fiber;
+    final exit =
+        Future<Exit<A, E>>.microtask(
+          () => execution.runScoped(effect),
+        ).whenComplete(() {
+          stopParentCancellation?.call();
+          owner.remove(fiber);
+        });
+    fiber = Fiber._(cancellation, exit);
+    owner.add(fiber);
+    return fiber;
+  }
 }
 
 /// Owns child fibers and finalizers for one execution region.
@@ -144,7 +156,7 @@ final class Scope {
 
   var _closed = false;
   Future<Cause<Never>?>? _closing;
-  final _children = <OwnedEffect>{};
+  final _children = <Fiber<Object?, Object?>>{};
   final _finalizers = <_RegisteredFinalizer>{};
 
   /// Whether this scope has stopped accepting work.
@@ -170,35 +182,13 @@ final class Scope {
       );
     }
 
-    final cancellation = EffectCancellation();
-    final execution = EffectExecution(
+    return FiberAccess.start(
+      effect,
       context: parent.context,
-      scope: Scope._(),
       clock: parent.clock,
-      cancellation: cancellation,
+      owner: _children,
+      parentCancellation: parent.cancellation,
     );
-    final stopParentCancellation = parent.cancellation.listen(
-      cancellation.cancel,
-    );
-    late final Fiber<A, E> fiber;
-    late final OwnedEffect ownedChild;
-    final exit =
-        Future<Exit<A, E>>.microtask(
-          () => execution.runScoped(effect),
-        ).whenComplete(() {
-          stopParentCancellation();
-          _children.remove(ownedChild);
-        });
-    fiber = Fiber._(cancellation, exit);
-    ownedChild = OwnedEffect((reason) async {
-      final childExit = await fiber.interrupt(reason);
-      return switch (childExit) {
-        Succeeded<A, E>() => null,
-        Failed<A, E>(:final cause) => cause.defectsOnly,
-      };
-    });
-    _children.add(ownedChild);
-    return fiber;
   }
 
   /// Stops child work, then runs registered finalizers in reverse order.
@@ -213,13 +203,16 @@ final class Scope {
   Future<Cause<Never>?> _close() async {
     _closed = true;
     final failures = <Cause<Never>>[];
-    final children = List<OwnedEffect>.of(_children);
+    final children = List.of(_children);
     final childFailures = await Future.wait(
       children.map(
         (child) => child
-            .interruptAndJoin(const ScopeClosed())
+            .interrupt(const ScopeClosed())
             .then<Cause<Never>?>(
-              (cause) => cause,
+              (exit) => switch (exit) {
+                Succeeded() => null,
+                Failed(:final cause) => cause.defectsOnly,
+              },
               onError: Defect<Never>.new,
             ),
       ),

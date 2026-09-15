@@ -1,13 +1,13 @@
 // All value fields are final; no annotation-only runtime dependency is needed.
 // ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
 
-import 'package:ack/ack.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/moment/local_resolution.dart';
 import 'package:conflux/src/moment/moment_error.dart';
 import 'package:conflux/src/moment/moment_parts.dart';
 import 'package:conflux/src/moment/parsing.dart';
 import 'package:conflux/src/moment/time_zone.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 
 /// An immutable instant with exact microseconds and explicit zone identity.
 ///
@@ -16,13 +16,9 @@ import 'package:conflux/src/moment/time_zone.dart';
 sealed class Moment implements Comparable<Moment> {
   const Moment._(this.microsecondsSinceEpoch);
 
-  /// Validates signed epoch microseconds against Dart DateTime's inclusive bounds.
-  static AckSchema<int, int> epochMicrosecondsSchema() =>
-      Ack.integer().min(minimumMomentMicros).max(maximumMomentMicros);
-
   /// Constructs UTC from signed microseconds since the Unix epoch.
   static Result<UtcMoment, MomentError> fromEpochMicroseconds(int value) {
-    if (epochMicrosecondsSchema().safeParse(value).isFail) {
+    if (value < minimumMomentMicros || value > maximumMomentMicros) {
       return const Failure(MomentError.range);
     }
 
@@ -34,21 +30,16 @@ sealed class Moment implements Comparable<Moment> {
       fromEpochMicroseconds(value.microsecondsSinceEpoch);
 
   /// Validates UTC fields without normalizing calendar overflow.
-  static Result<UtcMoment, MomentError> utc(MomentParts parts) {
-    final error = parts.validate();
-    if (error != null) return Failure(error);
-
-    return fromEpochMicroseconds(parts.encode().microsecondsSinceEpoch);
-  }
+  static Result<UtcMoment, MomentError> utc(MomentParts parts) =>
+      parts.encodeValidated().map(UtcMoment._);
 
   /// Resolves supplied local fields with an explicit gap/overlap policy.
   static Result<ZonedMoment, MomentError> zoned(
     MomentParts parts,
     TimeZone zone, {
     required Disambiguation disambiguation,
-  }) => zone
-      .resolveLocal(parts, disambiguation)
-      .flatMap((micros) => fromEpochMicroseconds(micros).flatMap((utc) => utc.setZone(zone)));
+  }) =>
+      zone.resolveLocal(parts, disambiguation).flatMap((micros) => _fromZonedMicros(micros, zone));
 
   /// Parses strict ISO timestamps with 1–6 fractional digits and a required offset.
   ///
@@ -57,14 +48,12 @@ sealed class Moment implements Comparable<Moment> {
   /// outside -9999–9999, such as `+010000`. Noncanonical year spellings,
   /// whitespace, leap seconds, calendar overflow and offset-free input fail.
   static Result<Moment, MomentError> parse(String input) => parseTimestamp(input).flatMap((parsed) {
-    final wallMicros = parsed.parts.encode().microsecondsSinceEpoch;
+    final wallMicros = parsed.wallMicros;
     final offset = parsed.offset;
     if (offset == null) return fromEpochMicroseconds(wallMicros);
 
     return TimeZone.fixed(offset).flatMap(
-      (zone) =>
-          fromEpochMicroseconds(wallMicros - offset.inMicroseconds)
-              .flatMap((utc) => utc.setZone(zone)),
+      (zone) => _fromZonedMicros(wallMicros - offset.inMicroseconds, zone),
     );
   });
 
@@ -119,11 +108,16 @@ sealed class Moment implements Comparable<Moment> {
   /// Preserves the instant and derives local fields in [zone], validating their range.
   ///
   /// This does not reinterpret clock fields and requires no DST policy.
-  Result<ZonedMoment, MomentError> setZone(TimeZone zone) {
-    final local = microsecondsSinceEpoch + zone.offsetAt(microsecondsSinceEpoch).inMicroseconds;
+  Result<ZonedMoment, MomentError> setZone(TimeZone zone) =>
+      _fromZonedMicros(microsecondsSinceEpoch, zone);
+
+  static Result<ZonedMoment, MomentError> _fromZonedMicros(int micros, TimeZone zone) {
+    if (!inMomentRange(micros)) return const Failure(MomentError.range);
+
+    final local = micros + zone.offsetAt(micros).inMicroseconds;
     if (!inMomentRange(local)) return const Failure(MomentError.range);
 
-    return Success(ZonedMoment._(microsecondsSinceEpoch, zone));
+    return Success(ZonedMoment._(micros, zone));
   }
 
   /// Converts explicitly to a native UTC date-time, preserving microseconds.
@@ -180,11 +174,10 @@ sealed class Moment implements Comparable<Moment> {
     }
 
     final micros = shifted.toInt();
-    final utc = UtcMoment._(micros);
 
     return switch (this) {
-      UtcMoment() => Success(utc),
-      ZonedMoment(:final zone) => utc.setZone(zone),
+      UtcMoment() => Success(UtcMoment._(micros)),
+      ZonedMoment(:final zone) => _fromZonedMicros(micros, zone),
     };
   }
 
@@ -227,4 +220,28 @@ final class ZonedMoment extends Moment {
 
   /// The zone used to derive local fields.
   final TimeZone zone;
+}
+
+/// Serializes [Moment] as an ISO timestamp with its current offset.
+///
+/// Decoding retains fixed offsets, including historical seconds. Named zones
+/// become fixed zones; their identity and future DST rules are not serialized.
+final class MomentMapper extends SimpleMapper<Moment> {
+  /// Creates a mapper for Conflux [Moment] values.
+  const MomentMapper();
+
+  @override
+  Moment decode(Object value) {
+    if (value is! String) {
+      throw FormatException('Expected an ISO timestamp string.', value);
+    }
+
+    return switch (Moment.parse(value)) {
+      Success(:final value) => value,
+      Failure(:final error) => throw FormatException(error.message, value),
+    };
+  }
+
+  @override
+  Object encode(Moment self) => self.formatIsoOffset();
 }

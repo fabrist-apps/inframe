@@ -1,6 +1,5 @@
 import 'dart:collection';
 
-import 'package:ack/ack.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/src/coordination/waiter.dart';
@@ -22,14 +21,8 @@ final class QueueShutdown {
 /// confined to the isolate that acquires it.
 final class Queue<A> {
   Queue._(this.capacity) {
-    validateArgument(capacitySchema(), capacity, debugName: 'capacity');
+    checkPositive(capacity, 'capacity');
   }
-
-  /// Validates a non-negative count.
-  static IntegerSchema limitSchema() => Ack.integer().min(0);
-
-  /// Validates a positive buffer capacity.
-  static IntegerSchema capacitySchema() => Ack.integer().positive();
 
   /// Lazily acquires a Queue and registers shutdown with the current scope.
   ///
@@ -59,7 +52,6 @@ final class Queue<A> {
   final ListQueue<A> _items = ListQueue();
   final ListQueue<_PendingOffer<A>> _offers = ListQueue();
   final ListQueue<CoordinationWaiter<A>> _takers = ListQueue();
-  final ListQueue<CoordinationWaiter<void>> _shutdownWaiters = ListQueue();
   var _isShutdown = false;
 
   /// The number of buffered items, excluding waiting consumers and producers.
@@ -107,12 +99,8 @@ final class Queue<A> {
           return;
         }
         _takers.addLast(taker);
-        _drain();
       },
-      onCancel: () {
-        _takers.remove(taker);
-        _drain();
-      },
+      onCancel: () => _takers.remove(taker),
     );
   });
 
@@ -145,7 +133,7 @@ final class Queue<A> {
   /// defect when the Effect runs.
   Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer((_) {
     if (_isShutdown) return _shutdownEffect();
-    validateArgument(limitSchema(), limit, debugName: 'limit');
+    checkNonNegative(limit, 'limit');
 
     final count = limit < _items.length ? limit : _items.length;
     final items = <A>[
@@ -161,31 +149,9 @@ final class Queue<A> {
   /// interrupted with [QueueShutdown].
   Effect<void, Never> shutdown() => Effect.sync((_) => _shutdown());
 
-  /// Lazily waits until shutdown bookkeeping and waiter notification finish.
-  ///
-  /// This does not wait for previously accepted items to be processed.
-  Effect<void, Never> awaitShutdown() => Effect.defer((_) {
-    final waiter = CoordinationWaiter<void>();
-    return waiter.awaitValue(
-      onStart: () {
-        if (_isShutdown) {
-          waiter.succeed(null);
-          return;
-        }
-        _shutdownWaiters.addLast(waiter);
-      },
-      onCancel: () => _shutdownWaiters.remove(waiter),
-    );
-  });
-
   void _drain() {
-    while (!_isShutdown) {
-      if (_takers.isNotEmpty && _items.isNotEmpty) {
-        _takers.removeFirst().succeed(_items.removeFirst());
-        continue;
-      }
-
-      if (_offers.isEmpty) return;
+    // Waiting takers imply an empty buffer; offers go directly to them.
+    while (!_isShutdown && _offers.isNotEmpty) {
       if (_takers.isNotEmpty) {
         final offer = _offers.removeFirst();
         _takers.removeFirst().succeed(offer.item);
@@ -209,9 +175,6 @@ final class Queue<A> {
     }
     while (_takers.isNotEmpty) {
       _takers.removeFirst().interrupt(const QueueShutdown());
-    }
-    while (_shutdownWaiters.isNotEmpty) {
-      _shutdownWaiters.removeFirst().succeed(null);
     }
   }
 

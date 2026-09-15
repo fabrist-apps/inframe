@@ -164,14 +164,12 @@ final class _CombineLatestCoordinator<A, E> {
     this._mailbox,
     this._execution,
     int sourceCount,
-  ) : _latest = List<Option<A>>.filled(sourceCount, const None()),
-      _remaining = sourceCount;
+  ) : _latest = List<Option<A>>.filled(sourceCount, const None());
 
   final FlowMailbox<List<A>, E> _mailbox;
   final EffectExecution _execution;
   final List<Option<A>> _latest;
   final Map<int, Fiber<void, E>> _fibers = {};
-  int _remaining;
   var _terminalizing = false;
   var _closed = false;
 
@@ -218,41 +216,32 @@ final class _CombineLatestCoordinator<A, E> {
     if (_terminalizing || _closed || _execution.cancellation.isCancelled) return;
     switch (exit) {
       case Failed<void, E>(:final cause):
-        await _fail(cause);
+        await _terminate(cause);
       case Succeeded<void, E>():
         if (_latest[index] case None()) {
-          await _completeEarly();
+          await _terminate();
           return;
         }
-        _remaining -= 1;
-        if (_remaining == 0) {
+        if (_fibers.isEmpty) {
           _terminalizing = true;
           _mailbox.complete();
         }
     }
   }
 
-  Future<void> _completeEarly() async {
+  Future<void> _terminate([Cause<E>? cause]) async {
     if (_terminalizing || _closed) return;
     _terminalizing = true;
     final cleanup = await _interruptCombination(_fibers.values);
-    if (cleanup == null) {
+    final failure = CauseGroup.sequential([
+      ?cause,
+      ?cleanup?.mapExpected<E>(_widenNever),
+    ]);
+    if (failure == null) {
       _mailbox.complete();
     } else {
-      _mailbox.fail(cleanup.mapExpected<E>(_widenNever));
+      _mailbox.fail(failure);
     }
-  }
-
-  Future<void> _fail(Cause<E> cause) async {
-    if (_terminalizing || _closed) return;
-    _terminalizing = true;
-    final cleanup = await _interruptCombination(_fibers.values);
-    _mailbox.fail(
-      CauseGroup.sequential([
-        cause,
-        ?cleanup?.mapExpected<E>(_widenNever),
-      ])!,
-    );
   }
 
   void close() => _closed = true;
@@ -312,33 +301,25 @@ final class _WithLatestCoordinator<A, B, C, E> {
     if (_terminalizing || _closed || _execution.cancellation.isCancelled) return;
     switch (exit) {
       case Failed<void, E>(:final cause):
-        await _fail(cause);
+        await _terminate(cause);
       case Succeeded<void, E>():
-        if (index == 0 || _latest is None) await _complete();
+        if (index == 0 || _latest is None) await _terminate();
     }
   }
 
-  Future<void> _complete() async {
+  Future<void> _terminate([Cause<E>? cause]) async {
     if (_terminalizing || _closed) return;
     _terminalizing = true;
     final cleanup = await _interruptCombination(_fibers.values);
-    if (cleanup == null) {
+    final failure = CauseGroup.sequential([
+      ?cause,
+      ?cleanup?.mapExpected<E>(_widenNever),
+    ]);
+    if (failure == null) {
       _mailbox.complete();
     } else {
-      _mailbox.fail(cleanup.mapExpected<E>(_widenNever));
+      _mailbox.fail(failure);
     }
-  }
-
-  Future<void> _fail(Cause<E> cause) async {
-    if (_terminalizing || _closed) return;
-    _terminalizing = true;
-    final cleanup = await _interruptCombination(_fibers.values);
-    _mailbox.fail(
-      CauseGroup.sequential([
-        cause,
-        ?cleanup?.mapExpected<E>(_widenNever),
-      ])!,
-    );
   }
 
   void close() => _closed = true;

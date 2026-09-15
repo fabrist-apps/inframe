@@ -333,9 +333,7 @@ void main() {
       final source = Flow.fromIterable(List.generate(100, (index) => index))
           .widenError<String>()
           .tap(
-            (_, _) =>
-                Effect.sync((_) => pulled += 1)
-                    .mapError((value, _) => _widenNever(value! as Never)),
+            (_, _) => Effect.sync((_) => pulled += 1),
           )
           .share(capacity: 1, replay: 2);
       final subscription = source.subscribe((_, _) {
@@ -375,8 +373,6 @@ Future<void> _flushMicrotasks() async {
     await Future<void>.delayed(Duration.zero);
   }
 }
-
-String _widenNever(Never error) => error;
 
 Never _impossibleFutureError(Object error, StackTrace stackTrace) {
   throw StateError('Unexpected future failure: $error');

@@ -125,9 +125,7 @@ void main() {
             overflow: FlowOverflowPolicy.fail,
             onOverflow: (overflow, _) => 'capacity ${overflow.capacity}',
           ).tap(
-            (value, _) =>
-                Effect.sync((_) => seen.add(value))
-                    .mapError((value, _) => _widenNever(value! as Never)),
+            (value, _) => Effect.sync((_) => seen.add(value)),
           );
       final exitFuture = flow.runDrain().runFutureExit();
       await _waitForListener(source);
@@ -293,5 +291,3 @@ Future<void> _waitForListener<T>(StreamController<T> controller) async {
     await Future<void>.delayed(Duration.zero);
   }
 }
-
-String _widenNever(Never error) => error;

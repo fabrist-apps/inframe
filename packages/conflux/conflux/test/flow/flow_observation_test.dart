@@ -64,7 +64,6 @@ void main() {
         return Flow.succeed(error.length);
       });
       final defective = Effect.sync<int>((_) => throw StateError('broken'))
-          .mapError<String>((value, _) => _widenNever(value! as Never))
           .asFlow()
           .catchError((error, _) {
             recoveries += 1;
@@ -93,9 +92,7 @@ void main() {
     test('should sequence value and failure observations without recovery', () async {
       final seen = <String>[];
       final success = Flow.succeed<int, String>(1).tap(
-        (value, _) =>
-            Effect.sync((_) => seen.add('value $value'))
-                .mapError((value, _) => _widenNever(value! as Never)),
+        (value, _) => Effect.sync((_) => seen.add('value $value')),
       );
       final failed = Flow.fail<int, String>('source')
           .tapError((error, _) => Effect.sync((_) => seen.add('error $error')))
@@ -183,5 +180,3 @@ void main() {
     });
   });
 }
-
-String _widenNever(Never error) => error;

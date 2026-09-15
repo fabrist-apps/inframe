@@ -8,4 +8,3 @@ environment:
 workspace:
   - conflux
   - chronicler_conflux
-  - dart_mappable_conflux

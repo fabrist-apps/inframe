@@ -1,0 +1,17 @@
+import 'package:conflux/conflux.dart';
+import 'package:conflux/val.dart' as direct;
+
+void main() {
+  final Schema<String> text = Val.string().optional().minLength(1).refine((value) => value.isNotEmpty);
+  final Result<String, NonEmptyList<ValidationIssue>> result = text.safeParse('x');
+  final String output = result.map((value) => value.toUpperCase()).parseForFixture();
+  final Schema<String?> nullable = text.nullable().refine((value) => value == null || value.isNotEmpty);
+  final String? cleared = nullable.parse(null);
+  final Map<String, Schema<Object?>> fields = {'text': text, 'nullable': nullable};
+  final Map<String, Object?> object = direct.Val.object(fields).parse({'nullable': null});
+  if (output != 'X' || cleared != null || object.containsKey('text')) throw StateError('Unexpected output');
+}
+
+extension FixtureResult<T> on Result<T, NonEmptyList<ValidationIssue>> {
+  T parseForFixture() => getOrThrowWith(ValidationException.new);
+}

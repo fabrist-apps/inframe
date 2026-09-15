@@ -8,32 +8,10 @@ resource scopes.
 
 ## Validation
 
-Conflux uses Ack for input validation. Schemas live as static methods on the
-types that own the rules. Use `safeParse` to decode input and `safeEncode` to
-validate and encode an existing model. For example, decode calendar fields with
-`MomentParts.schema()`:
-
-```dart
-import 'package:conflux/moment.dart';
-
-final result = MomentParts.schema().safeParse(
-  {'year': 2025, 'month': 2, 'day': 29},
-);
-assert(result.isFail); // February 2025 has 28 days.
-
-final encoded = MomentParts.schema().safeEncode(
-  const MomentParts(year: 2024, month: 2, day: 29),
-);
-assert(encoded.isOk);
-```
-
-Moment and Cron factories retain their typed `Result` failures. Runtime
-operations retain their argument error types and validation timing. Argument
-errors use Ack constraint messages. Scalar arguments use Ack’s `debugName`
-(such as `concurrency`); grouped configuration schemas report JSON Pointer
-paths (such as `#/capacity`). Schemas check
-input constraints; `Result.validate` and `Effect.validate` compose caller
-operations and collect their expected failures.
+Conflux uses direct checks for typed runtime arguments and Val for structured
+input validation. Invalid runtime arguments throw `ArgumentError` with the
+argument name, original value, and constraint message. Moment and Cron factories
+return their domain errors for invalid calendar values.
 
 ## Usage
 
@@ -99,53 +77,32 @@ Scopes interrupt and await child fibers before running finalizers once in
 reverse registration order. Finalizers are protected from ordinary
 cancellation, so an uncooperative finalizer can prevent bounded shutdown.
 
-`Cache` shares scoped lookups and retains successful values with a separate
-limit for active loads and stored entries:
+`Cache<K, A>` stores explicitly inserted values with fixed TTL and LRU capacity:
 
 ```dart
-final cachedLengths = Effect.build<(int, int), Never>(($) async {
+final cachedLength = Effect.build<Option<int>, Never>(($) async {
   final cache = await $(
-    Cache.make<String, int, Never>(
+    Cache.make<String, int>(
       capacity: 100,
-      concurrency: 8,
-      expiry: CacheExpiry.fixed(const Duration(minutes: 5)),
-      lookup: (key, _) => Effect.succeed(key.length),
+      timeToLive: const Duration(minutes: 5),
     ),
   );
 
-  final first = await $(cache.get('conflux'));
-  final second = await $(cache.get('conflux'));
-  return (first, second);
+  await $(cache.set('conflux', 7));
+  return await $(cache.get('conflux'));
 });
 ```
 
-`Cache.make` captures its creation scope's Context and Clock. Its lookup
-callback receives `(key, context)`, and a lookup started by another caller still
-uses those captured dependencies. Value-dependent expiry receives
-`(key, value, context)` from the same owner. `invalidateWhere` instead receives
-the calling Effect's Context. Put request-dependent data in the key or acquire
-the Cache inside the request scope. Cache coordination is confined to one
-isolate.
+`get` returns Some(value) for an unexpired entry, including Some(null), or None
+when absent. Reading marks an entry most recently used. Each `set` restarts its
+TTL using the creation scope's captured monotonic Clock. Zero TTL retains
+nothing. Expired entries are removed before applying the capacity limit.
 
-Concurrent requests for one key and generation share a load. Cancelling one
-waiter leaves that owner-scoped load available to other waiters. `concurrency`
-bounds active lookups, while `capacity` bounds successful retained values by
-LRU. Expiry uses monotonic time from successful completion. Use
-`CacheExpiry.fixed` for one TTL or `CacheExpiry.byValue` to derive it from the
-key and successful value.
-
-`getOption` and `containsKey` inspect only ready unexpired values. The `size`,
-`keys`, `values`, and `entries` getters return immutable ready snapshots and
-never start a lookup. `set`, `invalidate`, `invalidateAll`, and
-`invalidateWhere` advance generations so older loads cannot overwrite newer
-state. `refresh` starts or joins a current-generation load while an existing
-unexpired value remains readable; a failed refresh keeps that value and its
-original deadline.
-
-Cached values are borrowed. Eviction, invalidation, and Cache closure do not
-dispose them. Scope closure interrupts active loads, wakes waiters, and makes
-later Cache use a defect. Failure caching, eviction-time disposal, durable
-persistence, and automatic invalidation streams are outside this API.
+Use `invalidate(key)`, `invalidateAll()`, or `invalidateWhere(predicate)` to
+remove values. Predicates inspect only unexpired entries and receive the calling
+Effect's Context. Cached values are borrowed: eviction, invalidation, and scope
+closure never dispose them. Scope closure clears the cache and later operations
+fail with a defect. Loading and coordination belong to the caller.
 
 Timing operations use the runtime's `Clock`, so tests can control both wall and
 monotonic time. `delay` waits before starting work, `timed` reports monotonic
@@ -169,10 +126,9 @@ Durations must be non-negative. Conflux passes their microsecond value to the
 configured `Clock` without rounding; that Clock and its platform timer determine
 effective precision.
 
-`Schedule` values are reusable policy descriptions; every `retry`, `repeat`,
-or `schedule` execution creates a fresh driver. `retry` feeds expected errors
-to its driver, `repeat` runs immediately and feeds successful values, and
-`schedule` asks the driver before the first execution using `None`:
+`Schedule` values are reusable policy descriptions; every `retry` or `repeat`
+execution creates a fresh step function. `retry` feeds expected errors
+to that function, `repeat` runs immediately and feeds successful values:
 
 ```dart
 var attempts = 0;
@@ -185,15 +141,14 @@ final value = await loaded.runFuture();
 ```
 
 `recurs(n)` permits `n` continuing decisions, so retry and repeat can execute
-once initially plus `n` additional times. `Effect.schedule` can execute at most
-`n` times because it consults the policy first. A failed schedule step uses its
+once initially plus `n` additional times. A failed schedule step uses its
 expected-error channel and ends the operation; it is distinct from
 `ScheduleStop`.
 
 `spaced` measures each delay from the prior completion. `fixed` instead keeps an
 anchored cadence and skips missed ticks. Exponential delays have no implicit
 cap; add one explicitly with `modifyDelay` when the operation needs it. Schedule
-callbacks receive the consuming driver's execution `Context` as their final
+callbacks receive the consuming step's execution `Context` as their final
 argument:
 
 ```dart
@@ -212,11 +167,7 @@ Exponential scaling and jitter round down to whole microseconds and fail with a
 defect if the computed delay exceeds Dart's signed 64-bit `Duration` range.
 `Schedule.max` continues while both policies continue and waits for their later
 delay. `Schedule.min` continues while either policy continues, reports stopped
-branches as `None`, and waits for the earliest active delay. `within` uses the
-runtime's monotonic clock to prevent a new start beyond its budget; work that
-already started is allowed to finish. `whileInput`, `concat`, and `tap` support
-input gates, sequential policies with fresh state, and effectful observation of
-continuing decisions.
+branches as `None`, and waits for the earliest active delay.
 
 ### Moment date and time
 
@@ -277,13 +228,14 @@ implementations must migrate their wall-time return type.
 
 The implementation starts at `moment.dart`: value and zone files own identity
 and conversion, `local_resolution.dart` resolves transitions, and `calendar.dart`
-owns calendar operations. Native calendar coordinates used during Cron search
-stay in the internal date-time module. JSON persistence, locale/custom formats,
+owns calendar operations. Cron uses native UTC dates as local calendar
+coordinates and shares timezone candidate resolution with Moment. JSON persistence, locale/custom formats,
 and ambient timezone services are outside this API.
 
 `Cron` is a pure calendar value with an explicit `timezone.Location`. The
-application can call `Conflux.initialize()` to load the bundled IANA database.
-It retains an already initialized database and is safe to call repeatedly.
+application can call `Conflux.initialize()` to register dart_mappable support
+for `Moment`, `Option`, and Val paths and load the bundled IANA database. It is
+safe to call repeatedly and retains an already initialized timezone database.
 The timezone package sets its local default to UTC on first initialization;
 Moment and Cron continue to use explicitly supplied zones. Applications can
 also initialize a different timezone dataset themselves before this call:
@@ -315,11 +267,12 @@ Five-field expressions use second zero; six-field expressions put seconds
 first. Omitted `fromFields` values are wildcards, while explicit empty sets are
 invalid. When both day-of-month and weekday are restricted, either may match.
 When either begins with `*`, including `*/step`, both must match. `format`
-returns six fields and keeps the location separate.
+returns six fields and keeps the location separate. Parsed fields retain their
+syntax in lowercase, so equivalent expressions can format differently.
 
-`matches`, `next`, `previous`, and `sequence` accept `Moment`. Successful
+`matches`, `next`, and `sequence` accept `Moment`. Successful
 occurrence results are `ZonedMoment` retaining the configured Location.
-`next` and `previous` search strictly beyond the supplied instant. They verify
+`next` searches strictly after the supplied instant. It verifies
 each candidate's local fields against timezone transitions, so spring-forward
 gaps are skipped and both instants in a fall-back overlap can be returned. Each
 occurrence search examines at most 10,000 calendar-day candidates within years
@@ -327,9 +280,7 @@ occurrence search examines at most 10,000 calendar-day candidates within years
 that no occurrence exists. `sequence` searches lazily without timers or an end
 date; it yields one terminal failure and then stops if a search is exhausted.
 
-Attach a validated Cron to an Effect through `Schedule.cron`. `repeat` performs
-the operation immediately, while `schedule` waits for the first future
-occurrence. Map calendar search failures into the operation's domain error
+Attach a validated Cron to an Effect through `Schedule.cron`. `repeat` performs the operation immediately and waits for future occurrences between subsequent executions. Map calendar search failures into the operation's domain error
 before attaching the policy:
 
 ```dart
@@ -451,6 +402,12 @@ failure and a successful `null`. Use `match` when that distinction matters.
 `Option.firstSome` stops at the first present value, including `Some(null)`,
 while `Option.fromIterable` requests only the first item from its input.
 
+`MomentMapper`, `OptionMapper`, and `OptionFieldsHook` live beside their Conflux
+value types. Call `Conflux.initialize()` once in each isolate before using them
+through `MapperContainer.globals`. Generated classes may instead include the
+mappers in `@MappableClass`. `OptionFieldsHook` distinguishes an omitted field
+from an explicit `null` and must list serialized field keys, including renames.
+
 `Result.all` inspects already-created results until the first failure.
 `Result.validate` invokes a validator for every input and accumulates expected
 failures in an immutable `NonEmptyList`. Unexpected callback exceptions remain
@@ -461,3 +418,152 @@ Run the package tests from the repository root:
 ```sh
 dart test packages/conflux/conflux/test --chain-stack-traces
 ```
+
+## Val validation
+
+Import `package:conflux/val.dart` or the `conflux.dart` barrel. Validation is
+synchronous and needs no runtime, clock, or timezone setup.
+
+```dart
+final profile = Val.object({
+  'name': Val.string(name: 'Name').notEmpty(),
+  'nickname': Val.string().optional(),
+});
+final result = profile.safeParse({'name': 'Ada'});
+// Result<Map<String, Object?>, NonEmptyList<ValidationIssue>>
+```
+
+`safeParse` returns the existing Conflux Result. `parse` throws
+`ValidationException` containing the same ordered issues on failure. Each issue
+has a string `code`, a `message`, and an immutable path of `FieldSegment`
+and `IndexSegment` segments. A refinement path is relative to its schema.
+
+Fields are required by default. `optional()` omits missing fields without
+accepting present null; `nullable()` accepts present null and changes the output
+type. Presence uses the last `required()`/`optional()` selection. Nullable
+wrapping skips preceding checks for null; later refinements receive null.
+
+Objects reject extra keys by default. `strict()` customizes rejection,
+`strip()` removes extras before refinements, and `passthrough()` retains them.
+Policies apply only to the selected object. Object refinements run only after
+all declared fields and the unknown-key policy pass. Chained checks stop at the
+first failure; independent fields use schema order and extras use input order.
+
+Schema names label generated messages, while custom messages remain verbatim.
+Codes and messages may be overridden independently; null selects the default,
+and an empty string is an explicit override. Names never change structural paths.
+String lengths count UTF-16 code units. Schema derivations and validated
+containers are immutable and detached; passthrough values remain borrowed.
+Callback exceptions propagate, and repeated parsing may invoke callbacks again.
+
+Implementation reading path: `val.dart` → factories in `src/val/val.dart` →
+typed stages in `schema.dart` → primitive and container validators. Foundational
+Result/Option modules do not depend on Val.
+
+### Scalars and formats
+
+`Val.int`, `double`, `number`, and `boolean` follow Dart runtime type tests and
+never coerce inputs. Numeric schemas require finite values before checking
+inclusive `min`/`max`, exclusive `greaterThan`/`lessThan`, or sign aliases.
+Integers also support exact `multipleOf` and the inclusive JavaScript `safe`
+range, ±9007199254740991. Non-positive divisors throw `ArgumentError` when the
+schema is built.
+
+`literal<T>` requires both `value is T` and equality. `enumString` and
+`enumValues` copy their membership lists; enum instances are not parsed from
+strings. `instance<T>` returns the same borrowed instance.
+
+String formats are explicit profiles and do not normalize inputs: `email`,
+canonical `uuid` (versions 1–8, nil, and all ones), absolute `url` with a scheme
+and host, `ip`/`ipv4`/`ipv6`, `matches(RegExp)`, and literal
+`startsWith`/`endsWith`/`contains`. Regex matching uses `hasMatch`; anchors are
+caller-owned. IPv4 rejects leading zeros; IPv6 rejects brackets and zone IDs.
+
+### Collections
+
+`Val.list(itemSchema)` produces an immutable `List<T>`; `Val.map(valueSchema)`
+produces an immutable `Map<String, T>`. Nullable child schemas preserve present
+null elements/values. Child errors accumulate by list index or input key order,
+with their structural paths prefixed. List/map refinements run only when every
+child succeeds. List `minLength`, `maxLength`, `length`, and `notEmpty` count
+items; `unique` uses Dart equality on parsed values and emits one list error.
+Nested validated containers are copied, while arbitrary instance values remain
+borrowed references.
+
+### Object composition and alternatives
+
+`extend` replaces fields without moving their positions and appends new fields.
+`merge` adopts the right object's fields and unknown-key policy while retaining
+the left object's root configuration. `pick`/`omit` retain known keys in schema
+order. `partial` makes immediate fields optional without recursing or adding
+nullability. Finish shape and unknown-key operations before calling `optional`,
+`nullable`, or `refine`; those return a general `Schema` without shape methods.
+
+`Val.anyOf<T>(branches)` returns the first successful parsed branch. Total failure
+produces one `INVALID_UNION`; a failed union-level refinement does not retry
+branches. Make the outer union optional to permit an absent field.
+
+`Val.discriminated(discriminatorKey: 'kind', schemas: branches)` uses the
+discriminator value to select one registered schema. The selected branch owns
+all further validation, including validation of the discriminator field. Invalid
+selection yields one field-path issue.
+
+### Recursion and JSON values
+
+`Val.lazy<T>(() => schema, maxDepth: 64)` resolves on first parse and memoizes
+successful resolution. Throwing builders can be retried; builder re-entry throws
+`StateError`. Depth counts active entries into that lazy schema, with the root at
+one, and resets on every return or exception. Cyclic recursive inputs terminate
+at the bound. The outer lazy schema owns optionality and its own depth errors;
+target validation errors keep their original names and codes.
+
+`Val.any(maxDepth: 64)` validates non-null JSON-compatible roots, including
+nested null and finite numbers. It copies lists/maps, rejects non-string map keys
+and arbitrary instances, and counts nested containers with a root container at
+one. Active-container revisits are cycles; shared acyclic siblings are allowed.
+Both APIs reject non-positive depth limits at construction.
+
+### Moments
+
+`Val.moment()` validates existing UTC/zoned Moments and returns the same value.
+Its inclusive `min`/`max` bounds compare instants across zone representations.
+`Val.string().datetime()` delegates to Moment's strict ISO parser and returns the
+original string; `.moment()` instead returns a typed Moment, preserving its
+precision and UTC/fixed-offset representation. String checks run before
+conversion, and later checks receive Moment values. Optional omission and
+nullable stage ordering survive conversion. No clock or timezone initialization
+is performed; pass time bounds explicitly. Parse failures produce one
+`INVALID_MOMENT` issue at the original structural path.
+
+### Chrono IDs
+
+`Val.chronoId(prefix: 'use')` and `Val.string().chronoId(prefix: 'use')` validate
+through the existing `chrono_id` core and retain the original string. Size
+(default 24, minimum 16) counts the body only; omitted prefix requires no prefix.
+Invalid configuration is rejected by `chrono_id` when parsing. Format validation
+accepts structurally valid future timestamps, performs no normalization, and
+reads neither clocks nor randomness. Factory code/message overrides apply to
+format errors; customize type errors through `Val.string(...)` first.
+
+### Issue serialization
+
+Validation issues ship with generated `dart_mappable` support; consumers need no
+build step. Call `Conflux.initialize()` once before serialization. Use
+`issue.toMap()` or `issue.toJson()`, and
+`ValidationIssueMapper.fromMap(...)` / `fromJson(...)` to restore issues.
+
+```json
+{"code":"PASSWORD_TOO_SHORT","message":"Password must contain at least 8 characters","path":["users",0,"password"]}
+```
+
+The wire format contains exactly `code`, `message`, and `path`. Fields
+encode as strings and indices as non-negative integers; root paths are empty
+lists. Field decoding uses the standard `dart_mappable` rules, including primitive
+coercion. The custom path mapper handles field names and non-negative indices.
+Decoding errors propagate instead of becoming validation results. Paths remain immutable after
+decoding or `copyWith`. Raw inputs, callbacks, schemas, and stack traces are not
+part of the wire format.
+
+The generated issue mapper is ignored by Git. After a fresh checkout, generate it from
+`packages/conflux/conflux` with `dart run build_runner build
+--build-filter='lib/src/val/issue.mapper.dart'`, then format the generated file.

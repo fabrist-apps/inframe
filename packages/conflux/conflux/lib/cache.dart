@@ -1,4 +1,4 @@
-/// Scoped loading caches with shared lookups.
+/// Scoped caches with explicit insertion, expiry, and LRU eviction.
 library;
 
-export 'src/cache/cache.dart' show Cache, CacheExpiry;
+export 'src/cache/cache.dart' show Cache;

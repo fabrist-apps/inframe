@@ -113,33 +113,55 @@ extension MomentCalendar on Moment {
     required bool end,
     required Disambiguation policy,
   }) {
-    var p = parts;
-    if (unit == MomentUnit.week) {
-      final shift = end ? 7 - weekday : 1 - weekday;
-      final surrogateYear = 2000 + p.year % 400;
-      final date = DateTime.utc(surrogateYear, p.month, p.day + shift);
-      p = p.copyWith(year: p.year + date.year - surrogateYear, month: date.month, day: date.day);
+    final p = parts;
+    var year = p.year;
+    var month = p.month;
+    var day = p.day;
+
+    switch (unit) {
+      case MomentUnit.year:
+        month = end ? 12 : 1;
+        day = end ? 31 : 1;
+      case MomentUnit.month:
+        day = end ? calendarDaysInMonth(year, month) : 1;
+      case MomentUnit.week:
+        final shift = end ? 7 - p.encode().weekday : 1 - p.encode().weekday;
+        final surrogateYear = 2000 + year % 400;
+        final date = DateTime.utc(surrogateYear, month, day + shift);
+        year += date.year - surrogateYear;
+        month = date.month;
+        day = date.day;
+      case MomentUnit.day || MomentUnit.hour || MomentUnit.minute || MomentUnit.second:
+        break;
     }
 
-    if (unit == MomentUnit.year) p = p.copyWith(month: end ? 12 : 1);
-    if (unit == MomentUnit.year || unit == MomentUnit.month) {
-      p = p.copyWith(day: end ? calendarDaysInMonth(p.year, p.month) : 1);
-    }
+    final boundary = MomentParts(
+      year: year,
+      month: month,
+      day: day,
+      hour: switch (unit) {
+        MomentUnit.hour || MomentUnit.minute || MomentUnit.second => p.hour,
+        _ => end ? 23 : 0,
+      },
+      minute: switch (unit) {
+        MomentUnit.minute || MomentUnit.second => p.minute,
+        _ => end ? 59 : 0,
+      },
+      second: unit == MomentUnit.second ? p.second : (end ? 59 : 0),
+      millisecond: end ? 999 : 0,
+      microsecond: end ? 999 : 0,
+    );
 
-    if (unit.index <= MomentUnit.day.index) p = p.copyWith(hour: end ? 23 : 0);
-    if (unit.index <= MomentUnit.hour.index) p = p.copyWith(minute: end ? 59 : 0);
-    if (unit.index <= MomentUnit.minute.index) p = p.copyWith(second: end ? 59 : 0);
-    p = p.copyWith(millisecond: end ? 999 : 0, microsecond: end ? 999 : 0);
-
-    return withParts(p, disambiguation: policy);
+    return withParts(boundary, disambiguation: policy);
   }
 
   /// Local weekday, Monday=1 through Sunday=7.
   int get weekday => parts.encode().weekday;
 
   /// Local day of the year, starting at 1; unaffected by offset changes.
-  int get dayOfYear {
-    final p = parts;
+  int get dayOfYear => _dayOfYear(parts);
+
+  static int _dayOfYear(MomentParts p) {
     var days = p.day;
     for (var month = 1; month < p.month; month++) {
       days += calendarDaysInMonth(p.year, month);
@@ -149,7 +171,10 @@ extension MomentCalendar on Moment {
   }
 
   /// Number of calendar days in the local month.
-  int get daysInMonth => calendarDaysInMonth(parts.year, parts.month);
+  int get daysInMonth {
+    final p = parts;
+    return calendarDaysInMonth(p.year, p.month);
+  }
 
   /// Whether the local year has February 29.
   bool get isLeapYear => calendarDaysInMonth(parts.year, 2) == 29;
@@ -160,7 +185,7 @@ extension MomentCalendar on Moment {
   /// ISO week-year and week number, with Monday weeks containing January 4.
   ({int year, int week}) get isoWeek {
     final p = parts;
-    final week = (dayOfYear - weekday + 10) ~/ 7;
+    final week = (_dayOfYear(p) - p.encode().weekday + 10) ~/ 7;
     if (week == 0) return (year: p.year - 1, week: _isoWeeksInYear(p.year - 1));
     if (week > _isoWeeksInYear(p.year)) return (year: p.year + 1, week: 1);
 

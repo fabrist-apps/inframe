@@ -5,31 +5,32 @@ import 'package:conflux/src/moment/time_zone.dart';
 
 /// Internal resolution of local fields in an explicit zone.
 extension TimeZoneLocalResolution on TimeZone {
-  /// Finds every instant with these local fields, without normalizing a gap.
-  ///
-  /// The field encoding is a calendar coordinate, not a UTC occurrence. Checking
-  /// the offset at each candidate rejects obsolete offsets and retains overlaps.
-  List<int> _localCandidates(int wallMicros) {
-    final offsets = switch (this) {
-      FixedTimeZone(:final offset) => {offset},
-      NamedTimeZone(:final location) =>
-        location.zones.isEmpty ? {Duration.zero} : location.zones.map((z) => z.offset).toSet(),
-    };
+  /// Distinct historical offsets in ascending order, including fixed zones.
+  List<Duration> get candidateOffsets => (switch (this) {
+    FixedTimeZone(:final offset) => {offset},
+    NamedTimeZone(:final location) =>
+      location.zones.isEmpty ? {Duration.zero} : location.zones.map((z) => z.offset).toSet(),
+  }).toList()..sort();
 
-    return [
-      for (final offset in offsets)
-        if (offsetAt(wallMicros - offset.inMicroseconds) == offset)
-          wallMicros - offset.inMicroseconds,
-    ]..sort();
+  /// Enumerates real occurrences, skipping gaps and retaining every overlap.
+  ///
+  /// The wall encoding is a calendar coordinate, not a UTC occurrence. Checking
+  /// the offset at each candidate rejects obsolete offsets. Supply one offset
+  /// snapshot for a whole Cron search.
+  Iterable<int> localCandidates(int wallMicros, List<Duration> offsets) sync* {
+    for (final offset in offsets) {
+      final candidate = wallMicros - offset.inMicroseconds;
+      if (offsetAt(candidate) == offset) yield candidate;
+    }
   }
 
-  /// Resolves validated local fields; callers validate both final instant ranges.
+  /// Validates and resolves local fields; callers validate final instant ranges.
   Result<int, MomentError> resolveLocal(MomentParts parts, Disambiguation policy) {
-    final error = parts.validate();
-    if (error != null) return Failure(error);
+    final encoded = parts.encodeValidated();
+    if (encoded case Failure(:final error)) return Failure(error);
 
-    final wallMicros = parts.encode().microsecondsSinceEpoch;
-    final candidates = _localCandidates(wallMicros);
+    final wallMicros = (encoded as Success<int, MomentError>).value;
+    final candidates = localCandidates(wallMicros, candidateOffsets).toList()..sort();
     if (candidates.length == 1) return Success(candidates.single);
 
     if (candidates.length > 1) {

@@ -1,385 +1,109 @@
-import 'dart:async';
-import 'dart:collection';
-
-import 'package:ack/ack.dart';
+import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
-import 'package:conflux/src/effect/cause.dart';
-import 'package:conflux/src/effect/effect.dart';
-import 'package:conflux/src/effect/execution.dart';
-import 'package:conflux/src/effect/exit.dart';
+import 'package:conflux/src/effect/effect.dart' show EffectAccess;
+import 'package:conflux/src/effect/execution.dart' show ScopeAccess;
 import 'package:conflux/src/validation.dart';
 import 'package:context/context.dart';
 
-/// Selects how long successful Cache values remain ready.
-final class CacheExpiry<K, A> {
-  const CacheExpiry._(this._durationFor);
-
-  /// Encodes and decodes a non-negative duration as integer microseconds.
-  static CodecSchema<int, Duration> durationSchema() => Ack.integer()
-      .min(0)
-      .codec<Duration>(
-        decode: (microseconds) => Duration(microseconds: microseconds),
-        encode: (duration) => duration.inMicroseconds,
-      );
-
-  /// Uses one [duration] for every successful value.
-  static CacheExpiry<K, A> fixed<K, A>(Duration duration) {
-    validateArgument(CacheExpiry.durationSchema(), duration, debugName: 'duration');
-    return CacheExpiry._((_, _, _) => duration);
-  }
-
-  /// Computes each successful value's lifetime in the Cache owner's Context.
-  static CacheExpiry<K, A> byValue<K, A>(
-    Duration Function(K key, A value, Context context) expiry,
-  ) => CacheExpiry._(expiry);
-
-  final Duration Function(K key, A value, Context context) _durationFor;
-}
-
-/// A scoped loading cache that retains successful lookup results.
+/// Scoped storage populated explicitly through [set].
 ///
-/// Acquire a Cache inside the Effect scope that should own its lookup work.
-/// The Cache captures that scope's Context and Clock, so later callers cannot
-/// change lookup dependencies or expiry by running operations elsewhere.
-/// Request-dependent lookups need a request-scoped Cache or keys that include
-/// the dependency context that distinguishes their results.
-///
-/// Only successful values are retained. Values are borrowed references:
-/// eviction, invalidation, and scope closure never dispose them. Cache state
-/// and lookup coordination stay within the isolate where it was acquired.
-final class Cache<K, A, E> {
-  Cache._({
-    required this.capacity,
-    required this.concurrency,
-    required this._expiry,
-    required this._lookup,
-    required this._ownerExecution,
-  });
+/// Reads update LRU order. Values are borrowed references: eviction,
+/// invalidation, and closure never dispose them.
+final class Cache<K, A> {
+  Cache._(this.capacity, this.timeToLive, this._clock, this._scope);
 
-  /// Validates the capacity and concurrency of cache acquisition.
-  static ObjectSchema makeArgumentsSchema() =>
-      Ack.object({'capacity': capacitySchema(), 'concurrency': concurrencySchema()});
-
-  /// Validates a positive buffer capacity.
-  static IntegerSchema capacitySchema() => Ack.integer().positive();
-
-  /// Validates a positive concurrency limit.
-  static IntegerSchema concurrencySchema() => Ack.integer().positive();
-
-  /// Acquires a Cache owned by the current Effect scope.
+  /// Acquires a cache owned by the current Effect scope.
   ///
-  /// [capacity] and [concurrency] must both be positive. Lookups for the same
-  /// key share one execution, and cancelling one caller does not cancel work
-  /// still awaited by other callers. Expiry durations must be non-negative.
-  /// [lookup] receives this Cache's captured owner Context.
-  /// A thrown value-dependent expiry callback or negative returned duration is
-  /// reported as a defect to the lookup or set operation that evaluates it.
-  static Effect<Cache<K, A, E>, Never> make<K, A, E>({
+  /// Capacity must be positive and TTL non-negative. Expiry uses the captured
+  /// Clock even when another runtime reads or writes the cache.
+  static Effect<Cache<K, A>, Never> make<K, A>({
     required int capacity,
-    required int concurrency,
-    required CacheExpiry<K, A> expiry,
-    required Effect<A, E> Function(K key, Context context) lookup,
+    required Duration timeToLive,
   }) => EffectAccess.create((execution) async {
-    validateArgument(makeArgumentsSchema(), {'capacity': capacity, 'concurrency': concurrency});
+    checkPositive(capacity, 'capacity');
+    checkDuration(timeToLive, 'timeToLive');
 
-    final ownerExecution = EffectExecution(
-      context: execution.context,
-      scope: execution.scope,
-      clock: execution.clock,
-      cancellation: execution.cancellation,
-    );
-    final cache = Cache<K, A, E>._(
-      capacity: capacity,
-      concurrency: concurrency,
-      expiry: expiry,
-      lookup: lookup,
-      ownerExecution: ownerExecution,
-    );
+    final cache = Cache<K, A>._(capacity, timeToLive, execution.clock, execution.scope);
     final registered = ScopeAccess.addFinalizer(
       execution.scope,
-      Effect.sync((_) => cache._close()),
+      Effect.sync((_) => cache._entries.clear()),
       execution.context,
       execution.clock,
     );
-    if (!registered) {
-      cache._close();
-      throw StateError('Cannot acquire a Cache in a closed Scope.');
-    }
+    if (!registered) throw StateError('Cannot acquire a Cache in a closed Scope.');
+
     return Succeeded(cache);
   });
 
-  /// The maximum number of successful values retained by this Cache.
+  /// The maximum number of retained values.
   final int capacity;
 
-  /// The maximum number of lookups this Cache may run concurrently.
-  final int concurrency;
+  /// How long a value remains available after each [set].
+  final Duration timeToLive;
 
-  final CacheExpiry<K, A> _expiry;
-  final Effect<A, E> Function(K key, Context context) _lookup;
-  final EffectExecution _ownerExecution;
+  final Clock _clock;
+  final Scope _scope;
+  // Iteration order runs from least to most recently used.
+  final _entries = <K, _CacheEntry<A>>{};
 
-  // Ready entries are ordered from least to most recently used. Only the load
-  // registered in _currentLoads may retain a result. Invalidated loads remain
-  // in _loads until completion so their existing waiters still receive it.
-  final LinkedHashMap<K, _CacheEntry<A>> _entries = LinkedHashMap();
-  final Map<K, _CacheLoad<K, A, E>> _currentLoads = {};
-  final Set<_CacheLoad<K, A, E>> _loads = {};
-  final ListQueue<_CacheLoad<K, A, E>> _pendingLoads = ListQueue();
-  var _activeLoads = 0;
-  var _closed = false;
-
-  /// Returns a retained success, joins a current load, or starts the lookup.
-  Effect<A, E> get(K key) => EffectAccess.create((caller) {
-    _ensureOpen();
-    final ready = _readyEntry(key, touch: true);
-    if (ready != null) return Future.value(Succeeded(ready.value));
-
-    return _awaitLoad(_currentLoad(key), caller);
-  });
-
-  /// Loads [key] again while leaving an unexpired value readable.
+  /// Returns an unexpired value and marks it most recently used.
   ///
-  /// Concurrent refreshes and a current-generation miss share one load. A
-  /// failed refresh leaves the previous unexpired value and deadline intact.
-  Effect<A, E> refresh(K key) => EffectAccess.create((caller) {
+  /// Missing and expired entries return None; a stored null returns Some(null).
+  Effect<Option<A>, Never> get(K key) => Effect.sync((_) {
     _ensureOpen();
-    return _awaitLoad(_currentLoad(key), caller);
+    final entry = _entries.remove(key);
+    if (entry == null || _clock.monotonic() >= entry.expiresAt) return const None();
+
+    _entries[key] = entry;
+    return Some(entry.value);
   });
 
-  /// Inspects a ready value without starting or awaiting a lookup.
-  Effect<Option<A>, Never> getOption(K key) => EffectAccess.create((_) async {
+  /// Inserts or replaces a value, restarting its TTL and marking it most recent.
+  Effect<void, Never> set(K key, A value) => Effect.sync((_) {
     _ensureOpen();
-    final entry = _readyEntry(key, touch: true);
-    return Succeeded(entry == null ? const None() : Some(entry.value));
+    _removeExpiredEntries();
+    _entries.remove(key);
+    if (timeToLive == Duration.zero) return;
+
+    _entries[key] = _CacheEntry(value, _clock.monotonic() + timeToLive);
+    if (_entries.length > capacity) _entries.remove(_entries.keys.first);
   });
 
-  /// Reports ready unexpired membership without starting a lookup.
-  Effect<bool, Never> containsKey(K key) => EffectAccess.create((_) async {
+  /// Removes the value stored under [key].
+  Effect<void, Never> invalidate(K key) => Effect.sync((_) {
     _ensureOpen();
-    return Succeeded(_readyEntry(key, touch: false) != null);
+    _entries.remove(key);
   });
 
-  /// Replaces [key] with a successful [value] under a new generation.
-  Effect<void, Never> set(K key, A value) => EffectAccess.create((_) async {
-    _ensureOpen();
-    _invalidate(key);
-    _retain(key, value);
-    return const Succeeded(null);
-  });
-
-  /// Removes [key] and prevents older loads from repopulating it.
-  Effect<void, Never> invalidate(K key) => EffectAccess.create((_) async {
-    _ensureOpen();
-    _invalidate(key);
-    return const Succeeded(null);
-  });
-
-  /// Removes every ready value and invalidates every known pending generation.
-  Effect<void, Never> invalidateAll() => EffectAccess.create((_) async {
+  /// Removes all retained values.
+  Effect<void, Never> invalidateAll() => Effect.sync((_) {
     _ensureOpen();
     _entries.clear();
-    _currentLoads.clear();
-    return const Succeeded(null);
   });
 
-  /// Invalidates ready entries matching [predicate] in the caller's Context,
-  /// without inspecting loads.
+  /// Removes unexpired entries matching [predicate] in the caller's Context.
+  ///
+  /// Predicates are evaluated before removing matches. A thrown predicate
+  /// becomes a defect without applying the selected invalidations.
   Effect<void, Never> invalidateWhere(
     bool Function(K key, A value, Context context) predicate,
-  ) => EffectAccess.create((caller) async {
+  ) => Effect.sync((context) {
     _ensureOpen();
     _removeExpiredEntries();
-    _entries.entries
-        .where(
-          (entry) => predicate(
-            entry.key,
-            entry.value.value,
-            caller.context,
-          ),
-        )
-        .map((entry) => entry.key)
-        .toList()
-        .forEach(_invalidate);
-    return const Succeeded(null);
+    final keys = <K>[];
+    for (final entry in _entries.entries) {
+      if (predicate(entry.key, entry.value.value, context)) keys.add(entry.key);
+    }
+    keys.forEach(_entries.remove);
   });
 
-  /// The number of ready unexpired entries.
-  int get size {
-    _ensureOpen();
-    _removeExpiredEntries();
-    return _entries.length;
-  }
-
-  /// A snapshot of ready unexpired keys in LRU order.
-  List<K> get keys {
-    _ensureOpen();
-    _removeExpiredEntries();
-    return List.unmodifiable(_entries.keys);
-  }
-
-  /// A snapshot of ready unexpired values in LRU order.
-  List<A> get values {
-    _ensureOpen();
-    _removeExpiredEntries();
-    return List.unmodifiable(_entries.values.map((entry) => entry.value));
-  }
-
-  /// A snapshot of ready unexpired key/value pairs in LRU order.
-  List<MapEntry<K, A>> get entries {
-    _ensureOpen();
-    _removeExpiredEntries();
-    return List.unmodifiable(
-      _entries.entries.map((entry) => MapEntry(entry.key, entry.value.value)),
-    );
-  }
-
-  _CacheLoad<K, A, E> _currentLoad(K key) {
-    return _currentLoads[key] ?? _startLoad(key);
-  }
-
-  _CacheLoad<K, A, E> _startLoad(K key) {
-    final load = _CacheLoad<K, A, E>(key);
-    _currentLoads[key] = load;
-    _loads.add(load);
-    if (_activeLoads < concurrency) {
-      _runLoad(load);
-    } else {
-      _pendingLoads.addLast(load);
-    }
-    return load;
-  }
-
-  void _runLoad(_CacheLoad<K, A, E> load) {
-    _activeLoads += 1;
-    final fiber = ScopeAccess.fork(
-      _ownerExecution.scope,
-      Effect.defer((context) => _lookup(load.key, context)),
-      _ownerExecution,
-    );
-    unawaited(
-      fiber.join().then((exit) {
-        _activeLoads -= 1;
-        _loads.remove(load);
-        final isCurrent = identical(_currentLoads[load.key], load);
-        if (isCurrent) _currentLoads.remove(load.key);
-
-        var delivered = exit;
-        try {
-          if (exit case Succeeded<A, E>(:final value)) {
-            if (!_isClosed && isCurrent) {
-              _retain(load.key, value);
-            }
-          }
-        } on Object catch (error, stackTrace) {
-          delivered = Failed(Defect(error, stackTrace));
-        }
-        load.complete(delivered);
-        _drainPendingLoads();
-      }),
-    );
-  }
-
-  Future<Exit<A, E>> _awaitLoad(
-    _CacheLoad<K, A, E> load,
-    EffectExecution caller,
-  ) {
-    if (caller.cancellation.isCancelled) {
-      return Future.value(
-        Failed(Interrupted(caller.cancellation.reason)),
-      );
-    }
-
-    final completion = Completer<Exit<A, E>>();
-    var settled = false;
-    late final void Function() stopListening;
-
-    void complete(Exit<A, E> exit) {
-      if (settled) return;
-      settled = true;
-      stopListening();
-      completion.complete(exit);
-    }
-
-    stopListening = caller.cancellation.listen(
-      (reason) => complete(Failed(Interrupted(reason))),
-    );
-    unawaited(load.exit.then(complete));
-    return completion.future;
-  }
-
-  void _retain(K key, A value) {
-    final duration = _expiry._durationFor(
-      key,
-      value,
-      _ownerExecution.context,
-    );
-    validateArgument(CacheExpiry.durationSchema(), duration, debugName: 'duration');
-    _removeExpiredEntries();
-    final entry = _CacheEntry(
-      value,
-      _ownerExecution.clock.monotonic() + duration,
-    );
-    _entries.remove(key);
-    _entries[key] = entry;
-    while (_entries.length > capacity) {
-      _entries.remove(_entries.keys.first);
-    }
-  }
-
-  _CacheEntry<A>? _readyEntry(K key, {required bool touch}) {
-    final entry = _entries[key];
-    if (entry == null) return null;
-    if (_ownerExecution.clock.monotonic() >= entry.expiresAt) {
-      _entries.remove(key);
-      return null;
-    }
-    if (touch) {
-      _entries.remove(key);
-      _entries[key] = entry;
-    }
-    return entry;
-  }
-
   void _removeExpiredEntries() {
-    final now = _ownerExecution.clock.monotonic();
+    final now = _clock.monotonic();
     _entries.removeWhere((_, entry) => now >= entry.expiresAt);
   }
 
-  void _invalidate(K key) {
-    _currentLoads.remove(key);
-    _entries.remove(key);
-  }
-
-  void _drainPendingLoads() {
-    if (_isClosed) {
-      while (_pendingLoads.isNotEmpty) {
-        _pendingLoads.removeFirst().complete(
-          const Failed(Interrupted(ScopeClosed())),
-        );
-      }
-      return;
-    }
-    while (_pendingLoads.isNotEmpty && _activeLoads < concurrency) {
-      _runLoad(_pendingLoads.removeFirst());
-    }
-  }
-
-  bool get _isClosed => _closed || _ownerExecution.scope.isClosed;
-
   void _ensureOpen() {
-    if (_isClosed) throw StateError('Cache is closed.');
-  }
-
-  void _close() {
-    if (_closed) return;
-    _closed = true;
-    for (final load in _loads) {
-      load.complete(const Failed(Interrupted(ScopeClosed())));
-    }
-    _entries.clear();
-    _currentLoads.clear();
-    _loads.clear();
-    _pendingLoads.clear();
+    if (_scope.isClosed) throw StateError('Cache is closed.');
   }
 }
 
@@ -388,17 +112,4 @@ final class _CacheEntry<A> {
 
   final A value;
   final Duration expiresAt;
-}
-
-final class _CacheLoad<K, A, E> {
-  _CacheLoad(this.key);
-
-  final K key;
-  final Completer<Exit<A, E>> _completion = Completer();
-
-  Future<Exit<A, E>> get exit => _completion.future;
-
-  void complete(Exit<A, E> exit) {
-    if (!_completion.isCompleted) _completion.complete(exit);
-  }
 }
