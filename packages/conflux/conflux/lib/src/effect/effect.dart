@@ -129,15 +129,19 @@ final class Effect<A, E> {
     FutureOr<void> Function(Context context)? onCancel,
   }) => Effect._((execution) async {
     final context = execution.context;
-    late final Future<A> future;
-    try {
-      future = factory(context);
-    } on Object catch (error, stackTrace) {
+    Failed<A, E> failure(Object error, StackTrace stackTrace) {
       try {
         return Failed(Expected(onError(error, stackTrace, context)));
       } on Object catch (mapperError, mapperStackTrace) {
         return Failed(Defect(mapperError, mapperStackTrace));
       }
+    }
+
+    late final Future<A> future;
+    try {
+      future = factory(context);
+    } on Object catch (error, stackTrace) {
+      return failure(error, stackTrace);
     }
 
     Future<Cause<E>> cancellationCause(Object? reason) async {
@@ -187,11 +191,7 @@ final class Effect<A, E> {
         (value) => complete(Succeeded(value)),
         onError: (Object error, StackTrace stackTrace) {
           if (settled) return;
-          try {
-            complete(Failed(Expected(onError(error, stackTrace, context))));
-          } on Object catch (mapperError, mapperStackTrace) {
-            complete(Failed(Defect(mapperError, mapperStackTrace)));
-          }
+          complete(failure(error, stackTrace));
         },
       ),
     );
@@ -199,8 +199,7 @@ final class Effect<A, E> {
   });
 
   /// Reads a value from the execution [Context] when run.
-  static Effect<A, Never> context<A>(A Function(Context context) select) =>
-      Effect._((execution) async => Succeeded(select(execution.context)));
+  static Effect<A, Never> context<A>(A Function(Context context) select) => sync(select);
 
   /// Builds an effect with a callback-local callable binder.
   ///
@@ -209,20 +208,7 @@ final class Effect<A, E> {
   /// await has no cancellation hook; use [tryFuture] for adaptable foreign work.
   static Effect<A, E> build<A, E>(
     FutureOr<A> Function(EffectBuilder<E> $) body,
-  ) => Effect._((execution) async {
-    final builder = EffectBuilderAccess.create<E>(execution);
-    try {
-      final value = await body(builder);
-      final failure = EffectBuilderAccess.terminalCause(builder);
-      return failure == null ? Succeeded(value) : Failed(failure);
-    } on Object catch (error, stackTrace) {
-      final failure = EffectBuilderAccess.terminalCause(builder);
-      if (failure != null) return Failed(failure);
-      return Failed(Defect(error, stackTrace));
-    } finally {
-      EffectBuilderAccess.deactivate(builder);
-    }
-  });
+  ) => Effect._((execution) => EffectBuilderAccess.run(body, execution));
 
   /// Runs this effect with [context] for it and its descendants.
   Effect<A, E> withContext(Context context) => Effect._((execution) async {
@@ -253,7 +239,7 @@ final class Effect<A, E> {
   }) {
     checkPositive(concurrency, 'concurrency');
     return Effect._((execution) {
-      return _EffectCollection.run(List.of(effects), execution, concurrency);
+      return _EffectBranches<A, E>(execution).collect(List.of(effects), concurrency);
     });
   }
 
@@ -262,15 +248,10 @@ final class Effect<A, E> {
     Iterable<I> inputs,
     Effect<A, E> Function(I input, Context context) effect, {
     int concurrency = 1,
-  }) {
-    checkPositive(concurrency, 'concurrency');
-    return Effect.defer((_) {
-      final effects = inputs.map(
-        (input) => Effect.defer<A, E>((context) => effect(input, context)),
-      );
-      return all(effects, concurrency: concurrency);
-    });
-  }
+  }) => all(
+    inputs.map((input) => Effect.defer<A, E>((context) => effect(input, context))),
+    concurrency: concurrency,
+  );
 
   /// Returns the first successful branch after interrupting and cleaning up losers.
   static Effect<A, E> race<A, E>(Iterable<Effect<A, E>> effects) => Effect._((execution) {
@@ -278,7 +259,7 @@ final class Effect<A, E> {
     if (branches.isEmpty) {
       throw ArgumentError.value(branches, 'effects', 'Must not be empty');
     }
-    return _EffectRace.run(branches, execution);
+    return _EffectBranches<A, E>(execution).race(branches);
   });
 
   /// Evaluates every input and accumulates all expected errors in input order.
@@ -358,27 +339,17 @@ extension EffectTiming<A, E> on Effect<A, E> {
         timer.join().then(_TimerFinished.new),
       ]);
 
-      return switch (winner) {
-        _OperationFinished<A, E>(:final exit) => () async {
+      switch (winner) {
+        case _OperationFinished<A, E>(:final exit):
           final timerExit = await timer.interrupt(const _TimeoutCancelled());
-          final cleanup = switch (timerExit) {
-            Succeeded<void, Never>() => null,
-            Failed<void, Never>(:final cause) => cause.defectsOnly,
-          };
-          return exit.appendCleanup(cleanup);
-        }(),
-        _TimerFinished<A, E>(exit: Failed<void, Never>(:final cause)) => () async {
+          return exit.appendCleanup(_defectsFrom(timerExit));
+        case _TimerFinished<A, E>(exit: Failed<void, Never>(:final cause)):
           final operationExit = await operation.interrupt(
             execution.cancellation.reason,
           );
-          return Failed<A, E>(
-            cause.mapExpected<E>(_absurd),
-          ).appendCleanup(_defectsFrom(operationExit));
-        }(),
-        _TimerFinished<A, E>(exit: Succeeded<void, Never>()) => () async {
-          final operationExit = await operation.interrupt(
-            const _TimeoutElapsed(),
-          );
+          return Failed<A, E>(cause).appendCleanup(_defectsFrom(operationExit));
+        case _TimerFinished<A, E>(exit: Succeeded<void, Never>()):
+          final operationExit = await operation.interrupt(const _TimeoutElapsed());
           late final E error;
           try {
             error = onTimeout(context);
@@ -390,8 +361,7 @@ extension EffectTiming<A, E> on Effect<A, E> {
           return Failed<A, E>(
             Expected(error),
           ).appendCleanup(_defectsFrom(operationExit));
-        }(),
-      };
+      }
     });
   }
 }
@@ -400,8 +370,6 @@ Cause<Never>? _defectsFrom<A, E>(Exit<A, E> exit) => switch (exit) {
   Succeeded<A, E>() => null,
   Failed<A, E>(:final cause) => cause.defectsOnly,
 };
-
-E _absurd<E>(Never value) => value;
 
 sealed class _TimeoutWinner<A, E> {
   const _TimeoutWinner();
@@ -433,12 +401,7 @@ final class _TimeoutCancelled {
   String toString() => 'Effect timeout cancelled';
 }
 
-final class _IndexedExit<A, E> {
-  const _IndexedExit(this.index, this.exit);
-
-  final int index;
-  final Exit<A, E> exit;
-}
+typedef _IndexedExit<A, E> = ({int index, Exit<A, E> exit});
 
 /// Owns active branches and observes each completion once.
 ///
@@ -452,9 +415,6 @@ final class _EffectBranches<A, E> {
   final _ready = Queue<_IndexedExit<A, E>>();
   Completer<_IndexedExit<A, E>>? _waiting;
 
-  int get length => _active.length;
-  bool get isNotEmpty => _active.isNotEmpty;
-
   void start(int index, Effect<A, E> effect) {
     final fiber = ScopeAccess.fork(execution.scope, effect, execution);
     _active[index] = fiber;
@@ -462,10 +422,10 @@ final class _EffectBranches<A, E> {
       fiber.join().then((exit) {
         final waiting = _waiting;
         if (waiting == null) {
-          _ready.add(_IndexedExit(index, exit));
+          _ready.add((index: index, exit: exit));
         } else {
           _waiting = null;
-          waiting.complete(_IndexedExit(index, exit));
+          waiting.complete((index: index, exit: exit));
         }
       }),
     );
@@ -497,37 +457,33 @@ final class _EffectBranches<A, E> {
     _ready.clear();
     return CauseGroup.parallel(exits.map(_defectsFrom).whereType<Cause<Never>>());
   }
-}
 
-abstract final class _EffectCollection {
-  static Future<Exit<List<A>, E>> run<A, E>(
+  Future<Exit<List<A>, E>> collect(
     List<Effect<A, E>> effects,
-    EffectExecution execution,
     int concurrency,
   ) async {
     if (effects.isEmpty) return Succeeded(List.unmodifiable(const []));
 
     final slots = List<Option<A>>.filled(effects.length, const None());
-    final branches = _EffectBranches<A, E>(execution);
     var nextIndex = 0;
 
     void startNext() {
       final index = nextIndex++;
-      branches.start(index, effects[index]);
+      start(index, effects[index]);
     }
 
-    while (nextIndex < effects.length && branches.length < concurrency) {
+    while (nextIndex < effects.length && _active.length < concurrency) {
       startNext();
     }
 
-    while (branches.isNotEmpty) {
-      final completed = await branches.next();
+    while (_active.isNotEmpty) {
+      final completed = await next();
       switch (completed.exit) {
         case Succeeded<A, E>(:final value):
           slots[completed.index] = Some(value);
           if (nextIndex < effects.length) startNext();
         case Failed<A, E>(:final cause):
-          final cleanup = await branches.interrupt(const _CollectionStopped());
+          final cleanup = await interrupt(const _CollectionStopped());
           return Failed<List<A>, E>(cause).appendCleanup(cleanup);
       }
     }
@@ -540,6 +496,28 @@ abstract final class _EffectCollection {
     });
     return Succeeded(List.unmodifiable(values));
   }
+
+  Future<Exit<A, E>> race(
+    List<Effect<A, E>> effects,
+  ) async {
+    for (var index = 0; index < effects.length; index += 1) {
+      start(index, effects[index]);
+    }
+    final failures = List<Cause<E>?>.filled(effects.length, null);
+
+    while (_active.isNotEmpty) {
+      final completed = await next();
+      switch (completed.exit) {
+        case Failed<A, E>(:final cause):
+          failures[completed.index] = cause;
+        case Succeeded<A, E>(:final value):
+          final cleanup = await interrupt(const _RaceLost());
+          return Succeeded<A, E>(value).appendCleanup(cleanup);
+      }
+    }
+
+    return Failed(Parallel(failures.whereType<Cause<E>>()));
+  }
 }
 
 final class _CollectionStopped {
@@ -547,32 +525,6 @@ final class _CollectionStopped {
 
   @override
   String toString() => 'Collection stopped after a branch failed';
-}
-
-abstract final class _EffectRace {
-  static Future<Exit<A, E>> run<A, E>(
-    List<Effect<A, E>> effects,
-    EffectExecution execution,
-  ) async {
-    final branches = _EffectBranches<A, E>(execution);
-    for (var index = 0; index < effects.length; index += 1) {
-      branches.start(index, effects[index]);
-    }
-    final failures = List<Cause<E>?>.filled(effects.length, null);
-
-    while (branches.isNotEmpty) {
-      final completed = await branches.next();
-      switch (completed.exit) {
-        case Failed<A, E>(:final cause):
-          failures[completed.index] = cause;
-        case Succeeded<A, E>(:final value):
-          final cleanup = await branches.interrupt(const _RaceLost());
-          return Succeeded<A, E>(value).appendCleanup(cleanup);
-      }
-    }
-
-    return Failed(Parallel(failures.whereType<Cause<E>>()));
-  }
 }
 
 final class _RaceLost {
@@ -696,6 +648,7 @@ extension EffectRecovery<A, E> on Effect<A, E> {
   /// The expected error type remains in the Effect so mixed causes can retain
   /// their typed Expected leaves alongside defects or interruption.
   Effect<Result<A, E>, E> result() => Effect._((execution) async {
+    // Capture the outcome without another cancellation boundary after cleanup.
     final exit = await _evaluate(execution);
     return switch (exit) {
       Succeeded<A, E>(:final value) => Succeeded(Success(value)),
@@ -724,8 +677,7 @@ extension EffectObservation<A, E> on Effect<A, E> {
     if (exit case Failed<A, E>(:final cause)) {
       final primary = cause.primaryError;
       if (primary case Some<E>(:final value)) {
-        return _FailureObservation.run(
-          exit,
+        return exit.withCleanup(
           Effect.defer((context) => observe(value, context)),
           execution,
         );
@@ -741,8 +693,7 @@ extension EffectObservation<A, E> on Effect<A, E> {
     final exit = await _evaluate(execution);
     return switch (exit) {
       Succeeded<A, E>() => exit,
-      Failed<A, E>(:final cause) => _FailureObservation.run(
-        exit,
+      Failed<A, E>(:final cause) => exit.withCleanup(
         Effect.defer((context) => observe(cause, context)),
         execution,
       ),
@@ -750,20 +701,19 @@ extension EffectObservation<A, E> on Effect<A, E> {
   });
 }
 
-abstract final class _FailureObservation {
-  static Future<Exit<A, E>> run<A, E>(
-    Exit<A, E> original,
-    Effect<void, Never> observer,
+extension _ExitCleanup<A, E> on Exit<A, E> {
+  Future<Exit<A, E>> withCleanup(
+    Effect<void, Never> cleanup,
     EffectExecution execution,
   ) async {
-    final observerExit = await EffectExecution.runProtected(
-      observer,
+    final cleanupExit = await EffectExecution.runProtected(
+      cleanup,
       execution.context,
       execution.clock,
     );
-    return switch (observerExit) {
-      Succeeded<void, Never>() => original,
-      Failed<void, Never>(:final cause) => original.appendCleanup(cause),
+    return switch (cleanupExit) {
+      Succeeded<void, Never>() => this,
+      Failed<void, Never>(:final cause) => appendCleanup(cause),
     };
   }
 }
@@ -785,16 +735,7 @@ extension EffectCleanup<A, E> on Effect<A, E> {
     } on Object catch (error, stackTrace) {
       return exit.appendCleanup(Defect(error, stackTrace));
     }
-    final cleanupExit = await EffectExecution.runProtected(
-      cleanup,
-      execution.context,
-      execution.clock,
-    );
-    final cleanupCause = switch (cleanupExit) {
-      Succeeded<void, Never>() => null,
-      Failed<void, Never>(:final cause) => cause,
-    };
-    return exit.appendCleanup(cleanupCause);
+    return exit.withCleanup(cleanup, execution);
   });
 
   /// Runs [finalizer] only when the operation is interrupted.

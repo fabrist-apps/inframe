@@ -216,6 +216,26 @@ void main() {
       expect((result as Failure<int, String>).error, 'first');
     });
 
+    test('should capture a completed result despite interruption during cleanup', () async {
+      final runtime = Runtime();
+      late final Fiber<Result<int, String>, String> fiber;
+      fiber = runtime.fork(
+        Effect.succeed<int, String>(42)
+            .ensuring(
+              Effect.sync((_) {
+                unawaited(fiber.interrupt('during cleanup'));
+              }),
+            )
+            .result(),
+      );
+
+      final exit = await fiber.join();
+      await runtime.close();
+
+      final result = (exit as Succeeded<Result<int, String>, String>).value;
+      expect((result as Success<int, String>).value, 42);
+    });
+
     test('should retain a complete mixed cause in the Effect error channel', () async {
       final cause = Sequential<String>([
         const Expected('expected'),

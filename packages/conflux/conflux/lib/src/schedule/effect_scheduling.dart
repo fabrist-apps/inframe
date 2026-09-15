@@ -88,8 +88,6 @@ Future<Cause<E>?> _wait<E>(
   final waited = await EffectAccess.evaluate(Effect.sleep(delay), execution);
   return switch (waited) {
     Succeeded<void, Never>() => null,
-    Failed<void, Never>(:final cause) => cause.mapExpected(_absurd),
+    Failed<void, Never>(:final cause) => cause,
   };
 }
-
-E _absurd<E>(Never value) => value;

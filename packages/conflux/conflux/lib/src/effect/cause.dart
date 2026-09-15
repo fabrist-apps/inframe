@@ -33,8 +33,18 @@ sealed class Cause<E> {
   /// The first expected error when every leaf is expected.
   Option<E> get primaryError {
     if (containsFatal) return const None();
-    final errors = expectedErrors;
-    return errors.isEmpty ? const None() : Some(errors.first);
+    // Every group is non-empty, so following its first child reaches a leaf.
+    var first = this;
+    while (true) {
+      switch (first) {
+        case Expected<E>(:final error):
+          return Some(error);
+        case Sequential<E>(:final causes) || Parallel<E>(:final causes):
+          first = causes.first;
+        case Defect<E>() || Interrupted<E>():
+          return const None();
+      }
+    }
   }
 
   /// Transforms every expected error while preserving cause structure.

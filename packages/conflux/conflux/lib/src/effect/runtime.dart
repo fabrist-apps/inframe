@@ -42,37 +42,17 @@ final class Runtime {
   final Clock clock;
 
   var _closed = false;
-  final _roots = <OwnedEffect>{};
+  final _roots = <Fiber<Object?, Object?>>{};
 
   /// Starts [effect] as a runtime-owned root execution.
   Fiber<A, E> fork<A, E>(Effect<A, E> effect) {
     if (_closed) throw StateError('Runtime is closed.');
-    final scope = ScopeAccess.create();
-    final cancellation = EffectCancellation();
-    final execution = EffectExecution(
+    return FiberAccess.start(
+      effect,
       context: context,
-      scope: scope,
       clock: clock,
-      cancellation: cancellation,
+      owner: _roots,
     );
-    late final Fiber<A, E> fiber;
-    late final OwnedEffect root;
-    final exit =
-        Future<Exit<A, E>>.microtask(
-          () => execution.runScoped(effect),
-        ).whenComplete(
-          () => _roots.remove(root),
-        );
-    fiber = FiberAccess.create(cancellation, exit);
-    root = OwnedEffect((reason) async {
-      final exit = await fiber.interrupt(reason);
-      return switch (exit) {
-        Succeeded<A, E>() => null,
-        Failed<A, E>(:final cause) => cause.defectsOnly,
-      };
-    });
-    _roots.add(root);
-    return fiber;
   }
 
   /// Runs [effect] in a fresh root scope and returns after scope cleanup.
@@ -84,9 +64,9 @@ final class Runtime {
   Future<void> close() async {
     if (_closed && _roots.isEmpty) return;
     _closed = true;
-    final roots = List<OwnedEffect>.of(_roots);
+    final roots = List.of(_roots);
     await Future.wait(
-      roots.map((root) => root.interruptAndJoin(const RuntimeClosed())),
+      roots.map((root) => root.interrupt(const RuntimeClosed())),
     );
   }
 }

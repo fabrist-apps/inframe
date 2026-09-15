@@ -118,18 +118,24 @@ final class EffectBuilder<E> {
     _checkActive();
     if (_terminalCause != null) throw const _BindSignal();
   }
-
-  void _deactivate() => _active = false;
 }
 
 /// Uses builder internals without widening its callback-facing API.
 abstract final class EffectBuilderAccess {
-  /// Creates a callback-local builder for [execution].
-  static EffectBuilder<E> create<E>(EffectExecution execution) => EffectBuilder._(execution);
-
-  /// Returns the cause that stopped [builder], if one was bound.
-  static Cause<E>? terminalCause<E>(EffectBuilder<E> builder) => builder._terminalCause;
-
-  /// Prevents [builder] from escaping its callback.
-  static void deactivate<E>(EffectBuilder<E> builder) => builder._deactivate();
+  /// Runs [body] with a fresh builder and closes its callback lifetime.
+  static Future<Exit<A, E>> run<A, E>(
+    FutureOr<A> Function(EffectBuilder<E> builder) body,
+    EffectExecution execution,
+  ) async {
+    final builder = EffectBuilder<E>._(execution);
+    try {
+      final value = await body(builder);
+      final failure = builder._terminalCause;
+      return failure == null ? Succeeded(value) : Failed(failure);
+    } on Object catch (error, stackTrace) {
+      return Failed(builder._terminalCause ?? Defect(error, stackTrace));
+    } finally {
+      builder._active = false;
+    }
+  }
 }
