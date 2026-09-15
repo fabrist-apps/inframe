@@ -556,7 +556,7 @@ build step. Call `Conflux.initialize()` once before serialization. Use
 {"code":"PASSWORD_TOO_SHORT","message":"Password must contain at least 8 characters","path":["users",0,"password"]}
 ```
 
-The wire format contains exactly `code`, `message`, `kind`, and `path`. Fields
+The wire format contains exactly `code`, `message`, and `path`. Fields
 encode as strings and indices as non-negative integers; root paths are empty
 lists. Field decoding uses the standard `dart_mappable` rules, including primitive
 coercion. The custom path mapper handles field names and non-negative indices.
