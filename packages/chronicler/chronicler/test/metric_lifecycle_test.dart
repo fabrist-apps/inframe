@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:chronicler/chronicler.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
@@ -7,6 +5,7 @@ import 'package:test/test.dart';
 import 'support/async.dart';
 import 'support/exporter.dart';
 import 'support/metric_aggregation.dart';
+import 'support/metric_clock.dart';
 
 void main() {
   group('Chronicler metric lifecycle', () {
@@ -56,83 +55,58 @@ void main() {
 
     test('should restart the full interval after a partial flush', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final timers = <_ManualTimer>[];
-      await runZoned(
-        () async {
-          final chronicler = _chronicler(
-            exporter,
-            metricInterval: const Duration(milliseconds: 100),
-          );
-          final counter = chronicler.recorder.metrics.counter('requests')..add(1);
-
-          await chronicler.flush();
-          counter.add(2);
-          final staleTimer = timers.first;
-          final currentTimer = timers.last;
-
-          staleTimer.fire();
-          await Future<void>.delayed(Duration.zero);
-          expect(_sums(exporter), [1]);
-
-          currentTimer.fire();
-          await waitForCondition(() => _sums(exporter).length == 2);
-          expect(_sums(exporter), [1, 2]);
-          await chronicler.close();
-        },
-        zoneSpecification: ZoneSpecification(
-          createTimer: (self, parent, zone, duration, callback) {
-            if (duration == const Duration(milliseconds: 100)) {
-              final timer = _ManualTimer(callback);
-              timers.add(timer);
-              return timer;
-            }
-            return parent.createTimer(zone, duration, callback);
-          },
-        ),
+      final clock = MetricClock();
+      final chronicler = _chronicler(
+        exporter,
+        clock: clock,
+        metricInterval: const Duration(milliseconds: 100),
       );
+      final counter = chronicler.recorder.metrics.counter('requests')..add(1);
+      clock.advance(const Duration(milliseconds: 50));
+      await chronicler.flush();
+      counter.add(2);
+
+      clock.advance(const Duration(milliseconds: 50));
+      await settleAsync();
+      expect(_sums(exporter), [1]);
+
+      clock.advance(const Duration(milliseconds: 50));
+      await waitForCondition(() => _sums(exporter).length == 2);
+      expect(_sums(exporter), [1, 2]);
+      await chronicler.close();
     });
 
     test('should discard unfinished and queued metrics while retaining handles', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final timers = <_ManualTimer>[];
+      final clock = MetricClock();
       const interval = Duration(seconds: 17);
-      await runZoned(
-        () async {
-          final chronicler = _chronicler(
-            exporter,
-            maxBatchRecords: 10,
-            batchInterval: const Duration(minutes: 1),
-            metricInterval: interval,
-          );
-          final metrics = chronicler.recorder.metrics;
-          final counter = metrics.counter('requests')..add(1);
-          timers.single.fire();
-          counter.add(5);
-
-          chronicler.setCollectionEnabled(ChroniclerSignal.metrics, enabled: false);
-          counter.add(10);
-          chronicler.setCollectionEnabled(ChroniclerSignal.metrics, enabled: true);
-          expect(identical(metrics.counter('requests'), counter), isTrue);
-          counter.add(2);
-          final report = await chronicler.flush();
-
-          expect(report.accepted, 1);
-          expect(_sums(exporter), [2]);
-          expect(
-            chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled],
-            BigInt.from(2),
-          );
-          await chronicler.close();
-        },
-        zoneSpecification: ZoneSpecification(
-          createTimer: (self, parent, zone, duration, callback) {
-            if (duration != interval) return parent.createTimer(zone, duration, callback);
-            final timer = _ManualTimer(callback);
-            timers.add(timer);
-            return timer;
-          },
-        ),
+      final chronicler = _chronicler(
+        exporter,
+        clock: clock,
+        maxBatchRecords: 10,
+        batchInterval: const Duration(minutes: 1),
+        metricInterval: interval,
       );
+      final metrics = chronicler.recorder.metrics;
+      final counter = metrics.counter('requests')..add(1);
+      clock.advance(interval);
+      await settleAsync();
+      counter.add(5);
+
+      chronicler.setCollectionEnabled(ChroniclerSignal.metrics, enabled: false);
+      counter.add(10);
+      chronicler.setCollectionEnabled(ChroniclerSignal.metrics, enabled: true);
+      expect(identical(metrics.counter('requests'), counter), isTrue);
+      counter.add(2);
+      final report = await chronicler.flush();
+
+      expect(report.accepted, 1);
+      expect(_sums(exporter), [2]);
+      expect(
+        chronicler.diagnosticCounts[DiagnosticReason.collectionDisabled],
+        BigInt.from(2),
+      );
+      await chronicler.close();
     });
 
     test('should seal pending metrics during close after blocking new recording', () async {
@@ -301,80 +275,33 @@ void main() {
     }
 
     test('should keep interval scheduling paused while metrics are disabled', () async {
-      var metricTimers = 0;
-      await runZoned(
-        () async {
-          final chronicler = Chronicler(
-            appId: 'app',
-            release: 'release',
-            source: ChroniclerSource.server,
-            exporter: TestExporter(acceptImmediately: true),
-            options: const ChroniclerOptions(
-              enabledSignals: {
-                ChroniclerSignal.logs,
-                ChroniclerSignal.events,
-                ChroniclerSignal.traces,
-                ChroniclerSignal.errors,
-              },
-              metrics: MetricOptions(interval: Duration(milliseconds: 10)),
-            ),
-          );
-          chronicler.recorder.metrics.counter('requests');
-          await chronicler.flush();
-          await Future<void>.delayed(const Duration(milliseconds: 25));
-          await chronicler.close();
-        },
-        zoneSpecification: ZoneSpecification(
-          createTimer: (self, parent, zone, duration, callback) {
-            if (duration == const Duration(milliseconds: 10)) metricTimers++;
-            return parent.createTimer(zone, duration, callback);
-          },
-        ),
-      );
+      final clock = MetricClock();
+      final chronicler = _disabledMetrics(clock);
+      chronicler.recorder.metrics.counter('requests');
+      await chronicler.flush();
+      clock.advance(const Duration(seconds: 30));
+      await settleAsync();
 
-      expect(metricTimers, 0);
+      expect(clock.activeWaits, 0);
+      await chronicler.close();
     });
 
-    test('should retain only one active timer when first enabled', () async {
-      final timers = <_ManualTimer>[];
-      await runZoned(
-        () async {
-          final chronicler = Chronicler(
-            appId: 'app',
-            release: 'release',
-            source: ChroniclerSource.server,
-            exporter: TestExporter(acceptImmediately: true),
-            options: const ChroniclerOptions(
-              enabledSignals: {
-                ChroniclerSignal.logs,
-                ChroniclerSignal.events,
-                ChroniclerSignal.traces,
-                ChroniclerSignal.errors,
-              },
-              metrics: MetricOptions(interval: Duration(milliseconds: 10)),
-            ),
-          )..setCollectionEnabled(ChroniclerSignal.metrics, enabled: true);
+    test('should retain only one active wait when first enabled', () async {
+      final clock = MetricClock();
+      final chronicler = _disabledMetrics(clock)
+        ..setCollectionEnabled(ChroniclerSignal.metrics, enabled: true);
+      await settleAsync();
 
-          expect(timers.where((timer) => timer.isActive), hasLength(1));
-          await chronicler.close();
-        },
-        zoneSpecification: ZoneSpecification(
-          createTimer: (self, parent, zone, duration, callback) {
-            if (duration == const Duration(milliseconds: 10)) {
-              final timer = _ManualTimer(callback);
-              timers.add(timer);
-              return timer;
-            }
-            return parent.createTimer(zone, duration, callback);
-          },
-        ),
-      );
+      expect(clock.activeWaits, 1);
+      await chronicler.close();
+      expect(clock.activeWaits, 0);
     });
   });
 }
 
 Chronicler _chronicler(
   TestExporter exporter, {
+  MetricClock? clock,
   Duration batchInterval = const Duration(seconds: 5),
   int maxAttempts = 5,
   int maxBatchRecords = 1,
@@ -387,6 +314,7 @@ Chronicler _chronicler(
   release: 'release',
   source: ChroniclerSource.server,
   exporter: exporter,
+  clock: clock,
   options: ChroniclerOptions(
     delivery: DeliveryOptions(
       maxAttempts: maxAttempts,
@@ -407,24 +335,18 @@ List<double?> _sums(TestExporter exporter) => exporter.batches
     .map((record) => record.payload.sum)
     .toList();
 
-final class _ManualTimer implements Timer {
-  _ManualTimer(this._callback);
-
-  final void Function() _callback;
-
-  @override
-  int tick = 0;
-
-  @override
-  bool isActive = true;
-
-  @override
-  void cancel() => isActive = false;
-
-  void fire() {
-    if (!isActive) return;
-    isActive = false;
-    tick = 1;
-    _callback();
-  }
-}
+Chronicler _disabledMetrics(MetricClock clock) => Chronicler(
+  appId: 'app',
+  release: 'release',
+  source: ChroniclerSource.server,
+  exporter: TestExporter(acceptImmediately: true),
+  clock: clock,
+  options: const ChroniclerOptions(
+    enabledSignals: {
+      ChroniclerSignal.logs,
+      ChroniclerSignal.events,
+      ChroniclerSignal.traces,
+      ChroniclerSignal.errors,
+    },
+  ),
+);

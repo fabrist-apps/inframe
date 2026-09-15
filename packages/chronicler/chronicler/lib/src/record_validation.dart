@@ -11,10 +11,16 @@ const maxErrorCauses = 4;
 /// Reports why caller-supplied record data is invalid.
 final class RecordValidationException implements Exception {
   /// Creates a validation failure with a payload-free [reason].
-  const RecordValidationException(this.reason);
+  const RecordValidationException(this.reason) : isLimitExceeded = false;
+
+  /// Creates a failure caused by a configured resource or structural limit.
+  const RecordValidationException.limitExceeded(this.reason) : isLimitExceeded = true;
 
   /// The payload-free validation reason.
   final String reason;
+
+  /// Whether the failure is a limit rather than an invalid value.
+  final bool isLimitExceeded;
 }
 
 /// Validates and snapshots JSON-compatible record attributes.
@@ -41,7 +47,7 @@ final class RecordValidator {
     required int maxAttributes,
   }) {
     if (attributes.length > maxAttributes) {
-      throw const RecordValidationException('metric attribute limit exceeded');
+      throw const RecordValidationException.limitExceeded('metric attribute limit exceeded');
     }
     final budget = switch (maxSnapshotBytes) {
       final maximum? => _SnapshotBudget(maximum),
@@ -151,7 +157,7 @@ final class RecordValidator {
 
   void _enterContainer(Object value, int depth, Set<Object> activeContainers) {
     if (depth > _maxDepth) {
-      throw const RecordValidationException('container depth limit exceeded');
+      throw const RecordValidationException.limitExceeded('container depth limit exceeded');
     }
     if (!activeContainers.add(value)) {
       throw const RecordValidationException('cyclic attribute value');
@@ -183,7 +189,7 @@ final class _SnapshotBudget {
   void add(int bytes) {
     used += bytes;
     if (used > maximum) {
-      throw const RecordValidationException('encoded attribute limit exceeded');
+      throw const RecordValidationException.limitExceeded('encoded attribute limit exceeded');
     }
   }
 }

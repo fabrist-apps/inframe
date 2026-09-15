@@ -7,6 +7,7 @@ import 'package:chronicler/src/diagnostics.dart';
 import 'package:chronicler/src/lifecycle.dart';
 import 'package:chronicler/src/models.dart';
 import 'package:chronicler/src/transport.dart';
+import 'package:conflux/effect.dart';
 
 /// Owns buffered records, export attempts, retries, and exporter shutdown.
 ///
@@ -19,28 +20,28 @@ final class DeliveryQueue {
     required this._options,
     required this._exporter,
     required this._diagnostics,
-    required this._elapsed,
     required this._nextRandom,
+    required this._runtime,
   });
+
+  final Runtime _runtime;
 
   final DeliveryOptions _options;
   final ChroniclerExporter _exporter;
   final DiagnosticChannel _diagnostics;
-  final Duration Function() _elapsed;
+  Duration _elapsed() => _runtime.clock.monotonic();
   final double Function() _nextRandom;
   final _pending = Queue<_PendingRecord>();
   final _active = <_ActiveExport>{};
   final _flushWaiters = <_FlushWaiter>{};
-  var _pendingBytes = 0;
+  var _bufferedBytes = 0;
   var _nextSequence = 0;
   var _pumpScheduled = false;
-  Timer? _wakeTimer;
+  Fiber<void, Never>? _wakeTask;
   ChroniclerRuntimeState _state = ChroniclerRuntimeState.running;
   bool _deliveryOpen = true;
   Future<DeliveryReport>? _closeFuture;
-  Set<DeliveryDisposition>? _closeSnapshot;
-  Completer<void>? _closeDeliveryResolved;
-  Completer<void>? _activeDrained;
+  _Shutdown? _shutdown;
 
   /// Current lifecycle state shared with capture gating.
   ChroniclerRuntimeState get state => _state;
@@ -60,7 +61,7 @@ final class DeliveryQueue {
   }) {
     final disposition = DeliveryDisposition._();
     if (_pending.length + _activeRecordCount >= _options.maxPendingRecords ||
-        _pendingBytes + encodedBytes > _options.maxPendingBytes) {
+        _bufferedBytes + encodedBytes > _options.maxPendingBytes) {
       _dropDisposition(disposition, DropReason.queueFull);
       return disposition;
     }
@@ -76,7 +77,7 @@ final class DeliveryQueue {
       disposition,
     );
     _pending.add(pending);
-    _pendingBytes += encodedBytes;
+    _bufferedBytes += encodedBytes;
     if (_pending.where((record) => !record.isRetry).length >= _options.maxBatchRecords) {
       final now = _elapsed();
       for (final record in _pending.where((record) => !record.isRetry)) {
@@ -138,7 +139,7 @@ final class DeliveryQueue {
     }
     final waiter = _FlushWaiter(snapshot);
     _flushWaiters.add(waiter);
-    waiter.timer = Timer(timeout, () => _completeFlush(waiter, timedOut: true));
+    waiter.deadlineTask = _after(timeout, () => _completeFlush(waiter, timedOut: true));
     _schedulePump();
     return waiter.completer.future;
   }
@@ -170,42 +171,50 @@ final class DeliveryQueue {
         for (final record in export.records) record.disposition,
       ...finalizations,
     };
-    _closeSnapshot = snapshot;
-    final resolved = Completer<void>();
-    _closeDeliveryResolved = resolved;
+    final shutdown = _Shutdown(snapshot);
+    _shutdown = shutdown;
+    final resolved = shutdown.deliveryResolved;
     if (snapshot.every((state) => state._isTerminal)) resolved.complete();
     final now = _elapsed();
     for (final record in _pending) {
       record.readyAt = now;
     }
     _schedulePump();
-    unawaited(
-      _runClose(snapshot, resolved.future, startedAt).then(
-        completer.complete,
-        onError: (Object _, StackTrace _) {
-          _finishOutstandingAtShutdown();
-          _state = ChroniclerRuntimeState.closed;
-          _closeDeliveryResolved = null;
-          _closeSnapshot = null;
-          _activeDrained = null;
-          _notifyDispositionWaiters();
-          completer.complete(_report(snapshot, timedOut: true, cleanupIncomplete: true));
-        },
-      ),
-    );
+    unawaited(_finishClose(completer, snapshot, resolved.future, startedAt));
   }
 
-  Future<DeliveryReport> _runClose(
+  Future<void> _finishClose(
+    Completer<DeliveryReport> completer,
     Set<DeliveryDisposition> snapshot,
     Future<void> deliveryResolved,
     Duration startedAt,
   ) async {
+    final exit = await _runtime.run(_runClose(snapshot, deliveryResolved, startedAt));
+    final DeliveryReport report;
+    switch (exit) {
+      case Succeeded(:final value):
+        report = value;
+      case Failed():
+        _finishOutstandingAtShutdown();
+        _state = ChroniclerRuntimeState.closed;
+        _shutdown = null;
+        _notifyDispositionWaiters();
+        report = _report(snapshot, timedOut: true, cleanupIncomplete: true);
+    }
+    completer.complete(report);
+  }
+
+  Effect<DeliveryReport, Never> _runClose(
+    Set<DeliveryDisposition> snapshot,
+    Future<void> deliveryResolved,
+    Duration startedAt,
+  ) => Effect.build(($) async {
     final totalDeadline = startedAt + _options.closeTimeout;
     final deliveryDeadline = totalDeadline - _options.cleanupReserve;
-    final deliveryCompleted = await _completesBy(deliveryResolved, deliveryDeadline);
+    final deliveryCompleted = await $(_completesBy(deliveryResolved, deliveryDeadline));
     _deliveryOpen = false;
-    _wakeTimer?.cancel();
-    _wakeTimer = null;
+    unawaited(_wakeTask?.interrupt());
+    _wakeTask = null;
     if (!deliveryCompleted) {
       for (final record in _pending.toList()) {
         _pending.remove(record);
@@ -236,46 +245,52 @@ final class DeliveryQueue {
       },
     );
     final activeDrained = Completer<void>();
-    _activeDrained = activeDrained;
+    _shutdown!.activeDrained = activeDrained;
     if (_active.isEmpty) activeDrained.complete();
-    final cleanupCompleted = await _completesBy(
-      Future.wait([observedCleanup, activeDrained.future]),
-      totalDeadline,
+    final cleanupCompleted = await $(
+      _completesBy(
+        Future.wait([observedCleanup, activeDrained.future]),
+        totalDeadline,
+      ),
     );
     if (!cleanupCompleted) _finishOutstandingAtShutdown();
-    _activeDrained = null;
     _state = ChroniclerRuntimeState.closed;
-    _closeDeliveryResolved = null;
-    _closeSnapshot = null;
+    _shutdown = null;
     _notifyDispositionWaiters();
     return _report(
       snapshot,
       timedOut: !deliveryCompleted || !cleanupCompleted,
       cleanupIncomplete: cleanupFailed || !cleanupCompleted,
     );
+  });
+
+  /// Stops observing foreign work at the deadline, without claiming it stopped.
+  /// No exporter cleanup is registered as a protected Effect finalizer: a
+  /// transport that never settles must not prevent bounded shutdown.
+  Effect<bool, Never> _completesBy(Future<void> operation, Duration deadline) {
+    final remaining = deadline - _elapsed();
+    if (remaining <= Duration.zero) return Effect.succeed(false);
+    final observed = Effect.tryFuture<bool, Never>(
+      (_) => operation.then((_) => true, onError: (Object _, StackTrace _) => true),
+      onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
+    );
+    final expired = Effect.defer<bool, Never>((_) {
+      final remaining = deadline - _elapsed();
+      return Effect.sleep(remaining > Duration.zero ? remaining : Duration.zero)
+          .map((_, _) => false);
+    });
+    return Effect.race([observed, expired]);
   }
 
-  Future<bool> _completesBy(Future<void> operation, Duration deadline) {
-    final remaining = deadline - _elapsed();
-    if (remaining <= Duration.zero) return Future.value(false);
-    final result = Completer<bool>();
-    late final Timer timer;
-    timer = Timer(remaining, () => result.complete(false));
-    unawaited(
-      operation.then<void>(
-        (_) {
-          if (result.isCompleted) return;
-          timer.cancel();
-          result.complete(true);
-        },
-        onError: (Object _, StackTrace _) {
-          if (result.isCompleted) return;
-          timer.cancel();
-          result.complete(true);
-        },
-      ),
+  Fiber<void, Never> _after(Duration delay, void Function() action) {
+    final deadline = _elapsed() + delay;
+    return _runtime.fork(
+      Effect.defer((_) {
+        final remaining = deadline - _elapsed();
+        return Effect.sleep(remaining > Duration.zero ? remaining : Duration.zero)
+            .map((_, _) => action());
+      }),
     );
-    return result.future;
   }
 
   int get _activeRecordCount => _active.fold(0, (count, export) => count + export.records.length);
@@ -283,7 +298,7 @@ final class DeliveryQueue {
   void _schedulePump() {
     if (_pumpScheduled || !_deliveryOpen) return;
     _pumpScheduled = true;
-    Timer.run(() {
+    _after(Duration.zero, () {
       _pumpScheduled = false;
       _pump();
     });
@@ -291,8 +306,8 @@ final class DeliveryQueue {
 
   void _pump() {
     if (!_deliveryOpen) return;
-    _wakeTimer?.cancel();
-    _wakeTimer = null;
+    unawaited(_wakeTask?.interrupt());
+    _wakeTask = null;
     while (_active.length < _options.maxConcurrentExports) {
       final now = _elapsed();
       final eligible = _pending.where((record) => record.readyAt <= now).toList()
@@ -317,22 +332,32 @@ final class DeliveryQueue {
         _elapsed() + _options.attemptTimeout,
       );
       _active.add(active);
-      try {
-        final attempt = _exporter.export(
-          ChroniclerBatch(records.map((pending) => pending.record)),
-        );
-        active.attempt = attempt;
-        final result = attempt.result;
-        unawaited(
-          result.then(
-            (result) => _handleResult(active, result),
-            onError: (Object _, StackTrace _) => _handleFailure(active),
-          ),
-        );
-        _scheduleAttemptTimeout(active);
-      } on Object {
-        _handleFailure(active);
-      }
+      _runtime.fork(
+        Effect.tryFuture<ExportResult, Object>(
+          (_) {
+            // Create and observe the future in the same turn, including an
+            // exporter that returns an already-failed future.
+            final attempt = _exporter.export(
+              ChroniclerBatch(records.map((pending) => pending.record)),
+            );
+            active.attempt = attempt;
+            final result = attempt.result;
+            _scheduleAttemptTimeout(active);
+            return result;
+          },
+          onError: (error, _, _) => error,
+        ).onExit(
+          (exit, _) => Effect.sync((_) {
+            switch (exit) {
+              case Succeeded(:final value):
+                _handleResult(active, value);
+              case Failed():
+                // Shutdown has already terminally accounted for abandoned work.
+                _handleFailure(active);
+            }
+          }),
+        ),
+      );
     }
     _scheduleWakeup();
   }
@@ -342,7 +367,7 @@ final class DeliveryQueue {
     if (remaining <= Duration.zero) {
       _timeOut(active);
     } else {
-      active.timeout = Timer(remaining, () => _timeOut(active));
+      active.timeout = _after(remaining, () => _timeOut(active));
     }
   }
 
@@ -361,7 +386,7 @@ final class DeliveryQueue {
   void _requestCancellation(_ActiveExport active) {
     if (active.cancellationRequested) return;
     active.cancellationRequested = true;
-    active.timeout?.cancel();
+    unawaited(active.timeout?.interrupt());
     try {
       active.attempt?.cancel();
     } on Object {
@@ -371,7 +396,7 @@ final class DeliveryQueue {
 
   void _handleResult(_ActiveExport active, ExportResult result) {
     if (!_active.remove(active)) return;
-    active.timeout?.cancel();
+    unawaited(active.timeout?.interrupt());
     final outcomes = _validatedOutcomes(active.records, result);
     if (outcomes == null) {
       _diagnostics.record(DiagnosticReason.invalidExportResult);
@@ -400,7 +425,7 @@ final class DeliveryQueue {
 
   void _handleFailure(_ActiveExport active) {
     if (!_active.remove(active)) return;
-    active.timeout?.cancel();
+    unawaited(active.timeout?.interrupt());
     _diagnostics.record(DiagnosticReason.exportFailed);
     for (final record in active.records) {
       record.disposition._uncertain = true;
@@ -477,18 +502,18 @@ final class DeliveryQueue {
   }
 
   void _accept(_PendingRecord record) {
-    _pendingBytes -= record.encodedBytes;
-    record.disposition._accepted = true;
+    _bufferedBytes -= record.encodedBytes;
+    record.disposition._outcome = const _Accepted();
     _notifyDispositionWaiters();
   }
 
   void _drop(_PendingRecord record, DropReason reason) {
-    _pendingBytes -= record.encodedBytes;
+    _bufferedBytes -= record.encodedBytes;
     _dropDisposition(record.disposition, reason);
   }
 
   void _dropDisposition(DeliveryDisposition disposition, DropReason reason) {
-    disposition._dropReason = reason;
+    disposition._outcome = _Dropped(reason);
     _diagnostics.record(_diagnosticFor(reason));
     _notifyDispositionWaiters();
   }
@@ -513,8 +538,8 @@ final class DeliveryQueue {
         _completeFlush(waiter, timedOut: false);
       }
     }
-    final closeSnapshot = _closeSnapshot;
-    final closeResolved = _closeDeliveryResolved;
+    final closeSnapshot = _shutdown?.snapshot;
+    final closeResolved = _shutdown?.deliveryResolved;
     if (closeSnapshot != null &&
         closeResolved != null &&
         !closeResolved.isCompleted &&
@@ -524,22 +549,22 @@ final class DeliveryQueue {
   }
 
   void _notifyActiveDrained() {
-    final activeDrained = _activeDrained;
+    final activeDrained = _shutdown?.activeDrained;
     if (_active.isEmpty && activeDrained != null && !activeDrained.isCompleted) {
       activeDrained.complete();
     }
   }
 
   void _finishOutstandingAtShutdown() {
-    _wakeTimer?.cancel();
-    _wakeTimer = null;
+    unawaited(_wakeTask?.interrupt());
+    _wakeTask = null;
     for (final record in _pending.toList()) {
       _pending.remove(record);
       _drop(record, DropReason.shutdown);
     }
     for (final active in _active.toList()) {
       _active.remove(active);
-      active.timeout?.cancel();
+      unawaited(active.timeout?.interrupt());
       for (final record in active.records) {
         record.disposition._uncertain = true;
         _drop(record, DropReason.shutdown);
@@ -550,7 +575,7 @@ final class DeliveryQueue {
 
   void _completeFlush(_FlushWaiter waiter, {required bool timedOut}) {
     if (!_flushWaiters.remove(waiter)) return;
-    waiter.timer?.cancel();
+    unawaited(waiter.deadlineTask?.interrupt());
     waiter.completer.complete(_report(waiter.snapshot, timedOut: timedOut));
   }
 
@@ -564,13 +589,14 @@ final class DeliveryQueue {
     var uncertainDropped = 0;
     final dropped = <DropReason, int>{};
     for (final disposition in snapshot) {
-      if (disposition._accepted) {
-        accepted++;
-      } else if (disposition._dropReason case final reason?) {
-        dropped.update(reason, (count) => count + 1, ifAbsent: () => 1);
-        if (disposition._uncertain) uncertainDropped++;
-      } else {
-        pending++;
+      switch (disposition._outcome) {
+        case _Accepted():
+          accepted++;
+        case _Dropped(:final reason):
+          dropped.update(reason, (count) => count + 1, ifAbsent: () => 1);
+          if (disposition._uncertain) uncertainDropped++;
+        case null:
+          pending++;
       }
     }
     return DeliveryReport(
@@ -586,8 +612,8 @@ final class DeliveryQueue {
 
   void _scheduleWakeup() {
     if (!_deliveryOpen || _pending.isEmpty || _active.length >= _options.maxConcurrentExports) {
-      _wakeTimer?.cancel();
-      _wakeTimer = null;
+      unawaited(_wakeTask?.interrupt());
+      _wakeTask = null;
       return;
     }
     final next = _pending
@@ -598,8 +624,8 @@ final class DeliveryQueue {
       _schedulePump();
       return;
     }
-    _wakeTimer?.cancel();
-    _wakeTimer = Timer(delay, _pump);
+    unawaited(_wakeTask?.interrupt());
+    _wakeTask = _after(delay, _pump);
   }
 }
 
@@ -625,11 +651,24 @@ final class _PendingRecord {
 final class DeliveryDisposition {
   DeliveryDisposition._();
 
-  bool _accepted = false;
-  DropReason? _dropReason;
+  _DispositionOutcome? _outcome;
   bool _uncertain = false;
 
-  bool get _isTerminal => _accepted || _dropReason != null;
+  bool get _isTerminal => _outcome != null;
+}
+
+sealed class _DispositionOutcome {
+  const _DispositionOutcome();
+}
+
+final class _Accepted extends _DispositionOutcome {
+  const _Accepted();
+}
+
+final class _Dropped extends _DispositionOutcome {
+  const _Dropped(this.reason);
+
+  final DropReason reason;
 }
 
 final class _FlushWaiter {
@@ -637,7 +676,7 @@ final class _FlushWaiter {
 
   final Set<DeliveryDisposition> snapshot;
   final completer = Completer<DeliveryReport>();
-  Timer? timer;
+  Fiber<void, Never>? deadlineTask;
 }
 
 final class _ActiveExport {
@@ -645,7 +684,16 @@ final class _ActiveExport {
   final List<_PendingRecord> records;
   final Duration deadline;
   ExportAttempt? attempt;
-  Timer? timeout;
+  Fiber<void, Never>? timeout;
   bool timedOut = false;
   bool cancellationRequested = false;
+}
+
+/// State retained only while the shared shutdown operation is running.
+final class _Shutdown {
+  _Shutdown(this.snapshot);
+
+  final Set<DeliveryDisposition> snapshot;
+  final deliveryResolved = Completer<void>();
+  Completer<void>? activeDrained;
 }

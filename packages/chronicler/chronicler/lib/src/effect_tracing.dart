@@ -1,7 +1,17 @@
-import 'package:chronicler/chronicler.dart';
+import 'package:chronicler/src/context_integration.dart';
+import 'package:chronicler/src/models.dart';
+import 'package:chronicler/src/runtime.dart';
+import 'package:chronicler/src/trace_propagation.dart';
 import 'package:conflux/effect.dart';
 
-/// Runs Effects inside SDK-owned Chronicler span lifetimes.
+/// Runs Effects inside Chronicler span lifetimes using the execution Context.
+///
+/// Register a recorder with `Context.withChronicler` before running the Effect.
+/// Each execution acquires its own span and child resource scope. Owned cleanup
+/// finishes before the span ends, including on interruption. Expected failures
+/// and defects mark the span as an error; interruption-only causes mark it as
+/// cancelled. Values and complete causes are preserved without automatically
+/// capturing error occurrences.
 extension ChroniclerEffectTracing<A, E> on Effect<A, E> {
   /// Runs this Effect in a child span, or a root when no parent is active.
   Effect<A, E> withSpan(
@@ -38,6 +48,7 @@ extension ChroniclerEffectTracing<A, E> on Effect<A, E> {
     required RemoteTraceParent? parent,
   }) => Effect.defer((_) {
     ChroniclerSpan? span;
+
     final operation = Effect.build<A, E>(($) {
       final context = $.context;
       final acquired = forceRoot
@@ -56,6 +67,7 @@ extension ChroniclerEffectTracing<A, E> on Effect<A, E> {
       final traced = context.withChronicler(acquired.recorder);
       return $(Effect.using(withContext(traced)));
     });
+
     return operation.onExit((exit, _) {
       return Effect.sync((_) => span?.end(_statusFor(exit)));
     });

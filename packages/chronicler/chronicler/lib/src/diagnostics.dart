@@ -2,19 +2,23 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:chronicler/src/configuration.dart';
+import 'package:conflux/effect.dart';
 
 /// Counts runtime diagnostics and rate-limits payload-free notifications.
 final class DiagnosticChannel {
   /// Creates a channel using [options].
-  DiagnosticChannel(this.options);
+  ///
+  /// Notifications use [runtime]'s clock and root task ownership. [close]
+  /// interrupts this channel's tasks without closing a supplied runtime.
+  DiagnosticChannel(this.options, {Runtime? runtime}) : _runtime = runtime ?? Runtime();
 
   /// Notification behavior for this channel.
   final DiagnosticOptions options;
   final _counts = <DiagnosticReason, BigInt>{};
   final _pending = <DiagnosticReason, BigInt>{};
   final _lastNotification = <DiagnosticReason, Duration>{};
-  final _timers = <DiagnosticReason, Timer>{};
-  final _elapsed = Stopwatch()..start();
+  final Runtime _runtime;
+  final _notifications = <DiagnosticReason, Fiber<void, Never>>{};
 
   /// Whether the channel is currently invoking the application callback.
   bool insideCallback = false;
@@ -29,39 +33,49 @@ final class DiagnosticChannel {
   void record(DiagnosticReason reason) {
     _counts.update(reason, (count) => count + BigInt.one, ifAbsent: () => BigInt.one);
     _pending.update(reason, (count) => count + BigInt.one, ifAbsent: () => BigInt.one);
-    if (options.onDiagnostic == null || closed || insideCallback || _timers.containsKey(reason)) {
+    if (options.onDiagnostic == null ||
+        closed ||
+        insideCallback ||
+        _notifications.containsKey(reason)) {
       return;
     }
     final last = _lastNotification[reason];
-    final elapsed = last == null ? options.notificationInterval : _elapsed.elapsed - last;
+    final elapsed = last == null ? options.notificationInterval : _runtime.clock.monotonic() - last;
     final delay = elapsed >= options.notificationInterval
         ? Duration.zero
         : options.notificationInterval - elapsed;
-    _timers[reason] = Timer(delay, () => _notify(reason));
+    final deadline = _runtime.clock.monotonic() + delay;
+    _notifications[reason] = _runtime.fork(
+      Effect.defer<void, Never>((_) {
+        final remaining = deadline - _runtime.clock.monotonic();
+        return Effect.sleep(remaining.isNegative ? Duration.zero : remaining);
+      }).map((_, _) => _notify(reason)),
+    );
   }
 
   /// Cancels delayed notifications and emits notifications already eligible.
   void close() {
     if (closed) return;
-    final now = _elapsed.elapsed;
-    final eligible = _timers.keys.where((reason) {
+    final now = _runtime.clock.monotonic();
+    final eligible = _notifications.keys.where((reason) {
       final last = _lastNotification[reason];
       return last == null || now - last >= options.notificationInterval;
     }).toList();
-    for (final timer in _timers.values) {
-      timer.cancel();
+    for (final notification in _notifications.values) {
+      unawaited(notification.interrupt());
     }
-    _timers.clear();
+    _notifications.clear();
     eligible.forEach(_notify);
     closed = true;
   }
 
   void _notify(DiagnosticReason reason) {
-    _timers.remove(reason);
+    _notifications.remove(reason);
+    // Interruption settles asynchronously; closing must suppress callbacks now.
     if (closed) return;
     final count = _pending.remove(reason);
     if (count == null) return;
-    _lastNotification[reason] = _elapsed.elapsed;
+    _lastNotification[reason] = _runtime.clock.monotonic();
     insideCallback = true;
     try {
       options.onDiagnostic?.call(ChroniclerDiagnostic(reason: reason, count: count));

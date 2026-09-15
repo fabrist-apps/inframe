@@ -4,7 +4,7 @@ import 'package:chronicler/src/models.dart';
 import 'package:conflux/moment.dart';
 
 /// Runtime-owned definition and admitted series for one metric name.
-sealed class RegisteredInstrument {
+sealed class RegisteredInstrument<S extends MetricSeries> {
   RegisteredInstrument({required this.name, required this.unit});
 
   /// Registry key and exported metric name.
@@ -14,14 +14,14 @@ sealed class RegisteredInstrument {
   final String unit;
 
   /// Series admitted and evicted by the aggregation registry.
-  final series = <String, MetricSeries>{};
+  final series = <String, S>{};
 
   /// Wire-level instrument kind.
   MetricInstrument get instrument;
 
   /// Snapshots a nonempty aggregate for the supplied interval.
   MetricPayload payload(
-    MetricSeries series, {
+    S series, {
     required Moment intervalStart,
     required Moment intervalEnd,
     required int durationMicros,
@@ -29,17 +29,16 @@ sealed class RegisteredInstrument {
 }
 
 /// Shared delta payload construction for signed and nonnegative sums.
-sealed class SumInstrument extends RegisteredInstrument {
+sealed class SumInstrument extends RegisteredInstrument<SumSeries> {
   SumInstrument({required super.name, required super.unit});
 
   @override
   MetricPayload payload(
-    MetricSeries series, {
+    SumSeries sum, {
     required Moment intervalStart,
     required Moment intervalEnd,
     required int durationMicros,
   }) {
-    final sum = series as SumSeries;
     return MetricPayload(
       name: name,
       instrument: instrument,
@@ -88,7 +87,7 @@ final class UpDownCounterInstrument extends SumInstrument {
 }
 
 /// Registered gauge definition and interval payload construction.
-final class GaugeInstrument extends RegisteredInstrument {
+final class GaugeInstrument extends RegisteredInstrument<GaugeSeries> {
   /// Creates the definition and its stable application handle.
   GaugeInstrument({
     required super.name,
@@ -104,12 +103,11 @@ final class GaugeInstrument extends RegisteredInstrument {
 
   @override
   MetricPayload payload(
-    MetricSeries series, {
+    GaugeSeries gauge, {
     required Moment intervalStart,
     required Moment intervalEnd,
     required int durationMicros,
   }) {
-    final gauge = series as GaugeSeries;
     return MetricPayload(
       name: name,
       instrument: instrument,
@@ -126,7 +124,7 @@ final class GaugeInstrument extends RegisteredInstrument {
 }
 
 /// Registered histogram definition and interval payload construction.
-final class HistogramInstrument extends RegisteredInstrument {
+final class HistogramInstrument extends RegisteredInstrument<HistogramSeries> {
   /// Creates a definition using validated, immutable boundaries.
   HistogramInstrument({
     required super.name,
@@ -146,12 +144,11 @@ final class HistogramInstrument extends RegisteredInstrument {
 
   @override
   MetricPayload payload(
-    MetricSeries series, {
+    HistogramSeries histogram, {
     required Moment intervalStart,
     required Moment intervalEnd,
     required int durationMicros,
   }) {
-    final histogram = series as HistogramSeries;
     return MetricPayload(
       name: name,
       instrument: instrument,

@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler_conflux/chronicler_conflux.dart';
 import 'package:conflux/effect.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';

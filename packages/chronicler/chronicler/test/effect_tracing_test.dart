@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler_conflux/chronicler_conflux.dart';
 import 'package:conflux/conflux.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';

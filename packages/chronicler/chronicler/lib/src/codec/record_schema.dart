@@ -51,6 +51,9 @@ final class RecordSchema {
         throw const ChroniclerEncodingException('record is invalid');
       }
     } on RecordValidationException catch (failure) {
+      if (failure.isLimitExceeded) {
+        throw ChroniclerEncodingException.limitExceeded(failure.reason);
+      }
       throw ChroniclerEncodingException(failure.reason);
     }
   }

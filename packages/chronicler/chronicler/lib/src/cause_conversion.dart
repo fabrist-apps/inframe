@@ -37,6 +37,12 @@ final class ConfluxFailure implements Exception {
 }
 
 /// Converts complete Conflux failure trees without recording an occurrence.
+///
+/// Capture the returned input explicitly through `context.errors.capture`.
+/// Sequential and parallel structure is retained in the `conflux.cause`
+/// attribute, bounded to 64 nodes and 32 KiB of encoded metadata. Text is bounded
+/// to 4 KiB per value, with visible omission and truncation markers. The first
+/// defect stack is retained even when its node falls outside the metadata limit.
 extension ConfluxCauseConversion<E> on Cause<E> {
   /// Returns bounded input for an explicit `context.errors.capture` call.
   ChroniclerErrorInput toChroniclerError() => _CauseConverter<E>().convert(this);

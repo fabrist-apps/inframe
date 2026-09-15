@@ -1,6 +1,7 @@
 import 'package:chronicler/chronicler.dart';
 import 'package:chronicler/src/metrics/aggregation.dart';
 import 'package:chronicler/src/runtime/record_processing.dart';
+import 'package:conflux/effect.dart';
 import 'package:test/test.dart';
 
 import 'metric_clock.dart';
@@ -11,7 +12,11 @@ final class MetricHarness {
   MetricHarness({
     MetricOptions options = const MetricOptions(),
     MetricRecord Function(MetricPayload)? createRecord,
+    Runtime? runtime,
   }) {
+    clock = runtime == null ? MetricClock() : runtime.clock as MetricClock;
+    final execution = runtime ?? Runtime(clock: clock);
+    if (runtime == null) addTearDown(execution.close);
     final processor = RecordProcessor(
       codec: const ChroniclerCodec(),
       redaction: const RedactionOptions(),
@@ -25,13 +30,12 @@ final class MetricHarness {
       createRecord: createRecord ?? record,
       finalize: records.add,
       startEnabled: true,
-      now: () => clock.now,
-      elapsed: () => clock.elapsed,
+      runtime: execution,
     );
     addTearDown(metrics.stop);
   }
 
-  final clock = MetricClock();
+  late final MetricClock clock;
   final records = <MetricRecord>[];
   final reasons = <DiagnosticReason>[];
   late final MetricAggregation metrics;

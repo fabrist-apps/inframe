@@ -7,4 +7,3 @@ environment:
 
 workspace:
   - conflux
-  - chronicler_conflux
