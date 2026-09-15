@@ -8,6 +8,7 @@ export 'src/val/issue.dart'
         FieldSegment,
         IndexSegment,
         PathSegment,
+        PathSegmentMapper,
         ValidationException,
         ValidationIssue,
         ValidationIssueMapper;

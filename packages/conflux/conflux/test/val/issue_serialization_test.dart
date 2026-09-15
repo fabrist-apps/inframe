@@ -33,6 +33,10 @@ void main() {
       expect(ValidationIssueMapper.fromMap(issue.toMap()).toMap(), map);
     });
     test('should reject malformed path segments but retain empty fields and zero indices', () {
+      expect(
+        () => const PathSegmentMapper().decode(-1),
+        throwsA(isA<FormatException>()),
+      );
       final valid = <String, Object?>{
         'code': 'C',
         'message': 'M',

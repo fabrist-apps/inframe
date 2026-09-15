@@ -56,7 +56,7 @@ final class PathSegmentMapper extends SimpleMapper<PathSegment> {
   @override
   PathSegment decode(Object value) => switch (value) {
     final String field => FieldSegment(field),
-    final int index => IndexSegment(index),
+    final int index when index >= 0 => IndexSegment(index),
     _ => throw const FormatException('Path segments must be strings or non-negative integers'),
   };
 
