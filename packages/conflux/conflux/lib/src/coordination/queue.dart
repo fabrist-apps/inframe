@@ -52,7 +52,6 @@ final class Queue<A> {
   final ListQueue<A> _items = ListQueue();
   final ListQueue<_PendingOffer<A>> _offers = ListQueue();
   final ListQueue<CoordinationWaiter<A>> _takers = ListQueue();
-  final ListQueue<CoordinationWaiter<void>> _shutdownWaiters = ListQueue();
   var _isShutdown = false;
 
   /// The number of buffered items, excluding waiting consumers and producers.
@@ -100,12 +99,8 @@ final class Queue<A> {
           return;
         }
         _takers.addLast(taker);
-        _drain();
       },
-      onCancel: () {
-        _takers.remove(taker);
-        _drain();
-      },
+      onCancel: () => _takers.remove(taker),
     );
   });
 
@@ -154,31 +149,9 @@ final class Queue<A> {
   /// interrupted with [QueueShutdown].
   Effect<void, Never> shutdown() => Effect.sync((_) => _shutdown());
 
-  /// Lazily waits until shutdown bookkeeping and waiter notification finish.
-  ///
-  /// This does not wait for previously accepted items to be processed.
-  Effect<void, Never> awaitShutdown() => Effect.defer((_) {
-    final waiter = CoordinationWaiter<void>();
-    return waiter.awaitValue(
-      onStart: () {
-        if (_isShutdown) {
-          waiter.succeed(null);
-          return;
-        }
-        _shutdownWaiters.addLast(waiter);
-      },
-      onCancel: () => _shutdownWaiters.remove(waiter),
-    );
-  });
-
   void _drain() {
-    while (!_isShutdown) {
-      if (_takers.isNotEmpty && _items.isNotEmpty) {
-        _takers.removeFirst().succeed(_items.removeFirst());
-        continue;
-      }
-
-      if (_offers.isEmpty) return;
+    // Waiting takers imply an empty buffer; offers go directly to them.
+    while (!_isShutdown && _offers.isNotEmpty) {
       if (_takers.isNotEmpty) {
         final offer = _offers.removeFirst();
         _takers.removeFirst().succeed(offer.item);
@@ -202,9 +175,6 @@ final class Queue<A> {
     }
     while (_takers.isNotEmpty) {
       _takers.removeFirst().interrupt(const QueueShutdown());
-    }
-    while (_shutdownWaiters.isNotEmpty) {
-      _shutdownWaiters.removeFirst().succeed(null);
     }
   }
 

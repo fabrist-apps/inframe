@@ -144,15 +144,16 @@ void main() {
     });
 
     test('should distinguish a nullable item from an empty Queue', () async {
-      final fixture = await _QueueFixture.acquire<int?>(1);
-      addTearDown(fixture.close);
+      await Effect.build<void, Never>(($) async {
+        final queue = await $(Queue.bounded<int?>(1));
 
-      expect(await fixture.run(fixture.queue.poll()), isA<None>());
-      await fixture.run(fixture.queue.offer(null));
-      final present = await fixture.run(fixture.queue.poll());
+        expect(await $(queue.poll()), isA<None>());
+        await $(queue.offer(null));
+        final present = await $(queue.poll());
 
-      expect(present, isA<Some<int?>>());
-      expect((present as Some<int?>).value, isNull);
+        expect(present, isA<Some<int?>>());
+        expect((present as Some<int?>).value, isNull);
+      }).runFuture();
     });
 
     test('should peek without removing an item or releasing capacity', () async {
@@ -176,24 +177,25 @@ void main() {
     });
 
     test('should take an immutable available batch without waiting', () async {
-      final fixture = await _QueueFixture.acquire<int>(4);
-      addTearDown(fixture.close);
-      for (final item in [1, 2, 3]) {
-        await fixture.run(fixture.queue.offer(item));
-      }
+      await Effect.build<void, Never>(($) async {
+        final queue = await $(Queue.bounded<int>(4));
+        for (final item in [1, 2, 3]) {
+          await $(queue.offer(item));
+        }
 
-      final first = await fixture.run(fixture.queue.takeUpTo(2));
-      expect(first, [1, 2]);
-      expect(() => first.add(4), throwsUnsupportedError);
-      expect(fixture.queue.size, 1);
-      expect(await fixture.run(fixture.queue.takeUpTo(10)), [3]);
-      expect(await fixture.run(fixture.queue.takeUpTo(0)), isEmpty);
+        final first = await $(queue.takeUpTo(2));
+        expect(first, [1, 2]);
+        expect(() => first.add(4), throwsUnsupportedError);
+        expect(queue.size, 1);
+        expect(await $(queue.takeUpTo(10)), [3]);
+        expect(await $(queue.takeUpTo(0)), isEmpty);
 
-      final negative = fixture.queue.takeUpTo(-1);
-      expect(
-        (await fixture.runtime.run(negative) as Failed<List<int>, Never>).cause,
-        isA<Defect<Never>>(),
-      );
+        final negative = queue.takeUpTo(-1);
+        expect(
+          (await negative.runFutureExit() as Failed<List<int>, Never>).cause,
+          isA<Defect<Never>>(),
+        );
+      }).runFuture();
     });
 
     test('should preserve waiter fairness around nonblocking reads', () async {
@@ -246,26 +248,6 @@ void main() {
       await fixture.run(fixture.queue.shutdown());
 
       _expectQueueShutdown(await blockedTake.join());
-    });
-
-    test('should await completed shutdown bookkeeping cancellably', () async {
-      final fixture = await _QueueFixture.acquire<int>(1);
-      addTearDown(fixture.close);
-      await fixture.run(fixture.queue.offer(1));
-      var completed = false;
-      final waiter = fixture.runtime.fork(fixture.queue.awaitShutdown());
-      unawaited(waiter.exit.then((_) => completed = true));
-      await _flushMicrotasks();
-      expect(completed, isFalse);
-
-      final cancelled = fixture.runtime.fork(fixture.queue.awaitShutdown());
-      await _flushMicrotasks();
-      expect(await cancelled.interrupt('stop waiting'), isA<Failed<void, Never>>());
-      expect(fixture.queue.isShutdown, isFalse);
-
-      await fixture.run(fixture.queue.shutdown());
-      expect(await waiter.join(), isA<Succeeded<void, Never>>());
-      await fixture.run(fixture.queue.awaitShutdown());
     });
 
     test('should shut down when the acquiring scope fails or is cancelled', () async {

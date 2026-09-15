@@ -32,30 +32,31 @@ void main() {
     });
 
     test('should discard publications made without subscribers', () async {
-      final fixture = await _PubSubFixture.acquire<int>(1);
-      addTearDown(fixture.close);
-      await fixture.run(fixture.pubsub.publish(1));
-      final subscription = await fixture.subscribe();
-      final waiting = fixture.runtime.fork(subscription.take());
-      await _flushMicrotasks();
+      await Effect.build<void, Never>(($) async {
+        final pubsub = await $(PubSub.bounded<int>(1));
+        await $(pubsub.publish(1));
+        final subscription = await $(pubsub.subscribe());
+        expect(await $(subscription.takeUpTo(1)), isEmpty);
 
-      await fixture.run(fixture.pubsub.publish(2));
+        await $(pubsub.publish(2));
 
-      expect(_value(await waiting.join()), 2);
+        expect(await $(subscription.take()), 2);
+      }).runFuture();
     });
 
     test('should publish in common order to the captured subscriber set', () async {
-      final fixture = await _PubSubFixture.acquire<int>(3);
-      addTearDown(fixture.close);
-      final first = await fixture.subscribe();
-      final second = await fixture.subscribe();
-      await fixture.run(fixture.pubsub.publish(1));
-      final late = await fixture.subscribe();
-      await fixture.run(fixture.pubsub.publish(2));
+      await Effect.build<void, Never>(($) async {
+        final pubsub = await $(PubSub.bounded<int>(3));
+        final first = await $(pubsub.subscribe());
+        final second = await $(pubsub.subscribe());
+        await $(pubsub.publish(1));
+        final late = await $(pubsub.subscribe());
+        await $(pubsub.publish(2));
 
-      expect(await fixture.run(first.takeUpTo(3)), [1, 2]);
-      expect(await fixture.run(second.takeUpTo(3)), [1, 2]);
-      expect(await fixture.run(late.takeUpTo(3)), [2]);
+        expect(await $(first.takeUpTo(3)), [1, 2]);
+        expect(await $(second.takeUpTo(3)), [1, 2]);
+        expect(await $(late.takeUpTo(3)), [2]);
+      }).runFuture();
     });
 
     test('should let the slowest subscriber control backpressure', () async {
@@ -187,24 +188,25 @@ void main() {
     });
 
     test('should take immutable available batches without waiting', () async {
-      final fixture = await _PubSubFixture.acquire<int>(3);
-      addTearDown(fixture.close);
-      final subscription = await fixture.subscribe();
-      for (final item in [1, 2, 3]) {
-        await fixture.run(fixture.pubsub.publish(item));
-      }
+      await Effect.build<void, Never>(($) async {
+        final pubsub = await $(PubSub.bounded<int>(3));
+        final subscription = await $(pubsub.subscribe());
+        for (final item in [1, 2, 3]) {
+          await $(pubsub.publish(item));
+        }
 
-      final first = await fixture.run(subscription.takeUpTo(2));
+        final first = await $(subscription.takeUpTo(2));
 
-      expect(first, [1, 2]);
-      expect(() => first.add(4), throwsUnsupportedError);
-      expect(await fixture.run(subscription.takeUpTo(10)), [3]);
-      expect(await fixture.run(subscription.takeUpTo(0)), isEmpty);
-      final negative = subscription.takeUpTo(-1);
-      expect(
-        (await fixture.runtime.run(negative) as Failed<List<int>, Never>).cause,
-        isA<Defect<Never>>(),
-      );
+        expect(first, [1, 2]);
+        expect(() => first.add(4), throwsUnsupportedError);
+        expect(await $(subscription.takeUpTo(10)), [3]);
+        expect(await $(subscription.takeUpTo(0)), isEmpty);
+        final negative = subscription.takeUpTo(-1);
+        expect(
+          (await negative.runFutureExit() as Failed<List<int>, Never>).cause,
+          isA<Defect<Never>>(),
+        );
+      }).runFuture();
     });
 
     test('should unsubscribe idempotently and release retained capacity', () async {
@@ -289,25 +291,6 @@ void main() {
         await fixture.runtime.run(fixture.pubsub.subscribe()),
       );
       await fixture.run(slow.unsubscribe());
-    });
-
-    test('should await completed PubSub shutdown cancellably', () async {
-      final fixture = await _PubSubFixture.acquire<int>(1);
-      addTearDown(fixture.close);
-      var completed = false;
-      final waiter = fixture.runtime.fork(fixture.pubsub.awaitShutdown());
-      unawaited(waiter.exit.then((_) => completed = true));
-      await _flushMicrotasks();
-      expect(completed, isFalse);
-
-      final cancelled = fixture.runtime.fork(fixture.pubsub.awaitShutdown());
-      await _flushMicrotasks();
-      expect(await cancelled.interrupt('stop waiting'), isA<Failed<void, Never>>());
-      expect(fixture.pubsub.isShutdown, isFalse);
-
-      await fixture.run(fixture.pubsub.shutdown());
-      expect(await waiter.join(), isA<Succeeded<void, Never>>());
-      await fixture.run(fixture.pubsub.awaitShutdown());
     });
 
     test('should shut down when the acquiring scope fails or is cancelled', () async {
@@ -466,9 +449,8 @@ Effect<A, E> _atWaiterRegistrationBoundary<A, E>(Effect<A, E> effect) {
 }
 
 Effect<A, E> _atSubscriptionRegistrationBoundary<A, E>(Effect<A, E> effect) {
-  // The former subscription acquisition created state one step before the
-  // boundary, immediately before finalizer registration could complete.
-  return _afterEvaluationSteps(effect, EffectExecution.schedulingInterval - 4);
+  // The builder evaluates acquisition at the next cooperative boundary.
+  return _afterEvaluationSteps(effect, EffectExecution.schedulingInterval - 2);
 }
 
 Effect<A, E> _afterEvaluationSteps<A, E>(Effect<A, E> effect, int count) {
