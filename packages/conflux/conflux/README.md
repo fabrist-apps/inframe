@@ -521,3 +521,14 @@ canonical `uuid` (versions 1–8, nil, and all ones), absolute `url` with a sche
 and host, `ip`/`ipv4`/`ipv6`, `matches(RegExp)`, and literal
 `startsWith`/`endsWith`/`contains`. Regex matching uses `hasMatch`; anchors are
 caller-owned. IPv4 rejects leading zeros; IPv6 rejects brackets and zone IDs.
+
+### Collections
+
+`Val.list(itemSchema)` produces an immutable `List<T>`; `Val.map(valueSchema)`
+produces an immutable `Map<String, T>`. Nullable child schemas preserve present
+null elements/values. Child errors accumulate by list index or input key order,
+with their structural paths prefixed. List/map refinements run only when every
+child succeeds. List `minLength`, `maxLength`, `length`, and `notEmpty` count
+items; `unique` uses Dart equality on parsed values and emits one list error.
+Nested validated containers are copied, while arbitrary instance values remain
+borrowed references.

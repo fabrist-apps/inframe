@@ -1,6 +1,7 @@
 /// Synchronous schemas, typed results, and structured validation issues.
 library;
 
+export 'src/val/collection_schema.dart' show ListChecks;
 export 'src/val/issue.dart'
     show Field, Index, IssueKind, PathSegment, ValidationException, ValidationIssue;
 export 'src/val/membership_schema.dart' show LiteralSchema;

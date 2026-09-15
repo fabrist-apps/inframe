@@ -1,6 +1,7 @@
 import 'dart:core';
 import 'dart:core' as core;
 
+import 'package:conflux/src/val/collection_schema.dart';
 import 'package:conflux/src/val/membership_schema.dart';
 import 'package:conflux/src/val/numeric_schema.dart';
 import 'package:conflux/src/val/object_schema.dart';
@@ -9,6 +10,18 @@ import 'package:conflux/src/val/string_schema.dart';
 
 /// Factories for immutable synchronous validation schemas.
 abstract final class Val {
+  /// Validates arbitrary string keys against one value schema.
+  static Schema<Map<String, T>> map<T>(
+    Schema<T> values, {
+    String? name,
+    String? code,
+    String? message,
+  }) => mapSchema(values, name: name, code: code, message: message);
+
+  /// Validates each list item and returns an immutable typed list.
+  static Schema<List<T>> list<T>(Schema<T> items, {String? name, String? code, String? message}) =>
+      listSchema(items, name: name, code: code, message: message);
+
   /// Accepts a finite Dart double without conversion.
   static Schema<core.double> double({String? name, String? code, String? message}) =>
       numericSchema(type: 'a double', name: name, code: code, message: message);
