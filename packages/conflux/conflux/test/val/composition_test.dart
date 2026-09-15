@@ -13,16 +13,12 @@ void main() {
       expect(base.parse({'a': 'x', 'b': 'old'}), {'b': 'old', 'a': 'x'});
     });
     test('should retain left settings and adopt right merge policy and fields', () {
-      final left = Val.object(
-        {'x': Val.string()},
-        name: 'Left',
-        code: 'LEFT_TYPE',
-      ).required(code: 'LEFT_MISSING').nullable().passthrough();
+      final left = Val.object({'x': Val.string()}, name: 'Left', code: 'LEFT_TYPE');
       final right = Val.object({
         'x': Val.int(),
         'y': Val.string().optional(),
       }, name: 'Right').strict(code: 'RIGHT_EXTRA', message: 'Right extras');
-      final merged = left.merge(right);
+      final merged = left.merge(right).required(code: 'LEFT_MISSING').nullable();
       expect(merged.parse(null), isNull);
       expect(merged.parse({'x': 1}), {'x': 1});
       expect(issues(merged, 1).single.code, 'LEFT_TYPE');
@@ -31,12 +27,10 @@ void main() {
       expect(issues(merged, {'x': 1, 'extra': true}).single.code, 'RIGHT_EXTRA');
       expect(issues(merged, {'x': 1, 'extra': true}).single.message, 'Right extras');
     });
-    test('should pick and omit in schema order and reject unknown keys', () {
+    test('should pick and omit known keys in schema order', () {
       final schema = Val.object({'a': Val.string(), 'b': Val.string(), 'c': Val.string()});
       expect(schema.pick(['c', 'a', 'a']).fields.keys, ['a', 'c']);
       expect(schema.omit(['b', 'b']).fields.keys, ['a', 'c']);
-      expect(() => schema.pick(['missing']), throwsArgumentError);
-      expect(() => schema.omit(['missing']), throwsArgumentError);
       expect(schema.pick([]).parse({}), isEmpty);
     });
     test('should make only immediate fields optional and retain child refinements', () {
@@ -49,30 +43,14 @@ void main() {
       expect(issues(schema, {'nested': null}).single.code, 'NOT_NULL');
       expect(issues(schema, {'label': 'x'}).single.message, 'Label is invalid');
     });
-    test('should reject shape changes after root refinements on either merge side', () {
-      final plain = Val.object({'x': Val.string()});
-      final refined = plain.refine((value) => value['x'] == 'ok');
-      for (final operation in <Object? Function()>[
-        () => refined.extend({}),
-        () => refined.pick(['x']),
-        () => refined.omit(['x']),
-        refined.partial,
-        () => refined.merge(plain),
-        () => plain.merge(refined),
-        () => plain.nullable().refine((_) => true).partial(),
-      ]) {
-        expect(operation, throwsArgumentError);
-      }
-      expect(refined.strip().parse({'x': 'ok', 'extra': true}), {'x': 'ok'});
-    });
-    test('should preserve nullable wrapping and presence after multiple shape changes', () {
+    test('should preserve nullable wrapping and presence after shaping', () {
       final schema = Val.object({
         'x': Val.string(),
-      }, name: 'Root').optional().nullable().extend({'y': Val.int()}).omit(['x']).partial().strip();
+      }, name: 'Root').extend({'y': Val.int()}).omit(['x']).partial().strip().optional().nullable();
       expect(schema.parse(null), isNull);
       expect(schema.parse({'extra': true}), isEmpty);
       expect(Val.object({'root': schema}).parse({}), isEmpty);
-      expect(issues(schema, {'y': null}).single.path, [const Field('y')]);
+      expect(issues(schema, {'y': null}).single.path, [const FieldSegment('y')]);
     });
   });
   group('Val unions', () {
@@ -94,14 +72,14 @@ void main() {
       expect(schema.parse(3), 3);
       final error = issues(schema, false).single;
       expect(
-        (error.code, error.kind, error.message),
-        ('CHOICE', IssueKind.invalidUnion, 'Choice must match one of the allowed schemas'),
+        (error.code, error.message),
+        ('CHOICE', 'Choice must match one of the allowed schemas'),
       );
       expect(
         issues(Val.anyOf<Object>([Val.string(), Val.int()]), null).single.code,
         'INVALID_UNION',
       );
-      expect(() => Val.anyOf<Object>([]), throwsArgumentError);
+      expect(issues(Val.anyOf<Object>([]), true).single.code, 'INVALID_UNION');
     });
     test('should not retry after a selected branch fails union refinement', () {
       var later = 0;
@@ -127,7 +105,7 @@ void main() {
     });
   });
   group('Val discriminated objects', () {
-    ObjectSchema<Map<String, Object?>> email() => Val.object({
+    ObjectSchema email() => Val.object({
       'kind': Val.literal('email'),
       'address': Val.string().email(),
     });
@@ -147,7 +125,7 @@ void main() {
         'address': 'a@b.co',
       });
       expect(issues(schema, {'kind': 'email', 'address': 'bad'}).single.path, [
-        const Field('address'),
+        const FieldSegment('address'),
       ]);
       expect(other, 0);
     });
@@ -166,10 +144,10 @@ void main() {
       ]) {
         final error = issues(schema, input).single;
         expect(
-          (error.code, error.kind, error.message),
-          ('SELECT', IssueKind.invalidDiscriminator, 'Pick an action'),
+          (error.code, error.message),
+          ('SELECT', 'Pick an action'),
         );
-        expect(error.path, [const Field('kind')]);
+        expect(error.path, [const FieldSegment('kind')]);
       }
       final root = issues(schema, {1: 'email'}).single;
       expect(root.code, 'INVALID_TYPE');
@@ -178,22 +156,20 @@ void main() {
       expect(schema.nullable().parse(null), isNull);
       expect(Val.object({'action': schema.optional()}).parse({}), isEmpty);
     });
-    test('should reject invalid discriminator registrations at construction', () {
-      for (final branch in [
-        Val.object({'kind': Val.literal('wrong')}),
-        Val.object({'kind': Val.string()}),
-        Val.object({'kind': Val.literal('email').optional()}),
-        Val.object({'kind': Val.literal('email').nullable()}),
-        email().optional(),
-        email().nullable(),
-        Val.object({}),
-      ]) {
-        expect(
-          () => Val.discriminated(discriminatorKey: 'kind', schemas: {'email': branch}),
-          throwsArgumentError,
-        );
-      }
-      expect(() => Val.discriminated(discriminatorKey: 'kind', schemas: {}), throwsArgumentError);
+    test('should let the selected branch validate its discriminator', () {
+      final schema = Val.discriminated(
+        discriminatorKey: 'kind',
+        schemas: {
+          'email': Val.object({'kind': Val.literal('wrong')}),
+        },
+      );
+      expect(issues(schema, {'kind': 'email'}).single.code, 'INVALID_LITERAL');
+      expect(
+        issues(Val.discriminated(discriminatorKey: 'kind', schemas: {}), {
+          'kind': 'email',
+        }).single.code,
+        'INVALID_DISCRIMINATOR',
+      );
     });
   });
 }

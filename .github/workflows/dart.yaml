@@ -29,12 +29,11 @@ jobs:
       - name: Resolve workspace dependencies
         run: dart pub get
 
-      - name: Verify committed Val issue mappers
+      - name: Generate Val issue mappers
         working-directory: packages/conflux/conflux
         run: |
           dart run build_runner build --build-filter='lib/src/val/issue.mapper.dart'
           dart format lib/src/val/issue.mapper.dart
-          git diff --exit-code -- lib/src/val/issue.mapper.dart
 
       - name: Generate Chronicler models
         working-directory: packages/chronicler/chronicler

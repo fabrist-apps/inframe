@@ -4,7 +4,6 @@ import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/record_validation.dart';
 import 'package:conflux/moment.dart';
 import 'package:dart_mappable/dart_mappable.dart';
-import 'package:dart_mappable_conflux/dart_mappable_conflux.dart';
 
 part 'models.mapper.dart';
 

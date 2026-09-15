@@ -14,7 +14,6 @@ dependencies:
   conflux: ^0.1.0
   context: ^0.1.0
   dart_mappable: ^4.10.0
-  dart_mappable_conflux: ^0.1.0
 
 dev_dependencies:
   build_runner: ^2.16.1

@@ -1,6 +1,7 @@
-import 'package:conflux/val.dart';
+import 'package:conflux/conflux.dart';
 void main() {
-  final issue = ValidationIssue(code: 'C', message: 'M', kind: IssueKind.custom, path: [Field('x'), Index(0)]);
+  Conflux.initialize();
+  final issue = ValidationIssue(code: 'C', message: 'M', path: [FieldSegment('x'), IndexSegment(0)]);
   final String json = issue.toJson();
   final Map<String, Object?> map = issue.toMap();
   final restored = ValidationIssueMapper.fromMap(map);

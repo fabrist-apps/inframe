@@ -282,8 +282,9 @@ stay in the internal date-time module. JSON persistence, locale/custom formats,
 and ambient timezone services are outside this API.
 
 `Cron` is a pure calendar value with an explicit `timezone.Location`. The
-application can call `Conflux.initialize()` to load the bundled IANA database.
-It retains an already initialized database and is safe to call repeatedly.
+application can call `Conflux.initialize()` to register dart_mappable support
+for `Moment`, `Option`, and Val paths and load the bundled IANA database. It is
+safe to call repeatedly and retains an already initialized timezone database.
 The timezone package sets its local default to UTC on first initialization;
 Moment and Cron continue to use explicitly supplied zones. Applications can
 also initialize a different timezone dataset themselves before this call:
@@ -451,6 +452,12 @@ failure and a successful `null`. Use `match` when that distinction matters.
 `Option.firstSome` stops at the first present value, including `Some(null)`,
 while `Option.fromIterable` requests only the first item from its input.
 
+`MomentMapper`, `OptionMapper`, and `OptionFieldsHook` live beside their Conflux
+value types. Call `Conflux.initialize()` once in each isolate before using them
+through `MapperContainer.globals`. Generated classes may instead include the
+mappers in `@MappableClass`. `OptionFieldsHook` distinguishes an omitted field
+from an explicit `null` and must list serialized field keys, including renames.
+
 `Result.all` inspects already-created results until the first failure.
 `Result.validate` invokes a validator for every input and accumulates expected
 failures in an immutable `NonEmptyList`. Unexpected callback exceptions remain
@@ -478,8 +485,8 @@ final result = profile.safeParse({'name': 'Ada'});
 
 `safeParse` returns the existing Conflux Result. `parse` throws
 `ValidationException` containing the same ordered issues on failure. Each issue
-has a string `code`, a `message`, an `IssueKind`, and an immutable path of `Field`
-and `Index` segments. A refinement path is relative to its schema.
+has a string `code`, a `message`, and an immutable path of `FieldSegment`
+and `IndexSegment` segments. A refinement path is relative to its schema.
 
 Fields are required by default. `optional()` omits missing fields without
 accepting present null; `nullable()` accepts present null and changes the output
@@ -489,8 +496,8 @@ wrapping skips preceding checks for null; later refinements receive null.
 Objects reject extra keys by default. `strict()` customizes rejection,
 `strip()` removes extras before refinements, and `passthrough()` retains them.
 Policies apply only to the selected object. Object refinements run only after
-all declared fields and the unknown-key policy pass. Compatible checks collect
-failures in declaration order; fields use schema order and extras use input order.
+all declared fields and the unknown-key policy pass. Chained checks stop at the
+first failure; independent fields use schema order and extras use input order.
 
 Schema names label generated messages, while custom messages remain verbatim.
 Codes and messages may be overridden independently; null selects the default,
@@ -509,12 +516,12 @@ Result/Option modules do not depend on Val.
 never coerce inputs. Numeric schemas require finite values before checking
 inclusive `min`/`max`, exclusive `greaterThan`/`lessThan`, or sign aliases.
 Integers also support exact `multipleOf` and the inclusive JavaScript `safe`
-range, ±9007199254740991. Invalid bounds or divisors throw `ArgumentError`
-when the schema is built.
+range, ±9007199254740991. Non-positive divisors throw `ArgumentError` when the
+schema is built.
 
 `literal<T>` requires both `value is T` and equality. `enumString` and
-`enumValues` copy nonempty, duplicate-free membership lists; enum instances are
-not parsed from strings. `instance<T>` returns the same borrowed instance.
+`enumValues` copy their membership lists; enum instances are not parsed from
+strings. `instance<T>` returns the same borrowed instance.
 
 String formats are explicit profiles and do not normalize inputs: `email`,
 canonical `uuid` (versions 1–8, nil, and all ones), absolute `url` with a scheme
@@ -537,19 +544,19 @@ borrowed references.
 
 `extend` replaces fields without moving their positions and appends new fields.
 `merge` adopts the right object's fields and unknown-key policy while retaining
-the left object's root configuration. `pick`/`omit` retain schema order and reject
-unknown keys. `partial` makes immediate fields optional without recursing or
-adding nullability. Compose shapes before root refinements; shape changes after
-a root refinement throw `ArgumentError` to avoid stale field assumptions.
+the left object's root configuration. `pick`/`omit` retain known keys in schema
+order. `partial` makes immediate fields optional without recursing or adding
+nullability. Finish shape and unknown-key operations before calling `optional`,
+`nullable`, or `refine`; those return a general `Schema` without shape methods.
 
 `Val.anyOf<T>(branches)` returns the first successful parsed branch. Total failure
 produces one `INVALID_UNION`; a failed union-level refinement does not retry
 branches. Make the outer union optional to permit an absent field.
 
-`Val.discriminated(discriminatorKey: 'kind', schemas: branches)` selects one
-direct object schema. Each branch must declare its registration key as a required,
-non-nullable literal string at the discriminator field. Invalid selection yields
-one field-path issue; selected branches retain their own issues and key policy.
+`Val.discriminated(discriminatorKey: 'kind', schemas: branches)` uses the
+discriminator value to select one registered schema. The selected branch owns
+all further validation, including validation of the discriminator field. Invalid
+selection yields one field-path issue.
 
 ### Recursion and JSON values
 
@@ -583,7 +590,7 @@ is performed; pass time bounds explicitly. Parse failures produce one
 `Val.chronoId(prefix: 'use')` and `Val.string().chronoId(prefix: 'use')` validate
 through the existing `chrono_id` core and retain the original string. Size
 (default 24, minimum 16) counts the body only; omitted prefix requires no prefix.
-Invalid configuration throws while constructing the schema. Format validation
+Invalid configuration is rejected by `chrono_id` when parsing. Format validation
 accepts structurally valid future timestamps, performs no normalization, and
 reads neither clocks nor randomness. Factory code/message overrides apply to
 format errors; customize type errors through `Val.string(...)` first.
@@ -591,20 +598,22 @@ format errors; customize type errors through `Val.string(...)` first.
 ### Issue serialization
 
 Validation issues ship with generated `dart_mappable` support; consumers need no
-build step. Use `issue.toMap()` or `issue.toJson()`, and
+build step. Call `Conflux.initialize()` once before serialization. Use
+`issue.toMap()` or `issue.toJson()`, and
 `ValidationIssueMapper.fromMap(...)` / `fromJson(...)` to restore issues.
 
 ```json
-{"code":"PASSWORD_TOO_SHORT","message":"Password must contain at least 8 characters","kind":"tooSmall","path":["users",0,"password"]}
+{"code":"PASSWORD_TOO_SHORT","message":"Password must contain at least 8 characters","path":["users",0,"password"]}
 ```
 
 The wire format contains exactly `code`, `message`, `kind`, and `path`. Fields
 encode as strings and indices as non-negative integers; root paths are empty
-lists. Malformed required fields, unknown kinds, and invalid path segments fail
-decoding instead of becoming validation results. Paths remain immutable after
+lists. Field decoding uses the standard `dart_mappable` rules, including primitive
+coercion. The custom path mapper handles field names and non-negative indices.
+Decoding errors propagate instead of becoming validation results. Paths remain immutable after
 decoding or `copyWith`. Raw inputs, callbacks, schemas, and stack traces are not
 part of the wire format.
 
-Conflux maintainers regenerate the committed issue mapper from
+The generated issue mapper is ignored by Git. After a fresh checkout, generate it from
 `packages/conflux/conflux` with `dart run build_runner build
 --build-filter='lib/src/val/issue.mapper.dart'`, then format the generated file.

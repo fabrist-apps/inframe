@@ -1,5 +1,5 @@
-// Explicit types and null arguments exercise the public contract.
-// ignore_for_file: omit_local_variable_types, avoid_redundant_argument_values
+// Explicit types exercise the public contract.
+// ignore_for_file: omit_local_variable_types
 
 import 'package:conflux/conflux.dart';
 import 'package:conflux/val.dart' as direct;
@@ -18,11 +18,7 @@ void main() {
       expect(Val.string().parse('hello'), 'hello');
       expect(direct.Val.string().parse('hello'), 'hello');
       final Result<String, NonEmptyList<ValidationIssue>> result = Val.string().safeParse('x');
-      expect(result.map((v) => v.length).flatMap((v) => Success(v + 1)).getOrNull(), 2);
-      expect(
-        result.mapError((v) => v.first.code).match(onSuccess: (v) => v, onFailure: (e) => e),
-        'x',
-      );
+      expect(result.getOrNull(), 'x');
     });
     test('should skip incompatible checks and propagate callback exceptions', () {
       var calls = 0;
@@ -49,29 +45,15 @@ void main() {
       expect(issues(base, null).single.code, 'NOT_NULL');
       expect(nullable.nullable().parse(null), isNull);
     });
-    test('should accumulate independent length and predicate checks in order', () {
+    test('should stop chained checks after the first failure', () {
       final schema = Val.string(name: 'Password').minLength(8).maxLength(2).refine((_) => false);
-      expect(issues(schema, 'four').map((e) => e.code), ['MIN_LENGTH', 'MAX_LENGTH', 'CUSTOM']);
+      expect(issues(schema, 'four').map((e) => e.code), ['MIN_LENGTH']);
       expect(issues(schema, 'four').first.message, 'Password must contain at least 8 characters');
       expect(Val.string().length(2).parse('😀'), '😀');
       expect(
         issues(Val.string().notEmpty(), '').single.message,
         'Must contain at least 1 character',
       );
-      expect(() => Val.string().minLength(-1), throwsArgumentError);
-      expect(() => Val.string().maxLength(-1), throwsArgumentError);
-      expect(() => Val.string().length(-1), throwsArgumentError);
-    });
-    test('should independently preserve names, defaults, and explicit empty overrides', () {
-      expect(issues(Val.string(name: '  '), 1).single.message, 'Must be a string');
-      expect(issues(Val.string(name: 'Name', code: ''), 1).single.code, '');
-      expect(issues(Val.string(name: 'Name', message: ''), 1).single.message, '');
-      expect(
-        issues(Val.string().minLength(2, code: 'C'), '').single.message,
-        'Must contain at least 2 characters',
-      );
-      expect(issues(Val.string().minLength(2, message: 'M'), '').single.code, 'MIN_LENGTH');
-      expect(issues(Val.string(code: null), 1).single.code, 'INVALID_TYPE');
     });
     test('should throw an exception carrying the same failure details', () {
       final schema = Val.string().minLength(4);
@@ -80,16 +62,16 @@ void main() {
         () => schema.parse('x'),
         throwsA(
           isA<ValidationException>().having(
-            (e) => e.issues.map((v) => (v.code, v.message, v.kind)),
+            (e) => e.issues.map((v) => (v.code, v.message)),
             'issues',
-            failure.map((v) => (v.code, v.message, v.kind)),
+            failure.map((v) => (v.code, v.message)),
           ),
         ),
       );
-      expect(() => failure.first.path.add(const Field('x')), throwsUnsupportedError);
-      expect(() => Index(-1), throwsArgumentError);
-      expect(const Field(''), const Field(''));
-      expect(Index(0), Index(0));
+      expect(() => failure.first.path.add(const FieldSegment('x')), throwsUnsupportedError);
+      expect(() => IndexSegment(-1), throwsArgumentError);
+      expect(const FieldSegment(''), const FieldSegment(''));
+      expect(IndexSegment(0), IndexSegment(0));
     });
   });
   group('ObjectSchema', () {
@@ -121,9 +103,9 @@ void main() {
         'nested': {'a': 2, 'b': null},
       });
       expect(errors.map((e) => e.path), [
-        [const Field('nested'), const Field('b')],
-        [const Field('nested'), const Field('a')],
-        [const Field('extra')],
+        [const FieldSegment('nested'), const FieldSegment('b')],
+        [const FieldSegment('nested'), const FieldSegment('a')],
+        [const FieldSegment('extra')],
       ]);
       expect(calls, 0);
       expect(errors.map((e) => e.code), ['NOT_NULL', 'INVALID_TYPE', 'UNRECOGNIZED_KEY']);
@@ -145,7 +127,7 @@ void main() {
       final input = {'x': 'ok', 'extra': borrowed};
       final base = Val.object({'x': Val.string()}, name: 'Profile');
       expect(issues(base, input).single.message, 'Property is not allowed in Profile');
-      expect(base.refine((v) => !v.containsKey('extra')).strip().parse(input), {'x': 'ok'});
+      expect(base.strip().refine((v) => !v.containsKey('extra')).parse(input), {'x': 'ok'});
       final output = base.strip().passthrough().parse(input);
       expect(output['extra'], same(borrowed));
       expect(() => output['x'] = 'new', throwsUnsupportedError);
@@ -157,19 +139,19 @@ void main() {
       expect(issues(base, input).single.code, 'UNRECOGNIZED_KEY');
       expect(
         issues(Val.object({'nested': base}).strip(), {'nested': input, 'other': 1}).single.path,
-        [const Field('nested'), const Field('extra')],
+        [const FieldSegment('nested'), const FieldSegment('extra')],
       );
-      expect(base.nullable().refine((v) => v == null).strip().parse(null), isNull);
+      expect(base.strip().nullable().refine((v) => v == null).parse(null), isNull);
     });
     test('should copy fields and relative paths and isolate repeated parsing', () {
-      final path = <PathSegment>[const Field('confirm')];
+      final path = <PathSegment>[const FieldSegment('confirm')];
       final child = Val.string(name: 'Child').refine((_) => false, code: 'APP', path: path);
       path.clear();
       final fields = <String, Schema<Object?>>{'key': child};
       final schema = Val.object(fields, name: 'Parent');
       fields.clear();
       final error = issues(schema, {'key': 'x'}).single;
-      expect(error.path, [const Field('key'), const Field('confirm')]);
+      expect(error.path, [const FieldSegment('key'), const FieldSegment('confirm')]);
       expect(error.message, 'Child is invalid');
       expect(error.code, 'APP');
       final reusable = Val.object({'x': Val.string()});

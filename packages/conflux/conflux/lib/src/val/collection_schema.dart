@@ -1,35 +1,38 @@
-import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/val/issue.dart';
 import 'package:conflux/src/val/schema.dart';
 
 /// Internal typed list parser; intrinsic child failures suppress list checks.
 Schema<List<T>> listSchema<T>(Schema<T> items, {String? name, String? code, String? message}) {
-  final label = name == null || name.trim().isEmpty ? null : name.trim();
+  final label = normalizeSchemaName(name);
+
   return Schema.internal((input, context, path) {
     if (input is! List) {
-      return Evaluation.invalid(
-        IssueTemplate(
-          input == null ? 'NOT_NULL' : 'INVALID_TYPE',
-          IssueKind.invalidType,
-          input == null ? 'Must not be null' : 'Must be a list',
-          customCode: code,
-          customMessage: message,
-        ).at(path, label),
+      return invalid(
+        invalidTypeIssue(
+          input: input,
+          expected: 'a list',
+          path: path,
+          name: label,
+          code: code,
+          message: message,
+        ),
       );
     }
-    final values = <T>[];
+
+    final output = <T>[];
     final issues = <ValidationIssue>[];
+
     for (var index = 0; index < input.length; index++) {
-      switch (items.evaluate(input[index], context, [...path, Index(index)]).finish()) {
+      switch (items.evaluate(input[index], context, [...path, IndexSegment(index)])) {
         case Success(:final value):
-          values.add(value);
+          output.add(value);
         case Failure(:final error):
           issues.addAll(error);
       }
     }
-    if (issues.isNotEmpty) return Evaluation(const None(), issues);
-    return Evaluation.valid(List<T>.unmodifiable(values));
+
+    return issues.isEmpty ? Success(List<T>.unmodifiable(output)) : invalidAll(issues);
   }, name: label);
 }
 
@@ -40,33 +43,37 @@ Schema<Map<String, T>> mapSchema<T>(
   String? code,
   String? message,
 }) {
-  final label = name == null || name.trim().isEmpty ? null : name.trim();
+  final label = normalizeSchemaName(name);
+
   return Schema.internal((input, context, path) {
     if (input is! Map || input.keys.any((key) => key is! String)) {
-      return Evaluation.invalid(
-        IssueTemplate(
-          input == null ? 'NOT_NULL' : 'INVALID_TYPE',
-          IssueKind.invalidType,
-          input == null ? 'Must not be null' : 'Must be an object with string keys',
-          customCode: code,
-          customMessage: message,
-        ).at(path, label),
+      return invalid(
+        invalidTypeIssue(
+          input: input,
+          expected: 'an object with string keys',
+          path: path,
+          name: label,
+          code: code,
+          message: message,
+        ),
       );
     }
+
     final output = <String, T>{};
     final issues = <ValidationIssue>[];
+
     for (final entry in input.entries) {
-      final key = entry.key;
-      if (key is! String) continue;
-      switch (values.evaluate(entry.value, context, [...path, Field(key)]).finish()) {
+      final key = entry.key as String;
+
+      switch (values.evaluate(entry.value, context, [...path, FieldSegment(key)])) {
         case Success(:final value):
           output[key] = value;
         case Failure(:final error):
           issues.addAll(error);
       }
     }
-    if (issues.isNotEmpty) return Evaluation(const None(), issues);
-    return Evaluation.valid(Map<String, T>.unmodifiable(output));
+
+    return issues.isEmpty ? Success(Map<String, T>.unmodifiable(output)) : invalidAll(issues);
   }, name: label);
 }
 
@@ -77,7 +84,6 @@ extension ListChecks<T> on Schema<List<T>> {
     minimum,
     (length) => length >= minimum,
     'MIN_LENGTH',
-    IssueKind.tooSmall,
     'at least',
     code,
     message,
@@ -88,7 +94,6 @@ extension ListChecks<T> on Schema<List<T>> {
     maximum,
     (length) => length <= maximum,
     'MAX_LENGTH',
-    IssueKind.tooBig,
     'at most',
     code,
     message,
@@ -99,7 +104,6 @@ extension ListChecks<T> on Schema<List<T>> {
     length,
     (actual) => actual == length,
     'LENGTH',
-    IssueKind.invalidLength,
     'exactly',
     code,
     message,
@@ -114,17 +118,17 @@ extension ListChecks<T> on Schema<List<T>> {
     (values) {
       for (var index = 0; index < values.length; index++) {
         for (var prior = 0; prior < index; prior++) {
-          if (values[prior] == values[index]) return false;
+          if (values[prior] == values[index]) {
+            return false;
+          }
         }
       }
+
       return true;
     },
     IssueTemplate(
-      'UNIQUE',
-      IssueKind.notUnique,
-      'Must contain unique items',
-      customCode: code,
-      customMessage: message,
+      code ?? 'UNIQUE',
+      (name) => message ?? '${name == null ? 'Must' : '$name must'} contain unique items',
     ),
   );
 
@@ -132,21 +136,16 @@ extension ListChecks<T> on Schema<List<T>> {
     int count,
     bool Function(int) accepts,
     String defaultCode,
-    IssueKind kind,
     String comparison,
     String? code,
     String? message,
-  ) {
-    if (count < 0) throw ArgumentError.value(count, 'length', 'Must be non-negative');
-    return withCheck(
-      (value) => accepts(value.length),
-      IssueTemplate(
-        defaultCode,
-        kind,
-        'Must contain $comparison $count ${count == 1 ? 'item' : 'items'}',
-        customCode: code,
-        customMessage: message,
-      ),
-    );
-  }
+  ) => withCheck(
+    (value) => accepts(value.length),
+    IssueTemplate(
+      code ?? defaultCode,
+      (name) =>
+          message ??
+          '${name == null ? 'Must' : '$name must'} contain $comparison $count ${count == 1 ? 'item' : 'items'}',
+    ),
+  );
 }

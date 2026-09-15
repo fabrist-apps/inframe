@@ -31,13 +31,13 @@ void main() {
       final later = _moment('2026-01-01T00:00:01Z');
       final minimum = issues(Val.moment(name: 'Start').min(utc), earlier).single;
       expect(
-        (minimum.code, minimum.kind, minimum.message),
-        ('MIN_MOMENT', IssueKind.tooSmall, 'Start must be at or after 2026-01-01T00:00:00.000000Z'),
+        (minimum.code, minimum.message),
+        ('MIN_MOMENT', 'Start must be at or after 2026-01-01T00:00:00.000000Z'),
       );
       final maximum = issues(Val.moment().max(utc), later).single;
       expect(
-        (maximum.code, maximum.kind, maximum.message),
-        ('MAX_MOMENT', IssueKind.tooBig, 'Must be at or before 2026-01-01T00:00:00.000000Z'),
+        (maximum.code, maximum.message),
+        ('MAX_MOMENT', 'Must be at or before 2026-01-01T00:00:00.000000Z'),
       );
       expect(
         issues(Val.moment().min(utc, code: 'C'), earlier).single.message,
@@ -66,8 +66,8 @@ void main() {
         ]) {
           final error = issues(schema, input).single;
           expect(
-            (error.code, error.kind, error.message),
-            ('INVALID_MOMENT', IssueKind.invalidFormat, 'Start must be a valid timestamp'),
+            (error.code, error.message),
+            ('INVALID_MOMENT', 'Start must be a valid timestamp'),
           );
           expect(issues(Val.string().datetime(), input).single.code, 'INVALID_MOMENT');
         }
@@ -91,7 +91,7 @@ void main() {
         Val.string().moment().min(bound).refine((_) => false),
         '2025-01-01T00:00:00Z',
       );
-      expect(errors.map((e) => e.code), ['MIN_MOMENT', 'CUSTOM']);
+      expect(errors.single.code, 'MIN_MOMENT');
       final defect = StateError('source');
       expect(
         () => Val.string().refine((_) => throw defect).moment().parse('x'),
@@ -132,10 +132,10 @@ void main() {
       });
       final error = issues(object, {'start': '2026-02-30T00:00:00Z'}).single;
       expect(
-        (error.code, error.kind, error.message),
-        ('TIME', IssueKind.invalidFormat, 'Timestamp required'),
+        (error.code, error.message),
+        ('TIME', 'Timestamp required'),
       );
-      expect(error.path, [const Field('start')]);
+      expect(error.path, [const FieldSegment('start')]);
       expect(
         issues(Val.string(name: 'Start').datetime(code: 'C'), 'bad').single.message,
         'Start must be a valid timestamp',

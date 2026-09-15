@@ -8,6 +8,7 @@ import 'package:conflux/src/moment/moment_error.dart';
 import 'package:conflux/src/moment/moment_parts.dart';
 import 'package:conflux/src/moment/parsing.dart';
 import 'package:conflux/src/moment/time_zone.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 
 /// An immutable instant with exact microseconds and explicit zone identity.
 ///
@@ -227,4 +228,28 @@ final class ZonedMoment extends Moment {
 
   /// The zone used to derive local fields.
   final TimeZone zone;
+}
+
+/// Serializes [Moment] as an ISO timestamp with its current offset.
+///
+/// Decoding retains fixed offsets, including historical seconds. Named zones
+/// become fixed zones; their identity and future DST rules are not serialized.
+final class MomentMapper extends SimpleMapper<Moment> {
+  /// Creates a mapper for Conflux [Moment] values.
+  const MomentMapper();
+
+  @override
+  Moment decode(Object value) {
+    if (value is! String) {
+      throw FormatException('Expected an ISO timestamp string.', value);
+    }
+
+    return switch (Moment.parse(value)) {
+      Success(:final value) => value,
+      Failure(:final error) => throw FormatException(error.message, value),
+    };
+  }
+
+  @override
+  Object encode(Moment self) => self.formatIsoOffset();
 }

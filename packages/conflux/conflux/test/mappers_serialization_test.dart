@@ -1,30 +1,19 @@
 import 'dart:convert';
 
-import 'package:conflux/moment.dart';
-import 'package:conflux/option.dart';
-import 'package:conflux/result.dart';
+import 'package:conflux/conflux.dart';
 import 'package:dart_mappable/dart_mappable.dart';
-import 'package:dart_mappable_conflux/dart_mappable_conflux.dart';
 import 'package:test/test.dart';
-import 'package:timezone/data/latest.dart' as tz;
 
-part 'serialization_test.mapper.dart';
+part 'mappers_serialization_test.mapper.dart';
 
-@MappableClass(
-  includeCustomMappers: [MomentMapper(), OptionMapper()],
-  hook: OptionFieldsHook(['value']),
-)
+@MappableClass(hook: OptionFieldsHook(['value']))
 class Payload with PayloadMappable {
   const Payload(this.value);
 
   final Option<Moment?> value;
 }
 
-@MappableClass(
-  includeCustomMappers: [MomentMapper(), OptionMapper()],
-  hook: OptionFieldsHook(['renamed']),
-  ignoreNull: true,
-)
+@MappableClass(hook: OptionFieldsHook(['renamed']), ignoreNull: true)
 class Box<T> with BoxMappable<T> {
   const Box(this.item);
 
@@ -55,7 +44,7 @@ class UppercaseHook extends MappingHook {
 
 void main() {
   setUpAll(() {
-    tz.initializeTimeZones();
+    Conflux.initialize();
     PayloadMapper.ensureInitialized();
     BoxMapper.ensureInitialized();
     TaggedMessageMapper.ensureInitialized();

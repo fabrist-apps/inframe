@@ -1,5 +1,4 @@
 import 'package:conflux/non_empty_list.dart';
-import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/val/issue.dart';
 
@@ -9,41 +8,46 @@ final class ParseContext {
   final Map<Object, int> lazyDepth = Map.identity();
 }
 
-/// Internal stage output: predicates retain a typed candidate to accumulate
-/// subsequent predicate failures. A conversion or container consumes [finish].
-final class Evaluation<T> {
-  /// Retains a typed candidate and copies the accumulated failures.
-  Evaluation(this.value, [Iterable<ValidationIssue> issues = const []])
-    : issues = List.unmodifiable(issues);
-
-  /// A successful intrinsic parse.
-  Evaluation.valid(T value) : this(Some(value));
-
-  /// A failure with no candidate for subsequent checks.
-  Evaluation.invalid(ValidationIssue issue) : this(const None(), [issue]);
-
-  /// Candidate available to compatible predicates, including nullable null.
-  final Option<T> value;
-
-  /// Immutable failures in declaration order.
-  final List<ValidationIssue> issues;
-
-  /// Consumes a completed stage, discarding candidates when any check failed.
-  Result<T, NonEmptyList<ValidationIssue>> finish() {
-    if (issues.isNotEmpty) return Failure(NonEmptyList(issues.first, issues.skip(1)));
-    return switch (value) {
-      Some(:final value) => Success(value),
-      None() => throw StateError('Validation produced neither a value nor an issue'),
-    };
-  }
-}
+/// Internal parser result.
+typedef ParseResult<T> = Result<T, NonEmptyList<ValidationIssue>>;
 
 /// Internal parser function; nested parsing shares its context and path.
-typedef ParseValue<T> = Evaluation<T> Function(
+typedef ParseValue<T> = ParseResult<T> Function(
   Object? input,
   ParseContext context,
   List<PathSegment> path,
 );
+
+/// Normalizes the optional label used in generated issue messages.
+String? normalizeSchemaName(String? name) {
+  final trimmed = name?.trim();
+
+  return trimmed == null || trimmed.isEmpty ? null : trimmed;
+}
+
+/// Creates an internal parser failure containing one issue.
+ParseResult<T> invalid<T>(ValidationIssue issue) => Failure(NonEmptyList(issue));
+
+/// Creates an internal parser failure from a known non-empty issue list.
+ParseResult<T> invalidAll<T>(List<ValidationIssue> issues) =>
+    Failure(NonEmptyList(issues.first, issues.skip(1)));
+
+/// Creates the standard null or runtime-type issue.
+ValidationIssue invalidTypeIssue({
+  required Object? input,
+  required String expected,
+  required List<PathSegment> path,
+  String? name,
+  String? code,
+  String? message,
+}) => IssueTemplate(
+  code ?? (input == null ? 'NOT_NULL' : 'INVALID_TYPE'),
+  (name) =>
+      message ??
+      (input == null
+          ? '${name == null ? 'Must' : '$name must'} not be null'
+          : '${name == null ? 'Must' : '$name must'} be $expected'),
+).at(path, name);
 
 /// An immutable synchronous validator producing exactly [T].
 ///
@@ -57,10 +61,9 @@ class Schema<T> {
     this.isOptional = false,
     this.missingCode,
     this.missingMessage,
-    this.isNullable = false,
-  }) : name = name == null || name.trim().isEmpty ? null : name.trim();
+  }) : name = normalizeSchemaName(name);
 
-  /// Internal typed stage evaluator.
+  /// Internal parser.
   final ParseValue<T> evaluate;
 
   /// Human-readable name used only by generated messages.
@@ -75,12 +78,8 @@ class Schema<T> {
   /// Internal missing-field override text.
   final String? missingMessage;
 
-  /// Whether an explicit nullable wrapper has been added.
-  final bool isNullable;
-
   /// Validates a present input, including a present null.
-  Result<T, NonEmptyList<ValidationIssue>> safeParse(Object? input) =>
-      evaluate(input, ParseContext(), const []).finish();
+  ParseResult<T> safeParse(Object? input) => evaluate(input, ParseContext(), const []);
 
   /// Returns the parsed value or throws [ValidationException].
   T parse(Object? input) => safeParse(input).getOrThrowWith(ValidationException.new);
@@ -94,16 +93,14 @@ class Schema<T> {
 
   /// Accepts null before the current stage, skipping its checks for null.
   Schema<T?> nullable() => Schema<T?>.internal(
-    (input, context, path) =>
-        input == null ? Evaluation.valid(null) : evaluate(input, context, path),
+    (input, context, path) => input == null ? const Success(null) : evaluate(input, context, path),
     name: name,
     isOptional: isOptional,
     missingCode: missingCode,
     missingMessage: missingMessage,
-    isNullable: true,
   );
 
-  /// Internal presence derivation, also used by specialized schemas.
+  /// Internal presence derivation.
   Schema<T> copyPresence({required bool optional, String? code, String? message}) =>
       Schema.internal(
         evaluate,
@@ -111,24 +108,30 @@ class Schema<T> {
         isOptional: optional,
         missingCode: code,
         missingMessage: message,
-        isNullable: isNullable,
       );
 
-  /// Internal missing-field evaluation using Conflux Option presence.
-  Evaluation<T>? field(Option<Object?> input, ParseContext context, List<PathSegment> path) =>
-      switch (input) {
-        Some(:final value) => evaluate(value, context, path),
-        None() when isOptional => null,
-        None() => Evaluation.invalid(
-          IssueTemplate(
-            'REQUIRED',
-            IssueKind.missing,
-            'Value is required',
-            customCode: missingCode,
-            customMessage: missingMessage,
-          ).at(path, name),
-        ),
-      };
+  /// Evaluates one object field, returning null when an optional field is absent.
+  ParseResult<T>? field({
+    required bool isPresent,
+    required Object? input,
+    required ParseContext context,
+    required List<PathSegment> path,
+  }) {
+    if (isPresent) {
+      return evaluate(input, context, path);
+    }
+
+    if (isOptional) {
+      return null;
+    }
+
+    return invalid(
+      IssueTemplate(
+        missingCode ?? 'REQUIRED',
+        (name) => missingMessage ?? '${name ?? 'Value'} is required',
+      ).at(path, name),
+    );
+  }
 }
 
 /// Typed predicate derivation lives in an extension to allow sound widening.
@@ -142,11 +145,8 @@ extension SchemaRefinement<T> on Schema<T> {
   }) => withCheck(
     predicate,
     IssueTemplate(
-      'CUSTOM',
-      IssueKind.custom,
-      'Invalid value',
-      customCode: code,
-      customMessage: message,
+      code ?? 'CUSTOM',
+      (name) => message ?? (name == null ? 'Invalid value' : '$name is invalid'),
     ),
     path: path,
   );
@@ -154,48 +154,50 @@ extension SchemaRefinement<T> on Schema<T> {
 
 /// Internal typed stage composition, excluded from the public barrel.
 extension SchemaChecksInternal<T> on Schema<T> {
-  /// Internal predicate stage that accumulates failures without losing [T].
+  /// Adds a predicate that runs only when every preceding stage succeeded.
   Schema<T> withCheck(
     bool Function(T value) predicate,
     IssueTemplate issue, {
     List<PathSegment> path = const [],
   }) {
     final relativePath = List<PathSegment>.unmodifiable(path);
+
     return Schema.internal(
-      (input, context, currentPath) {
-        final parsed = evaluate(input, context, currentPath);
-        if (parsed.value case Some(:final value)) {
-          if (!predicate(value)) {
-            return Evaluation(parsed.value, [
-              ...parsed.issues,
-              issue.at([...currentPath, ...relativePath], name),
-            ]);
-          }
-        }
-        return parsed;
+      (input, context, currentPath) => switch (evaluate(input, context, currentPath)) {
+        Success(:final value) when predicate(value) => Success(value),
+        Success() => invalid(issue.at([...currentPath, ...relativePath], name)),
+        Failure(:final error) => Failure(error),
       },
       name: name,
       isOptional: isOptional,
       missingCode: missingCode,
       missingMessage: missingMessage,
-      isNullable: isNullable,
     );
   }
 }
 
 /// Internal construction of non-coercing primitive schemas.
-Schema<T> typeSchema<T>({required String type, String? name, String? code, String? message}) {
-  final label = name == null || name.trim().isEmpty ? null : name.trim();
-  return Schema.internal((input, context, path) {
-    if (input is T) return Evaluation.valid(input);
-    return Evaluation.invalid(
-      IssueTemplate(
-        input == null ? 'NOT_NULL' : 'INVALID_TYPE',
-        IssueKind.invalidType,
-        input == null ? 'Must not be null' : 'Must be $type',
-        customCode: code,
-        customMessage: message,
-      ).at(path, label),
-    );
-  }, name: label);
+Schema<T> typeSchema<T>({
+  required String type,
+  String? name,
+  String? code,
+  String? message,
+}) {
+  final label = normalizeSchemaName(name);
+
+  return Schema.internal(
+    (input, context, path) => input is T
+        ? Success(input)
+        : invalid(
+            invalidTypeIssue(
+              input: input,
+              expected: type,
+              path: path,
+              name: label,
+              code: code,
+              message: message,
+            ),
+          ),
+    name: label,
+  );
 }

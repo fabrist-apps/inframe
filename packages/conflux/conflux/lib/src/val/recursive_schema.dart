@@ -1,4 +1,4 @@
-import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
 import 'package:conflux/src/val/issue.dart';
 import 'package:conflux/src/val/schema.dart';
 
@@ -7,8 +7,10 @@ import 'package:conflux/src/val/schema.dart';
 final class LazyResolver<T> {
   /// Rejects invalid depth bounds before any builder can run.
   LazyResolver(this.build, {this.maxDepth = 64, String? name, this.code, this.message})
-    : name = name == null || name.trim().isEmpty ? null : name.trim() {
-    if (maxDepth <= 0) throw ArgumentError.value(maxDepth, 'maxDepth', 'Must be positive');
+    : name = normalizeSchemaName(name) {
+    if (maxDepth <= 0) {
+      throw ArgumentError.value(maxDepth, 'maxDepth', 'Must be positive');
+    }
   }
 
   /// Synchronous caller-owned builder.
@@ -32,10 +34,18 @@ final class LazyResolver<T> {
   Schema<T> schema() => Schema.internal(_evaluate, name: name);
 
   Schema<T> _resolve() {
-    if (_resolving) throw StateError('Lazy schema builder re-entry');
+    if (_resolving) {
+      throw StateError('Lazy schema builder re-entry');
+    }
+
     final resolved = _resolved;
-    if (resolved != null) return resolved;
+
+    if (resolved != null) {
+      return resolved;
+    }
+
     _resolving = true;
+
     try {
       return _resolved = build();
     } finally {
@@ -43,20 +53,22 @@ final class LazyResolver<T> {
     }
   }
 
-  Evaluation<T> _evaluate(Object? input, ParseContext context, List<PathSegment> path) {
+  ParseResult<T> _evaluate(Object? input, ParseContext context, List<PathSegment> path) {
     final previous = context.lazyDepth[this] ?? 0;
+
     if (previous >= maxDepth) {
-      return Evaluation.invalid(
+      return invalid(
         IssueTemplate(
-          'MAX_DEPTH',
-          IssueKind.maxDepth,
-          'Must not exceed the maximum nesting depth',
-          customCode: code,
-          customMessage: message,
+          code ?? 'MAX_DEPTH',
+          (name) =>
+              message ??
+              '${name == null ? 'Must' : '$name must'} not exceed the maximum nesting depth',
         ).at(path, name),
       );
     }
+
     context.lazyDepth[this] = previous + 1;
+
     try {
       return _resolve().evaluate(input, context, path);
     } finally {
@@ -73,8 +85,10 @@ final class LazyResolver<T> {
 final class JsonSchema {
   /// Rejects invalid depth bounds at schema construction.
   JsonSchema({this.maxDepth = 64, String? name, this.code, this.message})
-    : name = name == null || name.trim().isEmpty ? null : name.trim() {
-    if (maxDepth <= 0) throw ArgumentError.value(maxDepth, 'maxDepth', 'Must be positive');
+    : name = normalizeSchemaName(name) {
+    if (maxDepth <= 0) {
+      throw ArgumentError.value(maxDepth, 'maxDepth', 'Must be positive');
+    }
   }
 
   /// Maximum nested container count, including a root container at depth one.
@@ -91,69 +105,93 @@ final class JsonSchema {
 
   /// A non-null JSON-compatible root. Nested null remains valid.
   Schema<Object> schema() => Schema.internal((input, context, path) {
-    if (input == null) return Evaluation.invalid(_issue(path, nullRoot: true));
+    if (input == null) {
+      return invalid(_issue(path, nullRoot: true));
+    }
+
     final result = _visit(input, path, 0, Set.identity());
-    return switch (result.value) {
-      Some(:final Object value) => Evaluation(Some(value), result.issues),
-      _ => Evaluation(const None(), result.issues),
+
+    return switch (result) {
+      Success(:final value) => Success(value!),
+      Failure(:final error) => Failure(error),
     };
   }, name: name);
 
   ValidationIssue _issue(List<PathSegment> path, {bool depth = false, bool nullRoot = false}) =>
       IssueTemplate(
-        depth
-            ? 'MAX_DEPTH'
-            : nullRoot
-            ? 'NOT_NULL'
-            : 'INVALID_TYPE',
-        depth ? IssueKind.maxDepth : IssueKind.invalidType,
-        depth
-            ? 'Must not exceed the maximum nesting depth'
-            : nullRoot
-            ? 'Must not be null'
-            : 'Must be a JSON value',
-        customCode: code,
-        customMessage: message,
+        code ??
+            (depth
+                ? 'MAX_DEPTH'
+                : nullRoot
+                ? 'NOT_NULL'
+                : 'INVALID_TYPE'),
+        (name) =>
+            message ??
+            (depth
+                ? '${name == null ? 'Must' : '$name must'} not exceed the maximum nesting depth'
+                : nullRoot
+                ? '${name == null ? 'Must' : '$name must'} not be null'
+                : '${name == null ? 'Must' : '$name must'} be a JSON value'),
       ).at(path, name);
 
-  Evaluation<Object?> _visit(Object? input, List<PathSegment> path, int depth, Set<Object> active) {
+  ParseResult<Object?> _visit(
+    Object? input,
+    List<PathSegment> path,
+    int depth,
+    Set<Object> active,
+  ) {
     if (input == null || input is String || input is bool || input is num && input.isFinite) {
-      return Evaluation.valid(input);
+      return Success(input);
     }
-    if (input is! List && input is! Map) return Evaluation.invalid(_issue(path));
+
+    if (input is! List && input is! Map) {
+      return invalid(_issue(path));
+    }
+
     if (input is Map && input.keys.any((key) => key is! String)) {
-      return Evaluation.invalid(_issue(path));
+      return invalid(_issue(path));
     }
+
     if (depth >= maxDepth || !active.add(input)) {
-      return Evaluation.invalid(_issue(path, depth: true));
+      return invalid(_issue(path, depth: true));
     }
+
     try {
       final issues = <ValidationIssue>[];
+
       if (input is List) {
         final values = <Object?>[];
+
         for (var index = 0; index < input.length; index++) {
-          final parsed = _visit(input[index], [...path, Index(index)], depth + 1, active);
-          issues.addAll(parsed.issues);
-          if (parsed.value case Some(:final value)) values.add(value);
+          final parsed = _visit(input[index], [...path, IndexSegment(index)], depth + 1, active);
+          switch (parsed) {
+            case Success(:final value):
+              values.add(value);
+            case Failure(:final error):
+              issues.addAll(error);
+          }
         }
-        return issues.isEmpty
-            ? Evaluation.valid(List<Object?>.unmodifiable(values))
-            : Evaluation(const None(), issues);
+
+        return issues.isEmpty ? Success(List<Object?>.unmodifiable(values)) : invalidAll(issues);
       }
-      if (input is Map) {
-        final values = <String, Object?>{};
-        for (final entry in input.entries) {
-          final key = entry.key;
-          if (key is! String) continue;
-          final parsed = _visit(entry.value, [...path, Field(key)], depth + 1, active);
-          issues.addAll(parsed.issues);
-          if (parsed.value case Some(:final value)) values[key] = value;
+
+      final values = <String, Object?>{};
+
+      for (final entry in (input as Map).entries) {
+        final key = entry.key as String;
+
+        final parsed = _visit(entry.value, [...path, FieldSegment(key)], depth + 1, active);
+        switch (parsed) {
+          case Success(:final value):
+            values[key] = value;
+          case Failure(:final error):
+            issues.addAll(error);
         }
-        return issues.isEmpty
-            ? Evaluation.valid(Map<String, Object?>.unmodifiable(values))
-            : Evaluation(const None(), issues);
       }
-      throw StateError('JSON container type changed during validation');
+
+      return issues.isEmpty
+          ? Success(Map<String, Object?>.unmodifiable(values))
+          : invalidAll(issues);
     } finally {
       active.remove(input);
     }

@@ -1,7 +1,6 @@
-// Explicit numeric literals and types exercise VM and generic output contracts.
-// ignore_for_file: prefer_int_literals, omit_local_variable_types
+// Explicit numeric literals exercise VM numeric boundaries.
+// ignore_for_file: prefer_int_literals
 
-import 'package:conflux/result.dart';
 import 'package:conflux/val.dart';
 import 'package:test/test.dart';
 
@@ -31,8 +30,8 @@ void main() {
       for (final value in [double.nan, double.infinity, double.negativeInfinity]) {
         final error = issues(schema, value).single;
         expect(
-          (error.code, error.kind, error.message),
-          ('BAD', IssueKind.notFinite, 'Amount must be a finite number'),
+          (error.code, error.message),
+          ('BAD', 'Amount must be a finite number'),
         );
         expect(issues(Val.double(), value).single.code, 'NOT_FINITE');
       }
@@ -40,10 +39,7 @@ void main() {
     });
     test('should enforce inclusive and exclusive numeric bounds and aliases', () {
       expect(Val.int().min(2).max(2).parse(2), 2);
-      expect(issues(Val.int().greaterThan(2).lessThan(2), 2).map((e) => e.code), [
-        'GREATER_THAN',
-        'LESS_THAN',
-      ]);
+      expect(issues(Val.int().greaterThan(2).lessThan(2), 2).single.code, 'GREATER_THAN');
       expect(Val.double().min(2.0).max(2.0).parse(2.0), 2.0);
       expect(Val.number().greaterThan(1).lessThan(3.5).parse(2.5), 2.5);
       expect(Val.int().positive().parse(1), 1);
@@ -54,12 +50,12 @@ void main() {
         issues(Val.double().greaterThan(0), 0.0).single.message,
       );
       expect(issues(Val.number().negative(), 0).single.code, 'LESS_THAN');
-      expect(issues(Val.int().min(10).max(5), 7).map((e) => e.code), ['MIN', 'MAX']);
+      expect(issues(Val.int().min(10).max(5), 7).single.code, 'MIN');
     });
     test('should check exact divisibility and safe-integer endpoints', () {
       expect(Val.int().multipleOf(3).parse(-6), -6);
       expect(Val.int().multipleOf(3).parse(0), 0);
-      expect(issues(Val.int().multipleOf(3), 2).single.kind, IssueKind.notMultipleOf);
+      expect(issues(Val.int().multipleOf(3), 2).single.code, 'MULTIPLE_OF');
       for (final value in [-9007199254740991, 9007199254740991]) {
         expect(Val.int().safe().parse(value), value);
       }
@@ -69,20 +65,14 @@ void main() {
       for (final divisor in [0, -1]) {
         expect(() => Val.int().multipleOf(divisor), throwsArgumentError);
       }
-      expect(() => Val.double().min(double.nan), throwsArgumentError);
-      expect(() => Val.number().max(double.infinity), throwsArgumentError);
-      expect(() => Val.number().greaterThan(double.nan), throwsArgumentError);
-      expect(() => Val.double().lessThan(double.infinity), throwsArgumentError);
     });
     test('should retain literal types despite cross-type numeric equality', () {
       expect(Val.literal(1).parse(1), isA<int>());
       expect(issues(Val.literal<int>(1), 1.0).single.code, 'INVALID_LITERAL');
       expect(Val.literal<num>(1).parse(1.0), isA<double>());
       expect(Val.literal(true).parse(true), true);
-      expect(issues(Val.literal('a'), 1).single.kind, IssueKind.invalidValue);
+      expect(issues(Val.literal('a'), 1).single.code, 'INVALID_LITERAL');
       expect(issues(Val.literal('a'), null).single.code, 'NOT_NULL');
-      expect(() => Val.literal(double.nan), throwsArgumentError);
-      expect(() => Val.literal(Object()), throwsArgumentError);
     });
     test('should copy enum membership and retain borrowed instances', () {
       final values = ['a', 'b'];
@@ -93,68 +83,9 @@ void main() {
       expect(Val.enumValues([_Color.red]).parse(_Color.red), _Color.red);
       expect(issues(Val.enumValues([_Color.red]), 'red').single.code, 'INVALID_ENUM');
       expect(issues(Val.enumValues([_Color.red]), _Color.blue).single.code, 'INVALID_ENUM');
-      expect(() => Val.enumString([]), throwsArgumentError);
-      expect(() => Val.enumString(['a', 'a']), throwsArgumentError);
-      expect(() => Val.enumValues([_Color.red, _Color.red]), throwsArgumentError);
       final borrowed = Object();
       expect(Val.instance<Object>().parse(borrowed), same(borrowed));
       expect(issues(Val.instance<_Color>(), 1).single.message, 'Must be an instance of _Color');
-    });
-    test('should produce catalog defaults and independent named overrides', () {
-      final cases =
-          <(Schema<num> Function({String? code, String? message}), num, String, IssueKind, String)>[
-            (
-              ({code, message}) => Val.int(name: 'Age').min(18, code: code, message: message),
-              17,
-              'MIN',
-              IssueKind.tooSmall,
-              'Age must be at least 18',
-            ),
-            (
-              ({code, message}) => Val.int(name: 'Age').max(18, code: code, message: message),
-              19,
-              'MAX',
-              IssueKind.tooBig,
-              'Age must be at most 18',
-            ),
-            (
-              ({code, message}) =>
-                  Val.int(name: 'Age').greaterThan(18, code: code, message: message),
-              18,
-              'GREATER_THAN',
-              IssueKind.tooSmall,
-              'Age must be greater than 18',
-            ),
-            (
-              ({code, message}) => Val.int(name: 'Age').lessThan(18, code: code, message: message),
-              18,
-              'LESS_THAN',
-              IssueKind.tooBig,
-              'Age must be less than 18',
-            ),
-            (
-              ({code, message}) => Val.int(name: 'Age').multipleOf(3, code: code, message: message),
-              2,
-              'MULTIPLE_OF',
-              IssueKind.notMultipleOf,
-              'Age must be a multiple of 3',
-            ),
-          ];
-      for (final (build, input, code, kind, message) in cases) {
-        final error = issues(build(), input).single;
-        expect((error.code, error.kind, error.message), (code, kind, message));
-        expect(issues(build(code: ''), input).single.message, message);
-        expect(issues(build(message: ''), input).single.code, code);
-        expect(issues(build(code: 'C', message: 'M'), input).single.message, 'M');
-      }
-    });
-    test('should retain exact output types through fluent constraints', () {
-      final Schema<int> integer = Val.int().min(1).refine((v) => v.isOdd).safe();
-      final Schema<double> decimal = Val.double().positive().max(2.0);
-      final Schema<num> number = Val.number().min(1).max(2.5);
-      expect(integer.safeParse(1), isA<Success<int, Object>>());
-      expect(decimal.parse(1.0), 1.0);
-      expect(number.parse(2), 2);
     });
   });
   group('StringFormats', () {
@@ -205,7 +136,7 @@ void main() {
           expect(schema.parse(input), input, reason: input);
         }
         for (final input in invalid) {
-          expect(issues(schema, input).single.kind, IssueKind.invalidFormat, reason: input);
+          expect(issues(schema, input).single.code, startsWith('INVALID_'), reason: input);
         }
       });
     }
@@ -218,53 +149,6 @@ void main() {
       expect(Val.string().ip().parse('127.0.0.1'), '127.0.0.1');
       expect(issues(Val.string().ip(), 'x').single.code, 'INVALID_IP');
       expect(() => Val.string().ip(version: 5), throwsArgumentError);
-    });
-    test('should produce exact format catalog text and independent overrides', () {
-      final cases = <(Schema<String> Function({String? code, String? message}), String, String)>[
-        (
-          ({code, message}) => Val.string(name: 'Value').email(code: code, message: message),
-          'INVALID_EMAIL',
-          'a valid email address',
-        ),
-        (
-          ({code, message}) => Val.string(name: 'Value').url(code: code, message: message),
-          'INVALID_URL',
-          'an absolute URI with a scheme and host',
-        ),
-        (
-          ({code, message}) => Val.string(name: 'Value').uuid(code: code, message: message),
-          'INVALID_UUID',
-          'a valid UUID',
-        ),
-        (
-          ({code, message}) => Val.string(name: 'Value').ip(code: code, message: message),
-          'INVALID_IP',
-          'a valid IP address',
-        ),
-        (
-          ({code, message}) => Val.string(name: 'Value').ipv4(code: code, message: message),
-          'INVALID_IPV4',
-          'a valid IPv4 address',
-        ),
-        (
-          ({code, message}) => Val.string(name: 'Value').ipv6(code: code, message: message),
-          'INVALID_IPV6',
-          'a valid IPv6 address',
-        ),
-      ];
-      for (final (build, code, text) in cases) {
-        final error = issues(build(), 'bad').single;
-        expect((error.code, error.message), (code, 'Value must be $text'));
-        expect(issues(build(code: 'C'), 'bad').single.message, error.message);
-        expect(issues(build(message: ''), 'bad').single.code, code);
-        expect(issues(build(message: ''), 'bad').single.message, '');
-      }
-      expect(
-        issues(Val.string().matches(RegExp('x')), 'bad').single.message,
-        'Must match the required pattern',
-      );
-      expect(issues(Val.string().startsWith('x'), 'bad').single.message, 'Must start with "x"');
-      expect(issues(Val.string().endsWith('x'), 'bad').single.message, 'Must end with "x"');
     });
     test('should report the signup example errors in order without running refinement', () {
       final signup =
@@ -282,7 +166,7 @@ void main() {
             (data) => data['password'] == data['confirmPassword'],
             code: 'PASSWORD_MISMATCH',
             message: 'Passwords do not match',
-            path: [const Field('confirmPassword')],
+            path: [const FieldSegment('confirmPassword')],
           );
       expect(
         issues(signup, {

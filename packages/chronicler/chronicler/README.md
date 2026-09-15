@@ -257,7 +257,7 @@ explicitly with `Moment.fromDateTime(value)`, which returns a `Result`.
 The codec encodes timestamps as UTC ISO strings with six fractional digits and a trailing `Z`,
 using Moment's supported year range. Decoding delegates timestamp parsing and validation to Moment.
 It encodes zoned moments as their UTC instant. Generated model serialization uses
-`dart_mappable_conflux`; no mapper initialization is required from callers.
+Conflux's `MomentMapper`; no mapper initialization is required from callers.
 
 Elapsed durations still use `Duration` and monotonic clocks. This migration does not change
 scheduling, retry, or shutdown behavior.

@@ -13,8 +13,8 @@ void main() {
   final Schema<Color> instance = Val.instance<Color>();
   final Schema<List<String?>> list = Val.list(Val.string().nullable()).unique();
   final Schema<Map<String, int>> map = Val.map(integer);
-  final ObjectSchema<Map<String, Object?>> object = Val.object({'count': integer}).partial();
-  final ObjectSchema<Map<String, Object?>?> nullableObject = object.nullable().extend({'color': enumValue.optional()});
+  final ObjectSchema object = Val.object({'count': integer}).partial();
+  final Schema<Map<String, Object?>?> nullableObject = object.extend({'color': enumValue.optional()}).nullable();
   final Schema<Object> union = Val.anyOf<Object>([integer, boolean]);
   final Schema<Object> json = Val.any();
   final Schema<Map<String, Object?>> discriminated = Val.discriminated(discriminatorKey: 'kind', schemas: {

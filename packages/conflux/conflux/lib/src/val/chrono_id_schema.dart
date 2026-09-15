@@ -5,21 +5,13 @@ import 'package:conflux/src/val/string_schema.dart';
 
 /// Chrono ID checks reuse the independent core's complete format contract.
 extension ChronoIdChecks on Schema<String> {
-  /// Validates [prefix] and body [size] eagerly, then retains valid strings.
-  ///
-  /// Omitted prefix requires an unprefixed ID. Configuration validation invokes
-  /// the pure core validator with a dummy candidate; it never generates an ID.
-  StringSchema chronoId({String? prefix, int size = 24, String? code, String? message}) {
-    ChronoID.isValid('', prefix: prefix, size: size);
-    return withCheck(
-      (value) => ChronoID.isValid(value, prefix: prefix, size: size),
-      IssueTemplate(
-        'INVALID_CHRONO_ID',
-        IssueKind.invalidFormat,
-        'Must be a valid Chrono ID',
-        customCode: code,
-        customMessage: message,
-      ),
-    );
-  }
+  /// Validates a Chrono ID using the configured [prefix] and body [size].
+  StringSchema chronoId({String? prefix, int size = 24, String? code, String? message}) =>
+      withCheck(
+        (value) => ChronoID.isValid(value, prefix: prefix, size: size),
+        IssueTemplate(
+          code ?? 'INVALID_CHRONO_ID',
+          (name) => message ?? '${name == null ? 'Must' : '$name must'} be a valid Chrono ID',
+        ),
+      );
 }

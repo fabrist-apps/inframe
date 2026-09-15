@@ -65,7 +65,12 @@ void main() {
       }).single;
       expect(error.code, 'MAX_DEPTH');
       expect(error.message, 'Node must not exceed the maximum nesting depth');
-      expect(error.path, [const Field('children'), Index(0), const Field('children'), Index(0)]);
+      expect(error.path, [
+        const FieldSegment('children'),
+        IndexSegment(0),
+        const FieldSegment('children'),
+        IndexSegment(0),
+      ]);
       expect(node.parse(leaf), leaf);
       final cycle = <String, Object?>{'label': 'cycle'};
       cycle['children'] = [cycle];
@@ -101,7 +106,7 @@ void main() {
       late Schema<Object?> recursive;
       recursive = Val.lazy(() => recursive, maxDepth: 1, code: '', message: 'Limit');
       final error = issues(recursive, 'x').single;
-      expect((error.code, error.kind, error.message), ('', IssueKind.maxDepth, 'Limit'));
+      expect((error.code, error.message), ('', 'Limit'));
       expect(() => Val.lazy(Val.string, maxDepth: 0), throwsArgumentError);
     });
   });
@@ -131,9 +136,9 @@ void main() {
         'b': {1: 'not string'},
       });
       expect(errors.map((e) => e.path), [
-        [const Field('a'), Index(0)],
-        [const Field('a'), Index(1)],
-        [const Field('b')],
+        [const FieldSegment('a'), IndexSegment(0)],
+        [const FieldSegment('a'), IndexSegment(1)],
+        [const FieldSegment('b')],
       ]);
       expect(errors.map((e) => e.code), everyElement('INVALID_TYPE'));
     });
@@ -153,7 +158,7 @@ void main() {
             [1],
           ],
         ]).single.path,
-        [Index(0), Index(0)],
+        [IndexSegment(0), IndexSegment(0)],
       );
       final shared = [1];
       expect(schema.parse([shared, shared]), [
@@ -162,7 +167,7 @@ void main() {
       ]);
       final cycle = <Object?>[];
       cycle.add(cycle);
-      expect(issues(schema, cycle).single.path, [Index(0)]);
+      expect(issues(schema, cycle).single.path, [IndexSegment(0)]);
       final mapCycle = <String, Object?>{};
       mapCycle['self'] = mapCycle;
       expect(issues(schema, mapCycle).single.code, 'MAX_DEPTH');

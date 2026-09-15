@@ -2,7 +2,6 @@ import 'dart:core';
 import 'dart:core' as core;
 
 import 'package:conflux/moment.dart';
-import 'package:conflux/src/val/chrono_id_schema.dart';
 import 'package:conflux/src/val/collection_schema.dart';
 import 'package:conflux/src/val/membership_schema.dart';
 import 'package:conflux/src/val/numeric_schema.dart';
@@ -14,15 +13,6 @@ import 'package:conflux/src/val/union_schema.dart';
 
 /// Factories for immutable synchronous validation schemas.
 abstract final class Val {
-  /// Validates a Chrono ID string using the core format contract.
-  static StringSchema chronoId({
-    String? name,
-    String? prefix,
-    core.int size = 24,
-    String? code,
-    String? message,
-  }) => string(name: name).chronoId(prefix: prefix, size: size, code: code, message: message);
-
   /// Validates an existing Moment without changing its representation.
   static Schema<Moment> moment({String? name, String? code, String? message}) =>
       typeSchema(type: 'a Moment', name: name, code: code, message: message);
@@ -47,7 +37,7 @@ abstract final class Val {
   /// Selects a direct object branch through a required string literal field.
   static Schema<Map<String, Object?>> discriminated({
     required String discriminatorKey,
-    required Map<String, ObjectSchema<Map<String, Object?>?>> schemas,
+    required Map<String, Schema<Map<String, Object?>?>> schemas,
     String? name,
     String? code,
     String? message,
@@ -91,13 +81,20 @@ abstract final class Val {
   static Schema<bool> boolean({String? name, String? code, String? message}) =>
       typeSchema(type: 'a boolean', name: name, code: code, message: message);
 
-  /// Accepts the configured primitive value with its exact declared type.
-  static LiteralSchema<T> literal<T extends Object>(
+  /// Accepts the configured value with its exact declared type and equality.
+  static Schema<T> literal<T extends Object>(
     T expected, {
     String? name,
     String? code,
     String? message,
-  }) => LiteralSchema(expected, name: name, code: code, message: message);
+  }) => membershipSchema(
+    (value) => value == expected,
+    defaultCode: 'INVALID_LITERAL',
+    defaultMessage: (name) => '${name == null ? 'Must' : '$name must'} equal the expected value',
+    name: name,
+    code: code,
+    message: message,
+  );
 
   /// Accepts one of the configured case-sensitive strings.
   static Schema<String> enumString(
@@ -124,7 +121,7 @@ abstract final class Val {
       numericSchema(type: 'an integer', name: name, code: code, message: message);
 
   /// Validates declared fields and rejects unknown keys by default.
-  static ObjectSchema<Map<String, Object?>> object(
+  static ObjectSchema object(
     Map<String, Schema<Object?>> fields, {
     String? name,
     String? code,

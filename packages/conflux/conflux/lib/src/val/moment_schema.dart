@@ -1,5 +1,4 @@
 import 'package:conflux/moment.dart';
-import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/val/issue.dart';
 import 'package:conflux/src/val/schema.dart';
@@ -13,11 +12,10 @@ extension MomentChecks<T extends Moment?> on Schema<T> {
   Schema<T> min(Moment minimum, {String? code, String? message}) => withCheck(
     (value) => value == null || value.compareTo(minimum) >= 0,
     IssueTemplate(
-      'MIN_MOMENT',
-      IssueKind.tooSmall,
-      'Must be at or after ${minimum.formatIso()}',
-      customCode: code,
-      customMessage: message,
+      code ?? 'MIN_MOMENT',
+      (name) =>
+          message ??
+          '${name == null ? 'Must' : '$name must'} be at or after ${minimum.formatIso()}',
     ),
   );
 
@@ -25,11 +23,10 @@ extension MomentChecks<T extends Moment?> on Schema<T> {
   Schema<T> max(Moment maximum, {String? code, String? message}) => withCheck(
     (value) => value == null || value.compareTo(maximum) <= 0,
     IssueTemplate(
-      'MAX_MOMENT',
-      IssueKind.tooBig,
-      'Must be at or before ${maximum.formatIso()}',
-      customCode: code,
-      customMessage: message,
+      code ?? 'MAX_MOMENT',
+      (name) =>
+          message ??
+          '${name == null ? 'Must' : '$name must'} be at or before ${maximum.formatIso()}',
     ),
   );
 }
@@ -43,9 +40,9 @@ extension StringMomentChecks on Schema<String> {
   /// Converts only after preceding string checks pass. Later checks receive Moment.
   MomentSchema moment({String? code, String? message}) => Schema.internal(
     (input, context, path) {
-      switch (evaluate(input, context, path).finish()) {
+      switch (evaluate(input, context, path)) {
         case Failure(:final error):
-          return Evaluation(const None(), error);
+          return Failure(error);
         case Success(:final value):
           return _parseMoment(value, path, name, code, message);
       }
@@ -54,7 +51,6 @@ extension StringMomentChecks on Schema<String> {
     isOptional: isOptional,
     missingCode: missingCode,
     missingMessage: missingMessage,
-    isNullable: isNullable,
   );
 }
 
@@ -63,12 +59,12 @@ extension NullableStringMomentChecks on Schema<String?> {
   /// Converts present strings while retaining nullable output and source checks.
   Schema<Moment?> moment({String? code, String? message}) => Schema.internal(
     (input, context, path) {
-      switch (evaluate(input, context, path).finish()) {
+      switch (evaluate(input, context, path)) {
         case Failure(:final error):
-          return Evaluation(const None(), error);
+          return Failure(error);
         case Success(:final value):
           return value == null
-              ? Evaluation.valid(null)
+              ? const Success(null)
               : _parseMoment(value, path, name, code, message);
       }
     },
@@ -76,25 +72,21 @@ extension NullableStringMomentChecks on Schema<String?> {
     isOptional: isOptional,
     missingCode: missingCode,
     missingMessage: missingMessage,
-    isNullable: isNullable,
   );
 }
 
 IssueTemplate _timestampIssue(String? code, String? message) => IssueTemplate(
-  'INVALID_MOMENT',
-  IssueKind.invalidFormat,
-  'Must be a valid timestamp',
-  customCode: code,
-  customMessage: message,
+  code ?? 'INVALID_MOMENT',
+  (name) => message ?? '${name == null ? 'Must' : '$name must'} be a valid timestamp',
 );
 
-Evaluation<Moment> _parseMoment(
+ParseResult<Moment> _parseMoment(
   String value,
   List<PathSegment> path,
   String? name,
   String? code,
   String? message,
 ) => switch (Moment.parse(value)) {
-  Success(:final value) => Evaluation.valid(value),
-  Failure() => Evaluation.invalid(_timestampIssue(code, message).at(path, name)),
+  Success(:final value) => Success(value),
+  Failure() => invalid(_timestampIssue(code, message).at(path, name)),
 };

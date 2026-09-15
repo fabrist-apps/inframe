@@ -7,37 +7,16 @@ typedef StringSchema = Schema<String>;
 /// String constraints preserve access to other string constraints.
 extension StringChecks on Schema<String> {
   /// Requires at least [minimum] UTF-16 code units.
-  StringSchema minLength(int minimum, {String? code, String? message}) => _length(
-    minimum,
-    (length) => length >= minimum,
-    'MIN_LENGTH',
-    IssueKind.tooSmall,
-    'at least',
-    code,
-    message,
-  );
+  StringSchema minLength(int minimum, {String? code, String? message}) =>
+      _length(minimum, (length) => length >= minimum, 'MIN_LENGTH', 'at least', code, message);
 
   /// Requires at most [maximum] UTF-16 code units.
-  StringSchema maxLength(int maximum, {String? code, String? message}) => _length(
-    maximum,
-    (length) => length <= maximum,
-    'MAX_LENGTH',
-    IssueKind.tooBig,
-    'at most',
-    code,
-    message,
-  );
+  StringSchema maxLength(int maximum, {String? code, String? message}) =>
+      _length(maximum, (length) => length <= maximum, 'MAX_LENGTH', 'at most', code, message);
 
   /// Requires exactly [length] UTF-16 code units.
-  StringSchema length(int length, {String? code, String? message}) => _length(
-    length,
-    (actual) => actual == length,
-    'LENGTH',
-    IssueKind.invalidLength,
-    'exactly',
-    code,
-    message,
-  );
+  StringSchema length(int length, {String? code, String? message}) =>
+      _length(length, (actual) => actual == length, 'LENGTH', 'exactly', code, message);
 
   /// Alias for minLength(1).
   StringSchema notEmpty({String? code, String? message}) =>
@@ -47,23 +26,18 @@ extension StringChecks on Schema<String> {
     int count,
     bool Function(int) accepts,
     String defaultCode,
-    IssueKind kind,
     String comparison,
     String? code,
     String? message,
-  ) {
-    if (count < 0) throw ArgumentError.value(count, 'length', 'Must be non-negative');
-    return withCheck(
-      (value) => accepts(value.length),
-      IssueTemplate(
-        defaultCode,
-        kind,
-        'Must contain $comparison $count ${count == 1 ? 'character' : 'characters'}',
-        customCode: code,
-        customMessage: message,
-      ),
-    );
-  }
+  ) => withCheck(
+    (value) => accepts(value.length),
+    IssueTemplate(
+      code ?? defaultCode,
+      (name) =>
+          message ??
+          '${name == null ? 'Must' : '$name must'} contain $comparison $count ${count == 1 ? 'character' : 'characters'}',
+    ),
+  );
 }
 
 /// Explicit, non-normalizing first-version string format profiles.
@@ -72,7 +46,7 @@ extension StringFormats on Schema<String> {
   StringSchema email({String? code, String? message}) => _format(
     (value) => _fullMatch(_email, value),
     'INVALID_EMAIL',
-    'Must be a valid email address',
+    (name) => '${name == null ? 'Must' : '$name must'} be a valid email address',
     code,
     message,
   );
@@ -84,7 +58,7 @@ extension StringFormats on Schema<String> {
       return uri != null && uri.hasScheme && uri.host.isNotEmpty;
     },
     'INVALID_URL',
-    'Must be an absolute URI with a scheme and host',
+    (name) => '${name == null ? 'Must' : '$name must'} be an absolute URI with a scheme and host',
     code,
     message,
   );
@@ -93,38 +67,55 @@ extension StringFormats on Schema<String> {
   StringSchema uuid({String? code, String? message}) => _format(
     (value) => _fullMatch(_uuid, value),
     'INVALID_UUID',
-    'Must be a valid UUID',
+    (name) => '${name == null ? 'Must' : '$name must'} be a valid UUID',
     code,
     message,
   );
 
   /// Uses RegExp.hasMatch; callers add anchors when they need a whole-string match.
-  StringSchema matches(RegExp pattern, {String? code, String? message}) =>
-      _format(pattern.hasMatch, 'PATTERN', 'Must match the required pattern', code, message);
+  StringSchema matches(RegExp pattern, {String? code, String? message}) => _format(
+    pattern.hasMatch,
+    'PATTERN',
+    (name) => '${name == null ? 'Must' : '$name must'} match the required pattern',
+    code,
+    message,
+  );
 
   /// Requires a case-sensitive literal prefix.
   StringSchema startsWith(String text, {String? code, String? message}) => _format(
     (value) => value.startsWith(text),
     'STARTS_WITH',
-    'Must start with "$text"',
+    (name) => '${name == null ? 'Must' : '$name must'} start with "$text"',
     code,
     message,
   );
 
   /// Requires a case-sensitive literal suffix.
-  StringSchema endsWith(String text, {String? code, String? message}) =>
-      _format((value) => value.endsWith(text), 'ENDS_WITH', 'Must end with "$text"', code, message);
+  StringSchema endsWith(String text, {String? code, String? message}) => _format(
+    (value) => value.endsWith(text),
+    'ENDS_WITH',
+    (name) => '${name == null ? 'Must' : '$name must'} end with "$text"',
+    code,
+    message,
+  );
 
   /// Requires case-sensitive literal text, not a regular expression.
-  StringSchema contains(String text, {String? code, String? message}) =>
-      _format((value) => value.contains(text), 'CONTAINS', 'Must contain "$text"', code, message);
+  StringSchema contains(String text, {String? code, String? message}) => _format(
+    (value) => value.contains(text),
+    'CONTAINS',
+    (name) => '${name == null ? 'Must' : '$name must'} contain "$text"',
+    code,
+    message,
+  );
 
   /// Accepts IPv4, IPv6, or either when version is null. Invalid versions throw.
   StringSchema ip({int? version, String? code, String? message}) {
     if (version != null && version != 4 && version != 6) {
       throw ArgumentError.value(version, 'version', 'Must be null, 4, or 6');
     }
+
     final label = version == null ? 'IP' : 'IPv$version';
+
     return _format(
       (value) => switch (version) {
         4 => _ipv4(value),
@@ -132,7 +123,7 @@ extension StringFormats on Schema<String> {
         _ => _ipv4(value) || _ipv6(value),
       },
       'INVALID_${label.toUpperCase()}',
-      'Must be a valid $label address',
+      (name) => '${name == null ? 'Must' : '$name must'} be a valid $label address',
       code,
       message,
     );
@@ -149,18 +140,12 @@ extension StringFormats on Schema<String> {
   StringSchema _format(
     bool Function(String) accepts,
     String defaultCode,
-    String defaultMessage,
+    String Function(String? name) defaultMessage,
     String? code,
     String? message,
   ) => withCheck(
     accepts,
-    IssueTemplate(
-      defaultCode,
-      IssueKind.invalidFormat,
-      defaultMessage,
-      customCode: code,
-      customMessage: message,
-    ),
+    IssueTemplate(code ?? defaultCode, (name) => message ?? (defaultMessage(name))),
   );
 
   static final _email = RegExp(
@@ -174,11 +159,13 @@ extension StringFormats on Schema<String> {
 
   static bool _fullMatch(RegExp pattern, String value) {
     final match = pattern.firstMatch(value);
+
     return match != null && match.start == 0 && match.end == value.length;
   }
 
   static bool _ipv4(String value) {
     final parts = value.split('.');
+
     return parts.length == 4 &&
         parts.every((part) => _fullMatch(_octet, part) && int.parse(part) <= 255);
   }
@@ -191,6 +178,7 @@ extension StringFormats on Schema<String> {
         _whitespace.hasMatch(value)) {
       return false;
     }
+
     try {
       Uri.parseIPv6Address(value);
       return true;
