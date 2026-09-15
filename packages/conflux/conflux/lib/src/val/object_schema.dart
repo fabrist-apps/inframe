@@ -20,13 +20,14 @@ final class ObjectShape {
   /// Copies field configuration.
   ObjectShape(
     Map<String, Schema<Object?>> fields, {
-    this.name,
+    String? name,
     this.code,
     this.message,
     this.policy = UnknownKeys.strict,
     this.strictCode,
     this.strictMessage,
-  }) : fields = Map.unmodifiable(fields);
+  }) : fields = Map.unmodifiable(fields),
+       name = name == null || name.trim().isEmpty ? null : name.trim();
 
   /// Declared field schemas.
   final Map<String, Schema<Object?>> fields;
@@ -62,12 +63,6 @@ final class ObjectShape {
 
   /// Validates a complete shape before object-level stages run.
   Schema<Map<String, Object?>> schema() {
-    final root = typeSchema<Map<String, Object?>>(
-      type: 'an object with string keys',
-      name: name,
-      code: code,
-      message: message,
-    );
     return Schema.internal((input, context, path) {
       // Validate keys, not the map's declared generic arguments.
       if (input is! Map || input.keys.any((key) => key is! String)) {
@@ -78,7 +73,7 @@ final class ObjectShape {
             input == null ? 'Must not be null' : 'Must be an object with string keys',
             customCode: code,
             customMessage: message,
-          ).at(path, root.name),
+          ).at(path, name),
         );
       }
       final output = <String, Object?>{};
@@ -108,7 +103,7 @@ final class ObjectShape {
               'Property is not allowed',
               customCode: strictCode,
               customMessage: strictMessage,
-            ).at([...path, Field(key)], root.name),
+            ).at([...path, Field(key)], name),
           );
         } else if (policy == UnknownKeys.passthrough) {
           output[key] = input[key];

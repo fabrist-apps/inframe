@@ -26,6 +26,15 @@ void main() {
       await fixtures.analyze('val_consumer', 'issues.dart');
       await fixtures.run('val_consumer', 'issues.dart');
     });
+    test('should expose the full catalog with exact output types and sound widening', () async {
+      await fixtures.analyze('val_consumer', 'catalog.dart');
+      await fixtures.run('val_consumer', 'catalog.dart');
+      await fixtures.analyzeFails(
+        'val_consumer',
+        'invalid_numeric_bound.dart',
+        containing: 'ARGUMENT_TYPE_NOT_ASSIGNABLE',
+      );
+    });
     test('should reject non-string codes statically', () async {
       await fixtures.analyzeFails(
         'val_consumer',
