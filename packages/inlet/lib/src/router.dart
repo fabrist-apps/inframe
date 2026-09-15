@@ -21,14 +21,15 @@ class Router {
     List<Middleware> middleware = const [],
   }) {
     _ensureEditable();
+
     final registration = _RouteRegistration(
       method: _validateMethod(method),
       rawPath: path,
       pattern: _RoutePattern.parse(path, strict: _strict),
       handler: handler,
       middleware: List.unmodifiable(middleware),
-    );
-    _ensureNoConflict(registration, _registrations);
+    )..ensureNoConflict(_registrations);
+
     _registrations.add(registration);
   }
 
@@ -73,6 +74,7 @@ class Router {
 
     final childScope = List<Middleware>.unmodifiable(router._middleware);
     final mounted = <_RouteRegistration>[];
+
     for (final child in router._registrations) {
       final rawPath = _joinPaths(prefix, child.rawPath);
       final registration = _RouteRegistration(
@@ -81,10 +83,12 @@ class Router {
         pattern: _RoutePattern.parse(rawPath, strict: _strict),
         handler: child.handler,
         middleware: List.unmodifiable([...childScope, ...child.middleware]),
-      );
-      _ensureNoConflict(registration, _registrations.followedBy(mounted));
+      )..ensureNoConflict(_registrations.followedBy(mounted));
+
       mounted.add(registration);
     }
+
+    // Publish only after every mounted registration has passed validation.
     _registrations.addAll(mounted);
   }
 
@@ -93,8 +97,10 @@ class Router {
       final frozen = _compiled;
       if (frozen != null) {
         request._admit();
+
         return frozen;
       }
+
       final starting = _starting;
       if (starting != null) {
         await starting;
@@ -104,15 +110,18 @@ class Router {
       final candidate = _compile();
       request._admit();
       _compiled = candidate;
+
       return candidate;
     }
   }
 
+  // A failed bind leaves the router editable; admissions wait for it to settle.
   Future<T> _freezeAfter<T>(Future<T> Function() start) async {
     while (true) {
       if (_compiled != null) {
         return start();
       }
+
       final starting = _starting;
       if (starting != null) {
         await starting;
@@ -122,9 +131,11 @@ class Router {
       final candidate = _compile();
       final settled = Completer<void>();
       _starting = settled.future;
+
       try {
         final value = await start();
         _compiled = candidate;
+
         return value;
       } finally {
         _starting = null;
@@ -138,6 +149,25 @@ class Router {
     rootMiddleware: _middleware,
     strict: _strict,
   );
+
+  void _validateMountPrefix(String prefix) {
+    if (prefix != '/' && prefix.endsWith('/')) {
+      throw ArgumentError.value(prefix, 'prefix', 'must not end with a slash');
+    }
+
+    final pattern = _RoutePattern.parse(prefix, strict: true);
+    if (pattern.segments.any((segment) => segment is _WildcardSegment)) {
+      throw ArgumentError.value(prefix, 'prefix', 'must not contain a wildcard');
+    }
+  }
+
+  String _joinPaths(String prefix, String childPath) {
+    if (prefix == '/') {
+      return childPath;
+    }
+
+    return '$prefix$childPath';
+  }
 
   void _ensureEditable() {
     if (_compiled != null || _starting != null) {
@@ -160,6 +190,14 @@ final class _RouteRegistration {
   final _RoutePattern pattern;
   final Handler handler;
   final List<Middleware> middleware;
+
+  void ensureNoConflict(Iterable<_RouteRegistration> existing) {
+    for (final registration in existing) {
+      if (method == registration.method && pattern.hasSameShape(registration.pattern)) {
+        throw StateError('An equivalent route is already registered for $method.');
+      }
+    }
+  }
 }
 
 final class _RoutePattern {
@@ -174,64 +212,75 @@ final class _RoutePattern {
 
     final segments = <_PatternSegment>[];
     final captureNames = <String>[];
+
     for (var index = 0; index < rawSegments.length; index++) {
       final rawSegment = rawSegments[index];
-      if (rawSegment.startsWith(':')) {
-        _addCapture(
-          rawSegment: rawSegment,
-          captureNames: captureNames,
-          segments: segments,
-          segment: const _ParameterSegment(),
-          path: path,
-        );
-        continue;
-      }
-      if (rawSegment.startsWith('*')) {
-        if (index != rawSegments.length - 1) {
+      final isWildcard = rawSegment.startsWith('*');
+      if (rawSegment.startsWith(':') || isWildcard) {
+        if (isWildcard && index != rawSegments.length - 1) {
           throw ArgumentError.value(path, 'path', 'a wildcard must be the final segment');
         }
-        _addCapture(
-          rawSegment: rawSegment,
-          captureNames: captureNames,
-          segments: segments,
-          segment: const _WildcardSegment(),
-          path: path,
-        );
+
+        final name = rawSegment.substring(1);
+        if (!_captureName.hasMatch(name) || captureNames.contains(name)) {
+          throw ArgumentError.value(path, 'path', 'contains an invalid or repeated capture name');
+        }
+
+        captureNames.add(name);
+        segments.add(isWildcard ? const _WildcardSegment() : const _ParameterSegment());
         continue;
       }
+
       if (rawSegment.contains(':') || rawSegment.contains('*')) {
         throw ArgumentError.value(path, 'path', 'captures must occupy a whole segment');
       }
+
       segments.add(_LiteralSegment(_decodePatternLiteral(rawSegment, path)));
     }
-    if (!strict &&
-        segments.isNotEmpty &&
-        segments.last is _LiteralSegment &&
-        (segments.last as _LiteralSegment).value.isEmpty) {
+
+    if (segments.lastOrNull case _LiteralSegment(value: '') when !strict) {
       segments.removeLast();
     }
+
     return _RoutePattern(List.unmodifiable(segments), List.unmodifiable(captureNames));
   }
 
+  static final _captureName = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+
   final List<_PatternSegment> segments;
   final List<String> captureNames;
+
+  static String _decodePatternLiteral(String rawSegment, String path) {
+    if (rawSegment.isEmpty) {
+      return '';
+    }
+
+    try {
+      return Uri.parse('/$rawSegment').pathSegments.single;
+    } on Object {
+      throw ArgumentError.value(path, 'path', 'contains invalid percent-encoded UTF-8');
+    }
+  }
 
   bool hasSameShape(_RoutePattern other) {
     if (segments.length != other.segments.length) {
       return false;
     }
+
     for (var index = 0; index < segments.length; index++) {
       final left = segments[index];
       final right = other.segments[index];
       if (left.runtimeType != right.runtimeType) {
         return false;
       }
+
       if (left case _LiteralSegment(:final value)) {
         if ((right as _LiteralSegment).value != value) {
           return false;
         }
       }
     }
+
     return true;
   }
 }
@@ -267,6 +316,7 @@ final class _CompiledRouter {
     required bool strict,
   }) {
     final root = _BuildRouteNode();
+
     for (final registration in registrations) {
       var node = root;
       for (final segment in registration.pattern.segments) {
@@ -276,8 +326,10 @@ final class _CompiledRouter {
           _WildcardSegment() => node.wildcard ??= _BuildRouteNode(),
         };
       }
+
       node.endpoints[registration.method] = registration;
     }
+
     return _CompiledRouter(
       root.freeze(),
       rootMiddleware: List.unmodifiable(rootMiddleware),
@@ -296,6 +348,7 @@ final class _CompiledRouter {
     } on FormatException {
       return const _BadRoutePath();
     }
+
     if (!strict && segments.isNotEmpty && segments.last.isEmpty) {
       segments.removeLast();
     }
@@ -311,6 +364,7 @@ final class _CompiledRouter {
       if (explicit != null) {
         return explicit;
       }
+
       final fallback = _matchForMethod(candidates, 'GET');
       if (fallback != null) {
         return fallback.asHeadFallback();
@@ -329,10 +383,26 @@ final class _CompiledRouter {
         allowed.add('HEAD');
       }
     }
+
     final sorted = allowed.toList()..sort();
     return _MethodNotAllowed(List.unmodifiable(sorted));
   }
 
+  _MatchedRoute? _matchForMethod(
+    List<_PathCandidate> candidates,
+    String method,
+  ) {
+    for (final candidate in candidates) {
+      final match = candidate.matchForMethod(method);
+      if (match != null) {
+        return match;
+      }
+    }
+
+    return null;
+  }
+
+  // Collect in precedence order; method selection may backtrack to a later path.
   void _collectCandidates(
     _CompiledRouteNode node,
     List<String> segments,
@@ -344,10 +414,12 @@ final class _CompiledRouter {
       if (node.endpoints.isNotEmpty) {
         candidates.add(_PathCandidate(node, captures));
       }
+
       final wildcard = node.wildcard;
       if (wildcard != null && (!strict || index == 0) && wildcard.endpoints.isNotEmpty) {
         candidates.add(_PathCandidate(wildcard, [...captures, '']));
       }
+
       return;
     }
 
@@ -356,10 +428,12 @@ final class _CompiledRouter {
     if (literal != null) {
       _collectCandidates(literal, segments, index + 1, captures, candidates);
     }
+
     final parameter = node.parameter;
     if (parameter != null && segment.isNotEmpty) {
       _collectCandidates(parameter, segments, index + 1, [...captures, segment], candidates);
     }
+
     final wildcard = node.wildcard;
     if (wildcard != null && wildcard.endpoints.isNotEmpty) {
       candidates.add(_PathCandidate(wildcard, [...captures, segments.sublist(index).join('/')]));
@@ -401,26 +475,20 @@ final class _PathCandidate {
   final _CompiledRouteNode node;
   final List<String> captures;
 
-  _MatchedRoute toMatch(String method) {
-    final registration = node.endpoints[method]!;
+  _MatchedRoute? matchForMethod(String method) {
+    final registration = node.endpoints[method];
+    if (registration == null) {
+      return null;
+    }
+
     final parameters = <String, String>{};
+
     for (var index = 0; index < captures.length; index++) {
       parameters[registration.pattern.captureNames[index]] = captures[index];
     }
+
     return _MatchedRoute(registration, Map.unmodifiable(parameters));
   }
-}
-
-_MatchedRoute? _matchForMethod(
-  List<_PathCandidate> candidates,
-  String method,
-) {
-  for (final candidate in candidates) {
-    if (candidate.node.endpoints.containsKey(method)) {
-      return candidate.toMatch(method);
-    }
-  }
-  return null;
 }
 
 sealed class _RouteResolution {
@@ -457,63 +525,4 @@ final class _MethodNotAllowed extends _RouteResolution {
   const _MethodNotAllowed(this.allowedMethods);
 
   final List<String> allowedMethods;
-}
-
-void _addCapture({
-  required String rawSegment,
-  required List<String> captureNames,
-  required List<_PatternSegment> segments,
-  required _PatternSegment segment,
-  required String path,
-}) {
-  final name = rawSegment.substring(1);
-  final validName = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(name);
-  if (!validName || captureNames.contains(name)) {
-    throw ArgumentError.value(path, 'path', 'contains an invalid or repeated capture name');
-  }
-  captureNames.add(name);
-  segments.add(segment);
-}
-
-String _decodePatternLiteral(String rawSegment, String path) {
-  if (rawSegment.isEmpty) {
-    return '';
-  }
-  try {
-    return Uri.parse('/$rawSegment').pathSegments.single;
-  } on Object {
-    throw ArgumentError.value(path, 'path', 'contains invalid percent-encoded UTF-8');
-  }
-}
-
-void _ensureNoConflict(
-  _RouteRegistration candidate,
-  Iterable<_RouteRegistration> existing,
-) {
-  for (final registration in existing) {
-    if (candidate.method == registration.method &&
-        candidate.pattern.hasSameShape(registration.pattern)) {
-      throw StateError('An equivalent route is already registered for ${candidate.method}.');
-    }
-  }
-}
-
-void _validateMountPrefix(String prefix) {
-  if (prefix != '/' && prefix.endsWith('/')) {
-    throw ArgumentError.value(prefix, 'prefix', 'must not end with a slash');
-  }
-  final pattern = _RoutePattern.parse(prefix, strict: true);
-  if (pattern.segments.any((segment) => segment is _WildcardSegment)) {
-    throw ArgumentError.value(prefix, 'prefix', 'must not contain a wildcard');
-  }
-}
-
-String _joinPaths(String prefix, String childPath) {
-  if (prefix == '/') {
-    return childPath;
-  }
-  if (childPath == '/') {
-    return '$prefix/';
-  }
-  return '$prefix$childPath';
 }

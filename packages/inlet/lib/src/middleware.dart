@@ -26,6 +26,27 @@ final class _DispatchState {
     _report(error, StackTrace.current);
     throw error;
   }
+
+  void observeOrphan(Future<Response> downstream) {
+    Future<void> observe() async {
+      try {
+        final response = await downstream;
+        await closeAndReport(response);
+      } on Object catch (error, stackTrace) {
+        reportUnexpected(error, stackTrace);
+      }
+    }
+
+    unawaited(observe());
+  }
+
+  Future<void> closeAndReport(Response response) async {
+    try {
+      await response.close();
+    } on Object catch (error, stackTrace) {
+      reportUnexpected(error, stackTrace);
+    }
+  }
 }
 
 final class _ContinuationStateError extends StateError {
@@ -50,6 +71,8 @@ Future<Response> _runMiddleware(
     }
   }
 
+  // Track invocation lifetime separately from downstream completion: next may
+  // be called once while active, and its work must settle before a response wins.
   var active = true;
   var called = false;
   var downstreamSettled = false;
@@ -61,11 +84,13 @@ Future<Response> _runMiddleware(
         'next cannot be called after its middleware invocation has finished.',
       );
     }
+
     if (!forwardedRequest._isViewOf(request)) {
       dispatch.rejectContinuation(
         'next accepts only views of the current request.',
       );
     }
+
     if (called) {
       dispatch.rejectContinuation(
         'next can be called only once per middleware invocation.',
@@ -91,33 +116,40 @@ Future<Response> _runMiddleware(
         },
       ),
     );
+
     return future;
   }
 
   late final FutureOr<Response> result;
+
   try {
     result = middleware[index](context, request, next);
   } on Object catch (error, stackTrace) {
     active = false;
     if (called && !downstreamSettled) {
-      _observeOrphan(downstream!, dispatch);
+      dispatch.observeOrphan(downstream!);
     }
+
     return Future<Response>.error(error, stackTrace);
   }
 
   if (result is Future<Response>) {
     Future<Response> settle() async {
       late final Response response;
+
       try {
         response = await result;
-      } on Object catch (error, stackTrace) {
+      } on Object {
         active = false;
         if (called && !downstreamSettled) {
-          _observeOrphan(downstream!, dispatch);
+          dispatch.observeOrphan(downstream!);
         }
-        Error.throwWithStackTrace(error, stackTrace);
+
+        rethrow;
       }
+
       active = false;
+
       return _finishMiddleware(
         response,
         called: called,
@@ -131,6 +163,7 @@ Future<Response> _runMiddleware(
   }
 
   active = false;
+
   return _finishMiddleware(
     result,
     called: called,
@@ -151,30 +184,10 @@ Future<Response> _finishMiddleware(
     return response;
   }
 
-  await _closeAndReport(response, dispatch);
-  _observeOrphan(downstream!, dispatch);
-  dispatch.rejectContinuation(
-    'Middleware finished before its downstream work completed.',
-  );
-}
-
-void _observeOrphan(Future<Response> downstream, _DispatchState dispatch) {
-  Future<void> observe() async {
-    try {
-      final response = await downstream;
-      await _closeAndReport(response, dispatch);
-    } on Object catch (error, stackTrace) {
-      dispatch.reportUnexpected(error, stackTrace);
-    }
-  }
-
-  unawaited(observe());
-}
-
-Future<void> _closeAndReport(Response response, _DispatchState dispatch) async {
-  try {
-    await response.close();
-  } on Object catch (error, stackTrace) {
-    dispatch.reportUnexpected(error, stackTrace);
-  }
+  await dispatch.closeAndReport(response);
+  dispatch
+    ..observeOrphan(downstream!)
+    ..rejectContinuation(
+      'Middleware finished before its downstream work completed.',
+    );
 }

@@ -43,66 +43,75 @@ final class SseEvent {
   SseEvent.comment(String value) : _encoded = _encodeComment(value);
 
   final List<int> _encoded;
-}
 
-List<int> _encodeEvent({
-  required String data,
-  required String? event,
-  required String? id,
-  required Duration? retry,
-}) {
-  if (event != null) {
-    _validateMetadata(event, 'event');
-  }
-  if (id != null) {
-    _validateMetadata(id, 'id');
-  }
-  if (retry != null &&
-      (retry.isNegative || retry.inMicroseconds % Duration.microsecondsPerMillisecond != 0)) {
-    throw ArgumentError.value(
-      retry,
-      'retry',
-      'must be a nonnegative whole number of milliseconds',
-    );
+  static List<int> _encodeEvent({
+    required String data,
+    required String? event,
+    required String? id,
+    required Duration? retry,
+  }) {
+    if (event != null) {
+      _validateMetadata(event, 'event');
+    }
+
+    if (id != null) {
+      _validateMetadata(id, 'id');
+    }
+
+    if (retry != null &&
+        (retry.isNegative || retry.inMicroseconds % Duration.microsecondsPerMillisecond != 0)) {
+      throw ArgumentError.value(
+        retry,
+        'retry',
+        'must be a nonnegative whole number of milliseconds',
+      );
+    }
+
+    final normalized = data.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final encoded = StringBuffer();
+    if (event != null) {
+      _writeField(encoded, 'event', event);
+    }
+
+    if (id != null) {
+      _writeField(encoded, 'id', id);
+    }
+
+    if (retry != null) {
+      _writeField(encoded, 'retry', retry.inMilliseconds.toString());
+    }
+
+    for (final line in normalized.split('\n')) {
+      _writeField(encoded, 'data', line);
+    }
+
+    encoded.writeln();
+
+    return utf8.encode(encoded.toString());
   }
 
-  final normalized = data.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-  final encoded = StringBuffer();
-  if (event != null) {
-    _writeField(encoded, 'event', event);
-  }
-  if (id != null) {
-    _writeField(encoded, 'id', id);
-  }
-  if (retry != null) {
-    _writeField(encoded, 'retry', retry.inMilliseconds.toString());
-  }
-  for (final line in normalized.split('\n')) {
-    _writeField(encoded, 'data', line);
-  }
-  encoded.writeln();
-  return utf8.encode(encoded.toString());
-}
+  static List<int> _encodeComment(String value) {
+    if (value.contains('\r') || value.contains('\n')) {
+      throw ArgumentError.value(value, 'value', 'must contain one line');
+    }
 
-List<int> _encodeComment(String value) {
-  if (value.contains('\r') || value.contains('\n')) {
-    throw ArgumentError.value(value, 'value', 'must contain one line');
-  }
-  final encoded = StringBuffer();
-  _writeField(encoded, '', value);
-  encoded.writeln();
-  return utf8.encode(encoded.toString());
-}
+    final encoded = StringBuffer();
+    _writeField(encoded, '', value);
+    encoded.writeln();
 
-void _validateMetadata(String value, String name) {
-  if (value.contains('\r') || value.contains('\n') || value.contains('\u0000')) {
-    throw ArgumentError.value(value, name, 'must not contain CR, LF, or NUL');
+    return utf8.encode(encoded.toString());
   }
-}
 
-void _writeField(StringBuffer target, String name, String value) {
-  target
-    ..write(name)
-    ..write(':')
-    ..write(value.isEmpty ? '\n' : ' $value\n');
+  static void _validateMetadata(String value, String name) {
+    if (value.contains('\r') || value.contains('\n') || value.contains('\u0000')) {
+      throw ArgumentError.value(value, name, 'must not contain CR, LF, or NUL');
+    }
+  }
+
+  static void _writeField(StringBuffer target, String name, String value) {
+    target
+      ..write(name)
+      ..write(':')
+      ..write(value.isEmpty ? '\n' : ' $value\n');
+  }
 }

@@ -152,6 +152,7 @@ final class Inlet extends Router {
     final dispatch = _DispatchState(dispatchContext, dispatchRequest, _report);
 
     late final Response response;
+
     try {
       response = await _runMiddleware(
         middleware,
@@ -168,6 +169,7 @@ final class Inlet extends Router {
         stackTrace,
       );
     }
+
     var finalizedResponse = response;
     if (request.method == 'HEAD') {
       if (resolution case _MatchedRoute(isHeadFallback: true) when response.isWebSocketUpgrade) {
@@ -177,6 +179,7 @@ final class Inlet extends Router {
         finalizedResponse = response._withoutBody();
       }
     }
+
     return _DispatchResult(
       finalizedResponse,
       dispatch.context,
@@ -193,14 +196,17 @@ final class Inlet extends Router {
     if (_isUnexpected(error) && !_wasReported(error)) {
       _report(error, stackTrace);
     }
+
     final errorHandler = onError;
     if (errorHandler == null) {
       return _defaultErrorResponse(error);
     }
+
     try {
       return await errorHandler(context, request, error, stackTrace);
     } on Object catch (hookError, hookStackTrace) {
       _report(hookError, hookStackTrace);
+
       return Response.empty(status: HttpStatus.internalServerError);
     }
   }
@@ -213,6 +219,7 @@ final class Inlet extends Router {
         ..writeln(stackTrace);
       return;
     }
+
     try {
       reporter(error, stackTrace);
     } on Object catch (reporterError, reporterStackTrace) {

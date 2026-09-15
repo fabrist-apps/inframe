@@ -120,6 +120,7 @@ final class Response {
     if (maxFrameBytes <= 0) {
       throw ArgumentError.value(maxFrameBytes, 'maxFrameBytes', 'must be positive');
     }
+
     return Response._(
       statusCode: HttpStatus.switchingProtocols,
       headers: _webSocketHeaders(headers),
@@ -136,6 +137,7 @@ final class Response {
   factory Response._create({required int status, required Headers headers, required _Body body}) {
     _validateStatus(status);
     _validateResponseHeaders(headers);
+
     return Response._(
       statusCode: status,
       headers: headers,
@@ -165,6 +167,7 @@ final class Response {
     if (isWebSocketUpgrade) {
       throw StateError('A WebSocket upgrade response has no body.');
     }
+
     return _suppressBody ? const Stream.empty() : _body.stream;
   }
 
@@ -175,6 +178,7 @@ final class Response {
       _SseDelivery() => _sseHeaders(headers),
       _WebSocketDelivery() => _webSocketHeaders(headers),
     };
+
     return Response._(
       statusCode: statusCode,
       headers: validatedHeaders,
@@ -199,10 +203,12 @@ final class Response {
     if (isWebSocketUpgrade) {
       throw StateError('A WebSocket upgrade response has no body.');
     }
+
     _validateMaxBytes(maxBytes);
     if (_suppressBody) {
       return Uint8List(0);
     }
+
     try {
       return await _body.bytes(maxBytes: maxBytes);
     } on _BodyLimitFailure catch (error) {
@@ -220,6 +226,76 @@ final class Response {
 
   /// Releases body resources without subscribing to an untouched source.
   Future<void> close() => _body.close();
+
+  static Headers _withDefaultContentType(Headers headers, String? contentType) {
+    if (contentType == null || headers.contains(HttpHeaders.contentTypeHeader)) {
+      return headers;
+    }
+
+    return headers.set(HttpHeaders.contentTypeHeader, contentType);
+  }
+
+  static void _validateStatus(int status) {
+    if (status < 200 || status > 599) {
+      throw ArgumentError.value(status, 'status', 'must be from 200 through 599');
+    }
+  }
+
+  static bool _statusSuppressesBody(int status) =>
+      status == HttpStatus.noContent ||
+      status == HttpStatus.resetContent ||
+      status == HttpStatus.notModified;
+
+  static Headers _validateResponseHeaders(Headers headers) {
+    const forbidden = <String>{
+      HttpHeaders.contentLengthHeader,
+      HttpHeaders.transferEncodingHeader,
+      HttpHeaders.connectionHeader,
+      'keep-alive',
+      'proxy-connection',
+      HttpHeaders.trailerHeader,
+      HttpHeaders.upgradeHeader,
+    };
+    for (final name in forbidden) {
+      if (headers.contains(name)) {
+        throw ArgumentError.value(name, 'headers', 'is owned by the HTTP adapter');
+      }
+    }
+
+    return headers;
+  }
+
+  static Headers _sseHeaders(Headers headers) {
+    _validateResponseHeaders(headers);
+    if (headers.contains(HttpHeaders.contentEncodingHeader)) {
+      throw ArgumentError.value(
+        HttpHeaders.contentEncodingHeader,
+        'headers',
+        'is not supported for server-sent events',
+      );
+    }
+
+    var result = headers.set(
+      HttpHeaders.contentTypeHeader,
+      'text/event-stream; charset=utf-8',
+    );
+    if (!result.contains(HttpHeaders.cacheControlHeader)) {
+      result = result.set(HttpHeaders.cacheControlHeader, 'no-cache');
+    }
+
+    return result;
+  }
+
+  static Headers _webSocketHeaders(Headers headers) {
+    _validateResponseHeaders(headers);
+    for (final name in headers.toMap().keys) {
+      if (name.startsWith('sec-websocket-')) {
+        throw ArgumentError.value(name, 'headers', 'is owned by the WebSocket handshake');
+      }
+    }
+
+    return headers;
+  }
 }
 
 sealed class _ResponseDelivery {
@@ -249,67 +325,4 @@ final class _WebSocketDelivery extends _ResponseDelivery {
   final WebSocketProtocolSelector? selectProtocol;
   final int maxFrameBytes;
   final CompressionOptions compression;
-}
-
-Headers _withDefaultContentType(Headers headers, String? contentType) {
-  if (contentType == null || headers.contains(HttpHeaders.contentTypeHeader)) {
-    return headers;
-  }
-  return headers.set(HttpHeaders.contentTypeHeader, contentType);
-}
-
-void _validateStatus(int status) {
-  if (status < 200 || status > 599) {
-    throw ArgumentError.value(status, 'status', 'must be from 200 through 599');
-  }
-}
-
-bool _statusSuppressesBody(int status) =>
-    status == HttpStatus.noContent || status == HttpStatus.resetContent || status == 304;
-
-Headers _validateResponseHeaders(Headers headers) {
-  const forbidden = <String>{
-    HttpHeaders.contentLengthHeader,
-    HttpHeaders.transferEncodingHeader,
-    HttpHeaders.connectionHeader,
-    'keep-alive',
-    'proxy-connection',
-    HttpHeaders.trailerHeader,
-    HttpHeaders.upgradeHeader,
-  };
-  for (final name in forbidden) {
-    if (headers.contains(name)) {
-      throw ArgumentError.value(name, 'headers', 'is owned by the HTTP adapter');
-    }
-  }
-  return headers;
-}
-
-Headers _sseHeaders(Headers headers) {
-  _validateResponseHeaders(headers);
-  if (headers.contains(HttpHeaders.contentEncodingHeader)) {
-    throw ArgumentError.value(
-      HttpHeaders.contentEncodingHeader,
-      'headers',
-      'is not supported for server-sent events',
-    );
-  }
-  var result = headers.set(
-    HttpHeaders.contentTypeHeader,
-    'text/event-stream; charset=utf-8',
-  );
-  if (!result.contains(HttpHeaders.cacheControlHeader)) {
-    result = result.set(HttpHeaders.cacheControlHeader, 'no-cache');
-  }
-  return result;
-}
-
-Headers _webSocketHeaders(Headers headers) {
-  _validateResponseHeaders(headers);
-  for (final name in headers.toMap().keys) {
-    if (name.startsWith('sec-websocket-')) {
-      throw ArgumentError.value(name, 'headers', 'is owned by the WebSocket handshake');
-    }
-  }
-  return headers;
 }

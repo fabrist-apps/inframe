@@ -128,6 +128,7 @@ final class Request {
   /// Strictly decodes the buffered body as UTF-8.
   Future<String> text({int maxBytes = _defaultBodyLimit}) async {
     final bodyBytes = await bytes(maxBytes: maxBytes);
+
     try {
       return utf8.decode(bodyBytes, allowMalformed: false);
     } on FormatException {
@@ -151,7 +152,32 @@ final class Request {
     if (_exchange.admitted) {
       throw StateError('A Request can be admitted only once.');
     }
+
     _exchange.admitted = true;
+  }
+
+  static Uri _validateUri(Uri uri) {
+    if (!uri.path.startsWith('/')) {
+      throw ArgumentError.value(uri, 'uri', 'must have an absolute path');
+    }
+
+    if (uri.hasFragment || uri.userInfo.isNotEmpty) {
+      throw ArgumentError.value(uri, 'uri', 'must not contain a fragment or user information');
+    }
+
+    if (uri.hasAuthority && !uri.hasScheme) {
+      throw ArgumentError.value(
+        uri,
+        'uri',
+        'an authority requires an absolute HTTP or HTTPS URI',
+      );
+    }
+
+    if (uri.hasScheme && uri.scheme != 'http' && uri.scheme != 'https') {
+      throw ArgumentError.value(uri, 'uri', 'absolute URIs must use HTTP or HTTPS');
+    }
+
+    return uri;
   }
 }
 
@@ -166,27 +192,8 @@ String _validateMethod(String method) {
   if (!isHttpToken(method)) {
     throw ArgumentError.value(method, 'method', 'must be a nonempty HTTP token');
   }
-  return method;
-}
 
-Uri _validateUri(Uri uri) {
-  if (!uri.path.startsWith('/')) {
-    throw ArgumentError.value(uri, 'uri', 'must have an absolute path');
-  }
-  if (uri.hasFragment || uri.userInfo.isNotEmpty) {
-    throw ArgumentError.value(uri, 'uri', 'must not contain a fragment or user information');
-  }
-  if (uri.hasAuthority && !uri.hasScheme) {
-    throw ArgumentError.value(
-      uri,
-      'uri',
-      'an authority requires an absolute HTTP or HTTPS URI',
-    );
-  }
-  if (uri.hasScheme && uri.scheme != 'http' && uri.scheme != 'https') {
-    throw ArgumentError.value(uri, 'uri', 'absolute URIs must use HTTP or HTTPS');
-  }
-  return uri;
+  return method;
 }
 
 void _validatePort(int port, String name) {
