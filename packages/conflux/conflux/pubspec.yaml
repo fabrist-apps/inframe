@@ -9,6 +9,8 @@ environment:
 
 dependencies:
   ack: ^1.2.0
+  chrono_id:
+    path: ../../chrono_id/chrono_id
   context:
     path: ../../context
   timezone: ^0.11.1

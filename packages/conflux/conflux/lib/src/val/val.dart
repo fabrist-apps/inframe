@@ -2,6 +2,7 @@ import 'dart:core';
 import 'dart:core' as core;
 
 import 'package:conflux/moment.dart';
+import 'package:conflux/src/val/chrono_id_schema.dart';
 import 'package:conflux/src/val/collection_schema.dart';
 import 'package:conflux/src/val/membership_schema.dart';
 import 'package:conflux/src/val/numeric_schema.dart';
@@ -13,6 +14,15 @@ import 'package:conflux/src/val/union_schema.dart';
 
 /// Factories for immutable synchronous validation schemas.
 abstract final class Val {
+  /// Validates a Chrono ID string using the core format contract.
+  static StringSchema chronoId({
+    String? name,
+    String? prefix,
+    core.int size = 24,
+    String? code,
+    String? message,
+  }) => string(name: name).chronoId(prefix: prefix, size: size, code: code, message: message);
+
   /// Validates an existing Moment without changing its representation.
   static Schema<Moment> moment({String? name, String? code, String? message}) =>
       typeSchema(type: 'a Moment', name: name, code: code, message: message);

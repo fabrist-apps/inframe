@@ -577,3 +577,13 @@ conversion, and later checks receive Moment values. Optional omission and
 nullable stage ordering survive conversion. No clock or timezone initialization
 is performed; pass time bounds explicitly. Parse failures produce one
 `INVALID_MOMENT` issue at the original structural path.
+
+### Chrono IDs
+
+`Val.chronoId(prefix: 'use')` and `Val.string().chronoId(prefix: 'use')` validate
+through the existing `chrono_id` core and retain the original string. Size
+(default 24, minimum 16) counts the body only; omitted prefix requires no prefix.
+Invalid configuration throws while constructing the schema. Format validation
+accepts structurally valid future timestamps, performs no normalization, and
+reads neither clocks nor randomness. Factory code/message overrides apply to
+format errors; customize type errors through `Val.string(...)` first.
