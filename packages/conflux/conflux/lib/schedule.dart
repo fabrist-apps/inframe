@@ -3,11 +3,4 @@ library;
 
 export 'src/schedule/effect_scheduling.dart' show EffectScheduling;
 export 'src/schedule/schedule.dart'
-    show
-        Schedule,
-        ScheduleContinue,
-        ScheduleDecision,
-        ScheduleErrorMapping,
-        ScheduleOperations,
-        ScheduleStep,
-        ScheduleStop;
+    show Schedule, ScheduleContinue, ScheduleDecision, ScheduleStep, ScheduleStop;

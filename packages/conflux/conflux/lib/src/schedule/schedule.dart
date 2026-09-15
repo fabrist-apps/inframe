@@ -2,7 +2,6 @@ import 'dart:math';
 
 import 'package:conflux/cron.dart';
 import 'package:conflux/effect.dart';
-import 'package:conflux/moment.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
@@ -119,25 +118,17 @@ final class Schedule<I, O, E> {
   /// occurrence strictly after it. The output and delay are both the duration
   /// until that occurrence. Search exhaustion is an expected [CronError].
   static Schedule<I, Duration, CronError> cron<I>(Cron cron) {
-    return Schedule(
-      () =>
-          (_) => EffectAccess.create((execution) async {
-            final now = execution.clock.wallTime();
-            switch (cron.next(now)) {
-              case Success<ZonedMoment, CronError>(:final value):
-                return switch (value.difference(now)) {
-                  Success<Duration, MomentError>(:final value) => Succeeded(
-                    ScheduleContinue(value, value),
-                  ),
-                  Failure<Duration, MomentError>(:final error) => Failed(
-                    Expected(CronError(error.message)),
-                  ),
-                };
-              case Failure<ZonedMoment, CronError>(:final error):
-                return Failed(Expected(error));
-            }
-          }),
-    );
+    return Schedule(() {
+      return (_) => Effect.build(($) async {
+        final now = await $(Effect.now());
+        final next = $.sync(cron.next(now));
+        final delay = $.sync(
+          next.difference(now).mapError((error) => CronError(error.message)),
+        );
+
+        return ScheduleContinue(delay, delay);
+      });
+    });
   }
 
   /// Continues while both policies continue and selects their later delay.
@@ -234,10 +225,7 @@ final class Schedule<I, O, E> {
       });
     });
   }
-}
 
-/// Expected-error adaptation for reusable schedules.
-extension ScheduleErrorMapping<I, O, E> on Schedule<I, O, E> {
   /// Transforms only expected driver errors.
   Schedule<I, O, F> mapError<F>(F Function(E error, Context context) transform) {
     return Schedule(() {
@@ -245,10 +233,7 @@ extension ScheduleErrorMapping<I, O, E> on Schedule<I, O, E> {
       return (input) => source(input).mapError(transform);
     });
   }
-}
 
-/// Delay transforms for a Schedule.
-extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
   /// Replaces each continuing decision's computed delay.
   Schedule<I, O, E> modifyDelay(
     Duration Function(Duration delay, Context context) transform,

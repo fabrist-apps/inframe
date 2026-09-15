@@ -45,10 +45,7 @@ void main() {
       expect((third as ScheduleContinue<Duration>).delay, const Duration(milliseconds: 400));
     });
 
-    test('should modify exponential delay without adding an automatic cap', () async {
-      final uncapped = Schedule.exponential<Object?>(
-        const Duration(milliseconds: 100),
-      ).createStep();
+    test('should cap delays through modifyDelay and honor a custom factor', () async {
       final capped =
           Schedule.exponential<Object?>(
                 const Duration(milliseconds: 100),
@@ -60,15 +57,9 @@ void main() {
               )
               .createStep();
 
-      await uncapped(null).runFuture();
-      final uncappedSecond = await uncapped(null).runFuture();
       await capped(null).runFuture();
       final cappedSecond = await capped(null).runFuture();
 
-      expect(
-        (uncappedSecond as ScheduleContinue<Duration>).delay,
-        const Duration(milliseconds: 200),
-      );
       expect((cappedSecond as ScheduleContinue<Duration>).delay, const Duration(milliseconds: 150));
 
       final tripled = Schedule.exponential<Object?>(

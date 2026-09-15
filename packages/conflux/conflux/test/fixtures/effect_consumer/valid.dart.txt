@@ -92,13 +92,9 @@ Future<void> main() async {
 
   final cacheProgram = Effect.build<void, _BaseError>(($) async {
     final cache = await $(
-      Cache.make<String, int, _BaseError>(
+      Cache.make<String, int>(
         capacity: 2,
-        concurrency: 1,
-        expiry: CacheExpiry.byValue(
-          (key, value, context) => Duration(seconds: key.length + value + context.hashCode.abs() % 2),
-        ),
-        lookup: (key, context) => Effect.succeed(key.length + context.hashCode % 2),
+        timeToLive: const Duration(minutes: 5),
       ),
     );
     await $(cache.set('key', 3));

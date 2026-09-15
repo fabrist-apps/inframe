@@ -77,53 +77,32 @@ Scopes interrupt and await child fibers before running finalizers once in
 reverse registration order. Finalizers are protected from ordinary
 cancellation, so an uncooperative finalizer can prevent bounded shutdown.
 
-`Cache` shares scoped lookups and retains successful values with a separate
-limit for active loads and stored entries:
+`Cache<K, A>` stores explicitly inserted values with fixed TTL and LRU capacity:
 
 ```dart
-final cachedLengths = Effect.build<(int, int), Never>(($) async {
+final cachedLength = Effect.build<Option<int>, Never>(($) async {
   final cache = await $(
-    Cache.make<String, int, Never>(
+    Cache.make<String, int>(
       capacity: 100,
-      concurrency: 8,
-      expiry: CacheExpiry.fixed(const Duration(minutes: 5)),
-      lookup: (key, _) => Effect.succeed(key.length),
+      timeToLive: const Duration(minutes: 5),
     ),
   );
 
-  final first = await $(cache.get('conflux'));
-  final second = await $(cache.get('conflux'));
-  return (first, second);
+  await $(cache.set('conflux', 7));
+  return await $(cache.get('conflux'));
 });
 ```
 
-`Cache.make` captures its creation scope's Context and Clock. Its lookup
-callback receives `(key, context)`, and a lookup started by another caller still
-uses those captured dependencies. Value-dependent expiry receives
-`(key, value, context)` from the same owner. `invalidateWhere` instead receives
-the calling Effect's Context. Put request-dependent data in the key or acquire
-the Cache inside the request scope. Cache coordination is confined to one
-isolate.
+`get` returns Some(value) for an unexpired entry, including Some(null), or None
+when absent. Reading marks an entry most recently used. Each `set` restarts its
+TTL using the creation scope's captured monotonic Clock. Zero TTL retains
+nothing. Expired entries are removed before applying the capacity limit.
 
-Concurrent requests for one key and generation share a load. Cancelling one
-waiter leaves that owner-scoped load available to other waiters. `concurrency`
-bounds active lookups, while `capacity` bounds successful retained values by
-LRU. Expiry uses monotonic time from successful completion. Use
-`CacheExpiry.fixed` for one TTL or `CacheExpiry.byValue` to derive it from the
-key and successful value.
-
-`getOption` and `containsKey` inspect only ready unexpired values. The `size`,
-`keys`, `values`, and `entries` getters return immutable ready snapshots and
-never start a lookup. `set`, `invalidate`, `invalidateAll`, and
-`invalidateWhere` advance generations so older loads cannot overwrite newer
-state. `refresh` starts or joins a current-generation load while an existing
-unexpired value remains readable; a failed refresh keeps that value and its
-original deadline.
-
-Cached values are borrowed. Eviction, invalidation, and Cache closure do not
-dispose them. Scope closure interrupts active loads, wakes waiters, and makes
-later Cache use a defect. Failure caching, eviction-time disposal, durable
-persistence, and automatic invalidation streams are outside this API.
+Use `invalidate(key)`, `invalidateAll()`, or `invalidateWhere(predicate)` to
+remove values. Predicates inspect only unexpired entries and receive the calling
+Effect's Context. Cached values are borrowed: eviction, invalidation, and scope
+closure never dispose them. Scope closure clears the cache and later operations
+fail with a defect. Loading and coordination belong to the caller.
 
 Timing operations use the runtime's `Clock`, so tests can control both wall and
 monotonic time. `delay` waits before starting work, `timed` reports monotonic
