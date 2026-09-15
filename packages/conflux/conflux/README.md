@@ -461,3 +461,44 @@ Run the package tests from the repository root:
 ```sh
 dart test packages/conflux/conflux/test --chain-stack-traces
 ```
+
+## Val validation
+
+Import `package:conflux/val.dart` or the `conflux.dart` barrel. Validation is
+synchronous and needs no runtime, clock, or timezone setup.
+
+```dart
+final profile = Val.object({
+  'name': Val.string(name: 'Name').notEmpty(),
+  'nickname': Val.string().optional(),
+});
+final result = profile.safeParse({'name': 'Ada'});
+// Result<Map<String, Object?>, NonEmptyList<ValidationIssue>>
+```
+
+`safeParse` returns the existing Conflux Result. `parse` throws
+`ValidationException` containing the same ordered issues on failure. Each issue
+has a string `code`, a `message`, an `IssueKind`, and an immutable path of `Field`
+and `Index` segments. A refinement path is relative to its schema.
+
+Fields are required by default. `optional()` omits missing fields without
+accepting present null; `nullable()` accepts present null and changes the output
+type. Presence uses the last `required()`/`optional()` selection. Nullable
+wrapping skips preceding checks for null; later refinements receive null.
+
+Objects reject extra keys by default. `strict()` customizes rejection,
+`strip()` removes extras before refinements, and `passthrough()` retains them.
+Policies apply only to the selected object. Object refinements run only after
+all declared fields and the unknown-key policy pass. Compatible checks collect
+failures in declaration order; fields use schema order and extras use input order.
+
+Schema names label generated messages, while custom messages remain verbatim.
+Codes and messages may be overridden independently; null selects the default,
+and an empty string is an explicit override. Names never change structural paths.
+String lengths count UTF-16 code units. Schema derivations and validated
+containers are immutable and detached; passthrough values remain borrowed.
+Callback exceptions propagate, and repeated parsing may invoke callbacks again.
+
+Implementation reading path: `val.dart` → factories in `src/val/val.dart` →
+typed stages in `schema.dart` → primitive and container validators. Foundational
+Result/Option modules do not depend on Val.

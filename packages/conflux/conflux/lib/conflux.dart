@@ -15,6 +15,7 @@ export 'pubsub.dart';
 export 'queue.dart';
 export 'result.dart';
 export 'schedule.dart';
+export 'val.dart';
 
 /// Package-wide setup for Conflux capabilities.
 abstract final class Conflux {
