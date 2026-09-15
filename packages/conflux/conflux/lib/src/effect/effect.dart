@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
 
-import 'package:ack/ack.dart';
 import 'package:conflux/moment.dart';
 import 'package:conflux/non_empty_list.dart';
 import 'package:conflux/option.dart';
@@ -19,21 +18,6 @@ typedef _EffectRun<A, E> = Future<Exit<A, E>> Function(EffectExecution execution
 /// A lazy, reusable description of work producing [A] or expected error [E].
 final class Effect<A, E> {
   const Effect._(this._run);
-
-  /// Validates the snapshotted branches of a race.
-  static ListSchema<Effect<A, E>, Effect<A, E>> raceSchema<A, E>() =>
-      Ack.list(Ack.instance<Effect<A, E>>()).nonEmpty();
-
-  /// Validates a positive concurrency limit.
-  static IntegerSchema concurrencySchema() => Ack.integer().positive();
-
-  /// Encodes and decodes a non-negative duration as integer microseconds.
-  static CodecSchema<int, Duration> durationSchema() => Ack.integer()
-      .min(0)
-      .codec<Duration>(
-        decode: (microseconds) => Duration(microseconds: microseconds),
-        encode: (duration) => duration.inMicroseconds,
-      );
 
   final _EffectRun<A, E> _run;
 
@@ -81,7 +65,7 @@ final class Effect<A, E> {
   /// The duration must not be negative. It is passed to [Clock.sleep] without
   /// rounding; the selected Clock defines its effective timer precision.
   static Effect<void, Never> sleep(Duration duration) {
-    validateArgument(Effect.durationSchema(), duration, debugName: 'duration');
+    checkDuration(duration, 'duration');
     return Effect._((execution) async {
       final wait = execution.clock.sleep(duration);
       final completed = Completer<Exit<void, Never>>();
@@ -267,7 +251,7 @@ final class Effect<A, E> {
     Iterable<Effect<A, E>> effects, {
     int concurrency = 1,
   }) {
-    validateArgument(concurrencySchema(), concurrency, debugName: 'concurrency');
+    checkPositive(concurrency, 'concurrency');
     return Effect._((execution) {
       return _EffectCollection.run(List.of(effects), execution, concurrency);
     });
@@ -279,7 +263,7 @@ final class Effect<A, E> {
     Effect<A, E> Function(I input, Context context) effect, {
     int concurrency = 1,
   }) {
-    validateArgument(concurrencySchema(), concurrency, debugName: 'concurrency');
+    checkPositive(concurrency, 'concurrency');
     return Effect.defer((_) {
       final effects = inputs.map(
         (input) => Effect.defer<A, E>((context) => effect(input, context)),
@@ -291,7 +275,9 @@ final class Effect<A, E> {
   /// Returns the first successful branch after interrupting and cleaning up losers.
   static Effect<A, E> race<A, E>(Iterable<Effect<A, E>> effects) => Effect._((execution) {
     final branches = List<Effect<A, E>>.of(effects);
-    validateArgument(raceSchema<A, E>(), branches, debugName: 'effects');
+    if (branches.isEmpty) {
+      throw ArgumentError.value(branches, 'effects', 'Must not be empty');
+    }
     return _EffectRace.run(branches, execution);
   });
 
@@ -328,7 +314,7 @@ final class Effect<A, E> {
 extension EffectTiming<A, E> on Effect<A, E> {
   /// Waits for [duration] before starting this Effect.
   Effect<A, E> delay(Duration duration) {
-    validateArgument(Effect.durationSchema(), duration, debugName: 'duration');
+    checkDuration(duration, 'duration');
     return Effect._((execution) async {
       final waited = await Effect.sleep(duration)._evaluate(execution);
       return switch (waited) {
@@ -358,7 +344,7 @@ extension EffectTiming<A, E> on Effect<A, E> {
     Duration duration, {
     required E Function(Context context) onTimeout,
   }) {
-    validateArgument(Effect.durationSchema(), duration, debugName: 'duration');
+    checkDuration(duration, 'duration');
     return Effect._((execution) async {
       final context = execution.context;
       final operation = ScopeAccess.fork(execution.scope, this, execution);

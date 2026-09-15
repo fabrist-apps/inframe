@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
 
-import 'package:ack/ack.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/src/coordination/waiter.dart';
@@ -48,31 +47,16 @@ final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   /// Creates an open mailbox with already validated configuration.
   FlowMailbox(this.capacity, this.overflow, this._onOverflow);
 
-  /// Validates the positive capacity of a Flow-owned buffer.
-  static IntegerSchema capacitySchema() => Ack.integer().positive();
-
-  /// Requires an error mapper when the overflow policy is [FlowOverflowPolicy.fail].
-  static AckSchema<Function, Function> overflowHandlerSchema(FlowOverflowPolicy overflow) {
-    final handler = Ack.instance<Function>();
-    return overflow == FlowOverflowPolicy.fail ? handler : handler.nullable();
-  }
-
-  /// Validates the buffer configuration and reports named argument paths.
-  static ObjectSchema argumentsSchema(FlowOverflowPolicy overflow) => Ack.object({
-    'capacity': capacitySchema(),
-    'onOverflow': overflowHandlerSchema(overflow),
-  });
-
   /// Checks configuration before an operator starts acquiring resources.
   static void validateBuffer(
     int capacity,
     FlowOverflowPolicy overflow,
     Object? onOverflow,
   ) {
-    validateArgument(argumentsSchema(overflow), {
-      'capacity': capacity,
-      'onOverflow': onOverflow,
-    });
+    checkPositive(capacity, 'capacity');
+    if (overflow == FlowOverflowPolicy.fail && onOverflow == null) {
+      throw ArgumentError.value(onOverflow, 'onOverflow', 'Required for fail overflow policy');
+    }
   }
 
   /// Maximum buffered values, excluding active producer calls.

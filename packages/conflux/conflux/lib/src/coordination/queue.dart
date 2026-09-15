@@ -1,6 +1,5 @@
 import 'dart:collection';
 
-import 'package:ack/ack.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/src/coordination/waiter.dart';
@@ -22,14 +21,8 @@ final class QueueShutdown {
 /// confined to the isolate that acquires it.
 final class Queue<A> {
   Queue._(this.capacity) {
-    validateArgument(capacitySchema(), capacity, debugName: 'capacity');
+    checkPositive(capacity, 'capacity');
   }
-
-  /// Validates a non-negative count.
-  static IntegerSchema limitSchema() => Ack.integer().min(0);
-
-  /// Validates a positive buffer capacity.
-  static IntegerSchema capacitySchema() => Ack.integer().positive();
 
   /// Lazily acquires a Queue and registers shutdown with the current scope.
   ///
@@ -145,7 +138,7 @@ final class Queue<A> {
   /// defect when the Effect runs.
   Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer((_) {
     if (_isShutdown) return _shutdownEffect();
-    validateArgument(limitSchema(), limit, debugName: 'limit');
+    checkNonNegative(limit, 'limit');
 
     final count = limit < _items.length ? limit : _items.length;
     final items = <A>[

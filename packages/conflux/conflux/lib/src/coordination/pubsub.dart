@@ -1,6 +1,5 @@
 import 'dart:collection';
 
-import 'package:ack/ack.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/src/coordination/waiter.dart';
 import 'package:conflux/src/validation.dart';
@@ -31,11 +30,8 @@ final class PubSubSubscriptionClosed {
 /// the isolate that acquires the PubSub.
 final class PubSub<A> {
   PubSub._(this._capacity) {
-    validateArgument(capacitySchema(), _capacity, debugName: 'capacity');
+    checkPositive(_capacity, 'capacity');
   }
-
-  /// Validates a positive buffer capacity.
-  static IntegerSchema capacitySchema() => Ack.integer().positive();
 
   /// Lazily acquires a PubSub and registers shutdown with the current scope.
   ///
@@ -194,9 +190,6 @@ final class PubSub<A> {
 final class PubSubSubscription<A> {
   PubSubSubscription._(this._owner);
 
-  /// Validates a non-negative count.
-  static IntegerSchema limitSchema() => Ack.integer().min(0);
-
   final PubSub<A> _owner;
   final ListQueue<A> _items = ListQueue();
   final ListQueue<CoordinationWaiter<A>> _takers = ListQueue();
@@ -237,7 +230,7 @@ final class PubSubSubscription<A> {
   Effect<List<A>, Never> takeUpTo(int limit) => Effect.defer((_) {
     final closedReason = _closedReason;
     if (closedReason != null) return _interrupted(closedReason);
-    validateArgument(limitSchema(), limit, debugName: 'limit');
+    checkNonNegative(limit, 'limit');
 
     final count = limit < _items.length ? limit : _items.length;
     final items = <A>[

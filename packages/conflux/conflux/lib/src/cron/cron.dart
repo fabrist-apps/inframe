@@ -1,6 +1,5 @@
 import 'dart:collection';
 
-import 'package:ack/ack.dart';
 import 'package:conflux/moment.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/moment/calendar_date.dart';
@@ -379,14 +378,6 @@ final class _CronField {
 final class _FieldSpec {
   const _FieldSpec(this.name, this.minimum, this.maximum, {this.names = const {}});
 
-  /// Validates a numeric value before weekday normalization.
-  static AckSchema<int, int> schema(_FieldSpec spec) =>
-      Ack.integer().min(spec.minimum).max(spec.maximum);
-
-  /// Validates explicit field values before normalization.
-  static AckSchema<List<int>, List<int>> valuesSchema(_FieldSpec spec) =>
-      Ack.list(schema(spec)).nonEmpty();
-
   final String name;
   final int minimum;
   final int maximum;
@@ -431,16 +422,12 @@ _CronField _fieldFromValues(Set<int>? source, _FieldSpec spec) {
       startsWithWildcard: true,
     );
   }
-  final validation = _FieldSpec.valuesSchema(spec).safeParse(source.toList());
-  if (validation case Fail(:final error)) {
-    if (error is SchemaNestedError) {
-      final invalid = error.errors.first.value;
-      throw _InvalidCron(spec.name, '$invalid is outside ${spec.minimum}..${spec.maximum}.');
-    }
+  if (source.isEmpty) {
     throw _InvalidCron(spec.name, 'The field must not be empty.');
   }
   final values = SplayTreeSet<int>();
   for (final value in source) {
+    _validate(value, spec);
     values.add(_normalize(value, spec));
   }
   return _CronField(values, text: values.join(','), startsWithWildcard: false);
@@ -524,7 +511,7 @@ int _parseValue(String source, _FieldSpec spec) {
 final _decimal = RegExp(r'^\d+$');
 
 void _validate(int value, _FieldSpec spec) {
-  if (_FieldSpec.schema(spec).safeParse(value).isFail) {
+  if (value < spec.minimum || value > spec.maximum) {
     throw _InvalidCron(
       spec.name,
       '$value is outside ${spec.minimum}..${spec.maximum}.',

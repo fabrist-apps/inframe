@@ -8,7 +8,6 @@ environment:
   sdk: ^3.13.0
 
 dependencies:
-  ack: ^1.2.0
   chrono_id:
     path: ../../chrono_id/chrono_id
   context:

@@ -6,7 +6,7 @@ import 'package:conflux/moment.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:conflux/src/effect/effect.dart' show EffectAccess;
-import 'package:conflux/val.dart';
+import 'package:conflux/src/validation.dart';
 import 'package:context/context.dart';
 
 /// The result of stepping a [ScheduleStep].
@@ -42,24 +42,12 @@ final class Schedule<I, O, E> {
 
   final ScheduleStep<I, O, E> Function() _createStep;
 
-  /// Validates a non-negative duration without converting it.
-  static Schema<Duration> durationSchema() => Val.instance<Duration>().refine(
-    (value) => !value.isNegative,
-    message: 'Must be non-negative',
-  );
-
-  /// Validates a non-negative recurrence count.
-  static Schema<int> recurrencesSchema() => Val.int().min(0);
-
-  /// Validates a finite positive exponential multiplier.
-  static Schema<double> factorSchema() => Val.double().positive();
-
   /// Creates fresh iteration state for one consumer.
   ScheduleStep<I, O, E> createStep() => _createStep();
 
   /// Permits [times] continuing decisions without adding delay.
   static Schedule<I, int, Never> recurs<I>(int times) {
-    _validateArgument(recurrencesSchema(), times, debugName: 'times');
+    checkNonNegative(times, 'times');
     return Schedule(() {
       var recurrences = 0;
       return (_) {
@@ -73,7 +61,7 @@ final class Schedule<I, O, E> {
 
   /// Continues forever, spacing starts by [duration] from prior completion.
   static Schedule<I, int, Never> spaced<I>(Duration duration) {
-    _validateArgument(Schedule.durationSchema(), duration, debugName: 'duration');
+    checkDuration(duration, 'duration');
     return Schedule(() {
       var recurrences = 0;
       return (_) {
@@ -85,7 +73,7 @@ final class Schedule<I, O, E> {
 
   /// Continues forever on the next anchored [interval], skipping missed ticks.
   static Schedule<I, int, Never> fixed<I>(Duration interval) {
-    _validateArgument(durationSchema(), interval, debugName: 'interval');
+    checkDuration(interval, 'interval');
     return Schedule(() {
       Duration? anchor;
       var recurrence = 0;
@@ -111,8 +99,10 @@ final class Schedule<I, O, E> {
     Duration base, {
     double factor = 2,
   }) {
-    _validateArgument(durationSchema(), base, debugName: 'base');
-    _validateArgument(factorSchema(), factor, debugName: 'factor');
+    checkDuration(base, 'base');
+    if (!factor.isFinite || factor <= 0) {
+      throw ArgumentError.value(factor, 'factor', 'Must be finite and positive');
+    }
     return Schedule(() {
       var recurrence = 0;
       return (_) => Effect.sync((_) {
@@ -270,7 +260,7 @@ extension ScheduleOperations<I, O, E> on Schedule<I, O, E> {
 
         final continued = decision as ScheduleContinue<O>;
         final delay = transform(continued.delay, context);
-        _validateArgument(Schedule.durationSchema(), delay, debugName: 'duration');
+        checkDuration(delay, 'duration');
 
         return ScheduleContinue(continued.output, delay);
       });
@@ -306,12 +296,6 @@ Duration _scaledDuration(Duration duration, double factor) {
     throw RangeError('The computed delay exceeds the supported Duration range.');
   }
   return Duration(microseconds: microseconds.floor());
-}
-
-void _validateArgument<T>(Schema<T> schema, T value, {required String debugName}) {
-  if (schema.safeParse(value) case Failure(:final error)) {
-    throw ArgumentError.value(value, debugName, error.first.message);
-  }
 }
 
 Option<O> _continuedOutput<O>(ScheduleContinue<O>? decision) {

@@ -8,32 +8,10 @@ resource scopes.
 
 ## Validation
 
-Conflux uses Ack for input validation. Schemas live as static methods on the
-types that own the rules. Use `safeParse` to decode input and `safeEncode` to
-validate and encode an existing model. For example, decode calendar fields with
-`MomentParts.schema()`:
-
-```dart
-import 'package:conflux/moment.dart';
-
-final result = MomentParts.schema().safeParse(
-  {'year': 2025, 'month': 2, 'day': 29},
-);
-assert(result.isFail); // February 2025 has 28 days.
-
-final encoded = MomentParts.schema().safeEncode(
-  const MomentParts(year: 2024, month: 2, day: 29),
-);
-assert(encoded.isOk);
-```
-
-Moment and Cron factories retain their typed `Result` failures. Runtime
-operations retain their argument error types and validation timing. Argument
-errors use Ack constraint messages. Scalar arguments use Ack’s `debugName`
-(such as `concurrency`); grouped configuration schemas report JSON Pointer
-paths (such as `#/capacity`). Schemas check
-input constraints; `Result.validate` and `Effect.validate` compose caller
-operations and collect their expected failures.
+Conflux uses direct checks for typed runtime arguments and Val for structured
+input validation. Invalid runtime arguments throw `ArgumentError` with the
+argument name, original value, and constraint message. Moment and Cron factories
+return their domain errors for invalid calendar values.
 
 ## Usage
 

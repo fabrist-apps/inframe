@@ -1,7 +1,6 @@
 // Tests exercise the exact Dart VM integer range and required inferred API types.
 // ignore_for_file: avoid_js_rounded_ints, omit_local_variable_types
 
-import 'package:ack/ack.dart';
 import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
 import 'package:timezone/data/latest_all.dart' as data;
@@ -14,25 +13,6 @@ Matcher fails(MomentErrorKind kind) =>
 
 void main() {
   group('MomentParts', () {
-    test('should validate leap days and clock fields through its Ack schema', () {
-      final schema = MomentParts.schema();
-      const leapDay = MomentParts(year: 2000, month: 2, day: 29);
-      expect(schema.safeParse({'year': 2000, 'month': 2, 'day': 29}).getOrNull(), leapDay);
-      expect(schema.safeEncode(leapDay).getOrNull(), containsPair('year', 2000));
-      expect(schema.safeEncode(leapDay.copyWith(year: 1900)).isFail, isTrue);
-      expect(schema.safeEncode(leapDay.copyWith(month: 13)).isFail, isTrue);
-      expect(schema.safeEncode(leapDay.copyWith(second: 60)).isFail, isTrue);
-      expect(schema.safeEncode(leapDay.copyWith(microsecond: 1000)).isFail, isTrue);
-    });
-
-    test('should reject malformed fields with structured paths', () {
-      final result = MomentParts.schema().safeParse({'year': 2025, 'month': '2', 'day': 1});
-      final error = result.getError() as SchemaNestedError;
-      expect(error.errors.single.path, '#/month');
-      expect(error.errors.single, isA<TypeMismatchError>());
-      expect(MomentParts.schema().safeParse({'year': 2025, 'month': 2}).isFail, isTrue);
-    });
-
     test('should retain the first invalid field and its domain diagnostic', () {
       final result = Moment.utc(const MomentParts(year: 2025, month: 2, day: 29, hour: 25));
       expect(
@@ -44,28 +24,8 @@ void main() {
     });
   });
 
-  group('FixedTimeZone', () {
-    test('should decode and encode exact whole-second offsets', () {
-      final schema = FixedTimeZone.schema();
-      final zone = schema.safeParse(-19029000000).getOrNull()!;
-      expect(zone.offset, const Duration(hours: -5, minutes: -17, seconds: -9));
-      expect(schema.safeEncode(zone).getOrNull(), -19029000000);
-      expect(schema.safeParse(1).isFail, isTrue);
-      expect(schema.safeParse(Duration.microsecondsPerDay).isFail, isTrue);
-      expect(schema.safeParse(-Duration.microsecondsPerDay).isFail, isTrue);
-    });
-  });
-
   group('Moment', () {
     setUp(data.initializeTimeZones);
-
-    test('should expose exact inclusive epoch bounds through its Ack schema', () {
-      final schema = Moment.epochMicrosecondsSchema();
-      expect(schema.safeParse(-8640000000000000000).isOk, isTrue);
-      expect(schema.safeParse(8640000000000000000).isOk, isTrue);
-      expect(schema.safeParse(-8640000000000000001).isFail, isTrue);
-      expect(schema.safeParse(8640000000000000001).isFail, isTrue);
-    });
 
     test('should preserve signed microseconds through native UTC interop', () {
       for (final micros in [-62135596800000000, -1001, -1, 0, 1, 253402300799999999]) {

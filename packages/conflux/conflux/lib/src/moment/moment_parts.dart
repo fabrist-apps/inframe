@@ -1,7 +1,6 @@
 // All value fields are final; no annotation-only runtime dependency is needed.
 // ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
 
-import 'package:ack/ack.dart';
 import 'package:conflux/src/moment/moment_error.dart';
 
 /// Immutable local or UTC calendar fields, validated when constructing a Moment.
@@ -17,17 +16,6 @@ final class MomentParts {
     this.millisecond = 0,
     this.microsecond = 0,
   });
-
-  factory MomentParts._fromMap(Map<String, Object?> fields) => MomentParts(
-    year: fields['year']! as int,
-    month: fields['month']! as int,
-    day: fields['day']! as int,
-    hour: (fields['hour'] as int?) ?? 0,
-    minute: (fields['minute'] as int?) ?? 0,
-    second: (fields['second'] as int?) ?? 0,
-    millisecond: (fields['millisecond'] as int?) ?? 0,
-    microsecond: (fields['microsecond'] as int?) ?? 0,
-  );
 
   /// Proleptic Gregorian year, including year zero and negative years.
   final int year;
@@ -52,60 +40,6 @@ final class MomentParts {
 
   /// Microsecond within the millisecond, from 0 through 999.
   final int microsecond;
-
-  /// Decodes calendar-field maps and validates models when encoding them.
-  ///
-  /// Clock fields default to zero. Invalid dates and times are never normalized.
-  static AckSchema<Map<String, Object?>, MomentParts> schema() =>
-      Ack.object({
-            'year': Ack.integer().min(-271821).max(275760),
-            'month': Ack.integer().min(1).max(12),
-            'day': Ack.integer().min(1),
-            'hour': Ack.integer().min(0).max(23).withDefault(0),
-            'minute': Ack.integer().min(0).max(59).withDefault(0),
-            'second': Ack.integer().min(0).max(59).withDefault(0),
-            'millisecond': Ack.integer().min(0).max(999).withDefault(0),
-            'microsecond': Ack.integer().min(0).max(999).withDefault(0),
-          })
-          .refine((fields) {
-            final parts = MomentParts._fromMap(fields);
-            if (_daySchema(parts.year, parts.month).safeParse(parts.day).isFail) {
-              throw _InvalidMomentParts(
-                MomentError(
-                  MomentErrorKind.invalidField,
-                  'day must be 1–${calendarDaysInMonth(parts.year, parts.month)}.',
-                  field: 'day',
-                ),
-              );
-            }
-            final micros = parts.encodeCalendar();
-            if (micros < BigInt.from(minimumMomentMicros) ||
-                micros > BigInt.from(maximumMomentMicros)) {
-              throw const _InvalidMomentParts(
-                MomentError(
-                  MomentErrorKind.outOfRange,
-                  'Calendar fields are outside Dart DateTime’s range.',
-                ),
-              );
-            }
-            return true;
-          })
-          .codec<MomentParts>(
-            decode: MomentParts._fromMap,
-            encode: (parts) => {
-              'year': parts.year,
-              'month': parts.month,
-              'day': parts.day,
-              'hour': parts.hour,
-              'minute': parts.minute,
-              'second': parts.second,
-              'millisecond': parts.millisecond,
-              'microsecond': parts.microsecond,
-            },
-          );
-
-  static AckSchema<int, int> _daySchema(int year, int month) =>
-      Ack.integer().min(1).max(calendarDaysInMonth(year, month));
 
   /// Replaces supplied fields and retains omitted fields without validation.
   MomentParts copyWith({
@@ -164,33 +98,36 @@ int calendarDaysInMonth(int year, int month) => switch (month) {
 extension MomentPartsEncoding on MomentParts {
   /// Validates without allowing the native constructor to normalize input.
   MomentError? validate() {
-    final result = MomentParts.schema().safeEncode(this);
-    if (result case Fail(:final error)) {
-      if (error.cause case _InvalidMomentParts(:final error)) return error;
-      if (error is! SchemaNestedError) throw AckException([error]);
-      final first = error.errors.first;
-      var field = first.name;
-      if (field == 'year') {
-        return const MomentError(
-          MomentErrorKind.outOfRange,
-          'Year is outside Dart DateTime’s range.',
-          field: 'year',
+    if (year < -271821 || year > 275760) {
+      return const MomentError(
+        MomentErrorKind.outOfRange,
+        'Year is outside Dart DateTime’s range.',
+        field: 'year',
+      );
+    }
+    for (final (field, value, min, max) in [
+      ('month', month, 1, 12),
+      ('day', day, 1, calendarDaysInMonth(year, month)),
+      ('hour', hour, 0, 23),
+      ('minute', minute, 0, 59),
+      ('second', second, 0, 59),
+      ('millisecond', millisecond, 0, 999),
+      ('microsecond', microsecond, 0, 999),
+    ]) {
+      if (value < min || value > max) {
+        return MomentError(
+          MomentErrorKind.invalidField,
+          '$field must be $min–$max.',
+          field: field,
         );
       }
-      // Ack checks primitive fields before cross-field rules. Preserve the
-      // factory's date-before-clock diagnostic when both inputs are invalid.
-      if (field != 'month' && MomentParts._daySchema(year, month).safeParse(day).isFail) {
-        field = 'day';
-      }
-      final (min, max) = switch (field) {
-        'month' => (1, 12),
-        'day' => (1, calendarDaysInMonth(year, month)),
-        'hour' => (0, 23),
-        'minute' || 'second' => (0, 59),
-        'millisecond' || 'microsecond' => (0, 999),
-        _ => throw AckException([error]),
-      };
-      return MomentError(MomentErrorKind.invalidField, '$field must be $min–$max.', field: field);
+    }
+    final micros = encodeCalendar();
+    if (micros < BigInt.from(minimumMomentMicros) || micros > BigInt.from(maximumMomentMicros)) {
+      return const MomentError(
+        MomentErrorKind.outOfRange,
+        'Calendar fields are outside Dart DateTime’s range.',
+      );
     }
     return null;
   }
@@ -236,13 +173,4 @@ extension DateTimeMomentParts on DateTime {
     millisecond: millisecond,
     microsecond: microsecond,
   );
-}
-
-final class _InvalidMomentParts implements Exception {
-  const _InvalidMomentParts(this.error);
-
-  final MomentError error;
-
-  @override
-  String toString() => error.message;
 }

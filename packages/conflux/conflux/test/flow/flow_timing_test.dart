@@ -9,16 +9,6 @@ import '../support/fake_clock.dart';
 
 void main() {
   group('Flow timing', () {
-    test('should encode and decode duration schemas without losing microseconds', () {
-      final schema = Flow.durationSchema();
-      const duration = Duration(microseconds: 1001);
-      expect(schema.parse(1001), duration);
-      expect(schema.encode(duration), 1001);
-      expect(schema.safeParse(-1).isFail, isTrue);
-      expect(schema.safeEncode(const Duration(microseconds: -1)).isFail, isTrue);
-      expect(schema.parse(0), Duration.zero);
-    });
-
     test('should retain timed operator Context for delayed overflow callbacks', () async {
       final request = ContextKey<String>('request');
       final owner = Context().withBinding(request.bind('owner'));
