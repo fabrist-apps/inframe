@@ -42,9 +42,6 @@ enum DecodeFailureReason {
   /// The declared schema version is unsupported.
   unsupportedVersion,
 
-  /// The record kind is not recognized.
-  unknownKind,
-
   /// A required field is missing or invalid.
   invalidField,
 

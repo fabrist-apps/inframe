@@ -78,53 +78,6 @@ final class DeliveryOptions {
   final Duration cleanupReserve;
 }
 
-/// Bounds record labels, IDs, attributes, and error text.
-final class ChroniclerLimits {
-  /// Creates schema and caller-data limits.
-  const ChroniclerLimits({
-    this.maxIdBytes = 256,
-    this.maxLabelBytes = 256,
-    this.maxMapEntries = 128,
-    this.maxListItems = 128,
-    this.maxDepth = 5,
-    this.maxKeyBytes = 128,
-    this.maxStringBytes = 8 * 1024,
-    this.maxErrorMessageBytes = 8 * 1024,
-    this.maxStackTraceBytes = 16 * 1024,
-    this.maxCauses = 4,
-  });
-
-  /// Maximum UTF-8 bytes in identifiers.
-  final int maxIdBytes;
-
-  /// Maximum UTF-8 bytes in names and labels.
-  final int maxLabelBytes;
-
-  /// Maximum entries in each attribute map.
-  final int maxMapEntries;
-
-  /// Maximum items in each attribute list.
-  final int maxListItems;
-
-  /// Maximum attribute container depth, counting the root map as one.
-  final int maxDepth;
-
-  /// Maximum UTF-8 bytes in an attribute key.
-  final int maxKeyBytes;
-
-  /// Maximum UTF-8 bytes in a general string value.
-  final int maxStringBytes;
-
-  /// Maximum UTF-8 bytes in converted error text.
-  final int maxErrorMessageBytes;
-
-  /// Maximum UTF-8 bytes in a stack trace.
-  final int maxStackTraceBytes;
-
-  /// Maximum nested causes in one error record.
-  final int maxCauses;
-}
-
 /// Probability used for independently sampled record kinds.
 final class SamplingOptions {
   /// Creates independent sampling probabilities for sampled signals.
@@ -229,7 +182,6 @@ final class ChroniclerOptions {
   /// Creates an immutable runtime configuration.
   const ChroniclerOptions({
     this.delivery = const DeliveryOptions(),
-    this.limits = const ChroniclerLimits(),
     this.sampling = const SamplingOptions(),
     this.redaction = const RedactionOptions(),
     this.diagnostics = const DiagnosticOptions(),
@@ -262,9 +214,6 @@ final class ChroniclerOptions {
 
   /// Queueing, batching, retry, and lifecycle options.
   final DeliveryOptions delivery;
-
-  /// Record schema and caller-data limits.
-  final ChroniclerLimits limits;
 
   /// Sampling probabilities for sampled signal types.
   final SamplingOptions sampling;

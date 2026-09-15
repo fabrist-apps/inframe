@@ -1,6 +1,7 @@
 import 'package:chronicler/src/metrics.dart';
 import 'package:chronicler/src/metrics/series.dart';
 import 'package:chronicler/src/models.dart';
+import 'package:conflux/moment.dart';
 
 /// Runtime-owned definition and admitted series for one metric name.
 sealed class RegisteredInstrument {
@@ -21,8 +22,8 @@ sealed class RegisteredInstrument {
   /// Snapshots a nonempty aggregate for the supplied interval.
   MetricPayload payload(
     MetricSeries series, {
-    required DateTime intervalStart,
-    required DateTime intervalEnd,
+    required Moment intervalStart,
+    required Moment intervalEnd,
     required int durationMicros,
   });
 }
@@ -34,8 +35,8 @@ sealed class SumInstrument extends RegisteredInstrument {
   @override
   MetricPayload payload(
     MetricSeries series, {
-    required DateTime intervalStart,
-    required DateTime intervalEnd,
+    required Moment intervalStart,
+    required Moment intervalEnd,
     required int durationMicros,
   }) {
     final sum = series as SumSeries;
@@ -104,8 +105,8 @@ final class GaugeInstrument extends RegisteredInstrument {
   @override
   MetricPayload payload(
     MetricSeries series, {
-    required DateTime intervalStart,
-    required DateTime intervalEnd,
+    required Moment intervalStart,
+    required Moment intervalEnd,
     required int durationMicros,
   }) {
     final gauge = series as GaugeSeries;
@@ -146,8 +147,8 @@ final class HistogramInstrument extends RegisteredInstrument {
   @override
   MetricPayload payload(
     MetricSeries series, {
-    required DateTime intervalStart,
-    required DateTime intervalEnd,
+    required Moment intervalStart,
+    required Moment intervalEnd,
     required int durationMicros,
   }) {
     final histogram = series as HistogramSeries;

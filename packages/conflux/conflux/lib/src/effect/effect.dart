@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:ack/ack.dart';
 import 'package:conflux/moment.dart';
 import 'package:conflux/non_empty_list.dart';
 import 'package:conflux/option.dart';
@@ -10,6 +11,7 @@ import 'package:conflux/src/effect/cause.dart';
 import 'package:conflux/src/effect/clock.dart';
 import 'package:conflux/src/effect/execution.dart';
 import 'package:conflux/src/effect/exit.dart';
+import 'package:conflux/src/validation.dart';
 import 'package:context/context.dart';
 
 typedef _EffectRun<A, E> = Future<Exit<A, E>> Function(EffectExecution execution);
@@ -17,6 +19,21 @@ typedef _EffectRun<A, E> = Future<Exit<A, E>> Function(EffectExecution execution
 /// A lazy, reusable description of work producing [A] or expected error [E].
 final class Effect<A, E> {
   const Effect._(this._run);
+
+  /// Validates the snapshotted branches of a race.
+  static ListSchema<Effect<A, E>, Effect<A, E>> raceSchema<A, E>() =>
+      Ack.list(Ack.instance<Effect<A, E>>()).nonEmpty();
+
+  /// Validates a positive concurrency limit.
+  static IntegerSchema concurrencySchema() => Ack.integer().positive();
+
+  /// Encodes and decodes a non-negative duration as integer microseconds.
+  static CodecSchema<int, Duration> durationSchema() => Ack.integer()
+      .min(0)
+      .codec<Duration>(
+        decode: (microseconds) => Duration(microseconds: microseconds),
+        encode: (duration) => duration.inMicroseconds,
+      );
 
   final _EffectRun<A, E> _run;
 
@@ -64,7 +81,7 @@ final class Effect<A, E> {
   /// The duration must not be negative. It is passed to [Clock.sleep] without
   /// rounding; the selected Clock defines its effective timer precision.
   static Effect<void, Never> sleep(Duration duration) {
-    _requireNonNegativeDuration(duration);
+    validateArgument(Effect.durationSchema(), duration, debugName: 'duration');
     return Effect._((execution) async {
       final wait = execution.clock.sleep(duration);
       final completed = Completer<Exit<void, Never>>();
@@ -250,9 +267,7 @@ final class Effect<A, E> {
     Iterable<Effect<A, E>> effects, {
     int concurrency = 1,
   }) {
-    if (concurrency <= 0) {
-      throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
-    }
+    validateArgument(concurrencySchema(), concurrency, debugName: 'concurrency');
     return Effect._((execution) {
       return _EffectCollection.run(List.of(effects), execution, concurrency);
     });
@@ -264,9 +279,7 @@ final class Effect<A, E> {
     Effect<A, E> Function(I input, Context context) effect, {
     int concurrency = 1,
   }) {
-    if (concurrency <= 0) {
-      throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
-    }
+    validateArgument(concurrencySchema(), concurrency, debugName: 'concurrency');
     return Effect.defer((_) {
       final effects = inputs.map(
         (input) => Effect.defer<A, E>((context) => effect(input, context)),
@@ -278,9 +291,7 @@ final class Effect<A, E> {
   /// Returns the first successful branch after interrupting and cleaning up losers.
   static Effect<A, E> race<A, E>(Iterable<Effect<A, E>> effects) => Effect._((execution) {
     final branches = List<Effect<A, E>>.of(effects);
-    if (branches.isEmpty) {
-      throw ArgumentError.value(effects, 'effects', 'Must not be empty.');
-    }
+    validateArgument(raceSchema<A, E>(), branches, debugName: 'effects');
     return _EffectRace.run(branches, execution);
   });
 
@@ -317,7 +328,7 @@ final class Effect<A, E> {
 extension EffectTiming<A, E> on Effect<A, E> {
   /// Waits for [duration] before starting this Effect.
   Effect<A, E> delay(Duration duration) {
-    _requireNonNegativeDuration(duration);
+    validateArgument(Effect.durationSchema(), duration, debugName: 'duration');
     return Effect._((execution) async {
       final waited = await Effect.sleep(duration)._evaluate(execution);
       return switch (waited) {
@@ -347,7 +358,7 @@ extension EffectTiming<A, E> on Effect<A, E> {
     Duration duration, {
     required E Function(Context context) onTimeout,
   }) {
-    _requireNonNegativeDuration(duration);
+    validateArgument(Effect.durationSchema(), duration, debugName: 'duration');
     return Effect._((execution) async {
       final context = execution.context;
       final operation = ScopeAccess.fork(execution.scope, this, execution);
@@ -403,12 +414,6 @@ Cause<Never>? _defectsFrom<A, E>(Exit<A, E> exit) => switch (exit) {
   Succeeded<A, E>() => null,
   Failed<A, E>(:final cause) => cause.defectsOnly,
 };
-
-void _requireNonNegativeDuration(Duration duration) {
-  if (duration.isNegative) {
-    throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
-  }
-}
 
 E _absurd<E>(Never value) => value;
 

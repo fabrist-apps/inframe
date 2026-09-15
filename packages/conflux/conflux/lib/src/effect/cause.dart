@@ -1,8 +1,14 @@
+import 'package:ack/ack.dart';
 import 'package:conflux/option.dart';
+import 'package:conflux/src/validation.dart';
 
 /// Explains why an Effect failed.
 sealed class Cause<E> {
   const Cause();
+
+  /// Validates the children of a sequential or parallel cause.
+  static ListSchema<Cause<T>, Cause<T>> causesSchema<T>() =>
+      Ack.list(Ack.instance<Cause<T>>()).nonEmpty();
 
   /// Whether this cause contains a defect or interruption.
   bool get containsFatal => switch (this) {
@@ -52,9 +58,7 @@ sealed class Cause<E> {
 
   static List<Cause<T>> _nonEmpty<T>(Iterable<Cause<T>> causes) {
     final values = List<Cause<T>>.unmodifiable(causes);
-    if (values.isEmpty) {
-      throw ArgumentError.value(causes, 'causes', 'Must not be empty.');
-    }
+    validateArgument(causesSchema<T>(), values, debugName: 'causes');
     return values;
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:ack/ack.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/pubsub.dart';
@@ -20,6 +21,7 @@ import 'package:conflux/src/flow/flow_scheduling.dart';
 import 'package:conflux/src/flow/protocol.dart';
 import 'package:conflux/src/flow/sharing.dart';
 import 'package:conflux/src/flow/stream_adapter.dart';
+import 'package:conflux/src/validation.dart';
 import 'package:context/context.dart';
 
 E _widenNever<E>(Never error) => error;
@@ -32,6 +34,18 @@ final class Flow<A, E> {
   const Flow._(this._openCursor);
 
   final OpenFlowCursor<A, E> _openCursor;
+
+  /// Validates counts, allowing zero for selection and replay by default.
+  static IntegerSchema countSchema({bool allowZero = true}) =>
+      allowZero ? Ack.integer().min(0) : Ack.integer().positive();
+
+  /// Validates nonnegative durations, encoded as exact microseconds.
+  static CodecSchema<int, Duration> durationSchema() => Ack.integer()
+      .min(0)
+      .codec<Duration>(
+        decode: (micros) => Duration(microseconds: micros),
+        encode: (duration) => duration.inMicroseconds,
+      );
 
   /// Creates a Flow that completes without emitting a value.
   static Flow<A, E> empty<A, E>() => Flow._(
@@ -94,7 +108,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => StreamFlowSource.open(
         source,
@@ -116,7 +130,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => ConcurrentFlowSource.openMerge(
         sources.map((source) => source.open),
@@ -147,7 +161,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => CombinationFlowSource.openCombineLatest(
         sources.map((source) => source.open),
@@ -225,9 +239,7 @@ final class Flow<A, E> {
 
   /// Discards the first [count] values.
   Flow<A, E> skip(int count) {
-    if (count < 0) {
-      throw ArgumentError.value(count, 'count', 'Must not be negative.');
-    }
+    validateArgument(countSchema(), count, debugName: 'count');
     if (count == 0) return this;
     return Flow._(
       () => open().map((cursor, _) => _SkipCursor(cursor, count)),
@@ -310,10 +322,8 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    if (concurrency <= 0) {
-      throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
-    }
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    validateArgument(countSchema(allowZero: false), concurrency, debugName: 'concurrency');
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => ConcurrentFlowSource.openMergeMap(
         open,
@@ -336,7 +346,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => ConcurrentFlowSource.openSwitchMap(
         open,
@@ -355,7 +365,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => ConcurrentFlowSource.openExhaustMap(
         open,
@@ -378,7 +388,7 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => CombinationFlowSource.openWithLatestFrom(
         open,
@@ -404,10 +414,8 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    validateFlowBuffer(capacity, overflow, onOverflow);
-    if (replay < 0) {
-      throw ArgumentError.value(replay, 'replay', 'Must not be negative.');
-    }
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
+    validateArgument(countSchema(), replay, debugName: 'replay');
     final shared = SharedFlowSource.create<A, E>(
       open,
       capacity: capacity,
@@ -423,9 +431,7 @@ final class Flow<A, E> {
   /// [count] must be positive. Normal completion flushes a non-empty partial
   /// batch, while failure discards it and preserves the complete failure cause.
   Flow<List<A>, E> bufferCount(int count) {
-    if (count <= 0) {
-      throw ArgumentError.value(count, 'count', 'Must be positive.');
-    }
+    validateArgument(countSchema(allowZero: false), count, debugName: 'count');
     return Flow._(() => BatchingFlowSource.openCount(open, count));
   }
 
@@ -442,11 +448,9 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    _validateFlowDuration(duration);
-    if (maxSize <= 0) {
-      throw ArgumentError.value(maxSize, 'maxSize', 'Must be positive.');
-    }
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    validateArgument(durationSchema(), duration, debugName: 'duration');
+    validateArgument(countSchema(allowZero: false), maxSize, debugName: 'maxSize');
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => BatchingFlowSource.openTime(
         open,
@@ -470,8 +474,8 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    _validateFlowDuration(duration);
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    validateArgument(durationSchema(), duration, debugName: 'duration');
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => FlowSchedulingSource.openDebounce(
         open,
@@ -494,8 +498,8 @@ final class Flow<A, E> {
     FlowOverflowPolicy overflow = FlowOverflowPolicy.backpressure,
     E Function(FlowBufferOverflow overflow, Context context)? onOverflow,
   }) {
-    _validateFlowDuration(duration);
-    validateFlowBuffer(capacity, overflow, onOverflow);
+    validateArgument(durationSchema(), duration, debugName: 'duration');
+    FlowMailbox.validateBuffer(capacity, overflow, onOverflow);
     return Flow._(
       () => FlowSchedulingSource.openThrottle(
         open,
@@ -573,9 +577,7 @@ final class Flow<A, E> {
 
   /// Emits at most the first [count] values and then closes upstream.
   Flow<A, E> take(int count) {
-    if (count < 0) {
-      throw ArgumentError.value(count, 'count', 'Must not be negative.');
-    }
+    validateArgument(countSchema(), count, debugName: 'count');
     if (count == 0) return Flow.empty();
     return Flow._(
       () => open().map((cursor, _) => _TakeCursor(cursor, count)),
@@ -660,12 +662,6 @@ final class Flow<A, E> {
       );
     }),
   );
-}
-
-void _validateFlowDuration(Duration duration) {
-  if (duration.isNegative) {
-    throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
-  }
 }
 
 Effect<FlowSourceCursor<A, E>, E> _openWithExitHook<A, E>(

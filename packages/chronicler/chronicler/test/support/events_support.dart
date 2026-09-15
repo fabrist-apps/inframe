@@ -7,7 +7,6 @@ import 'runtime.dart';
 Chronicler createEventChronicler(
   TestExporter exporter, {
   int maxBatchRecords = 1,
-  ChroniclerLimits limits = const ChroniclerLimits(),
   SamplingOptions sampling = const SamplingOptions(),
 }) => closeAfterTest(
   Chronicler(
@@ -17,7 +16,6 @@ Chronicler createEventChronicler(
     exporter: exporter,
     options: ChroniclerOptions(
       delivery: DeliveryOptions(maxBatchRecords: maxBatchRecords),
-      limits: limits,
       sampling: sampling,
     ),
   ),

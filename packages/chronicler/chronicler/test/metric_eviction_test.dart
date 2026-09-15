@@ -1,50 +1,42 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart' show ChroniclerMetricFixture;
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 import 'support/exporter.dart';
-import 'support/metric_clock.dart';
+import 'support/metric_aggregation.dart';
 
 void main() {
   group('Chronicler metric idle eviction', () {
     test('should finalize an expired series before admitting its replacement', () async {
-      final exporter = TestExporter(acceptImmediately: true);
-      final clock = MetricClock();
-      final chronicler = _chronicler(exporter);
-      ChroniclerMetricFixture.overrideClocks(
-        chronicler,
-        now: () => clock.now,
-        elapsed: () => clock.elapsed,
+      final harness = MetricHarness(
+        options: const MetricOptions(
+          maxSeries: 1,
+          maxSeriesPerInstrument: 1,
+          idleTimeout: Duration(seconds: 10),
+        ),
       );
-      final counter = Context().withChronicler(chronicler.recorder).metrics.counter('requests')
-        ..add(1, attributes: {'route': 'old'});
+      final clock = harness.clock;
+      final counter = harness.metrics.counter('requests')..add(1, attributes: {'route': 'old'});
       clock.advance(const Duration(seconds: 10));
       counter.add(2, attributes: {'route': 'new'});
-      await chronicler.flush();
+      harness.seal();
 
-      final payloads = exporter.batches
-          .expand((batch) => batch.records)
-          .cast<MetricRecord>()
-          .map((record) => record.payload)
-          .toList();
+      final payloads = harness.records.map((record) => record.payload).toList();
       expect(payloads, hasLength(2));
       expect(payloads.map((payload) => payload.sum), [1, 2]);
       expect(payloads.map((payload) => payload.attributes['route']), ['old', 'new']);
-
-      await chronicler.close();
     });
 
     test('should not refresh idle time for rejected measurements or lookup', () async {
-      final exporter = TestExporter(acceptImmediately: true);
-      final clock = MetricClock();
-      final chronicler = _chronicler(exporter);
-      ChroniclerMetricFixture.overrideClocks(
-        chronicler,
-        now: () => clock.now,
-        elapsed: () => clock.elapsed,
+      final harness = MetricHarness(
+        options: const MetricOptions(
+          maxSeries: 1,
+          maxSeriesPerInstrument: 1,
+          idleTimeout: Duration(seconds: 10),
+        ),
       );
-      final metrics = Context().withChronicler(chronicler.recorder).metrics;
+      final clock = harness.clock;
+      final metrics = harness.metrics;
       final counter = metrics.counter('requests')..add(1, attributes: {'route': 'old'});
 
       clock.advance(const Duration(seconds: 9));
@@ -55,71 +47,60 @@ void main() {
       // ignore: cascade_invocations
       clock.advance(const Duration(seconds: 1));
       counter.add(2, attributes: {'route': 'new'});
-      await chronicler.flush();
+      harness.seal();
 
       expect(
-        exporter.batches
-            .expand((batch) => batch.records)
-            .cast<MetricRecord>()
-            .map((record) => record.payload.sum),
+        harness.records.map((record) => record.payload.sum),
         [1, 2],
       );
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidMeasurement], BigInt.one);
-      await chronicler.close();
+      expect(harness.reasons, [DiagnosticReason.invalidMeasurement]);
     });
 
     test('should retain active series and reclaim empty state at an interval boundary', () async {
-      final exporter = TestExporter(acceptImmediately: true);
-      final clock = MetricClock();
-      final chronicler = _chronicler(exporter);
-      ChroniclerMetricFixture.overrideClocks(
-        chronicler,
-        now: () => clock.now,
-        elapsed: () => clock.elapsed,
+      final harness = MetricHarness(
+        options: const MetricOptions(
+          maxSeries: 1,
+          maxSeriesPerInstrument: 1,
+          idleTimeout: Duration(seconds: 10),
+        ),
       );
-      final counter = Context().withChronicler(chronicler.recorder).metrics.counter('requests')
-        ..add(1, attributes: {'route': 'active'});
+      final clock = harness.clock;
+      final counter = harness.metrics.counter('requests')..add(1, attributes: {'route': 'active'});
 
       clock.advance(const Duration(seconds: 9));
       counter.add(1, attributes: {'route': 'active'});
       clock.advance(const Duration(seconds: 1));
       counter.add(5, attributes: {'route': 'blocked'});
-      await chronicler.flush();
-      expect(chronicler.diagnosticCounts[DiagnosticReason.seriesLimitReached], BigInt.one);
+      harness.seal();
+      expect(harness.reasons, [DiagnosticReason.seriesLimitReached]);
       expect(
-        (exporter.batches.single.records.single as MetricRecord).payload.sum,
+        harness.records.single.payload.sum,
         2,
       );
 
       clock.advance(const Duration(seconds: 9));
-      ChroniclerMetricFixture.rotate(chronicler);
+      harness.seal();
       counter.add(3, attributes: {'route': 'replacement'});
-      await chronicler.flush();
+      harness.seal();
       expect(
-        (exporter.batches.last.records.single as MetricRecord).payload.sum,
+        harness.records.last.payload.sum,
         3,
       );
-      await chronicler.close();
     });
 
     test('should reclaim capacity even when final delivery rejects the expired record', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = MetricClock();
       final chronicler = _chronicler(
         exporter,
         batchInterval: const Duration(minutes: 1),
         maxPendingRecords: 1,
-      );
-      ChroniclerMetricFixture.overrideClocks(
-        chronicler,
-        now: () => clock.now,
-        elapsed: () => clock.elapsed,
+        maxBatchRecords: 10,
       );
       final context = Context().withChronicler(chronicler.recorder);
       context.logs.info('occupies queue');
       final counter = context.metrics.counter('requests')..add(1, attributes: {'route': 'expired'});
 
-      clock.advance(const Duration(seconds: 10));
+      await Future<void>.delayed(const Duration(milliseconds: 2));
       counter.add(2, attributes: {'route': 'replacement'});
       chronicler.setCollectionEnabled(ChroniclerSignal.logs, false);
       await chronicler.flush();
@@ -133,34 +114,32 @@ void main() {
     });
 
     test('should use the common idle store for every instrument kind', () async {
-      final exporter = TestExporter(acceptImmediately: true);
-      final clock = MetricClock();
-      final chronicler = _chronicler(exporter);
-      ChroniclerMetricFixture.overrideClocks(
-        chronicler,
-        now: () => clock.now,
-        elapsed: () => clock.elapsed,
+      final harness = MetricHarness(
+        options: const MetricOptions(
+          maxSeries: 1,
+          maxSeriesPerInstrument: 1,
+          idleTimeout: Duration(seconds: 10),
+        ),
       );
-      final metrics = Context().withChronicler(chronicler.recorder).metrics;
+      final clock = harness.clock;
+      final metrics = harness.metrics;
       metrics.histogram('latency', boundaries: [10]).record(4);
-      await chronicler.flush();
+      harness.seal();
 
       clock.advance(const Duration(seconds: 10));
-      ChroniclerMetricFixture.rotate(chronicler);
+      harness.seal();
       metrics.gauge('depth').set(7);
-      await chronicler.flush();
+      harness.seal();
 
       expect(
-        (exporter.batches.last.records.single as MetricRecord).payload.instrument,
+        harness.records.last.payload.instrument,
         MetricInstrument.gauge,
       );
       expect(const MetricOptions().idleTimeout, const Duration(minutes: 5));
-      await chronicler.close();
     });
 
     test('should contain instrument lookup from a finalization hook', () async {
       final exporter = TestExporter(acceptImmediately: true);
-      final clock = MetricClock();
       late Chronicler chronicler;
       chronicler = _chronicler(
         exporter,
@@ -171,14 +150,9 @@ void main() {
           },
         ),
       );
-      ChroniclerMetricFixture.overrideClocks(
-        chronicler,
-        now: () => clock.now,
-        elapsed: () => clock.elapsed,
-      );
       final counter = chronicler.recorder.metrics.counter('requests')
         ..add(1, attributes: {'route': 'old'});
-      clock.advance(const Duration(seconds: 10));
+      await Future<void>.delayed(const Duration(milliseconds: 2));
 
       expect(
         () => counter.add(2, attributes: {'route': 'replacement'}),
@@ -203,6 +177,7 @@ Chronicler _chronicler(
   TestExporter exporter, {
   Duration batchInterval = const Duration(seconds: 5),
   int maxPendingRecords = 5000,
+  int maxBatchRecords = 1,
   RedactionOptions redaction = const RedactionOptions(),
 }) => Chronicler(
   appId: 'app',
@@ -212,13 +187,13 @@ Chronicler _chronicler(
   options: ChroniclerOptions(
     delivery: DeliveryOptions(
       batchInterval: batchInterval,
-      maxBatchRecords: 1,
+      maxBatchRecords: maxBatchRecords,
       maxPendingRecords: maxPendingRecords,
     ),
     metrics: const MetricOptions(
       maxSeries: 1,
       maxSeriesPerInstrument: 1,
-      idleTimeout: Duration(seconds: 10),
+      idleTimeout: Duration(microseconds: 1),
     ),
     redaction: redaction,
   ),

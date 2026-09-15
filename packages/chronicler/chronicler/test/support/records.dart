@@ -1,12 +1,16 @@
 import 'package:chronicler/chronicler.dart';
 import 'package:chrono_id/chrono_id.dart';
+import 'package:conflux/moment.dart';
+import 'package:conflux/result.dart';
 
-RecordEnvelope testEnvelope({DateTime? timestamp}) => RecordEnvelope(
+RecordEnvelope testEnvelope({Moment? timestamp}) => RecordEnvelope(
   eventId: ChronoID.generate(prefix: 'evt'),
   appId: 'app',
   release: 'release',
   source: ChroniclerSource.server,
-  timestamp: timestamp ?? DateTime.now().toUtc(),
+  timestamp:
+      timestamp ??
+      Moment.fromDateTime(DateTime.now()).getOrThrowWith((error) => StateError('$error')),
 );
 
 LogRecord testLogRecord(String message) => LogRecord(
@@ -15,7 +19,7 @@ LogRecord testLogRecord(String message) => LogRecord(
 );
 
 MetricRecord testMetricRecord() {
-  final now = DateTime.now().toUtc();
+  final now = Moment.fromDateTime(DateTime.now()).getOrThrowWith((error) => StateError('$error'));
   return MetricRecord(
     envelope: testEnvelope(timestamp: now),
     payload: MetricPayload(

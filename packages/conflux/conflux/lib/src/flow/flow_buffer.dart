@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:ack/ack.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/src/coordination/waiter.dart';
@@ -9,6 +10,7 @@ import 'package:conflux/src/effect/effect.dart' show EffectAccess;
 import 'package:conflux/src/effect/execution.dart' show EffectExecution, ScopeAccess;
 import 'package:conflux/src/effect/exit.dart' show ExitRuntimeOperations;
 import 'package:conflux/src/flow/protocol.dart';
+import 'package:conflux/src/validation.dart';
 import 'package:context/context.dart';
 
 /// The action a Flow operation takes when its owned buffer is full.
@@ -38,24 +40,6 @@ final class FlowBufferOverflow {
   String toString() => 'Flow buffer reached capacity $capacity';
 }
 
-/// Validates the shared bounded-buffer configuration used by Flow operators.
-void validateFlowBuffer(
-  int capacity,
-  FlowOverflowPolicy overflow,
-  Object? onOverflow,
-) {
-  if (capacity <= 0) {
-    throw ArgumentError.value(capacity, 'capacity', 'Must be positive.');
-  }
-  if (overflow == FlowOverflowPolicy.fail && onOverflow == null) {
-    throw ArgumentError.value(
-      onOverflow,
-      'onOverflow',
-      'Must be supplied when overflow is FlowOverflowPolicy.fail.',
-    );
-  }
-}
-
 /// A single-consumer bounded mailbox that retains terminal state after values.
 ///
 /// One producer wait may retain one value while backpressured. Closing interrupts
@@ -63,6 +47,33 @@ void validateFlowBuffer(
 final class FlowMailbox<A, E> implements FlowSourceCursor<A, E> {
   /// Creates an open mailbox with already validated configuration.
   FlowMailbox(this.capacity, this.overflow, this._onOverflow);
+
+  /// Validates the positive capacity of a Flow-owned buffer.
+  static IntegerSchema capacitySchema() => Ack.integer().positive();
+
+  /// Requires an error mapper when the overflow policy is [FlowOverflowPolicy.fail].
+  static AckSchema<Function, Function> overflowHandlerSchema(FlowOverflowPolicy overflow) {
+    final handler = Ack.instance<Function>();
+    return overflow == FlowOverflowPolicy.fail ? handler : handler.nullable();
+  }
+
+  /// Validates the buffer configuration and reports named argument paths.
+  static ObjectSchema argumentsSchema(FlowOverflowPolicy overflow) => Ack.object({
+    'capacity': capacitySchema(),
+    'onOverflow': overflowHandlerSchema(overflow),
+  });
+
+  /// Checks configuration before an operator starts acquiring resources.
+  static void validateBuffer(
+    int capacity,
+    FlowOverflowPolicy overflow,
+    Object? onOverflow,
+  ) {
+    validateArgument(argumentsSchema(overflow), {
+      'capacity': capacity,
+      'onOverflow': onOverflow,
+    });
+  }
 
   /// Maximum buffered values, excluding active producer calls.
   final int capacity;

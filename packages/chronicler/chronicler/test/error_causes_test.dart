@@ -166,7 +166,7 @@ void main() {
       expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
     });
 
-    test('should accept four causes and honor a configured zero limit', () async {
+    test('should accept four causes', () async {
       final exporter = TestExporter();
       final chronicler = createErrorChronicler(exporter);
 
@@ -182,64 +182,6 @@ void main() {
         (exporter.batches.single.records.single as ErrorRecord).payload.causes,
         hasLength(4),
       );
-
-      final zeroExporter = TestExporter();
-      final zero = Chronicler(
-        appId: 'app',
-        release: 'release',
-        source: ChroniclerSource.server,
-        exporter: zeroExporter,
-        options: const ChroniclerOptions(
-          limits: ChroniclerLimits(maxCauses: 0),
-          delivery: DeliveryOptions(maxBatchRecords: 1),
-        ),
-      );
-      Context()
-          .withChronicler(zero.recorder)
-          .errors
-          .capture(
-            'root',
-            causes: const [ChroniclerCause('cause')],
-          );
-      await Future<void>.delayed(Duration.zero);
-      expect(zeroExporter.batches, isEmpty);
-      expect(zero.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
-    });
-
-    test('should enforce UTF-8 field limits on every cause', () async {
-      Future<Chronicler> capture(ChroniclerCause cause) async {
-        final exporter = TestExporter();
-        final chronicler = Chronicler(
-          appId: 'app',
-          release: 'release',
-          source: ChroniclerSource.server,
-          exporter: exporter,
-          options: const ChroniclerOptions(
-            limits: ChroniclerLimits(
-              maxErrorMessageBytes: 3,
-              maxStackTraceBytes: 3,
-            ),
-            delivery: DeliveryOptions(maxBatchRecords: 1),
-          ),
-        );
-        Context()
-            .withChronicler(chronicler.recorder)
-            .errors
-            .capture(
-              '',
-              causes: [cause],
-            );
-        await Future<void>.delayed(Duration.zero);
-        expect(exporter.batches, isEmpty);
-        return chronicler;
-      }
-
-      final message = await capture(const ChroniclerCause('éé'));
-      final stack = await capture(
-        ChroniclerCause('', stackTrace: StackTrace.fromString('éé')),
-      );
-      expect(message.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
-      expect(stack.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
     });
 
     test('should enforce the complete encoded bound across a cause chain', () async {

@@ -1,5 +1,4 @@
 import 'package:chronicler/chronicler.dart';
-import 'package:chronicler/src/runtime.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
@@ -10,17 +9,21 @@ void main() {
   group('Chronicler Context identity', () {
     test('should replace complete identity while preserving other context state', () async {
       final exporter = TestExporter();
-      final chronicler = createEventChronicler(exporter, maxBatchRecords: 5);
+      final chronicler = createEventChronicler(
+        exporter,
+        maxBatchRecords: 5,
+        sampling: const SamplingOptions(traces: 0),
+      );
       final authKey = ContextKey<Object>('auth');
       final auth = Object();
-      final correlated = ChroniclerCaptureFixture.withCorrelation(
-        chronicler.recorder,
-        traceId: '1' * 32,
-        spanId: '2' * 16,
-      );
+      final span = chronicler.recorder.startSpan('identity');
+      addTearDown(() => span.end(SpanStatus.success));
+      final correlation = TracePropagation.extract(span.recorder.injectTrace({}));
+      expect(correlation, isNotNull);
+      expect(correlation!.sampled, isFalse);
       final base = Context()
           .withBinding(authKey.bind(auth))
-          .withChronicler(correlated)
+          .withChronicler(span.recorder)
           .withIdentity(
             userId: 'alice',
             anonymousId: 'anonymous',
@@ -56,8 +59,8 @@ void main() {
         ],
       );
       for (final record in records) {
-        expect(record.envelope.traceId, '1' * 32);
-        expect(record.envelope.spanId, '2' * 16);
+        expect(record.envelope.traceId, correlation.traceId);
+        expect(record.envelope.spanId, correlation.parentSpanId);
       }
       expect(base.require(authKey), same(auth));
       expect(userOnly.require(authKey), same(auth));
@@ -115,21 +118,13 @@ void main() {
         () => source.withIdentity(userId: ''),
         throwsA(isA<ChroniclerConfigurationException>()),
       );
-      expect(
-        () => source.withIdentity(userId: '😀' * 65),
-        throwsA(isA<ChroniclerConfigurationException>()),
-      );
-      expect(
-        () => source.withIdentity(userId: String.fromCharCode(0xd800)),
-        throwsA(isA<ChroniclerConfigurationException>()),
-      );
-      final boundary = source.withIdentity(userId: '😀' * 64);
+      final derived = source.withIdentity(userId: '😀' * 65);
       source.events.track('still_base');
-      boundary.events.track('boundary');
+      derived.events.track('derived');
 
       await Future<void>.delayed(Duration.zero);
       final records = exporter.batches.expand((batch) => batch.records).toList();
-      expect(records.map((record) => record.envelope.userId), ['base', '😀' * 64]);
+      expect(records.map((record) => record.envelope.userId), ['base', '😀' * 65]);
     });
   });
 }

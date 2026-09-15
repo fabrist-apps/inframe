@@ -23,7 +23,15 @@ void main() {
       expect(await source.skip(10).runCollect().runFuture(), isEmpty);
       expect(await source.takeWhile((value, _) => value < 3).runCollect().runFuture(), [1, 2]);
       expect(await source.skipWhile((value, _) => value < 3).runCollect().runFuture(), [3, 4]);
-      expect(() => source.skip(-1), throwsArgumentError);
+      expect(
+        () => source.skip(-1),
+        throwsA(
+          isA<ArgumentError>()
+              .having((error) => error.name, 'name', 'count')
+              .having((error) => error.invalidValue, 'invalidValue', -1)
+              .having((error) => error.message, 'message', 'Must be at least 0, got -1.'),
+        ),
+      );
     });
 
     test('should suppress only consecutive duplicate values', () async {

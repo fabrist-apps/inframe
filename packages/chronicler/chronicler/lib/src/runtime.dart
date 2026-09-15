@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/lifecycle.dart';
@@ -11,7 +10,7 @@ import 'package:chronicler/src/runtime/tracing.dart';
 import 'package:chronicler/src/trace_propagation.dart';
 import 'package:chronicler/src/transport.dart';
 
-export 'package:chronicler/src/runtime/capture.dart' show ChroniclerCause, ChroniclerRuntime;
+export 'package:chronicler/src/runtime/capture.dart' show ChroniclerCause;
 
 /// Configured owner of capture and export resources.
 final class Chronicler {
@@ -31,8 +30,6 @@ final class Chronicler {
          buildId: buildId,
          options: options,
        );
-
-  Chronicler._fromRuntime(this._runtime);
 
   /// Default field-name terms replaced before buffering.
   static const Set<String> defaultSensitiveFieldTerms =
@@ -181,7 +178,7 @@ final class ChroniclerRecorder {
   void setSpanAttributes(Map<String, Object?> attributes) =>
       _runtime.tracing.setAttributes(_attribution.span, attributes);
 
-  /// Returns a cleaned carrier containing this active span's W3C metadata.
+  /// Returns a cleaned carrier containing this active span's Chronicler headers.
   Map<String, String> injectTrace(Map<String, String> headers) =>
       _runtime.tracing.inject(_attribution.span, headers);
 
@@ -386,191 +383,5 @@ final class ChroniclerSpan {
     } on Object {
       _runtime.diagnostics.record(DiagnosticReason.spanEndFailed);
     }
-  }
-}
-
-/// Internal fixture bridge used by sibling-signal contract tests.
-final class ChroniclerCaptureFixture {
-  const ChroniclerCaptureFixture._();
-
-  /// Submits a finalized sibling-signal [record] through capture policy.
-  static void capture(Chronicler chronicler, ChroniclerRecord record) =>
-      RuntimeTestAccess.capture(chronicler._runtime, record);
-
-  /// Returns a recorder with valid operation correlation for identity tests.
-  static ChroniclerRecorder withCorrelation(
-    ChroniclerRecorder recorder, {
-    required String traceId,
-    required String spanId,
-  }) => ChroniclerRecorder._(
-    recorder._runtime,
-    RecorderAttribution(
-      userId: recorder._attribution.userId,
-      anonymousId: recorder._attribution.anonymousId,
-      sessionId: recorder._attribution.sessionId,
-      traceId: traceId,
-      spanId: spanId,
-    ),
-  );
-}
-
-/// Internal fixture bridge for deterministic tracing tests.
-final class ChroniclerTracingFixture {
-  const ChroniclerTracingFixture._();
-
-  /// Creates a runtime using [secureRandom] for startup validation and IDs.
-  static Chronicler create({
-    required String appId,
-    required String release,
-    required ChroniclerSource source,
-    required ChroniclerExporter exporter,
-    required Random Function() secureRandom,
-    ChroniclerOptions options = const ChroniclerOptions(),
-  }) => Chronicler._fromRuntime(
-    ChroniclerRuntime.create(
-      appId: appId,
-      release: release,
-      source: source,
-      exporter: exporter,
-      buildId: null,
-      options: options,
-      secureRandomFactory: secureRandom,
-    ),
-  );
-
-  /// Replaces wall and monotonic clocks for span-lifetime tests.
-  static void overrideClocks(
-    Chronicler chronicler, {
-    required DateTime Function() now,
-    required Duration Function() elapsed,
-  }) {
-    RuntimeTestAccess.overrideClocks(chronicler._runtime, now: now, elapsed: elapsed);
-  }
-
-  /// Replaces the ID source after setup for recording-failure tests.
-  static void overrideSecureRandom(Chronicler chronicler, Random random) {
-    RuntimeTestAccess.overrideSecureRandom(chronicler._runtime, random);
-  }
-
-  /// Replaces the root sampling source for whole-trace tests.
-  static void overrideSamplingRandom(Chronicler chronicler, Random random) {
-    RuntimeTestAccess.overrideSamplingRandom(chronicler._runtime, random);
-  }
-
-  /// Makes the next manual or callback span start fail unexpectedly.
-  static void failNextSpanStart(Chronicler chronicler) {
-    chronicler._runtime.tracing.failNextStartForTest();
-  }
-
-  /// Returns the number of payload attributes retained by [recorder]'s span.
-  static int retainedAttributeCount(ChroniclerRecorder recorder) =>
-      recorder._attribution.span?.retainedAttributeCount ?? 0;
-}
-
-/// Internal fixture bridge for deterministic delivery tests.
-final class ChroniclerDeliveryFixture {
-  const ChroniclerDeliveryFixture._();
-
-  /// Replaces retry jitter selection for deterministic delivery tests.
-  static void selectRetryDelay(
-    Chronicler chronicler,
-    Duration Function(int attempt, Duration ceiling) selector,
-  ) {
-    RuntimeTestAccess.selectRetryDelay(chronicler._runtime, selector);
-  }
-
-  /// Returns the current trace propagation switch.
-  static bool propagationEnabled(Chronicler chronicler) =>
-      RuntimeTestAccess.propagationEnabled(chronicler._runtime);
-
-  /// Queues [records] for internal finalization during the next flush.
-  static void finalizeOnNextFlush(
-    Chronicler chronicler,
-    Iterable<ChroniclerRecord> records,
-  ) {
-    RuntimeTestAccess.finalizeOnNextFlush(chronicler._runtime, records);
-  }
-
-  /// Returns the number of flush calls waiting on record dispositions.
-  static int activeFlushes(Chronicler chronicler) =>
-      RuntimeTestAccess.activeFlushes(chronicler._runtime);
-}
-
-/// Internal fixture bridge for deterministic metric aggregation tests.
-final class ChroniclerMetricFixture {
-  const ChroniclerMetricFixture._();
-
-  /// Replaces wall and monotonic clocks before accessing metric instruments.
-  static void overrideClocks(
-    Chronicler chronicler, {
-    required DateTime Function() now,
-    required Duration Function() elapsed,
-  }) {
-    RuntimeTestAccess.overrideClocks(chronicler._runtime, now: now, elapsed: elapsed);
-  }
-
-  /// Rotates the current interval synchronously and stops its next timer.
-  static void rotate(Chronicler chronicler) {
-    RuntimeTestAccess.rotate(chronicler._runtime);
-  }
-
-  /// Makes the next metric record construction fail.
-  static void failNextRecordCreation(Chronicler chronicler) {
-    RuntimeTestAccess.failNextRecordCreation(chronicler._runtime);
-  }
-
-  /// Places an existing counter series at an arithmetic boundary.
-  static void setCounterAggregate(
-    Chronicler chronicler, {
-    required int count,
-    required String name,
-    required double sum,
-    Map<String, Object?> attributes = const {},
-  }) {
-    RuntimeTestAccess.setCounterAggregate(
-      chronicler._runtime,
-      name: name,
-      attributes: attributes,
-      count: count,
-      sum: sum,
-    );
-  }
-
-  /// Places an existing series at the portable observation-count boundary.
-  static void setSeriesCount(
-    Chronicler chronicler, {
-    required int count,
-    required String name,
-    Map<String, Object?> attributes = const {},
-  }) {
-    RuntimeTestAccess.setSeriesCount(
-      chronicler._runtime,
-      name: name,
-      attributes: attributes,
-      count: count,
-    );
-  }
-
-  /// Places an existing histogram at an aggregate arithmetic boundary.
-  static void setHistogramAggregate(
-    Chronicler chronicler, {
-    required List<int> bucketCounts,
-    required int count,
-    required double max,
-    required double min,
-    required String name,
-    required double sum,
-    Map<String, Object?> attributes = const {},
-  }) {
-    RuntimeTestAccess.setHistogramAggregate(
-      chronicler._runtime,
-      name: name,
-      attributes: attributes,
-      count: count,
-      bucketCounts: bucketCounts,
-      sum: sum,
-      min: min,
-      max: max,
-    );
   }
 }

@@ -27,14 +27,10 @@ void main() {
       logs.info('unsupported', attributes: {'value': Object()});
       logs.info('cycle', attributes: cyclic);
       logs.info('nan', attributes: {'value': double.nan});
-      logs.info('large integer', attributes: {'value': 9007199254740992});
-      logs.info('minimum integer', attributes: {'value': -9223372036854775808});
-      logs.info('large integral double', attributes: {'value': 9007199254740992.0});
-      logs.info(String.fromCharCode(0xd800));
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(7));
+      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(3));
     });
 
     test('should stop shared-container expansion at the record budget', () {
@@ -69,7 +65,6 @@ void main() {
         exporter: exporter,
         options: const ChroniclerOptions(
           delivery: DeliveryOptions(maxBatchRecords: 1),
-          limits: ChroniclerLimits(maxDepth: 2),
         ),
       );
       final logs = Context().withChronicler(chronicler.recorder).logs;
@@ -77,15 +72,27 @@ void main() {
       logs.info(
         'valid',
         attributes: {
-          'nested': {'value': true},
+          'nested': [
+            [
+              {
+                'value': [true],
+              },
+            ],
+          ],
         },
       );
       logs.info(
         'invalid',
         attributes: {
-          'nested': {
-            'deeper': <Object?>[true],
-          },
+          'nested': [
+            [
+              {
+                'value': [
+                  [true],
+                ],
+              },
+            ],
+          ],
         },
       );
       await Future<void>.delayed(Duration.zero);
@@ -102,18 +109,17 @@ void main() {
         source: ChroniclerSource.server,
         exporter: exporter,
         options: const ChroniclerOptions(
-          delivery: DeliveryOptions(maxBatchRecords: 1),
-          limits: ChroniclerLimits(maxStringBytes: 4),
+          delivery: DeliveryOptions(maxBatchRecords: 1, maxRecordBytes: 400),
         ),
       );
       final logs = Context().withChronicler(chronicler.recorder).logs;
 
       logs.info('😀');
-      logs.info('😀a');
+      logs.info('😀' * 100);
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, hasLength(1));
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.one);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.recordTooLarge], BigInt.one);
     });
 
     test('should retain in-flight records in count capacity', () async {
@@ -140,7 +146,7 @@ void main() {
       exporter.attempts.single.completer.complete(const ExportResult.accepted());
     });
 
-    test('should enforce nested map, list, key, and total record bounds', () async {
+    test('should enforce the complete record budget across attributes', () async {
       final exporter = TestExporter();
       final chronicler = Chronicler(
         appId: 'app',
@@ -149,30 +155,23 @@ void main() {
         exporter: exporter,
         options: const ChroniclerOptions(
           delivery: DeliveryOptions(maxBatchRecords: 1, maxRecordBytes: 400),
-          limits: ChroniclerLimits(
-            maxMapEntries: 1,
-            maxListItems: 1,
-            maxKeyBytes: 2,
-            maxStringBytes: 300,
-          ),
         ),
       );
       final logs = Context().withChronicler(chronicler.recorder).logs;
 
-      logs.info('map', attributes: {'a': 1, 'b': 2});
+      logs.info('map', attributes: {'a': 'x' * 150, 'b': 'x' * 150});
       logs.info(
         'list',
         attributes: {
-          'a': [1, 2],
+          'a': ['x' * 150, 'x' * 150],
         },
       );
-      logs.info('key', attributes: {'long': 1});
+      logs.info('key', attributes: {'x' * 300: 1});
       logs.info('record', attributes: {'a': 'x' * 300});
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.from(3));
-      expect(chronicler.diagnosticCounts[DiagnosticReason.recordTooLarge], BigInt.one);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.recordTooLarge], BigInt.from(4));
     });
 
     test('should retain in-flight records in encoded-byte capacity', () async {

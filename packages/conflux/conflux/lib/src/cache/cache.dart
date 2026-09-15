@@ -1,20 +1,30 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:ack/ack.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/src/effect/cause.dart';
 import 'package:conflux/src/effect/effect.dart';
 import 'package:conflux/src/effect/execution.dart';
 import 'package:conflux/src/effect/exit.dart';
+import 'package:conflux/src/validation.dart';
 import 'package:context/context.dart';
 
 /// Selects how long successful Cache values remain ready.
 final class CacheExpiry<K, A> {
   const CacheExpiry._(this._durationFor);
 
+  /// Encodes and decodes a non-negative duration as integer microseconds.
+  static CodecSchema<int, Duration> durationSchema() => Ack.integer()
+      .min(0)
+      .codec<Duration>(
+        decode: (microseconds) => Duration(microseconds: microseconds),
+        encode: (duration) => duration.inMicroseconds,
+      );
+
   /// Uses one [duration] for every successful value.
   static CacheExpiry<K, A> fixed<K, A>(Duration duration) {
-    _requireNonNegativeExpiry(duration);
+    validateArgument(CacheExpiry.durationSchema(), duration, debugName: 'duration');
     return CacheExpiry._((_, _, _) => duration);
   }
 
@@ -46,6 +56,16 @@ final class Cache<K, A, E> {
     required this._ownerExecution,
   });
 
+  /// Validates the capacity and concurrency of cache acquisition.
+  static ObjectSchema makeArgumentsSchema() =>
+      Ack.object({'capacity': capacitySchema(), 'concurrency': concurrencySchema()});
+
+  /// Validates a positive buffer capacity.
+  static IntegerSchema capacitySchema() => Ack.integer().positive();
+
+  /// Validates a positive concurrency limit.
+  static IntegerSchema concurrencySchema() => Ack.integer().positive();
+
   /// Acquires a Cache owned by the current Effect scope.
   ///
   /// [capacity] and [concurrency] must both be positive. Lookups for the same
@@ -60,12 +80,7 @@ final class Cache<K, A, E> {
     required CacheExpiry<K, A> expiry,
     required Effect<A, E> Function(K key, Context context) lookup,
   }) => EffectAccess.create((execution) async {
-    if (capacity <= 0) {
-      throw ArgumentError.value(capacity, 'capacity', 'Must be positive.');
-    }
-    if (concurrency <= 0) {
-      throw ArgumentError.value(concurrency, 'concurrency', 'Must be positive.');
-    }
+    validateArgument(makeArgumentsSchema(), {'capacity': capacity, 'concurrency': concurrency});
 
     final ownerExecution = EffectExecution(
       context: execution.context,
@@ -298,7 +313,7 @@ final class Cache<K, A, E> {
       value,
       _ownerExecution.context,
     );
-    _requireNonNegativeExpiry(duration);
+    validateArgument(CacheExpiry.durationSchema(), duration, debugName: 'duration');
     _removeExpiredEntries();
     final entry = _CacheEntry(
       value,
@@ -385,11 +400,5 @@ final class _CacheLoad<K, A, E> {
 
   void complete(Exit<A, E> exit) {
     if (!_completion.isCompleted) _completion.complete(exit);
-  }
-}
-
-void _requireNonNegativeExpiry(Duration duration) {
-  if (duration.isNegative) {
-    throw ArgumentError.value(duration, 'duration', 'Must not be negative.');
   }
 }

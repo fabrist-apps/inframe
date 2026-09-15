@@ -1,4 +1,4 @@
-const _maximumPortableInteger = 9007199254740991;
+import 'package:conflux/moment.dart';
 
 /// Mutable interval state for one canonical attribute set.
 sealed class MetricSeries {
@@ -17,7 +17,7 @@ sealed class MetricSeries {
   void reset();
 }
 
-/// Finite delta sum with portable observation count.
+/// Finite delta sum with an observation count.
 final class SumSeries extends MetricSeries {
   /// Creates empty interval state for validated dimensions.
   SumSeries(super.attributes);
@@ -25,11 +25,11 @@ final class SumSeries extends MetricSeries {
   /// Sum of accepted observations.
   double sum = 0;
 
-  /// Applies a measurement only when both aggregate fields remain portable.
+  /// Rejects numeric overflow without changing the aggregate.
   bool add(double value) {
     final nextCount = count + 1;
     final nextSum = sum + value;
-    if (nextCount > _maximumPortableInteger || !nextSum.isFinite) return false;
+    if (nextCount <= count || !nextSum.isFinite) return false;
     count = nextCount;
     sum = nextSum == 0 ? 0 : nextSum;
     return true;
@@ -51,12 +51,12 @@ final class GaugeSeries extends MetricSeries {
   double value = 0;
 
   /// Wall-clock time of the most recent accepted observation.
-  DateTime? observedAt;
+  Moment? observedAt;
 
-  /// Replaces the observation if the count remains portable.
-  bool set(double observation, DateTime Function() now) {
+  /// Replaces the observation unless the count overflows.
+  bool set(double observation, Moment Function() now) {
     final nextCount = count + 1;
-    if (nextCount > _maximumPortableInteger) return false;
+    if (nextCount <= count) return false;
     count = nextCount;
     value = observation == 0 ? 0 : observation;
     observedAt = now();
@@ -95,9 +95,7 @@ final class HistogramSeries extends MetricSeries {
     final nextCount = count + 1;
     final nextBucketCount = bucketCounts[bucket] + 1;
     final nextSum = sum + value;
-    if (nextCount > _maximumPortableInteger ||
-        nextBucketCount > _maximumPortableInteger ||
-        !nextSum.isFinite) {
+    if (nextCount <= count || nextBucketCount <= bucketCounts[bucket] || !nextSum.isFinite) {
       return false;
     }
     count = nextCount;

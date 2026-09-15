@@ -216,20 +216,16 @@ void main() {
         source: ChroniclerSource.server,
         exporter: exporter,
         options: const ChroniclerOptions(
-          limits: ChroniclerLimits(
-            maxErrorMessageBytes: 3,
-            maxStackTraceBytes: 3,
-          ),
-          delivery: DeliveryOptions(maxBatchRecords: 1),
+          delivery: DeliveryOptions(maxBatchRecords: 1, maxRecordBytes: 400),
         ),
       );
       Context().withChronicler(chronicler.recorder).errors
-        ..capture('four')
-        ..capture('', stackTrace: StackTrace.fromString('four'));
+        ..capture('x' * 400)
+        ..capture('', stackTrace: StackTrace.fromString('x' * 400));
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, isEmpty);
-      expect(chronicler.diagnosticCounts[DiagnosticReason.invalidRecord], BigInt.two);
+      expect(chronicler.diagnosticCounts[DiagnosticReason.recordTooLarge], BigInt.two);
     });
 
     test('should obey error collection and closed-runtime transitions', () async {
