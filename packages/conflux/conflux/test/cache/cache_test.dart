@@ -6,7 +6,7 @@ import 'package:conflux/option.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
-import 'support/fake_clock.dart';
+import '../support/fake_clock.dart';
 
 void main() {
   group('Cache', () {

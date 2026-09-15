@@ -6,9 +6,9 @@ import 'package:test/test.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
-import 'support/fake_clock.dart';
+import '../support/fake_clock.dart';
 
-import 'support/moments.dart';
+import '../support/moments.dart';
 
 void main() {
   tz_data.initializeTimeZones();

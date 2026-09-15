@@ -2,8 +2,8 @@ import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
 import 'package:timezone/timezone.dart' as tz;
 
-import 'support/fake_clock.dart';
-import 'support/moments.dart';
+import '../support/fake_clock.dart';
+import '../support/moments.dart';
 
 void main() {
   group('Effect.now', () {

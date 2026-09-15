@@ -1,6 +1,6 @@
 import 'package:test/test.dart';
 
-import 'support/consumer_fixtures.dart';
+import '../support/consumer_fixtures.dart';
 
 void main() {
   group('Effect consumer', () {

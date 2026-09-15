@@ -4,9 +4,9 @@ import 'package:conflux/conflux.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
-import 'support/fake_clock.dart';
+import '../support/fake_clock.dart';
 
-import 'support/moments.dart';
+import '../support/moments.dart';
 
 void main() {
   group('Effect timing', () {

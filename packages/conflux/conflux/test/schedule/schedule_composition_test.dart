@@ -1,7 +1,7 @@
 import 'package:conflux/conflux.dart';
 import 'package:test/test.dart';
 
-import 'support/fake_clock.dart';
+import '../support/fake_clock.dart';
 
 void main() {
   group('Schedule composition', () {
