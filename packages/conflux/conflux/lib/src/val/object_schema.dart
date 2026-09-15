@@ -154,6 +154,83 @@ final class ObjectSchema<T extends Map<String, Object?>?> extends Schema<T> {
   /// Declared fields in their validation order.
   Map<String, Schema<Object?>> get fields => shape.fields;
 
+  /// Replaces matching fields in place and appends new fields in incoming order.
+  ObjectSchema<T> extend(Map<String, Schema<Object?>> fields) => _compose(
+    ObjectShape(
+      {...shape.fields, ...fields},
+      name: shape.name,
+      code: shape.code,
+      message: shape.message,
+      policy: shape.policy,
+      strictCode: shape.strictCode,
+      strictMessage: shape.strictMessage,
+    ),
+  );
+
+  /// Combines fields and adopts the right object's unknown-key policy.
+  /// The receiver retains its root name, type, presence, and nullable settings.
+  ObjectSchema<T> merge(ObjectSchema<Map<String, Object?>?> other) {
+    if (other.hasRefinements) {
+      throw ArgumentError('Compose the shape before adding object refinements');
+    }
+    return _compose(
+      ObjectShape(
+        {...shape.fields, ...other.fields},
+        name: shape.name,
+        code: shape.code,
+        message: shape.message,
+        policy: other.shape.policy,
+        strictCode: other.shape.strictCode,
+        strictMessage: other.shape.strictMessage,
+      ),
+    );
+  }
+
+  /// Keeps requested fields in their original schema order.
+  ObjectSchema<T> pick(List<String> keys) => _select(keys, keep: true);
+
+  /// Removes requested fields while retaining the order of remaining fields.
+  ObjectSchema<T> omit(List<String> keys) => _select(keys, keep: false);
+
+  /// Makes immediate fields optional, without adding nullability or recursing.
+  ObjectSchema<T> partial() => _compose(
+    ObjectShape(
+      {for (final entry in fields.entries) entry.key: entry.value.optional()},
+      name: shape.name,
+      code: shape.code,
+      message: shape.message,
+      policy: shape.policy,
+      strictCode: shape.strictCode,
+      strictMessage: shape.strictMessage,
+    ),
+  );
+
+  ObjectSchema<T> _select(List<String> keys, {required bool keep}) {
+    if (keys.any((key) => !fields.containsKey(key))) {
+      throw ArgumentError.value(keys, 'keys', 'Unknown field');
+    }
+    final selected = keys.toSet();
+    return _compose(
+      ObjectShape(
+        {
+          for (final entry in fields.entries)
+            if (selected.contains(entry.key) == keep) entry.key: entry.value,
+        },
+        name: shape.name,
+        code: shape.code,
+        message: shape.message,
+        policy: shape.policy,
+        strictCode: shape.strictCode,
+        strictMessage: shape.strictMessage,
+      ),
+    );
+  }
+
+  ObjectSchema<T> _compose(ObjectShape replacement) {
+    if (hasRefinements) throw ArgumentError('Compose the shape before adding object refinements');
+    return ObjectSchema<T>.internal(replacement, build);
+  }
+
   /// Internal construction for the public factory.
   static ObjectSchema<Map<String, Object?>> create(
     Map<String, Schema<Object?>> fields, {

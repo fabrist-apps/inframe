@@ -7,9 +7,33 @@ import 'package:conflux/src/val/numeric_schema.dart';
 import 'package:conflux/src/val/object_schema.dart';
 import 'package:conflux/src/val/schema.dart';
 import 'package:conflux/src/val/string_schema.dart';
+import 'package:conflux/src/val/union_schema.dart';
 
 /// Factories for immutable synchronous validation schemas.
 abstract final class Val {
+  /// Selects a direct object branch through a required string literal field.
+  static Schema<Map<String, Object?>> discriminated({
+    required String discriminatorKey,
+    required Map<String, ObjectSchema<Map<String, Object?>?>> schemas,
+    String? name,
+    String? code,
+    String? message,
+  }) => discriminatedSchema(
+    discriminatorKey: discriminatorKey,
+    schemas: schemas,
+    name: name,
+    code: code,
+    message: message,
+  );
+
+  /// Selects the first successful schema in declaration order.
+  static Schema<T> anyOf<T>(
+    List<Schema<T>> schemas, {
+    String? name,
+    String? code,
+    String? message,
+  }) => unionSchema(schemas, name: name, code: code, message: message);
+
   /// Validates arbitrary string keys against one value schema.
   static Schema<Map<String, T>> map<T>(
     Schema<T> values, {

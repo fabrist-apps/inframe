@@ -532,3 +532,21 @@ child succeeds. List `minLength`, `maxLength`, `length`, and `notEmpty` count
 items; `unique` uses Dart equality on parsed values and emits one list error.
 Nested validated containers are copied, while arbitrary instance values remain
 borrowed references.
+
+### Object composition and alternatives
+
+`extend` replaces fields without moving their positions and appends new fields.
+`merge` adopts the right object's fields and unknown-key policy while retaining
+the left object's root configuration. `pick`/`omit` retain schema order and reject
+unknown keys. `partial` makes immediate fields optional without recursing or
+adding nullability. Compose shapes before root refinements; shape changes after
+a root refinement throw `ArgumentError` to avoid stale field assumptions.
+
+`Val.anyOf<T>(branches)` returns the first successful parsed branch. Total failure
+produces one `INVALID_UNION`; a failed union-level refinement does not retry
+branches. Make the outer union optional to permit an absent field.
+
+`Val.discriminated(discriminatorKey: 'kind', schemas: branches)` selects one
+direct object schema. Each branch must declare its registration key as a required,
+non-nullable literal string at the discriminator field. Invalid selection yields
+one field-path issue; selected branches retain their own issues and key policy.
