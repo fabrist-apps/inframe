@@ -1,6 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
+import 'package:runnel/src/errors.dart';
+
 /// Lifecycle state of a Pub/Sub session.
 enum PubSubState {
   /// The socket and desired subscriptions are acknowledged.
@@ -63,7 +67,13 @@ final class PubSubMessage extends PubSubEvent {
   Uint8List get payload => Uint8List.fromList(_payload);
 
   /// Payload decoded as strict UTF-8.
-  String get text => utf8.decode(_payload);
+  Result<String, RunnelError> decodeText() {
+    try {
+      return Success(utf8.decode(_payload));
+    } on FormatException catch (error, stack) {
+      return Failure(RunnelDecodingError(error.message, cause: error, stackTrace: stack));
+    }
+  }
 }
 
 /// A delivery generation stopped or a session terminated.
@@ -73,7 +83,7 @@ final class PubSubInterrupted extends PubSubEvent {
     required this.generation,
     required this.cause,
     required this.terminal,
-    this.error,
+    this.error = const None(),
   });
 
   /// Generation that was interrupted.
@@ -86,7 +96,7 @@ final class PubSubInterrupted extends PubSubEvent {
   final bool terminal;
 
   /// Underlying transport, server, timeout, or protocol failure.
-  final Object? error;
+  final Option<RunnelError> error;
 }
 
 /// A new connection has acknowledged the desired subscription snapshot.
@@ -102,27 +112,17 @@ final class PubSubRestored extends PubSubEvent {
   final Set<String> channels;
 }
 
-/// An unfinished subscription was replaced by a later channel operation.
-final class SubscriptionSupersededException implements Exception {
-  /// Creates a later-operation-wins failure.
-  const SubscriptionSupersededException([
-    this.message = 'A later subscription change superseded this operation.',
-  ]);
-
-  /// Human-readable failure detail.
-  final String message;
-
-  @override
-  String toString() => message;
-}
-
 /// Internal queue accounting without copying message payloads.
 extension PubSubEventSize on PubSubEvent {
   /// Retained payload and textual metadata size.
   int get bufferedBytes => switch (this) {
     PubSubMessage(:final channel, :final _payload) => utf8.encode(channel).length + _payload.length,
     PubSubInterrupted(:final cause, :final error) =>
-      utf8.encode(cause.name).length + (error == null ? 0 : utf8.encode('$error').length),
+      utf8.encode(cause.name).length +
+          (switch (error) {
+            Some(:final value) => utf8.encode(value.message).length,
+            None() => 0,
+          }),
     PubSubRestored(:final channels) => channels.fold(
       0,
       (total, channel) => total + utf8.encode(channel).length,

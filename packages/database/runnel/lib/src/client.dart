@@ -17,6 +17,7 @@ import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
+import 'package:runnel/src/pubsub/session.dart' show PubSubSessionOwnership;
 import 'package:runnel/src/resp/resp_value.dart';
 import 'package:runnel/src/scripts.dart';
 import 'package:runnel/src/transaction.dart';
@@ -299,10 +300,10 @@ final class Runnel {
   }
 
   /// Opens a bounded, dynamically subscribed Pub/Sub session on a dedicated socket.
-  Future<PubSubSession> openPubSub({
+  Effect<PubSubSession, RunnelError> openPubSub({
     Duration controlTimeout = const Duration(seconds: 5),
     PubSubLimits limits = const PubSubLimits(),
-  }) async {
+  }) => RunnelOperation.run((operation) async {
     _readyConnection();
     final session = await PubSubSession.connect(
       PubSubConnectionConfiguration(
@@ -319,14 +320,17 @@ final class Runnel {
       controlTimeout: controlTimeout,
       limits: limits,
       onClosed: _pubSubSessions.remove,
-      onCreated: _pubSubSessions.add,
+      onCreated: (session) {
+        _pubSubSessions.add(session);
+        operation.onCancel(session.closeFuture);
+      },
     );
-    if (_state != _ClientState.ready) {
-      await session.close();
+    if (_state != _ClientState.ready || operation.isCancelled) {
+      await session.closeFuture();
       throw const RedisClosedException(message: 'The Runnel client is closing.');
     }
     return session;
-  }
+  });
 
   Future<List<Result<Object?, RunnelError>>> _executePipeline(
     List<RedisCommand<Object?>> commands,
@@ -409,7 +413,7 @@ final class Runnel {
       Future.wait([
         ...opening.map((attempt) => attempt.cancel()),
         ...blockingSessions.map((session) => session.closeFuture()),
-        ...pubSubSessions.map((session) => session.close()),
+        ...pubSubSessions.map((session) => session.closeFuture()),
         ...transactions.map(
           (transaction) => transaction.close(commandsAreUncertain: true),
         ),
