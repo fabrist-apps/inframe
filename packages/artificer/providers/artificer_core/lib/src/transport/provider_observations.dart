@@ -72,9 +72,10 @@ class ProviderObservations {
           }),
         )
         .concat(
-          Effect.sync((_) {
+          Flow.defer((_) {
             complete = true;
-          }).asFlow().widenError<AiError>().concatMap<T>((_, _) => Flow.empty()),
+            return Flow.empty();
+          }),
         )
         .onExit((exit, _) => Effect.sync((_) => attempt.finish(exit, stopped: !complete)));
   });

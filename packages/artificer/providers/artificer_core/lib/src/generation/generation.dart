@@ -365,7 +365,7 @@ enum GenerationPartKind {
   opaque,
 }
 
-/// Closed ContentDelta variants.
+/// Incremental content for one identified generation part.
 @MappableClass(
   discriminatorKey: 'type',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
@@ -381,13 +381,13 @@ sealed class ContentDelta with ContentDeltaMappable {
   static const fromJson = ContentDeltaMapper.fromJson;
 }
 
-/// TextDelta.
+/// Appends visible model text.
 @MappableClass(
   discriminatorValue: 'text',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class TextDelta extends ContentDelta with TextDeltaMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const TextDelta({required this.text});
 
   /// Text.
@@ -400,13 +400,13 @@ final class TextDelta extends ContentDelta with TextDeltaMappable {
   static const fromJson = TextDeltaMapper.fromJson;
 }
 
-/// ReasoningDelta.
+/// Appends a public reasoning summary.
 @MappableClass(
   discriminatorValue: 'reasoning',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class ReasoningDelta extends ContentDelta with ReasoningDeltaMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const ReasoningDelta({required this.text});
 
   /// Text.
@@ -419,13 +419,13 @@ final class ReasoningDelta extends ContentDelta with ReasoningDeltaMappable {
   static const fromJson = ReasoningDeltaMapper.fromJson;
 }
 
-/// ToolArgumentsDelta.
+/// Appends original tool argument text before parsing is possible.
 @MappableClass(
   discriminatorValue: 'toolArguments',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class ToolArgumentsDelta extends ContentDelta with ToolArgumentsDeltaMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const ToolArgumentsDelta({required this.text});
 
   /// Text.
@@ -438,19 +438,19 @@ final class ToolArgumentsDelta extends ContentDelta with ToolArgumentsDeltaMappa
   static const fromJson = ToolArgumentsDeltaMapper.fromJson;
 }
 
-/// GenerationStarted.
+/// Begins one generation after response headers are available.
 @MappableClass(
   discriminatorValue: 'started',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class GenerationStarted extends GenerationEvent with GenerationStartedMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const GenerationStarted({this.responseId, this.requestId});
 
-  /// ResponseId.
+  /// Native response identity when known.
   final String? responseId;
 
-  /// RequestId.
+  /// Provider request identity from response metadata.
   final String? requestId;
 
   /// Decodes persisted map data.
@@ -460,13 +460,13 @@ final class GenerationStarted extends GenerationEvent with GenerationStartedMapp
   static const fromJson = GenerationStartedMapper.fromJson;
 }
 
-/// PartStarted.
+/// Declares a stable local part identity and its final output order.
 @MappableClass(
   discriminatorValue: 'partStarted',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class PartStarted extends GenerationEvent with PartStartedMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const PartStarted({
     required this.id,
     required this.index,
@@ -476,16 +476,16 @@ final class PartStarted extends GenerationEvent with PartStartedMappable {
     this.owner,
   });
 
-  /// Id.
+  /// Stable local identity used by subsequent part events.
   final String id;
 
-  /// Index.
+  /// Final output position, independent of arrival or completion order.
   final int index;
 
   /// Kind.
   final GenerationPartKind kind;
 
-  /// CallId.
+  /// Native application call identity, which may arrive after this event.
   final String? callId;
 
   /// Name.
@@ -501,16 +501,16 @@ final class PartStarted extends GenerationEvent with PartStartedMappable {
   static const fromJson = PartStartedMapper.fromJson;
 }
 
-/// PartDelta.
+/// Adds typed content to an unfinished part.
 @MappableClass(
   discriminatorValue: 'partDelta',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class PartDelta extends GenerationEvent with PartDeltaMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const PartDelta({required this.id, required this.delta});
 
-  /// Id.
+  /// Stable local identity used by subsequent part events.
   final String id;
 
   /// Delta.
@@ -523,16 +523,16 @@ final class PartDelta extends GenerationEvent with PartDeltaMappable {
   static const fromJson = PartDeltaMapper.fromJson;
 }
 
-/// PartFinished.
+/// Supplies the complete part, including metadata received after its deltas.
 @MappableClass(
   discriminatorValue: 'partFinished',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class PartFinished extends GenerationEvent with PartFinishedMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const PartFinished({required this.id, required this.part});
 
-  /// Id.
+  /// Stable local identity used by subsequent part events.
   final String id;
 
   /// Part.
@@ -545,13 +545,13 @@ final class PartFinished extends GenerationEvent with PartFinishedMappable {
   static const fromJson = PartFinishedMapper.fromJson;
 }
 
-/// UsageUpdated.
+/// Replaces prior usage with the latest cumulative provider snapshot.
 @MappableClass(
   discriminatorValue: 'usageUpdated',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class UsageUpdated extends GenerationEvent with UsageUpdatedMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const UsageUpdated({required this.usage});
 
   /// Usage.
@@ -564,13 +564,13 @@ final class UsageUpdated extends GenerationEvent with UsageUpdatedMappable {
   static const fromJson = UsageUpdatedMapper.fromJson;
 }
 
-/// ProviderEvent.
+/// Preserves an unrecognized native event without changing common semantics.
 @MappableClass(
   discriminatorValue: 'providerEvent',
   generateMethods: GenerateMethods.encode | GenerateMethods.decode,
 )
 final class ProviderEvent extends GenerationEvent with ProviderEventMappable {
-  /// Creates the value retaining supplied collections.
+  /// Creates this event value without copying supplied data.
   const ProviderEvent({
     required this.providerId,
     required this.api,
@@ -587,7 +587,7 @@ final class ProviderEvent extends GenerationEvent with ProviderEventMappable {
   /// Event.
   final String event;
 
-  /// Data.
+  /// Complete standard JSON from the native event.
   @MappableField(hook: JsonValueHook())
   final Object? data;
 
