@@ -445,6 +445,7 @@ class ProviderReplayMapper extends ClassMapperBase<ProviderReplay> {
   static const Field<ProviderReplay, List<Object?>> _f$items = Field(
     'items',
     _$items,
+    hook: JsonValueHook(),
   );
   static int _$schemaVersion(ProviderReplay v) => v.schemaVersion;
   static const Field<ProviderReplay, int> _f$schemaVersion = Field(
@@ -641,7 +642,11 @@ class CitationMapper extends ClassMapperBase<Citation> {
   final String id = 'Citation';
 
   static Object? _$data(Citation v) => v.data;
-  static const Field<Citation, Object> _f$data = Field('data', _$data);
+  static const Field<Citation, Object> _f$data = Field(
+    'data',
+    _$data,
+    hook: JsonValueHook(),
+  );
   static String? _$url(Citation v) => v.url;
   static const Field<Citation, String> _f$url = Field('url', _$url, opt: true);
   static String? _$title(Citation v) => v.title;
@@ -920,7 +925,11 @@ class OpaqueOutputPartMapper extends SubClassMapperBase<OpaqueOutputPart> {
   static String _$api(OpaqueOutputPart v) => v.api;
   static const Field<OpaqueOutputPart, String> _f$api = Field('api', _$api);
   static Object? _$data(OpaqueOutputPart v) => v.data;
-  static const Field<OpaqueOutputPart, Object> _f$data = Field('data', _$data);
+  static const Field<OpaqueOutputPart, Object> _f$data = Field(
+    'data',
+    _$data,
+    hook: JsonValueHook(),
+  );
 
   @override
   final MappableFields<OpaqueOutputPart> fields = const {
@@ -1075,6 +1084,7 @@ class ProviderToolPartMapper extends SubClassMapperBase<ProviderToolPart> {
   static const Field<ProviderToolPart, Object> _f$native = Field(
     'native',
     _$native,
+    hook: JsonValueHook(),
   );
   static ToolStatus _$status(ProviderToolPart v) => v.status;
   static const Field<ProviderToolPart, ToolStatus> _f$status = Field(

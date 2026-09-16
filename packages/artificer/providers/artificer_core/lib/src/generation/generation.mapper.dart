@@ -1322,7 +1322,11 @@ class ProviderEventMapper extends SubClassMapperBase<ProviderEvent> {
   static String _$event(ProviderEvent v) => v.event;
   static const Field<ProviderEvent, String> _f$event = Field('event', _$event);
   static Object? _$data(ProviderEvent v) => v.data;
-  static const Field<ProviderEvent, Object> _f$data = Field('data', _$data);
+  static const Field<ProviderEvent, Object> _f$data = Field(
+    'data',
+    _$data,
+    hook: JsonValueHook(),
+  );
 
   @override
   final MappableFields<ProviderEvent> fields = const {

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:artificer_core/src/json/json_value.dart';
+import 'package:artificer_core/src/json/json_value_hook.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 
 part 'tools.mapper.dart';
@@ -20,6 +21,7 @@ final class FunctionTool with FunctionToolMappable {
   final String? description;
 
   /// InputSchema.
+  @MappableField(hook: JsonValueHook())
   final Map<String, Object?> inputSchema;
 
   /// Decodes persisted map data.
@@ -180,6 +182,7 @@ final class JsonSchemaOutput extends OutputFormat with JsonSchemaOutputMappable 
   final String? description;
 
   /// Schema.
+  @MappableField(hook: JsonValueHook())
   final Map<String, Object?> schema;
 
   /// Decodes persisted map data.
@@ -227,6 +230,7 @@ final class JsonToolArguments extends ToolArguments with JsonToolArgumentsMappab
   const JsonToolArguments({required this.value, this.original});
 
   /// Value.
+  @MappableField(hook: JsonValueHook())
   final Map<String, Object?> value;
 
   /// Original.
@@ -274,6 +278,7 @@ final class NativeToolArguments extends ToolArguments with NativeToolArgumentsMa
   final String api;
 
   /// Value.
+  @MappableField(hook: JsonValueHook())
   final Object? value;
 
   /// Decodes persisted map data.
@@ -331,6 +336,7 @@ final class JsonToolResultContent extends ToolResultContent with JsonToolResultC
   const JsonToolResultContent({required this.value});
 
   /// Value.
+  @MappableField(hook: JsonValueHook())
   final Object? value;
 
   /// Decodes persisted map data.
@@ -375,6 +381,7 @@ final class NativeToolResultContent extends ToolResultContent with NativeToolRes
   final String api;
 
   /// Value.
+  @MappableField(hook: JsonValueHook())
   final Object? value;
 
   /// Decodes persisted map data.

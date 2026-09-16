@@ -1,3 +1,4 @@
+import 'package:artificer_core/src/json/json_value_hook.dart';
 import 'package:artificer_core/src/serialization.dart';
 import 'package:artificer_core/src/tools/tools.dart';
 import 'package:dart_mappable/dart_mappable.dart';
@@ -187,6 +188,7 @@ final class Citation with CitationMappable {
   });
 
   /// Data.
+  @MappableField(hook: JsonValueHook())
   final Object? data;
 
   /// Url.
@@ -232,6 +234,7 @@ final class ProviderReplay with ProviderReplayMappable {
   final String modelId;
 
   /// Items.
+  @MappableField(hook: JsonValueHook())
   final List<Object?> items;
 
   /// SchemaVersion.
@@ -327,6 +330,7 @@ final class OpaqueOutputPart extends OutputPart with OpaqueOutputPartMappable {
   final String api;
 
   /// Data.
+  @MappableField(hook: JsonValueHook())
   final Object? data;
 
   /// Decodes persisted map data.
@@ -393,6 +397,7 @@ final class ProviderToolPart extends OutputPart with ProviderToolPartMappable {
   final ToolStatus status;
 
   /// Native.
+  @MappableField(hook: JsonValueHook())
   final Object? native;
 
   /// Decodes persisted map data.

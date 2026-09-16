@@ -365,6 +365,7 @@ class EmbeddingBatchMapper extends ClassMapperBase<EmbeddingBatch> {
     'usage',
     _$usage,
     opt: true,
+    hook: JsonValueHook(),
   );
 
   @override

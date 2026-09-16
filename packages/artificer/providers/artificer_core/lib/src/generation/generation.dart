@@ -1,4 +1,5 @@
 import 'package:artificer_core/src/errors.dart';
+import 'package:artificer_core/src/json/json_value_hook.dart';
 import 'package:artificer_core/src/messages/messages.dart';
 import 'package:artificer_core/src/native.dart';
 import 'package:artificer_core/src/serialization.dart';
@@ -587,6 +588,7 @@ final class ProviderEvent extends GenerationEvent with ProviderEventMappable {
   final String event;
 
   /// Data.
+  @MappableField(hook: JsonValueHook())
   final Object? data;
 
   /// Decodes persisted map data.

@@ -103,7 +103,11 @@ class NativePayloadMapper extends ClassMapperBase<NativePayload> {
     _$modelId,
   );
   static Object? _$data(NativePayload v) => v.data;
-  static const Field<NativePayload, Object> _f$data = Field('data', _$data);
+  static const Field<NativePayload, Object> _f$data = Field(
+    'data',
+    _$data,
+    hook: JsonValueHook(),
+  );
   static List<Map<String, Object?>> _$unknownEvents(NativePayload v) =>
       v.unknownEvents;
   static const Field<NativePayload, List<Map<String, Object?>>>
@@ -112,6 +116,7 @@ class NativePayloadMapper extends ClassMapperBase<NativePayload> {
     _$unknownEvents,
     opt: true,
     def: const [],
+    hook: JsonValueHook(),
   );
 
   @override

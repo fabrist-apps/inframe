@@ -1,3 +1,4 @@
+import 'package:artificer_core/src/json/json_value_hook.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 
 part 'native.mapper.dart';
@@ -46,9 +47,11 @@ final class NativePayload with NativePayloadMappable {
   final String modelId;
 
   /// Complete JSON value, including unknown nested fields.
+  @MappableField(hook: JsonValueHook())
   final Object? data;
 
   /// Unknown stream records retained separately from the assembled native response.
+  @MappableField(hook: JsonValueHook())
   final List<Map<String, Object?>> unknownEvents;
 
   /// Decodes a map using the shipped generated mapper.

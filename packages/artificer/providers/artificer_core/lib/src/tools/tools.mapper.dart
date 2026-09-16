@@ -28,6 +28,7 @@ class FunctionToolMapper extends ClassMapperBase<FunctionTool> {
   static const Field<FunctionTool, Map<String, Object?>> _f$inputSchema = Field(
     'inputSchema',
     _$inputSchema,
+    hook: JsonValueHook(),
   );
   static String? _$description(FunctionTool v) => v.description;
   static const Field<FunctionTool, String> _f$description = Field(
@@ -519,6 +520,7 @@ class JsonSchemaOutputMapper extends SubClassMapperBase<JsonSchemaOutput> {
   static const Field<JsonSchemaOutput, Map<String, Object?>> _f$schema = Field(
     'schema',
     _$schema,
+    hook: JsonValueHook(),
   );
   static String? _$description(JsonSchemaOutput v) => v.description;
   static const Field<JsonSchemaOutput, String> _f$description = Field(
@@ -639,6 +641,7 @@ class JsonToolArgumentsMapper extends SubClassMapperBase<JsonToolArguments> {
   static const Field<JsonToolArguments, Map<String, Object?>> _f$value = Field(
     'value',
     _$value,
+    hook: JsonValueHook(),
   );
   static String? _$original(JsonToolArguments v) => v.original;
   static const Field<JsonToolArguments, String> _f$original = Field(
@@ -780,6 +783,7 @@ class NativeToolArgumentsMapper
   static const Field<NativeToolArguments, Object> _f$value = Field(
     'value',
     _$value,
+    hook: JsonValueHook(),
   );
 
   @override
@@ -966,6 +970,7 @@ class JsonToolResultContentMapper
   static const Field<JsonToolResultContent, Object> _f$value = Field(
     'value',
     _$value,
+    hook: JsonValueHook(),
   );
 
   @override
@@ -1100,6 +1105,7 @@ class NativeToolResultContentMapper
   static const Field<NativeToolResultContent, Object> _f$value = Field(
     'value',
     _$value,
+    hook: JsonValueHook(),
   );
 
   @override
