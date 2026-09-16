@@ -1,4 +1,5 @@
 import 'package:artificer_core/src/serialization.dart';
+import 'package:artificer_core/src/tools/tools.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 
 part 'messages.mapper.dart';
@@ -55,7 +56,16 @@ final class UserMessage extends Message with UserMessageMappable {
 )
 final class AssistantMessage extends Message with AssistantMessageMappable {
   /// Creates a [AssistantMessage] retaining the supplied values.
-  AssistantMessage(this.parts, {super.schemaVersion});
+  AssistantMessage(this.parts, {this.replay, super.schemaVersion});
+
+  /// Same-target native replay. Clear after direct mutation of nested content.
+  ProviderReplay? replay;
+
+  /// Replaces content and deliberately drops signatures and replay state.
+  AssistantMessage withParts(List<OutputPart> parts) => AssistantMessage(parts);
+
+  /// Copies content without retaining potentially stale replay state.
+  AssistantMessage copyWith({List<OutputPart>? parts}) => AssistantMessage(parts ?? this.parts);
 
   /// Ordered parts, retained without defensive copying.
   final List<OutputPart> parts;
@@ -128,7 +138,10 @@ sealed class OutputPart with OutputPartMappable {
 )
 final class TextOutputPart extends OutputPart with TextOutputPartMappable {
   /// Creates a [TextOutputPart] retaining the supplied values.
-  const TextOutputPart(this.text);
+  const TextOutputPart(this.text, {this.citations = const []});
+
+  /// Ordered citations attached to this text.
+  final List<Citation> citations;
 
   /// The text content.
   final String text;
@@ -138,4 +151,253 @@ final class TextOutputPart extends OutputPart with TextOutputPartMappable {
 
   /// Decodes a JSON string using the shipped generated mapper.
   static const fromJson = TextOutputPartMapper.fromJson;
+}
+
+/// Caller supplied application results, in original order.
+@MappableClass(
+  discriminatorValue: 'tool',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class ToolMessage extends Message with ToolMessageMappable {
+  /// Creates a nonempty result turn without copying it.
+  ToolMessage(this.results, {super.schemaVersion}) {
+    if (results.isEmpty) throw ArgumentError.value(results, 'results');
+  }
+
+  /// Ordered application results.
+  final List<ToolResult> results;
+
+  /// Decodes persisted map data.
+  static const fromMap = ToolMessageMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ToolMessageMapper.fromJson;
+}
+
+/// Ordered citation details; native data retains unknown provider fields.
+@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+final class Citation with CitationMappable {
+  /// Creates the value retaining supplied collections.
+  const Citation({
+    required this.data,
+    this.url,
+    this.title,
+    this.start,
+    this.end,
+  });
+
+  /// Data.
+  final Object? data;
+
+  /// Url.
+  final String? url;
+
+  /// Title.
+  final String? title;
+
+  /// Start.
+  final int? start;
+
+  /// End.
+  final int? end;
+
+  /// Decodes persisted map data.
+  static const fromMap = CitationMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = CitationMapper.fromJson;
+}
+
+/// Ordered native JSON blocks for exact same-target resubmission.
+@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+final class ProviderReplay with ProviderReplayMappable {
+  /// Creates the value retaining supplied collections.
+  ProviderReplay({
+    required this.providerId,
+    required this.api,
+    required this.modelId,
+    required this.items,
+    this.schemaVersion = 1,
+  }) {
+    DomainSchema.check(schemaVersion);
+  }
+
+  /// ProviderId.
+  final String providerId;
+
+  /// Api.
+  final String api;
+
+  /// ModelId.
+  final String modelId;
+
+  /// Items.
+  final List<Object?> items;
+
+  /// SchemaVersion.
+  final int schemaVersion;
+
+  /// Decodes persisted map data.
+  static const fromMap = ProviderReplayMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ProviderReplayMapper.fromJson;
+}
+
+/// Explicit execution ownership; provider work never becomes an application call.
+@MappableEnum()
+enum ToolExecutionOwner {
+  /// Executed by the calling application.
+  application,
+
+  /// Executed by the provider.
+  provider,
+}
+
+/// Observed provider work state, including unfinished records.
+@MappableEnum()
+enum ToolStatus {
+  /// Waiting to start.
+  pending,
+
+  /// Execution underway.
+  running,
+
+  /// Execution completed.
+  completed,
+
+  /// Execution failed.
+  failed,
+
+  /// Unrecognized or absent native status.
+  unknown,
+}
+
+/// ReasoningOutputPart.
+@MappableClass(
+  discriminatorValue: 'reasoning',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class ReasoningOutputPart extends OutputPart with ReasoningOutputPartMappable {
+  /// Creates the value retaining supplied collections.
+  const ReasoningOutputPart({required this.summary});
+
+  /// Summary.
+  final String summary;
+
+  /// Decodes persisted map data.
+  static const fromMap = ReasoningOutputPartMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ReasoningOutputPartMapper.fromJson;
+}
+
+/// RefusalOutputPart.
+@MappableClass(
+  discriminatorValue: 'refusal',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class RefusalOutputPart extends OutputPart with RefusalOutputPartMappable {
+  /// Creates the value retaining supplied collections.
+  const RefusalOutputPart({required this.text});
+
+  /// Text.
+  final String text;
+
+  /// Decodes persisted map data.
+  static const fromMap = RefusalOutputPartMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = RefusalOutputPartMapper.fromJson;
+}
+
+/// OpaqueOutputPart.
+@MappableClass(
+  discriminatorValue: 'opaque',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class OpaqueOutputPart extends OutputPart with OpaqueOutputPartMappable {
+  /// Creates the value retaining supplied collections.
+  const OpaqueOutputPart({required this.providerId, required this.api, required this.data});
+
+  /// ProviderId.
+  final String providerId;
+
+  /// Api.
+  final String api;
+
+  /// Data.
+  final Object? data;
+
+  /// Decodes persisted map data.
+  static const fromMap = OpaqueOutputPartMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = OpaqueOutputPartMapper.fromJson;
+}
+
+/// ToolCallPart.
+@MappableClass(
+  discriminatorValue: 'toolCall',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class ToolCallPart extends OutputPart with ToolCallPartMappable {
+  /// Creates the value retaining supplied collections.
+  ToolCallPart({required this.callId, required this.name, required this.arguments}) {
+    if (callId.isEmpty || name.isEmpty) {
+      throw ArgumentError('Tool call ID and name must be nonempty.');
+    }
+  }
+
+  /// CallId.
+  final String callId;
+
+  /// Name.
+  final String name;
+
+  /// Arguments.
+  final ToolArguments arguments;
+
+  /// Decodes persisted map data.
+  static const fromMap = ToolCallPartMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ToolCallPartMapper.fromJson;
+}
+
+/// ProviderToolPart.
+@MappableClass(
+  discriminatorValue: 'providerTool',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class ProviderToolPart extends OutputPart with ProviderToolPartMappable {
+  /// Creates the value retaining supplied collections.
+  const ProviderToolPart({
+    required this.id,
+    required this.name,
+    required this.owner,
+    required this.native,
+    this.status = ToolStatus.unknown,
+  });
+
+  /// Id.
+  final String id;
+
+  /// Name.
+  final String name;
+
+  /// Owner.
+  final ToolExecutionOwner owner;
+
+  /// Status.
+  final ToolStatus status;
+
+  /// Native.
+  final Object? native;
+
+  /// Decodes persisted map data.
+  static const fromMap = ProviderToolPartMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ProviderToolPartMapper.fromJson;
 }

@@ -258,6 +258,9 @@ class GenerationRequestMapper extends ClassMapperBase<GenerationRequest> {
       MapperContainer.globals.use(_instance = GenerationRequestMapper._());
       MessageMapper.ensureInitialized();
       GenerationOptionsMapper.ensureInitialized();
+      FunctionToolMapper.ensureInitialized();
+      ToolChoiceMapper.ensureInitialized();
+      OutputFormatMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -283,12 +286,36 @@ class GenerationRequestMapper extends ClassMapperBase<GenerationRequest> {
     opt: true,
     def: const GenerationOptions(),
   );
+  static List<FunctionTool> _$tools(GenerationRequest v) => v.tools;
+  static const Field<GenerationRequest, List<FunctionTool>> _f$tools = Field(
+    'tools',
+    _$tools,
+    opt: true,
+    def: const [],
+  );
+  static ToolChoice _$toolChoice(GenerationRequest v) => v.toolChoice;
+  static const Field<GenerationRequest, ToolChoice> _f$toolChoice = Field(
+    'toolChoice',
+    _$toolChoice,
+    opt: true,
+    def: const AutoToolChoice(),
+  );
+  static OutputFormat _$output(GenerationRequest v) => v.output;
+  static const Field<GenerationRequest, OutputFormat> _f$output = Field(
+    'output',
+    _$output,
+    opt: true,
+    def: const TextOutput(),
+  );
 
   @override
   final MappableFields<GenerationRequest> fields = const {
     #messages: _f$messages,
     #instructions: _f$instructions,
     #options: _f$options,
+    #tools: _f$tools,
+    #toolChoice: _f$toolChoice,
+    #output: _f$output,
   };
 
   static GenerationRequest _instantiate(DecodingData data) {
@@ -296,6 +323,9 @@ class GenerationRequestMapper extends ClassMapperBase<GenerationRequest> {
       messages: data.dec(_f$messages),
       instructions: data.dec(_f$instructions),
       options: data.dec(_f$options),
+      tools: data.dec(_f$tools),
+      toolChoice: data.dec(_f$toolChoice),
+      output: data.dec(_f$output),
     );
   }
 

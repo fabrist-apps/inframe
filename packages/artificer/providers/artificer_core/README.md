@@ -72,3 +72,11 @@ final nativeOptions = overrides.resolve(modelDefaults).toWire();
 `NativeField<T>` separately represents native omitted/null/present values. Use `NativeField.fromJson<String>(json)` to retain generic type arguments through the public decoding alias. A native field is resolved into a wire object with `writeTo`, never by sending its persisted form.
 
 Provider codecs use `TextRequestPolicy` from `protocols.dart` with their pinned typed fields, hosted-tool inventory, unsupported options and storage policy. Apply it inside the lazy operation. It returns typed preflight failures for collisions and known deferred capabilities while retaining neutral new text extras. `ModelCapabilities.validateRequested` rejects only known unsupported features; unknown model support remains pass-through.
+
+## Tool history and replay
+
+`GenerationRequest` includes application `FunctionTool` declarations, `ToolChoice` and `OutputFormat`. Tools describe a protocol; core never executes callbacks or validates generated output against an application schema. Adapters call `request.validate(providerId: ..., api: ..., modelId: ...)` during execution before I/O to check IDs, declarations, native action targets and replay compatibility.
+
+Assistant output distinguishes application calls from provider-owned tool records, including pending records without a result. Tool arguments preserve parsed JSON with original text, declared free-form input, tagged native actions, or malformed original arguments. Tool results retain success/application failure and JSON, ordered text or tagged native content.
+
+Persist the returned `AssistantMessage` with its `ProviderReplay` to resubmit signed or opaque native items to the same provider/API/model. Incompatible targets fail explicitly. `withParts` and `copyWith` drop replay on content edits. If you mutate `parts` or nested collections directly, set `message.replay = null` before resubmission. Generated copy helpers are disabled for these data models so they cannot retain stale replay. Opaque native base64 strings remain native strings; the SDK does not infer private reasoning from them.

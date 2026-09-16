@@ -34,7 +34,10 @@ final class TextModel implements LanguageModel {
   ModelCapabilities get capabilities => const ModelCapabilities();
   @override
   Effect<GenerationResult, AiError> generate(GenerationRequest request, {TestOptions? options}) =>
-      Effect.defer((_) => provider.client.requestJson(
+      Effect.defer((_) {
+        final error = request.validate(providerId: providerId, api: 'fixture', modelId: modelId);
+        if (error != null) return Effect.fail(error);
+        return provider.client.requestJson(
         url: provider.endpoint,
         body: {
           'model': modelId,
@@ -51,7 +54,8 @@ final class TextModel implements LanguageModel {
           native: NativePayload(providerId: providerId, api: 'fixture', modelId: modelId, data: data),
           metadata: response.metadata,
         );
-      }));
+      });
+      });
   @override
   Flow<GenerationEvent, AiError> stream(GenerationRequest request) =>
       generate(request).asFlow().map((result, _) => GenerationFinished(result));

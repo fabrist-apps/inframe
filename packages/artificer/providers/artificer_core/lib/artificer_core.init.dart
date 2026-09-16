@@ -10,6 +10,7 @@ import 'src/messages/messages.dart' as p2;
 import 'src/models.dart' as p3;
 import 'src/native.dart' as p4;
 import 'src/settings.dart' as p5;
+import 'src/tools/tools.dart' as p6;
 
 void initializeMappers() {
   p0.AiErrorMapper.ensureInitialized();
@@ -36,6 +37,16 @@ void initializeMappers() {
   p2.TextInputPartMapper.ensureInitialized();
   p2.OutputPartMapper.ensureInitialized();
   p2.TextOutputPartMapper.ensureInitialized();
+  p2.ToolMessageMapper.ensureInitialized();
+  p2.CitationMapper.ensureInitialized();
+  p2.ProviderReplayMapper.ensureInitialized();
+  p2.ReasoningOutputPartMapper.ensureInitialized();
+  p2.RefusalOutputPartMapper.ensureInitialized();
+  p2.OpaqueOutputPartMapper.ensureInitialized();
+  p2.ToolCallPartMapper.ensureInitialized();
+  p2.ProviderToolPartMapper.ensureInitialized();
+  p2.ToolExecutionOwnerMapper.ensureInitialized();
+  p2.ToolStatusMapper.ensureInitialized();
   p3.ModelCapabilitiesMapper.ensureInitialized();
   p3.CapabilitySupportMapper.ensureInitialized();
   p3.ModelCapabilityMapper.ensureInitialized();
@@ -47,5 +58,27 @@ void initializeMappers() {
   p5.ValueSettingMapper.ensureInitialized();
   p5.ClearSettingMapper.ensureInitialized();
   p5.NativeFieldMapper.ensureInitialized();
+  p6.FunctionToolMapper.ensureInitialized();
+  p6.ToolChoiceMapper.ensureInitialized();
+  p6.AutoToolChoiceMapper.ensureInitialized();
+  p6.NoToolChoiceMapper.ensureInitialized();
+  p6.RequiredToolChoiceMapper.ensureInitialized();
+  p6.NamedToolChoiceMapper.ensureInitialized();
+  p6.OutputFormatMapper.ensureInitialized();
+  p6.TextOutputMapper.ensureInitialized();
+  p6.JsonObjectOutputMapper.ensureInitialized();
+  p6.JsonSchemaOutputMapper.ensureInitialized();
+  p6.ToolArgumentsMapper.ensureInitialized();
+  p6.JsonToolArgumentsMapper.ensureInitialized();
+  p6.FreeFormToolArgumentsMapper.ensureInitialized();
+  p6.NativeToolArgumentsMapper.ensureInitialized();
+  p6.MalformedToolArgumentsMapper.ensureInitialized();
+  p6.ToolResultContentMapper.ensureInitialized();
+  p6.JsonToolResultContentMapper.ensureInitialized();
+  p6.TextToolResultContentMapper.ensureInitialized();
+  p6.NativeToolResultContentMapper.ensureInitialized();
+  p6.ToolResultMapper.ensureInitialized();
+  p6.ToolSuccessMapper.ensureInitialized();
+  p6.ToolFailureMapper.ensureInitialized();
 }
 

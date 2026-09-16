@@ -3,6 +3,7 @@ import 'package:artificer_core/src/messages/messages.dart';
 import 'package:artificer_core/src/native.dart';
 import 'package:artificer_core/src/serialization.dart';
 import 'package:artificer_core/src/settings.dart';
+import 'package:artificer_core/src/tools/tools.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 
 part 'generation.mapper.dart';
@@ -101,6 +102,9 @@ final class GenerationRequest with GenerationRequestMappable {
     required this.messages,
     this.instructions,
     this.options = const GenerationOptions(),
+    this.tools = const [],
+    this.toolChoice = const AutoToolChoice(),
+    this.output = const TextOutput(),
   }) {
     if (messages.isEmpty) throw ArgumentError.value(messages, 'messages', 'Must not be empty.');
   }
@@ -113,6 +117,90 @@ final class GenerationRequest with GenerationRequestMappable {
 
   /// Common per-request generation options.
   final GenerationOptions options;
+
+  /// Application declarations; the provider never executes these functions.
+  final List<FunctionTool> tools;
+
+  /// Requested function-selection policy.
+  final ToolChoice toolChoice;
+
+  /// Requested output encoding, without application-schema validation.
+  final OutputFormat output;
+
+  /// Checks explicit history and native replay compatibility before I/O.
+  InvalidRequestError? validate({
+    required String providerId,
+    required String api,
+    required String modelId,
+  }) {
+    if (messages.isEmpty) return const InvalidRequestError('Messages must not be empty.');
+    final names = <String>{};
+    for (final tool in tools) {
+      if (!names.add(tool.name)) return const InvalidRequestError('Conflicting tool declarations.');
+    }
+    if (toolChoice case NamedToolChoice(:final name)) {
+      if (!names.contains(name)) return const InvalidRequestError('Named tool is not declared.');
+    }
+    final calls = <String, ToolCallPart>{};
+    final thisResultIds = <String>{};
+    for (final message in messages) {
+      switch (message) {
+        case UserMessage(:final parts):
+          if (parts.isEmpty) return const InvalidRequestError('User parts must not be empty.');
+        case AssistantMessage(:final parts, :final replay):
+          if (replay != null &&
+              (replay.providerId != providerId || replay.api != api || replay.modelId != modelId)) {
+            return const InvalidRequestError('Provider replay target is incompatible.');
+          }
+          for (final part in parts.whereType<ToolCallPart>()) {
+            if (calls.containsKey(part.callId)) {
+              return const InvalidRequestError('Duplicate application call ID.');
+            }
+            calls[part.callId] = part;
+            if (part.arguments case NativeToolArguments(
+              providerId: final owner,
+              api: final dialect,
+            )) {
+              if (owner != providerId || dialect != api) {
+                return const InvalidRequestError('Native action target is incompatible.');
+              }
+            }
+          }
+        case ToolMessage(:final results):
+          if (results.isEmpty) return const InvalidRequestError('Tool results must not be empty.');
+          for (final result in results) {
+            final call = calls[result.callId];
+            if (call == null) {
+              return const InvalidRequestError(
+                'Tool result references a missing application call.',
+              );
+            }
+            if (!thisResultIds.add(result.callId)) {
+              return const InvalidRequestError('Duplicate tool result ID.');
+            }
+            if (result.content case NativeToolResultContent(
+              providerId: final owner,
+              api: final dialect,
+            )) {
+              if (owner != providerId || dialect != api) {
+                return const InvalidRequestError('Native result target is incompatible.');
+              }
+              if (call.arguments case NativeToolArguments(
+                providerId: final callOwner,
+                api: final callApi,
+              )) {
+                if (owner != callOwner || dialect != callApi) {
+                  return const InvalidRequestError('Native result does not match its call.');
+                }
+              } else {
+                return const InvalidRequestError('Native result requires a native action call.');
+              }
+            }
+          }
+      }
+    }
+    return null;
+  }
 
   /// Decodes a map using the shipped generated mapper.
   static const fromMap = GenerationRequestMapper.fromMap;
