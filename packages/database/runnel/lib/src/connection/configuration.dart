@@ -82,7 +82,7 @@ final class ConnectionConfiguration {
 
   /// Negotiates RESP3, authenticates when configured, and selects the database.
   Iterable<RedisCommand<Object?>> get handshakeCommands sync* {
-    yield RedisCommand<Object?>.internal([
+    yield builtInCommand<Object?>([
       RedisArgument.text('HELLO'),
       RedisArgument.text('3'),
       if (password case final secret?) ...[
@@ -92,7 +92,7 @@ final class ConnectionConfiguration {
       ],
     ], (reply) => reply);
     if (database != 0) {
-      yield RedisCommand<Object?>.internal([
+      yield builtInCommand<Object?>([
         RedisArgument.text('SELECT'),
         RedisArgument.text('$database'),
       ], (reply) => reply);

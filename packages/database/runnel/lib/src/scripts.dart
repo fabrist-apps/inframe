@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:conflux/result.dart';
 import 'package:crypto/crypto.dart';
-import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// An immutable Lua source program and its typed result decoder.

@@ -44,7 +44,7 @@ extension RunnelPublishingCommands on Runnel {
 
 RedisCommand<int> _publishCommand(String channel, RedisArgument message) {
   if (channel.isEmpty) throw ArgumentError.value(channel, 'channel', 'must not be empty');
-  return RedisCommand<int>.internal(
+  return builtInCommand<int>(
     [
       RedisArgument.text('PUBLISH'),
       RedisArgument.text(channel),

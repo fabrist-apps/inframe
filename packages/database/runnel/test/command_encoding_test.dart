@@ -55,5 +55,5 @@ RedisBatch _batch(int maxBytes) => RedisBatch.internal(
   reservedCommands: 0,
   reservedBytes: 0,
   defaultTimeout: const Duration(seconds: 1),
-  executor: (_, _) async => const [],
+  executor: (_, _, _) async => const [],
 );

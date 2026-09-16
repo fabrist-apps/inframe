@@ -130,38 +130,6 @@ final class PubSubSession {
     );
   }
 
-  /// Opens a dedicated connection and completes its HELLO/SELECT handshake.
-  ///
-  /// [onClosed] is invoked once after the socket is released so a parent client can
-  /// unregister ownership.
-  static Future<PubSubSession> connect(
-    PubSubConnectionConfiguration configuration, {
-    Duration controlTimeout = const Duration(seconds: 5),
-    PubSubLimits limits = const PubSubLimits(),
-    void Function(PubSubSession session)? onClosed,
-    void Function(PubSubSession session)? onCreated,
-  }) async {
-    RunnelOperation.validate(() {
-      configuration._validate();
-      limits._validate();
-      if (controlTimeout <= Duration.zero) {
-        throw ArgumentError.value(controlTimeout, 'controlTimeout', 'must be positive');
-      }
-    });
-    final session = PubSubSession._(configuration, controlTimeout, limits, onClosed);
-    onCreated?.call(session);
-    try {
-      await session._openInitialTransport();
-      return session;
-    } on Object {
-      await session._transport?.close();
-      session
-        .._state = PubSubState.closed
-        .._notifyClosed();
-      rethrow;
-    }
-  }
-
   final PubSubConnectionConfiguration _configuration;
   late final ConnectionConfiguration _endpoint;
   final Duration _controlTimeout;
@@ -1039,11 +1007,10 @@ final class PubSubSession {
   }
 }
 
-RedisCommand<void> _controlCommand(String name, List<String> channels) =>
-    RedisCommand<void>.internal([
-      RedisArgument.text(name),
-      ...channels.map(RedisArgument.text),
-    ], (_) {});
+RedisCommand<void> _controlCommand(String name, List<String> channels) => builtInCommand<void>([
+  RedisArgument.text(name),
+  ...channels.map(RedisArgument.text),
+], (_) {});
 
 Iterable<List<String>> _chunks(List<String> channels) sync* {
   for (var start = 0; start < channels.length; start += 512) {
@@ -1122,6 +1089,38 @@ final class _ControlOperation {
 
 /// Package-internal parent ownership operations.
 extension PubSubSessionOwnership on PubSubSession {
+  /// Opens a dedicated connection and completes its HELLO/SELECT handshake.
+  ///
+  /// [onClosed] is invoked once after the socket is released so a parent client can
+  /// unregister ownership.
+  static Future<PubSubSession> connect(
+    PubSubConnectionConfiguration configuration, {
+    Duration controlTimeout = const Duration(seconds: 5),
+    PubSubLimits limits = const PubSubLimits(),
+    void Function(PubSubSession session)? onClosed,
+    void Function(PubSubSession session)? onCreated,
+  }) async {
+    RunnelOperation.validate(() {
+      configuration._validate();
+      limits._validate();
+      if (controlTimeout <= Duration.zero) {
+        throw ArgumentError.value(controlTimeout, 'controlTimeout', 'must be positive');
+      }
+    });
+    final session = PubSubSession._(configuration, controlTimeout, limits, onClosed);
+    onCreated?.call(session);
+    try {
+      await session._openInitialTransport();
+      return session;
+    } on Object {
+      await session._transport?.close();
+      session
+        .._state = PubSubState.closed
+        .._notifyClosed();
+      rethrow;
+    }
+  }
+
   /// Releases this session for its owning client without starting another runtime.
   Future<void> closeFuture() => _closing ??= _close(listenerCancelled: false);
 }

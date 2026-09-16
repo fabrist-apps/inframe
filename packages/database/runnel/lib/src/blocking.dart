@@ -24,23 +24,6 @@ typedef BlockingConnectionFactory = Future<RedisConnection> Function();
 final class BlockingSession {
   BlockingSession._(this._connection, this._commandTimeout, this._onClosed);
 
-  /// Creates a session from Runnel's inherited physical-connection factory.
-  ///
-  /// This constructor is public only so the package's separate Dart libraries
-  /// can compose the client. Applications use `Runnel.blocking`.
-  static Future<BlockingSession> internal({
-    required BlockingConnectionFactory openConnection,
-    Duration commandTimeout = const Duration(seconds: 5),
-    void Function(BlockingSession session)? onClosed,
-    void Function(BlockingSession session)? onCreated,
-  }) async {
-    _requirePositive(commandTimeout, 'commandTimeout');
-    final connection = await openConnection();
-    final session = BlockingSession._(connection, commandTimeout, onClosed);
-    onCreated?.call(session);
-    return session;
-  }
-
   final RedisConnection _connection;
   final Duration _commandTimeout;
   final void Function(BlockingSession session)? _onClosed;
@@ -95,7 +78,7 @@ final class BlockingSession {
     return _execute(() {
       _requireWholeMillisecondWait(wait);
       if (captured.isEmpty) throw ArgumentError.value(captured, 'keys', 'must not be empty');
-      return RedisCommand<Option<({String key, String value})>>.internal([
+      return builtInCommand<Option<({String key, String value})>>([
         RedisArgument.text(command),
         ...captured.map(RedisArgument.text),
         RedisArgument.text(_secondsArgument(wait)),
@@ -200,6 +183,22 @@ String _secondsArgument(Duration wait) {
 
 /// Internal release boundary used by the owning Runnel client.
 extension BlockingSessionAccess on BlockingSession {
+  /// Creates a session from Runnel's inherited physical-connection factory.
+  ///
+  /// Applications use `Runnel.blocking`; this extension is not exported.
+  static Future<BlockingSession> internal({
+    required BlockingConnectionFactory openConnection,
+    Duration commandTimeout = const Duration(seconds: 5),
+    void Function(BlockingSession session)? onClosed,
+    void Function(BlockingSession session)? onCreated,
+  }) async {
+    _requirePositive(commandTimeout, 'commandTimeout');
+    final connection = await openConnection();
+    final session = BlockingSession._(connection, commandTimeout, onClosed);
+    onCreated?.call(session);
+    return session;
+  }
+
   /// Releases without starting a separate Effect runtime.
   Future<void> closeFuture() => _closing ??= _close();
 }

@@ -186,7 +186,7 @@ RedisCommand<StreamId> xaddCommand(
     throw ArgumentError.value(approximate, 'approximate', 'requires maxLength');
   }
 
-  return RedisCommand<StreamId>.internal([
+  return builtInCommand<StreamId>([
     RedisArgument.text('XADD'),
     RedisArgument.text(key),
     if (maxLength != null) ...[
@@ -231,14 +231,14 @@ RedisCommand<List<StreamEntry>> xrevrangeCommand(
 );
 
 /// Builds an XTRIM command for an explicit trimming strategy.
-RedisCommand<int> xtrimCommand(String key, StreamTrim trim) => RedisCommand<int>.internal([
+RedisCommand<int> xtrimCommand(String key, StreamTrim trim) => builtInCommand<int>([
   RedisArgument.text('XTRIM'),
   RedisArgument.text(key),
   ..._trimArguments(trim),
 ], (reply) => reply.integer);
 
 /// Builds an XLEN command.
-RedisCommand<int> xlenCommand(String key) => RedisCommand<int>.internal([
+RedisCommand<int> xlenCommand(String key) => builtInCommand<int>([
   RedisArgument.text('XLEN'),
   RedisArgument.text(key),
 ], (reply) => reply.integer);
@@ -250,7 +250,7 @@ RedisCommand<List<StreamRead>> xreadCommand(Map<String, StreamId> after, {int? c
   }
   _checkCount(count);
   final cursors = after.entries.toList(growable: false);
-  return RedisCommand<List<StreamRead>>.internal([
+  return builtInCommand<List<StreamRead>>([
     RedisArgument.text('XREAD'),
     if (count != null) ...[
       RedisArgument.text('COUNT'),
@@ -337,7 +337,7 @@ RedisCommand<List<StreamEntry>> _rangeCommand({
   required int? count,
 }) {
   _checkCount(count);
-  return RedisCommand<List<StreamEntry>>.internal([
+  return builtInCommand<List<StreamEntry>>([
     RedisArgument.text(command),
     RedisArgument.text(key),
     RedisArgument.text(_boundArgument(firstWireBound)),

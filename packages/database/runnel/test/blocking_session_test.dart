@@ -235,7 +235,7 @@ void main() {
       final peer = await _BlockingPeer.start();
       addTearDown(peer.close);
       var opens = 0;
-      final session = await BlockingSession.internal(
+      final session = await BlockingSessionAccess.internal(
         openConnection: () {
           opens++;
           return _openConnection(peer);
@@ -260,7 +260,7 @@ void main() {
       final peer = await _BlockingPeer.start();
       addTearDown(peer.close);
       var closeNotifications = 0;
-      final session = await BlockingSession.internal(
+      final session = await BlockingSessionAccess.internal(
         openConnection: () => _openConnection(peer),
         onClosed: (_) => closeNotifications++,
       );
@@ -292,7 +292,7 @@ void main() {
 Future<BlockingSession> _openSession(
   _BlockingPeer peer, {
   Duration commandTimeout = const Duration(seconds: 5),
-}) => BlockingSession.internal(
+}) => BlockingSessionAccess.internal(
   openConnection: () => _openConnection(peer),
   commandTimeout: commandTimeout,
 );

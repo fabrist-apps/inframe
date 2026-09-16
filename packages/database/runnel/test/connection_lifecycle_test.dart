@@ -7,7 +7,6 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
-import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:test/test.dart';
 
@@ -395,12 +394,12 @@ void main() {
         shutdownTimeout: const Duration(milliseconds: 20),
       ).runFuture();
       final blocking = await client.blocking().runFuture();
-      final pubSub = await client.openPubSub();
+      final pubSub = await client.openPubSub().runFuture();
 
       final ordinary = client.ping().runFuture();
-      final transaction = (client.transaction()..add(_pingCommand())).exec();
+      final transaction = (client.transaction()..add(_pingCommand())).exec().runFuture();
       final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30)).runFuture();
-      final subscription = pubSub.subscribe(['orders']);
+      final subscription = pubSub.subscribe(['orders']).runFuture();
       final ordinaryFailure = expectLater(
         ordinary,
         throwsA(
@@ -411,7 +410,16 @@ void main() {
           ),
         ),
       );
-      final transactionFailure = expectLater(transaction, throwsA(isA<RunnelException>()));
+      final transactionFailure = expectLater(
+        transaction,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'error',
+            isA<RunnelError>(),
+          ),
+        ),
+      );
       final blockingFailure = expectLater(
         blocked,
         throwsA(
@@ -424,7 +432,13 @@ void main() {
       );
       final subscriptionFailure = expectLater(
         subscription,
-        throwsA(isA<RedisClosedException>()),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
       );
       await peer.waitForCommandCount('PING', 2);
       await peer.waitForCommandCount('EXEC', 1);
@@ -457,7 +471,7 @@ void main() {
         shutdownTimeout: const Duration(milliseconds: 50),
       ).runFuture();
       final blocking = await client.blocking().runFuture();
-      final pubSub = await client.openPubSub();
+      final pubSub = await client.openPubSub().runFuture();
       peer.holdCommands = true;
 
       final malformed = client.ping().runFuture();
@@ -474,7 +488,7 @@ void main() {
         ),
       );
       final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30)).runFuture();
-      final subscribed = pubSub.subscribe(['orders']);
+      final subscribed = pubSub.subscribe(['orders']).runFuture();
       final blockedFailure = expectLater(
         blocked,
         throwsA(
@@ -485,7 +499,16 @@ void main() {
           ),
         ),
       );
-      final subscribeFailure = expectLater(subscribed, throwsA(isA<RedisClosedException>()));
+      final subscribeFailure = expectLater(
+        subscribed,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
       await peer.waitForCommandCount('BLPOP', 1);
       await peer.waitForCommandCount('SUBSCRIBE', 1);
 
@@ -505,8 +528,8 @@ void main() {
       peer.holdHandshakes = true;
 
       final openingBlocking = client.blocking().runFuture();
-      final openingPubSub = client.openPubSub();
-      final openingTransaction = (client.transaction()..add(_pingCommand())).exec();
+      final openingPubSub = client.openPubSub().runFuture();
+      final openingTransaction = (client.transaction()..add(_pingCommand())).exec().runFuture();
       final blockingFailure = expectLater(openingBlocking, throwsA(anything));
       final pubSubFailure = expectLater(openingPubSub, throwsA(anything));
       final transactionFailure = expectLater(openingTransaction, throwsA(anything));

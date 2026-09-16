@@ -32,16 +32,6 @@ base class RedisCommand<T> {
     if (arguments.isEmpty) throw ArgumentError.value(arguments, 'arguments', 'must not be empty');
   }
 
-  /// Internal built-in decoder boundary: reply-shape and UTF-8 errors are expected.
-  RedisCommand.internal(List<RedisArgument> arguments, T Function(RespValue reply) decode)
-    : this(arguments, (reply) {
-        try {
-          return Success(decode(reply));
-        } on FormatException catch (error, stack) {
-          return Failure(RunnelDecodingError(error.message, cause: error, stackTrace: stack));
-        }
-      });
-
   /// Immutable command arguments, including the command name.
   final List<RedisArgument> arguments;
   final Result<T, RunnelError> Function(RespValue reply) _decode;
@@ -97,3 +87,20 @@ final class CommandDecoderDefect {
   /// The callback stack, before crossing the Future boundary.
   final StackTrace stackTrace;
 }
+
+/// Internal built-in boundary: reply-shape and UTF-8 errors are expected.
+RedisCommand<T> builtInCommand<T>(
+  List<RedisArgument> arguments,
+  T Function(RespValue reply) decode,
+) => RedisCommand(arguments, builtInDecoder(decode));
+
+/// Adapts only known built-in reply-shape failures to typed errors.
+Result<T, RunnelError> Function(RespValue) builtInDecoder<T>(
+  T Function(RespValue) decode,
+) => (reply) {
+  try {
+    return Success(decode(reply));
+  } on FormatException catch (error, stack) {
+    return Failure(RunnelDecodingError(error.message, cause: error, stackTrace: stack));
+  }
+};

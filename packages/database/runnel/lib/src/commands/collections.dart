@@ -376,7 +376,7 @@ RedisCommand<T> _command<T>(
   String name,
   List<String> arguments,
   T Function(RespValue reply) decode,
-) => RedisCommand<T>.internal([
+) => builtInCommand<T>([
   RedisArgument.text(name),
   for (final argument in arguments) RedisArgument.text(argument),
 ], decode);

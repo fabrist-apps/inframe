@@ -198,11 +198,10 @@ final class Runnel {
   /// Executes a custom ordinary typed command.
   Effect<T, RunnelError> execute<T>(RedisCommand<T> command, {Duration? timeout}) =>
       RunnelOperation.run(
-        (operation) => executeFuture(command, timeout: timeout, operation: operation),
+        (operation) => _execute(command, timeout: timeout, operation: operation),
       );
 
-  /// Internal transport bridge for command families during the API migration.
-  Future<T> executeFuture<T>(
+  Future<T> _execute<T>(
     RedisCommand<T> command, {
     Duration? timeout,
     RunnelOperation? operation,
@@ -295,7 +294,7 @@ final class Runnel {
   Future<BlockingSession> _blocking(RunnelOperation operation) async {
     _readyConnection();
     late RedisConnection openingConnection;
-    final session = await BlockingSession.internal(
+    final session = await BlockingSessionAccess.internal(
       openConnection: () async =>
           openingConnection = await _openPhysicalConnection(operation: operation),
       commandTimeout: _commandTimeout,
@@ -319,7 +318,7 @@ final class Runnel {
     PubSubLimits limits = const PubSubLimits(),
   }) => RunnelOperation.run((operation) async {
     _readyConnection();
-    final session = await PubSubSession.connect(
+    final session = await PubSubSessionOwnership.connect(
       PubSubConnectionConfiguration(
         host: _endpoint.host,
         port: _endpoint.port,
@@ -399,7 +398,7 @@ final class Runnel {
 
   /// Checks that Redis can process an ordinary command.
   Effect<bool, RunnelError> ping({Duration? timeout}) => execute(
-    RedisCommand<bool>.internal([RedisArgument.text('PING')], (reply) => respText(reply) == 'PONG'),
+    builtInCommand<bool>([RedisArgument.text('PING')], (reply) => respText(reply) == 'PONG'),
     timeout: timeout,
   );
 

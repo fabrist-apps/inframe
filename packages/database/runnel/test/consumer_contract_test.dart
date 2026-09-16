@@ -1,35 +1,137 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:conflux/effect.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
 import 'fixtures/herald_consumer_fixture.dart';
+import 'support/resp_peer.dart';
 
 void main() {
+  group('HeraldScopedConsumerFixture', () {
+    test(
+      'should map storage rejection into the consumer domain and retain its borrowed client',
+      () async {
+        final peer = await RespPeer.start(
+          onCommand: (command) {
+            if (command.replyToHandshake()) return;
+            if (command.name == 'SUBSCRIBE') command.reply('-NOPERM denied\r\n');
+            if (command.name == 'PING') command.reply('+PONG\r\n');
+          },
+        );
+        addTearDown(peer.close);
+        final redis = await Runnel.connect(peer.endpoint).runFuture();
+        addTearDown(() => redis.close().runFuture());
+        final exit = await HeraldScopedConsumerFixture()
+            .recover(
+              redis: redis,
+              names: HeraldFixtureNames(appId: '42', channel: 'orders'),
+              expectedEpoch: 'epoch-a',
+              lastSeenPosition: 0,
+              liveMessageCount: 1,
+              readHistory: Effect.sync((_) {
+                fail('History cannot run before a successful subscription acknowledgement.');
+              }),
+            )
+            .runFutureExit();
+        final failure = (exit as Failed<HistoryHandoverResult, HeraldConsumerError>)
+            .cause
+            .expectedErrors
+            .single
+            .failure;
+        expect(failure, isA<RunnelServerError>().having((e) => e.code, 'code', 'NOPERM'));
+        expect(await redis.ping().runFuture(), isTrue);
+      },
+    );
+
+    test(
+      'should acknowledge before history, merge buffered live events, and release only its session',
+      () async {
+        var acknowledged = false;
+        final disconnected = Completer<void>();
+        final peer = await RespPeer.start(
+          onCommand: (command) {
+            if (command.replyToHandshake()) return;
+            if (command.name == 'SUBSCRIBE') {
+              acknowledged = true;
+              command.reply('>3\r\n+subscribe\r\n+${command.textArguments[1]}\r\n:1\r\n');
+            } else if (command.name == 'PING') {
+              command.reply('+PONG\r\n');
+            }
+          },
+          onDisconnect: (_) {
+            if (!disconnected.isCompleted) disconnected.complete();
+          },
+        );
+        addTearDown(peer.close);
+        final redis = await Runnel.connect(peer.endpoint).runFuture();
+        addTearDown(() => redis.close().runFuture());
+        final names = HeraldFixtureNames(appId: '42', channel: 'orders');
+        final result = await HeraldScopedConsumerFixture()
+            .recover(
+              redis: redis,
+              names: names,
+              expectedEpoch: 'epoch-a',
+              lastSeenPosition: 0,
+              liveMessageCount: 2,
+              readHistory: Effect.sync((_) {
+                expect(acknowledged, isTrue);
+                peer.sockets.last.add(
+                  utf8.encode(
+                    '>3\r\n+message\r\n+${names.channelName}\r\n+2|two\r\n'
+                    '>3\r\n+message\r\n+${names.channelName}\r\n+3|three\r\n',
+                  ),
+                );
+                return HeraldHistoryPage(
+                  epoch: 'epoch-a',
+                  events: const [
+                    HeraldEvent(epoch: 'epoch-a', position: 1, payload: 'one'),
+                    HeraldEvent(epoch: 'epoch-a', position: 2, payload: 'two'),
+                  ],
+                );
+              }),
+            )
+            .runFuture();
+        expect(result.reloadRequired, isFalse);
+        expect(result.events.map((event) => event.position), [1, 2, 3]);
+        expect(result.events.map((event) => event.payload), ['one', 'two', 'three']);
+        await disconnected.future.timeout(const Duration(seconds: 1));
+        expect(peer.sockets, hasLength(2));
+        expect(await redis.ping().runFuture(), isTrue);
+      },
+    );
+  });
+
   group('HistoryHandoverFixture', () {
     test(
       'should subscribe before reading history and merge a concurrent publication once',
       () async {
         final calls = <String>[];
         late void Function(HeraldEvent) publishLive;
-        final result = await HistoryHandoverFixture().recover(
-          expectedEpoch: 'epoch-a',
-          lastSeenPosition: 0,
-          subscribe: (listener) async {
-            calls.add('subscribe');
-            publishLive = listener;
-          },
-          readHistory: () async {
-            calls.add('history');
-            publishLive(const HeraldEvent(epoch: 'epoch-a', position: 2, payload: 'two'));
-            publishLive(const HeraldEvent(epoch: 'epoch-a', position: 3, payload: 'three'));
-            return HeraldHistoryPage(
-              epoch: 'epoch-a',
-              events: const [
-                HeraldEvent(epoch: 'epoch-a', position: 1, payload: 'one'),
-                HeraldEvent(epoch: 'epoch-a', position: 2, payload: 'two'),
-              ],
-            );
-          },
-        );
+        final result = await HistoryHandoverFixture()
+            .recover(
+              expectedEpoch: 'epoch-a',
+              lastSeenPosition: 0,
+              subscribe: (listener) => consumerFuture(() async {
+                calls.add('subscribe');
+                publishLive = listener;
+              }),
+              readHistory: () => consumerFuture(() async {
+                calls.add('history');
+                publishLive(const HeraldEvent(epoch: 'epoch-a', position: 2, payload: 'two'));
+                publishLive(const HeraldEvent(epoch: 'epoch-a', position: 3, payload: 'three'));
+                return HeraldHistoryPage(
+                  epoch: 'epoch-a',
+                  events: const [
+                    HeraldEvent(epoch: 'epoch-a', position: 1, payload: 'one'),
+                    HeraldEvent(epoch: 'epoch-a', position: 2, payload: 'two'),
+                  ],
+                );
+              }),
+            )
+            .runFuture();
 
         expect(calls, ['subscribe', 'history']);
         expect(result.reloadRequired, isFalse);
@@ -40,30 +142,35 @@ void main() {
 
     test('should request authoritative recovery when a position is missing', () async {
       late void Function(HeraldEvent) publishLive;
-      final result = await HistoryHandoverFixture().recover(
-        expectedEpoch: 'epoch-a',
-        lastSeenPosition: 0,
-        subscribe: (listener) async => publishLive = listener,
-        readHistory: () async {
-          publishLive(const HeraldEvent(epoch: 'epoch-a', position: 3, payload: 'three'));
-          return HeraldHistoryPage(
-            epoch: 'epoch-a',
-            events: const [HeraldEvent(epoch: 'epoch-a', position: 1, payload: 'one')],
-          );
-        },
-      );
+      final result = await HistoryHandoverFixture()
+          .recover(
+            expectedEpoch: 'epoch-a',
+            lastSeenPosition: 0,
+            subscribe: (listener) => consumerFuture(() async => publishLive = listener),
+            readHistory: () => consumerFuture(() async {
+              publishLive(const HeraldEvent(epoch: 'epoch-a', position: 3, payload: 'three'));
+              return HeraldHistoryPage(
+                epoch: 'epoch-a',
+                events: const [HeraldEvent(epoch: 'epoch-a', position: 1, payload: 'one')],
+              );
+            }),
+          )
+          .runFuture();
 
       expect(result.reloadRequired, isTrue);
       expect(result.events, isEmpty);
     });
 
     test('should request authoritative recovery when the stream epoch changes', () async {
-      final result = await HistoryHandoverFixture().recover(
-        expectedEpoch: 'old',
-        lastSeenPosition: 4,
-        subscribe: (_) async {},
-        readHistory: () async => HeraldHistoryPage(epoch: 'new', events: const []),
-      );
+      final result = await HistoryHandoverFixture()
+          .recover(
+            expectedEpoch: 'old',
+            lastSeenPosition: 4,
+            subscribe: (_) => consumerFuture(() async {}),
+            readHistory: () =>
+                consumerFuture(() async => HeraldHistoryPage(epoch: 'new', events: const [])),
+          )
+          .runFuture();
 
       expect(result.reloadRequired, isTrue);
     });
@@ -74,18 +181,30 @@ void main() {
       'should ignore a stale delta and apply a matching delta buffered during snapshot read',
       () async {
         late void Function(VersionedDelta) publishDelta;
-        final result = await LatestStateFixture().recover(
-          subscribe: (listener) async => publishDelta = listener,
-          readSnapshot: () async {
-            publishDelta(
-              const VersionedDelta(epoch: 'epoch-a', baseVersion: 4, version: 5, state: 'stale'),
-            );
-            publishDelta(
-              const VersionedDelta(epoch: 'epoch-a', baseVersion: 5, version: 6, state: 'current'),
-            );
-            return const VersionedSnapshot(epoch: 'epoch-a', version: 5, state: 'snapshot');
-          },
-        );
+        final result = await LatestStateFixture()
+            .recover(
+              subscribe: (listener) => consumerFuture(() async => publishDelta = listener),
+              readSnapshot: () => consumerFuture(() async {
+                publishDelta(
+                  const VersionedDelta(
+                    epoch: 'epoch-a',
+                    baseVersion: 4,
+                    version: 5,
+                    state: 'stale',
+                  ),
+                );
+                publishDelta(
+                  const VersionedDelta(
+                    epoch: 'epoch-a',
+                    baseVersion: 5,
+                    version: 6,
+                    state: 'current',
+                  ),
+                );
+                return const VersionedSnapshot(epoch: 'epoch-a', version: 5, state: 'snapshot');
+              }),
+            )
+            .runFuture();
 
         expect(result.reloadRequired, isFalse);
         expect(result.version, 6);
@@ -95,15 +214,17 @@ void main() {
 
     test('should reject a delta whose base does not match the complete snapshot', () async {
       late void Function(VersionedDelta) publishDelta;
-      final result = await LatestStateFixture().recover(
-        subscribe: (listener) async => publishDelta = listener,
-        readSnapshot: () async {
-          publishDelta(
-            const VersionedDelta(epoch: 'epoch-a', baseVersion: 7, version: 8, state: 'gap'),
-          );
-          return const VersionedSnapshot(epoch: 'epoch-a', version: 5, state: 'snapshot');
-        },
-      );
+      final result = await LatestStateFixture()
+          .recover(
+            subscribe: (listener) => consumerFuture(() async => publishDelta = listener),
+            readSnapshot: () => consumerFuture(() async {
+              publishDelta(
+                const VersionedDelta(epoch: 'epoch-a', baseVersion: 7, version: 8, state: 'gap'),
+              );
+              return const VersionedSnapshot(epoch: 'epoch-a', version: 5, state: 'snapshot');
+            }),
+          )
+          .runFuture();
 
       expect(result.reloadRequired, isTrue);
       expect(result.version, 5);
@@ -151,12 +272,29 @@ void main() {
           ]),
         );
 
-        expect(publication.position, 7);
-        expect(publication.subscriberCount, 2);
-        expect(publication.streamId, '1000-0');
-        expect(publication.duplicate, isFalse);
-        expect(upsertPresenceLeaseScript.decode(const RespInteger(2)), 2);
-        expect(removeExpiredPresenceLeasesScript.decode(const RespInteger(1)), 1);
+        final decoded = publication.getOrThrowWith((error) => error);
+        expect(decoded.position, 7);
+        expect(decoded.subscriberCount, 2);
+        expect(decoded.streamId, '1000-0');
+        expect(decoded.duplicate, isFalse);
+        expect(
+          coordinatedPublicationScript.decode(const RespInteger(1)),
+          isA<Failure<CoordinatedPublication, RunnelError>>().having(
+            (result) => result.error,
+            'error',
+            isA<RunnelDecodingError>(),
+          ),
+        );
+        expect(
+          upsertPresenceLeaseScript.decode(const RespInteger(2)).getOrThrowWith((error) => error),
+          2,
+        );
+        expect(
+          removeExpiredPresenceLeasesScript
+              .decode(const RespInteger(1))
+              .getOrThrowWith((error) => error),
+          1,
+        );
       },
     );
   });
@@ -168,21 +306,23 @@ void main() {
         final publications = <String>[];
         final reconnects = <Duration>[];
         final probe = DeliveryPathProbe(
-          publish: (channel, payload) async {
+          publish: (channel, payload) => Effect.sync((_) {
             publications.add('$channel:$payload');
             return 1;
-          },
+          }),
           health: () => PubSubState.ready,
-          reconnect: (timeout) async => reconnects.add(timeout),
+          reconnect: (timeout) => Effect.sync((_) => reconnects.add(timeout)),
         );
 
-        final result = await probe.check(
-          channel: 'app:42:herald:probe',
-          token: 'probe-1',
-          awaitDelivery: (_, _) async => false,
-          deliveryTimeout: const Duration(milliseconds: 50),
-          reconnectTimeout: const Duration(seconds: 1),
-        );
+        final result = await probe
+            .check(
+              channel: 'app:42:herald:probe',
+              token: 'probe-1',
+              awaitDelivery: (_, _) async => false,
+              deliveryTimeout: const Duration(milliseconds: 50),
+              reconnectTimeout: const Duration(seconds: 1),
+            )
+            .runFuture();
 
         expect(publications, ['app:42:herald:probe:probe-1']);
         expect(result.delivered, isFalse);
@@ -195,18 +335,22 @@ void main() {
     test('should not reconnect when the probe traverses the delivery path', () async {
       var reconnects = 0;
       final probe = DeliveryPathProbe(
-        publish: (_, _) async => 1,
+        publish: (_, _) => Effect.succeed(1),
         health: () => PubSubState.ready,
-        reconnect: (_) async => reconnects++,
+        reconnect: (_) => Effect.sync((_) {
+          reconnects++;
+        }),
       );
 
-      final result = await probe.check(
-        channel: 'app:42:herald:probe',
-        token: 'probe-2',
-        awaitDelivery: (token, _) async => token == 'probe-2',
-        deliveryTimeout: const Duration(milliseconds: 50),
-        reconnectTimeout: const Duration(seconds: 1),
-      );
+      final result = await probe
+          .check(
+            channel: 'app:42:herald:probe',
+            token: 'probe-2',
+            awaitDelivery: (token, _) async => token == 'probe-2',
+            deliveryTimeout: const Duration(milliseconds: 50),
+            reconnectTimeout: const Duration(seconds: 1),
+          )
+          .runFuture();
 
       expect(result.delivered, isTrue);
       expect(result.reconnectRequested, isFalse);

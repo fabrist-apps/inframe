@@ -8,6 +8,7 @@ import 'package:conflux/flow.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
+import 'package:runnel/src/pubsub/session.dart';
 import 'package:test/test.dart';
 
 import 'support/resp_peer.dart';
@@ -467,7 +468,7 @@ Future<PubSubSession> _connect(
   _RecoveryPeer peer, {
   Duration controlTimeout = const Duration(milliseconds: 200),
   RunnelLimits connectionLimits = const RunnelLimits(),
-}) => PubSubSession.connect(
+}) => PubSubSessionOwnership.connect(
   PubSubConnectionConfiguration(
     host: InternetAddress.loopbackIPv4.address,
     port: peer.port,

@@ -87,10 +87,12 @@ final class RedisBatch {
     return RunnelOperation.run((operation) async {
       if (_claimed) throw const RunnelUsageError('This batch has already executed.');
       _claimed = true;
-      if (commands.isEmpty)
+      if (commands.isEmpty) {
         throw const RunnelUsageError('A batch must contain at least one command.');
-      if (duration <= Duration.zero)
+      }
+      if (duration <= Duration.zero) {
         throw const RunnelInputError('Batch timeout must be positive.');
+      }
       final results = await _executor(commands, duration, operation);
       return BatchResults._(_owner, List.unmodifiable(results));
     });

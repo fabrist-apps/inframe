@@ -84,18 +84,17 @@ RedisCommand<Option<String>> getCommand(String key) => Get(key);
 final class Get extends RedisCommand<Option<String>> {
   /// Creates a GET command for [key].
   Get(String key)
-    : super.internal(
+    : super(
         [RedisArgument.text('GET'), RedisArgument.text(key)],
-        (reply) => reply is RespNull ? const None() : Some(respText(reply)),
+        builtInDecoder((reply) => reply is RespNull ? const None() : Some(respText(reply))),
       );
 }
 
 /// Builds a typed binary GET command.
-RedisCommand<Option<Uint8List>> getBytesCommand(String key) =>
-    RedisCommand<Option<Uint8List>>.internal(
-      [RedisArgument.text('GET'), RedisArgument.text(key)],
-      _decodeBytes,
-    );
+RedisCommand<Option<Uint8List>> getBytesCommand(String key) => builtInCommand<Option<Uint8List>>(
+  [RedisArgument.text('GET'), RedisArgument.text(key)],
+  _decodeBytes,
+);
 
 /// Builds a typed text SET command.
 RedisCommand<bool> setCommand(
@@ -126,7 +125,7 @@ RedisCommand<bool> setBytesCommand(
 /// Builds an MGET command that preserves key order and duplicates.
 RedisCommand<List<Option<String>>> mgetCommand(Iterable<String> keys) {
   final snapshot = _nonEmpty(keys, 'keys');
-  return RedisCommand<List<Option<String>>>.internal(
+  return builtInCommand<List<Option<String>>>(
     [RedisArgument.text('MGET'), ...snapshot.map(RedisArgument.text)],
     (reply) => reply.optionalTextList,
   );
@@ -136,7 +135,7 @@ RedisCommand<List<Option<String>>> mgetCommand(Iterable<String> keys) {
 RedisCommand<void> msetCommand(Map<String, String> values) {
   if (values.isEmpty) throw ArgumentError.value(values, 'values', 'must not be empty');
   final entries = List<MapEntry<String, String>>.of(values.entries);
-  return RedisCommand<void>.internal([
+  return builtInCommand<void>([
     RedisArgument.text('MSET'),
     for (final entry in entries) ...[
       RedisArgument.text(entry.key),
@@ -152,10 +151,10 @@ RedisCommand<int> incrCommand(String key) => Incr(key);
 final class Incr extends RedisCommand<int> {
   /// Creates an INCR command for [key].
   Incr(String key)
-    : super.internal([
+    : super([
         RedisArgument.text('INCR'),
         RedisArgument.text(key),
-      ], (reply) => reply.integer);
+      ], builtInDecoder((reply) => reply.integer));
 }
 
 /// Builds an INCRBY command.
@@ -191,7 +190,7 @@ RedisCommand<bool> expireCommand(String key, Duration duration) {
 RedisCommand<int> pttlCommand(String key) => _integerCommand('PTTL', [key]);
 
 /// Builds a TYPE command.
-RedisCommand<String> typeCommand(String key) => RedisCommand<String>.internal(
+RedisCommand<String> typeCommand(String key) => builtInCommand<String>(
   [RedisArgument.text('TYPE'), RedisArgument.text(key)],
   respText,
 );
@@ -205,7 +204,7 @@ RedisCommand<ScanPage> scanCommand(
   if (count != null && count <= 0) {
     throw ArgumentError.value(count, 'count', 'must be positive');
   }
-  return RedisCommand<ScanPage>.internal([
+  return builtInCommand<ScanPage>([
     RedisArgument.text('SCAN'),
     RedisArgument.text(cursor),
     if (match != null) ...[RedisArgument.text('MATCH'), RedisArgument.text(match)],
@@ -369,7 +368,7 @@ RedisCommand<bool> _setCommand(
   RedisArgument value, {
   required SetCondition condition,
   required Expiry? expiry,
-}) => RedisCommand<bool>.internal([
+}) => builtInCommand<bool>([
   RedisArgument.text('SET'),
   RedisArgument.text(key),
   value,
@@ -396,14 +395,13 @@ RedisCommand<int> _keysCommand(String name, Iterable<String> keys) {
   return _integerCommand(name, snapshot);
 }
 
-RedisCommand<int> _integerCommand(String name, Iterable<String> arguments) =>
-    RedisCommand<int>.internal([
-      RedisArgument.text(name),
-      ...arguments.map(RedisArgument.text),
-    ], (reply) => reply.integer);
+RedisCommand<int> _integerCommand(String name, Iterable<String> arguments) => builtInCommand<int>([
+  RedisArgument.text(name),
+  ...arguments.map(RedisArgument.text),
+], (reply) => reply.integer);
 
 RedisCommand<bool> _predicateCommand(String name, Iterable<String> arguments) =>
-    RedisCommand<bool>.internal([
+    builtInCommand<bool>([
       RedisArgument.text(name),
       ...arguments.map(RedisArgument.text),
     ], _decodePredicate);

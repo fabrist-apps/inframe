@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
 
 /// One position-addressed publication owned by the consumer fixture.
@@ -38,15 +40,18 @@ final class HistoryHandoverResult {
 
 /// Consumer-owned subscribe-before-read history handover logic.
 final class HistoryHandoverFixture {
-  Future<HistoryHandoverResult> recover({
+  Effect<HistoryHandoverResult, HeraldConsumerError> recover({
     required String expectedEpoch,
     required int lastSeenPosition,
-    required Future<void> Function(void Function(HeraldEvent event) onLiveEvent) subscribe,
-    required Future<HeraldHistoryPage> Function() readHistory,
-  }) async {
+    required Effect<void, HeraldConsumerError> Function(
+      void Function(HeraldEvent event) onLiveEvent,
+    )
+    subscribe,
+    required Effect<HeraldHistoryPage, HeraldConsumerError> Function() readHistory,
+  }) => Effect.build(($) async {
     final buffered = <HeraldEvent>[];
-    await subscribe(buffered.add);
-    final history = await readHistory();
+    await $(subscribe(buffered.add));
+    final history = await $(readHistory());
     if (history.epoch != expectedEpoch) return HistoryHandoverResult.reload();
 
     final byPosition = SplayTreeMap<int, HeraldEvent>();
@@ -68,7 +73,7 @@ final class HistoryHandoverFixture {
       expectedPosition++;
     }
     return HistoryHandoverResult.ready(byPosition.values);
-  }
+  });
 }
 
 /// A complete latest-state snapshot.
@@ -112,13 +117,16 @@ final class LatestStateResult {
 
 /// Consumer-owned snapshot and delta handover logic.
 final class LatestStateFixture {
-  Future<LatestStateResult> recover({
-    required Future<void> Function(void Function(VersionedDelta delta) onLiveDelta) subscribe,
-    required Future<VersionedSnapshot> Function() readSnapshot,
-  }) async {
+  Effect<LatestStateResult, HeraldConsumerError> recover({
+    required Effect<void, HeraldConsumerError> Function(
+      void Function(VersionedDelta delta) onLiveDelta,
+    )
+    subscribe,
+    required Effect<VersionedSnapshot, HeraldConsumerError> Function() readSnapshot,
+  }) => Effect.build(($) async {
     final buffered = <VersionedDelta>[];
-    await subscribe(buffered.add);
-    final snapshot = await readSnapshot();
+    await $(subscribe(buffered.add));
+    final snapshot = await $(readSnapshot());
     var version = snapshot.version;
     var state = snapshot.state;
     for (final delta in buffered) {
@@ -148,7 +156,7 @@ final class LatestStateFixture {
       state: state,
       reloadRequired: false,
     );
-  }
+  });
 }
 
 /// Exact app-scoped names passed unchanged to Runnel.
@@ -242,11 +250,11 @@ local subscribers = redis.call('PUBLISH', channel, tostring(position) .. '|' .. 
 redis.call('HSET', KEYS[4], receipt_id, tostring(position))
 return {position, subscribers, stream_id, 0}
 ''',
-  _decodeCoordinatedPublication,
+  (reply) => _decodeResult(() => _decodeCoordinatedPublication(reply)),
 );
 
 /// Coordinates history, a complete snapshot, publication, and a retry receipt.
-Future<CoordinatedPublication> publishCoordinated(
+Effect<CoordinatedPublication, RunnelError> publishCoordinated(
   Runnel redis,
   HeraldFixtureNames names, {
   required String receiptId,
@@ -293,11 +301,11 @@ redis.call('HSET', KEYS[1], connection_id, user_id)
 redis.call('ZADD', KEYS[2], expires_at, connection_id)
 return redis.call('HLEN', KEYS[1])
 ''',
-  _decodeInteger,
+  (reply) => _decodeResult(() => _decodeInteger(reply)),
 );
 
 /// Atomically stores one connection-to-user mapping and its lease expiration.
-Future<int> upsertPresenceLease(
+Effect<int, RunnelError> upsertPresenceLease(
   Runnel redis,
   HeraldFixtureNames names, {
   required String connectionId,
@@ -339,11 +347,11 @@ for _, connection_id in ipairs(expired) do
 end
 return #expired
 ''',
-  _decodeInteger,
+  (reply) => _decodeResult(() => _decodeInteger(reply)),
 );
 
 /// Removes every expired connection from both consumer-owned presence structures.
-Future<int> removeExpiredPresenceLeases(
+Effect<int, RunnelError> removeExpiredPresenceLeases(
   Runnel redis,
   HeraldFixtureNames names, {
   required int nowMilliseconds,
@@ -374,9 +382,9 @@ final class DeliveryProbeResult {
 /// Consumer-owned probe that exercises normal publication and requests recovery on a stall.
 final class DeliveryPathProbe {
   factory DeliveryPathProbe({
-    required Future<int> Function(String channel, String payload) publish,
+    required Effect<int, RunnelError> Function(String channel, String payload) publish,
     required PubSubState Function() health,
-    required Future<void> Function(Duration timeout) reconnect,
+    required Effect<void, RunnelError> Function(Duration timeout) reconnect,
   }) => DeliveryPathProbe._(publish, health, reconnect);
 
   const DeliveryPathProbe._(this._publish, this._health, this._reconnect);
@@ -390,28 +398,32 @@ final class DeliveryPathProbe {
     reconnect: (timeout) => subscriber.reconnect(timeout: timeout),
   );
 
-  final Future<int> Function(String channel, String payload) _publish;
+  final Effect<int, RunnelError> Function(String channel, String payload) _publish;
   final PubSubState Function() _health;
-  final Future<void> Function(Duration timeout) _reconnect;
+  final Effect<void, RunnelError> Function(Duration timeout) _reconnect;
 
-  Future<DeliveryProbeResult> check({
+  Effect<DeliveryProbeResult, HeraldConsumerError> check({
     required String channel,
     required String token,
     required Future<bool> Function(String token, Duration timeout) awaitDelivery,
     required Duration deliveryTimeout,
     required Duration reconnectTimeout,
-  }) async {
+  }) => Effect.build(($) async {
     if (deliveryTimeout <= Duration.zero) {
       throw ArgumentError.value(deliveryTimeout, 'deliveryTimeout', 'must be positive');
     }
     if (reconnectTimeout <= Duration.zero) {
       throw ArgumentError.value(reconnectTimeout, 'reconnectTimeout', 'must be positive');
     }
-    await _publish(channel, token);
-    final delivered = await awaitDelivery(
-      token,
-      deliveryTimeout,
-    ).timeout(deliveryTimeout, onTimeout: () => false);
+    await $(_consumer(_publish(channel, token)));
+    final delivered = await $(
+      consumerFuture(
+        () => awaitDelivery(
+          token,
+          deliveryTimeout,
+        ).timeout(deliveryTimeout, onTimeout: () => false),
+      ),
+    );
     final health = _health();
     if (delivered) {
       return DeliveryProbeResult(
@@ -420,13 +432,13 @@ final class DeliveryPathProbe {
         reconnectRequested: false,
       );
     }
-    await _reconnect(reconnectTimeout);
+    await $(_consumer(_reconnect(reconnectTimeout)));
     return DeliveryProbeResult(
       delivered: false,
       healthBeforeRecovery: health,
       reconnectRequested: true,
     );
-  }
+  });
 }
 
 CoordinatedPublication _decodeCoordinatedPublication(RespValue reply) {
@@ -446,3 +458,78 @@ int _decodeInteger(RespValue reply) => switch (reply) {
   RespInteger(:final value) => value,
   _ => throw FormatException('Expected an integer, received ${reply.runtimeType}.'),
 };
+
+/// The consumer retains a typed storage failure for its own recovery policy.
+final class HeraldConsumerError {
+  const HeraldConsumerError(this.failure);
+  final RunnelError failure;
+}
+
+Effect<T, HeraldConsumerError> _consumer<T>(Effect<T, RunnelError> operation) =>
+    operation.mapError((error, _) => HeraldConsumerError(error));
+
+/// Adapts a consumer-owned Future; unexpected callback throws remain defects.
+Effect<T, HeraldConsumerError> consumerFuture<T>(Future<T> Function() work) => Effect.tryFuture(
+  (_) => work(),
+  onError: (error, stack, _) => Error.throwWithStackTrace(error, stack),
+);
+
+Result<T, RunnelError> _decodeResult<T>(T Function() decode) {
+  try {
+    return Success(decode());
+  } on FormatException catch (error, stack) {
+    return Failure(RunnelDecodingError(error.message, cause: error, stackTrace: stack));
+  }
+}
+
+/// A finite history/live handover that borrows the client and owns its subscriber.
+final class HeraldScopedConsumerFixture {
+  Effect<HistoryHandoverResult, HeraldConsumerError> recover({
+    required Runnel redis,
+    required HeraldFixtureNames names,
+    required String expectedEpoch,
+    required int lastSeenPosition,
+    required int liveMessageCount,
+    required Effect<HeraldHistoryPage, HeraldConsumerError> readHistory,
+  }) => Effect.build(($) async {
+    final session = await $.acquireRelease(
+      _consumer(redis.openPubSub()),
+      release: (session, _) => session.close(),
+    );
+    await $(_consumer(session.subscribe([names.channelName])));
+    final history = await $(readHistory);
+    final publications = await $(
+      session.events
+          .filter((event, _) => event is PubSubMessage)
+          .take(liveMessageCount)
+          .runCollect()
+          .mapError((error, _) => HeraldConsumerError(error)),
+    );
+    final live = <HeraldEvent>[];
+    for (final publication in publications.cast<PubSubMessage>()) {
+      final text = $.sync(publication.decodeText().mapError(HeraldConsumerError.new));
+      final separator = text.indexOf('|');
+      final position = separator < 0 ? null : int.tryParse(text.substring(0, separator));
+      if (position == null || position <= 0) {
+        return HistoryHandoverResult.reload();
+      }
+      live.add(
+        HeraldEvent(
+          epoch: expectedEpoch,
+          position: position,
+          payload: text.substring(separator + 1),
+        ),
+      );
+    }
+    return $(
+      HistoryHandoverFixture().recover(
+        expectedEpoch: expectedEpoch,
+        lastSeenPosition: lastSeenPosition,
+        subscribe: (onLive) => Effect.sync((_) {
+          live.forEach(onLive);
+        }),
+        readHistory: () => Effect.succeed(history),
+      ),
+    );
+  });
+}

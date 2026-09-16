@@ -52,16 +52,15 @@ Future<List<Result<Object?, RunnelError>>> executeTransaction(
 }
 
 /// Constructs a transaction framing command without interpreting its reply.
-RedisCommand<Object?> transactionFrame(String name) => RedisCommand<Object?>.internal(
+RedisCommand<Object?> transactionFrame(String name) => builtInCommand<Object?>(
   [RedisArgument.text(name)],
   (reply) => reply,
 );
 
-RedisCommand<Object?> _queuedCommand(RedisCommand<Object?> command) =>
-    RedisCommand<Object?>.internal(
-      command.arguments,
-      (reply) => reply,
-    );
+RedisCommand<Object?> _queuedCommand(RedisCommand<Object?> command) => builtInCommand<Object?>(
+  command.arguments,
+  (reply) => reply,
+);
 
 Object? _requireTransactionSuccess(Result<Object?, RunnelError> outcome, String message) {
   return switch (outcome) {

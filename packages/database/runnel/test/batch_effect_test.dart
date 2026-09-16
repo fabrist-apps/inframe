@@ -12,19 +12,20 @@ void main() {
   group('RedisBatch Effects', () {
     test('should freeze without executing the batch', () {
       var transmissions = 0;
-      final batch = RedisBatch.internal(
-        maxCommands: 10,
-        maxBytes: 1024,
-        reservedCommands: 0,
-        reservedBytes: 0,
-        defaultTimeout: const Duration(seconds: 1),
-        executor: (commands, timeout, operation) async {
-          transmissions++;
-          return [const Success<Object?, RunnelError>(1)];
-        },
-      );
-      batch.add(incrCommand('counter'));
-      batch.exec();
+      final batch =
+          RedisBatch.internal(
+              maxCommands: 10,
+              maxBytes: 1024,
+              reservedCommands: 0,
+              reservedBytes: 0,
+              defaultTimeout: const Duration(seconds: 1),
+              executor: (commands, timeout, operation) async {
+                transmissions++;
+                return [const Success<Object?, RunnelError>(1)];
+              },
+            )
+            ..add(incrCommand('counter'))
+            ..exec();
       expect(transmissions, 0);
       expect(() => batch.add(incrCommand('counter')), throwsStateError);
     });
@@ -73,8 +74,7 @@ void main() {
           transmissions++;
           return [const Success<Object?, RunnelError>(1)];
         },
-      );
-      batch.add(incrCommand('counter'));
+      )..add(incrCommand('counter'));
       final effect = batch.exec();
       final runtime = Runtime();
       addTearDown(runtime.close);
@@ -127,9 +127,9 @@ void main() {
         final client = await Runnel.connect(peer.endpoint).runFuture();
         addTearDown(() => client.close().runFuture());
         const error = RunnelUsageError('thrown callback');
-        final batch = client.pipeline();
-        batch.add(RedisCommand<void>([RedisArgument.text('CUSTOM')], (_) => throw error));
-        batch.add(RedisCommand<void>([RedisArgument.text('CUSTOM')], (_) => const Success(null)));
+        final batch = client.pipeline()
+          ..add(RedisCommand<void>([RedisArgument.text('CUSTOM')], (_) => throw error))
+          ..add(RedisCommand<void>([RedisArgument.text('CUSTOM')], (_) => const Success(null)));
         final exit = await batch.exec().runFutureExit();
         expect(
           (exit as Failed<BatchResults, RunnelError>).cause,

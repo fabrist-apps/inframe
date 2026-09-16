@@ -8,6 +8,7 @@ import 'package:conflux/result.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
+import 'package:runnel/src/pubsub/session.dart';
 import 'package:test/test.dart';
 
 import 'support/resp_peer.dart';
@@ -197,7 +198,7 @@ Future<PubSubSession> _connect(
   RespPeer peer, {
   PubSubLimits limits = const PubSubLimits(),
   void Function(PubSubSession)? onClosed,
-}) => PubSubSession.connect(
+}) => PubSubSessionOwnership.connect(
   PubSubConnectionConfiguration(
     host: InternetAddress.loopbackIPv4.address,
     port: peer.port,
