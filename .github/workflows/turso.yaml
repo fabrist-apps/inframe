@@ -117,6 +117,8 @@ jobs:
           "$RUNNER_TEMP/turso-selenium/bin/python" tool/run_web_verification.py firefox
 
   turso-apple:
+    # Disabled intentionally; this macOS job also covers iOS and Safari.
+    if: ${{ false }}
     needs: turso-linux
     runs-on: blacksmith-6vcpu-macos-latest
 
