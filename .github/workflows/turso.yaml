@@ -177,7 +177,7 @@ jobs:
           }
 
   turso-apple:
-    runs-on: macos-15
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v7
@@ -215,9 +215,11 @@ jobs:
           cp "$GITHUB_WORKSPACE/packages/database/turso/tool/flutter_native_runtime_test.dart.template" integration_test/runtime_test.dart
       - name: Boot an iOS simulator
         run: |
+          SDK_VERSION="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-${SDK_VERSION//./-}"
           DEVICE_ID="$(xcrun simctl list devices available -j \
-            | jq -r '[.devices[] | .[] | select(.name | startswith("iPhone"))][0].udid')"
-          test -n "$DEVICE_ID"
+            | jq -er --arg runtime "$RUNTIME_ID" \
+              '[.devices[$runtime][]? | select(.name | startswith("iPhone"))][0].udid // error("No iPhone simulator for the selected Xcode SDK")')"
           echo "IOS_DEVICE_ID=$DEVICE_ID" >> "$GITHUB_ENV"
           xcrun simctl boot "$DEVICE_ID" || true
           open -a Simulator --args -CurrentDeviceUDID "$DEVICE_ID"
@@ -226,7 +228,13 @@ jobs:
       - name: Run iOS simulator tests
         working-directory: ${{ runner.temp }}/turso_mobile
         timeout-minutes: 20
-        run: flutter test integration_test/runtime_test.dart -d "$IOS_DEVICE_ID"
+        run: flutter test integration_test/runtime_test.dart -d "$IOS_DEVICE_ID" --verbose
+      - name: Report iOS simulator failures
+        if: ${{ failure() && env.IOS_DEVICE_ID != '' }}
+        run: |
+          xcrun simctl spawn "$IOS_DEVICE_ID" log show --last 5m --style compact \
+            --predicate 'process == "Runner"'
+          find "$HOME/Library/Logs/DiagnosticReports" -name 'Runner*' -type f -exec cat {} \;
       - name: Build the iOS device application
         working-directory: ${{ runner.temp }}/turso_mobile
         run: |
