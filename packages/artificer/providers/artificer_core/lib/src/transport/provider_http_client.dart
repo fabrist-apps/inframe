@@ -82,6 +82,7 @@ class ProviderHttpClient {
               await handle.dispose();
             } finally {
               _active.remove(handle);
+              handle.finishOperation();
             }
           }, onError: (error, stack, _) => Error.throwWithStackTrace(error, stack)),
         );
@@ -89,7 +90,7 @@ class ProviderHttpClient {
           Effect.tryFuture<ProviderJsonResponse, AiError>(
             (_) => _request(handle, url, method, headers, body),
             onCancel: (_) => handle.dispose(interrupt: true),
-            onError: (error, stack, _) => _mapError(error, stack),
+            onError: (error, stack, _) => _mapError(error, stack, handle),
           ).catchError(
             (error, _) => handle.interrupted
                 ? Effect.failCause(const Interrupted('Provider closed'))
@@ -158,7 +159,7 @@ class ProviderHttpClient {
     return ProviderJsonResponse(data: data, metadata: metadata);
   }
 
-  AiError _mapError(Object error, StackTrace stack) {
+  AiError _mapError(Object error, StackTrace stack, RequestLifetime handle) {
     if (error is AiError) return error;
     if (error is DioException) {
       if (error.type == DioExceptionType.unknown &&
@@ -167,20 +168,35 @@ class ProviderHttpClient {
           error.error is! HandshakeException) {
         Error.throwWithStackTrace(error.error ?? error, stack);
       }
-      return const TransportError('HTTP transport failed.');
+      return TransportError('HTTP transport failed.', deliveryState: handle.deliveryState);
     }
     if (error is SocketException || error is HttpException || error is HandshakeException) {
-      return const TransportError('HTTP transport failed.');
+      return TransportError('HTTP transport failed.', deliveryState: handle.deliveryState);
     }
     Error.throwWithStackTrace(error, stack);
   }
 
   /// Interrupts this provider's active requests and awaits owned cleanup.
   /// A borrowed Dio remains usable by its other callers.
-  Future<void> close() => _closing ??= _close();
+  Future<void> close() {
+    if (_closing case final closing?) return closing;
+    final completion = Completer<void>();
+    _closing = completion.future;
+    completion.complete(_close());
+    return completion.future;
+  }
+
   Future<void> _close() async {
     try {
-      await Future.wait(_active.toList().map((handle) => handle.dispose(interrupt: true)));
+      await Future.wait(
+        _active.toList().map((handle) async {
+          try {
+            await handle.dispose(interrupt: true);
+          } finally {
+            await handle.finished;
+          }
+        }),
+      );
     } finally {
       if (_ownsDio) _dio.close(force: true);
     }

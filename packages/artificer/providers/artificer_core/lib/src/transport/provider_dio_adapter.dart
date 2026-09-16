@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:artificer_core/src/errors.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 
@@ -9,12 +10,17 @@ import 'package:dio/io.dart';
 /// Borrowed Dio clients must install this adapter before creating a provider.
 class ProviderDioAdapter implements HttpClientAdapter {
   /// Creates one IO connection pool, optionally using a configured native client.
-  ProviderDioAdapter({HttpClient Function()? createHttpClient}) {
-    _delegate = IOHttpClientAdapter(
-      createHttpClient: () => _TrackingHttpClient(
-        createHttpClient?.call() ?? HttpClient(),
-      ),
-    );
+  ///
+  /// [createAdapter] supports IO adapter configuration such as certificate
+  /// validation. Custom adapters must use the supplied native client factory,
+  /// delegate each exchange exactly once, and preserve its response stream.
+  ProviderDioAdapter({
+    HttpClient Function()? createHttpClient,
+    IOHttpClientAdapter Function(HttpClient Function() createHttpClient)? createAdapter,
+  }) {
+    HttpClient trackedClient() => _TrackingHttpClient(createHttpClient?.call() ?? HttpClient());
+    _delegate =
+        createAdapter?.call(trackedClient) ?? IOHttpClientAdapter(createHttpClient: trackedClient);
   }
 
   late final IOHttpClientAdapter _delegate;
@@ -61,7 +67,21 @@ class RequestLifetime {
   /// Cancellation signal unique to this execution.
   final CancelToken token = CancelToken();
   final Completer<void> _fetchCompleted = Completer<void>();
-  final Completer<void> _released = Completer<void>();
+  final Completer<void> _operationFinished = Completer<void>();
+
+  /// Completes after the operation's protected finalizer leaves client ownership.
+  Future<void> get finished => _operationFinished.future;
+
+  /// Marks the protected operation finalizer complete, including failed cleanup.
+  void finishOperation() => _operationFinished.complete();
+
+  /// Conservative evidence about whether a failed attempt reached the service.
+  DeliveryState get deliveryState => _response != null
+      ? DeliveryState.responseStarted
+      : _nativeRequest != null
+      ? DeliveryState.mayHaveReachedProvider
+      : DeliveryState.notSent;
+
   Future<void>? _acquisition;
   HttpClientRequest? _nativeRequest;
   _TrackedStream? _response;
@@ -76,22 +96,31 @@ class RequestLifetime {
   Future<void> dispose({bool interrupt = false}) {
     interrupted |= interrupt;
     _disposing = true;
-    token.cancel('Provider request _released');
+    token.cancel('Provider request released');
     _nativeRequest?.abort();
     return _disposal ??= _dispose();
   }
 
   Future<void> _dispose() async {
+    Object? cleanupError;
+    StackTrace? cleanupStack;
     try {
-      // Cancel an active body before waiting for any remaining _acquisition.
       await _response?.dispose();
-      if (_fetchStarted) await _fetchCompleted.future;
-      await _acquisition;
-      // Dio may discard a _response which arrives after its cancellation race.
-      await _response?.dispose();
-    } finally {
-      _released.complete();
+    } on Object catch (error, stack) {
+      cleanupError = error;
+      cleanupStack = stack;
     }
+    // Even a broken stream disposer must not skip a late native acquisition.
+    if (_fetchStarted) await _fetchCompleted.future;
+    await _acquisition;
+    try {
+      // Dio can discard a response which arrives after its cancellation race.
+      await _response?.dispose();
+    } on Object catch (error, stack) {
+      cleanupError ??= error;
+      cleanupStack ??= stack;
+    }
+    if (cleanupError != null) Error.throwWithStackTrace(cleanupError, cleanupStack!);
   }
 }
 
@@ -107,7 +136,16 @@ class _TrackedStream {
     };
     _controller.onPause = () => _subscription?.pause();
     _controller.onResume = () => _subscription?.resume();
-    _controller.onCancel = _cancel;
+    _controller.onCancel = () async {
+      // Dio initiates cancellation without awaiting its Future. The request
+      // owner observes the original error through dispose instead, avoiding an
+      // unhandled asynchronous error while preserving the cleanup defect.
+      try {
+        await _cancel();
+      } on Object {
+        // Reported by the protected operation finalizer.
+      }
+    };
   }
   late final StreamController<Uint8List> _controller;
   StreamSubscription<Uint8List>? _subscription;
@@ -119,13 +157,12 @@ class _TrackedStream {
       // Listening then cancelling releases an otherwise unconsumed native body.
       final subscription = stream.listen((_) {}, onError: (Object _) {});
       await subscription.cancel();
-    } else {
-      await _cancel();
     }
+    await _cancel();
   }
 }
 
-/// Full public HttpClient delegation; only native _acquisition is intercepted.
+/// Full public HttpClient delegation; only native acquisition is intercepted.
 class _TrackingHttpClient implements HttpClient {
   _TrackingHttpClient(this.delegate);
   final HttpClient delegate;
@@ -133,12 +170,13 @@ class _TrackingHttpClient implements HttpClient {
   Future<HttpClientRequest> openUrl(String method, Uri url) {
     final handle = Zone.current[ProviderDioAdapter._zoneKey];
     if (handle is! RequestLifetime) return delegate.openUrl(method, url);
-    final acquired = delegate.openUrl(method, url).then((request) {
-      handle._nativeRequest = request;
+    final acquired = delegate.openUrl(method, url).then((request) async {
       if (handle._disposing) {
         request.abort();
+        await request.done.then<void>((_) {}, onError: (Object _, StackTrace _) {});
         throw StateError('Native request acquired after release.');
       }
+      handle._nativeRequest = request;
       return request;
     });
     handle._acquisition = acquired.then<void>((_) {}, onError: (Object _, StackTrace _) {});
