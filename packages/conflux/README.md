@@ -416,7 +416,7 @@ ordinary Dart exceptions rather than validation failures.
 Run the package tests from the repository root:
 
 ```sh
-dart test packages/conflux/conflux/test --chain-stack-traces
+dart test packages/conflux/test --chain-stack-traces
 ```
 
 ## Val validation
@@ -565,5 +565,5 @@ decoding or `copyWith`. Raw inputs, callbacks, schemas, and stack traces are not
 part of the wire format.
 
 The generated issue mapper is ignored by Git. After a fresh checkout, generate it from
-`packages/conflux/conflux` with `dart run build_runner build
+`packages/conflux` with `dart run build_runner build
 --build-filter='lib/src/val/issue.mapper.dart'`, then format the generated file.
