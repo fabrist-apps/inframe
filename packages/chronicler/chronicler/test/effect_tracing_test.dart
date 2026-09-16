@@ -8,6 +8,7 @@ import 'package:test/test.dart';
 import 'support/memory_exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler Effect tracing', () {
     test('should stay lazy and create isolated spans for every execution', () async {
       final harness = _Harness();

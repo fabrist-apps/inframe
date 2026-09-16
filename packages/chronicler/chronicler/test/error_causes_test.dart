@@ -6,6 +6,7 @@ import 'support/error_capture_support.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerErrors causes', () {
     test('should reject hook-modified causes that exceed the chain limit', () async {
       final exporter = TestExporter();

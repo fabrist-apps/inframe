@@ -5,6 +5,7 @@ import 'package:test/test.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerHistogram', () {
     test('should export upper-inclusive buckets and distribution fields', () async {
       final exporter = TestExporter(acceptImmediately: true);

@@ -6,6 +6,7 @@ import 'package:context/context.dart';
 
 /// Runs entirely locally: no server, credentials, or Conflux application code.
 Future<void> main() async {
+  Chronicler.initialize();
   final chronicler = Chronicler(
     appId: 'shop_demo',
     release: '1.0.0',

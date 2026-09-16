@@ -10,6 +10,7 @@ import 'support/exporter.dart';
 import 'support/metric_clock.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler Effect lifecycle', () {
     test('should contain an exporter future that fails immediately', () async {
       final chronicler = Chronicler(

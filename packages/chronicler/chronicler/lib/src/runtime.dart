@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:chronicler/chronicler.init.dart' as generated;
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/lifecycle.dart';
 import 'package:chronicler/src/metrics.dart';
@@ -9,6 +10,7 @@ import 'package:chronicler/src/runtime/capture.dart';
 import 'package:chronicler/src/runtime/tracing.dart';
 import 'package:chronicler/src/trace_propagation.dart';
 import 'package:chronicler/src/transport.dart';
+import 'package:conflux/conflux.dart' show Conflux;
 import 'package:conflux/effect.dart';
 
 export 'package:chronicler/src/runtime/capture.dart' show ChroniclerCause;
@@ -37,6 +39,15 @@ final class Chronicler {
          options: options,
          clock: clock,
        );
+
+  /// Required setup before recording or using serialization in each isolate.
+  /// Initializes Conflux and registers all Chronicler mappers.
+  /// Loads Conflux’s timezone database if it has not already been initialized.
+  /// Safe to call repeatedly; creates no runtime or export resources.
+  static void initialize() {
+    Conflux.initialize();
+    generated.initializeMappers();
+  }
 
   /// Default field-name terms replaced before buffering.
   static const Set<String> defaultSensitiveFieldTerms =

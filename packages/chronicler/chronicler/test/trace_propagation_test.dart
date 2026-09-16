@@ -5,6 +5,7 @@ const traceId = 'trc_0123456789ABCDEFGHIJKLMN';
 const parentId = 'spn_0123456789ABCDEFGHIJKLMN';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('TracePropagation', () {
     const headers = {
       'chronicler-trace-id': traceId,

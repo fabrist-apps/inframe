@@ -1,0 +1,175 @@
+import 'protocols.dart';
+
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/transport.dart';
+import 'package:artificer_core/protocols.dart';
+import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
+
+final class TestOptions {
+  const TestOptions(this.tag);
+  final String tag;
+}
+
+final class TextProvider implements LanguageModelProvider, EmbeddingModelProvider {
+  TextProvider(this.endpoint);
+  final Uri endpoint;
+  final client = ProviderHttpClient();
+  @override
+  TextModel languageModel(String modelId) => TextModel(this, modelId);
+  @override
+  CompatibleEmbeddingModel embeddingModel(String modelId) => CompatibleEmbeddingModel(
+    providerId: 'fixture',
+    modelId: modelId,
+    client: client,
+    endpoint: endpoint.resolve('/embed'),
+  );
+  Future<void> close() => client.close();
+}
+
+final class TextModel implements LanguageModel {
+  TextModel(this.provider, this.modelId) {
+    if (modelId.isEmpty) throw ArgumentError.value(modelId, 'modelId');
+  }
+  final TextProvider provider;
+  @override
+  final String modelId;
+  @override
+  String get providerId => 'fixture';
+  @override
+  ModelCapabilities get capabilities => const ModelCapabilities();
+  @override
+  Effect<GenerationResult, AiError> generate(GenerationRequest request, {TestOptions? options}) =>
+      Effect.defer((_) {
+        final error = request.validate(providerId: providerId, api: 'fixture', modelId: modelId);
+        if (error != null) return Effect.fail(error);
+        return provider.client
+            .requestJson(
+              url: provider.endpoint,
+              body: {
+                'model': modelId,
+                'messages': [
+                  for (final message in request.messages)
+                    if (message is UserMessage)
+                      {
+                        'role': 'user',
+                        'content': [
+                          for (final part in message.parts)
+                            if (part is TextInputPart) part.text,
+                        ].join(),
+                      },
+                ],
+                ...request.options.resolve().toWire(),
+                if (options != null) 'tag': options.tag,
+              },
+            )
+            .map((response, _) {
+              final data = response.data as Map<String, Object?>;
+              return GenerationResult(
+                message: AssistantMessage([TextOutputPart(data['reply'] as String)]),
+                finishReason: FinishReason.stop,
+                native: NativePayload(
+                  providerId: providerId,
+                  api: 'fixture',
+                  modelId: modelId,
+                  data: data,
+                ),
+                metadata: response.metadata,
+              );
+            });
+      });
+  @override
+  Flow<GenerationEvent, AiError> stream(GenerationRequest request) =>
+      generate(request).asFlow().map((result, _) => GenerationFinished(result));
+}
+
+Future<void> main() async {
+  ArtificerCore.initialize();
+  await verifyCompatibleProtocols();
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final bodies = <Map<String, Object?>>[];
+  server.listen((request) async {
+    bodies.add(jsonDecode(await utf8.decoder.bind(request).join()) as Map<String, Object?>);
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(
+      jsonEncode(
+        request.uri.path == '/embed'
+            ? {
+                'model': 'actual-embedding-model',
+                'data': [
+                  {
+                    'index': 0,
+                    'embedding': [0.25, 0.5],
+                  },
+                ],
+                'unknown': true,
+              }
+            : {
+                'reply': 'hello',
+                'unknown': {
+                  'nested': [1, true],
+                },
+              },
+      ),
+    );
+    await request.response.close();
+  });
+  final provider = TextProvider(Uri.parse('http://127.0.0.1:${server.port}/generate'));
+  final runtime = Runtime();
+  try {
+    final model = provider.languageModel('unfamiliar-model');
+    final common = model as LanguageModel;
+    final parts = <InputPart>[const TextInputPart('question')];
+    final request = GenerationRequest(messages: [UserMessage(parts)]);
+    final operation = common.generate(request);
+    if (bodies.isNotEmpty) throw StateError('eager inference');
+    parts.add(const TextInputPart('!'));
+    final results = await runtime.run(Effect.all([operation, operation]));
+    if (results case Succeeded(:final value)) {
+      for (final result in value) {
+        if (result.text != 'hello' || result.usage != null)
+          throw StateError('generation result');
+        if ((result.native.data as Map)['unknown'] == null) throw StateError('unknown data lost');
+      }
+    } else {
+      throw StateError('$results');
+    }
+    final override = await runtime.run(
+      model.generate(request, options: const TestOptions('typed')),
+    );
+    if (override is! Succeeded<GenerationResult, AiError>) throw StateError('typed options');
+    if (bodies.length != 3 ||
+        bodies.first['model'] != 'unfamiliar-model' ||
+        bodies.first['max_tokens'] != 4096 ||
+        bodies.first.containsKey('temperature'))
+      throw StateError('wire defaults/attempts');
+    if ((bodies.first['messages'] as List).first['content'] != 'question!')
+      throw StateError('cold ordinary collections');
+    if (bodies.last['tag'] != 'typed') throw StateError('concrete options');
+    final composed = Effect.build<EmbeddingResult, AiError>(($) async {
+      final reply = await $(provider.languageModel('text-model').generate(request));
+      return await $(
+        provider
+            .embeddingModel('embedding-alias')
+            .embed(
+              EmbeddingRequest(items: [EmbeddingInput.text(reply.text)]),
+            ),
+      );
+    });
+    final embeddingExit = await runtime.run(composed);
+    if (embeddingExit case Succeeded(:final value)) {
+      if (value.modelId != 'actual-embedding-model' || value.vectors.single.length != 2)
+        throw StateError('embedding result');
+      if ((bodies.last['input'] as List).single != 'hello') throw StateError('composition');
+    } else {
+      throw StateError('embedding failed: $embeddingExit');
+    }
+  } finally {
+    await provider.close();
+    await runtime.close();
+    await server.close(force: true);
+  }
+}

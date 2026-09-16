@@ -7,6 +7,7 @@ import 'support/exporter.dart';
 import 'support/metric_aggregation.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler up/down counters and gauges', () {
     test('should export signed net changes and the latest gauge observation', () async {
       final exporter = TestExporter(acceptImmediately: true);

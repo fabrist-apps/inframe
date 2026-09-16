@@ -8,6 +8,7 @@ import 'support/async.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler close', () {
     test('shares one future and closes the exporter once', () async {
       final exporter = TestExporter();

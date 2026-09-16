@@ -4,6 +4,7 @@ import 'package:test/test.dart';
 import '../support/trace_controller.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('TraceController', () {
     test('should retain correlation when reading the start clock fails', () {
       final bed = TraceControllerTestBed(

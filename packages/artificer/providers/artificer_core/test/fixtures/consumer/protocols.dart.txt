@@ -1,0 +1,237 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/protocols.dart';
+import 'package:artificer_core/transport.dart';
+import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
+import 'package:conflux/result.dart';
+
+Future<void> verifyCompatibleProtocols() async {
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final records = <({String path, Map<String, Object?> body, String? auth})>[];
+  final client = ProviderHttpClient();
+  final runtime = Runtime();
+  final base = Uri.parse('http://127.0.0.1:${server.port}');
+  Map<String, Object?> responseBody() => {
+    'id': 'response',
+    'model': 'actual-model',
+    'status': 'completed',
+    'output': [
+      {
+        'type': 'message',
+        'id': 'message',
+        'role': 'assistant',
+        'phase': 'final_answer',
+        'content': [
+          {'type': 'output_text', 'text': 'hello', 'annotations': []},
+        ],
+      },
+    ],
+    'usage': {'input_tokens': 2, 'output_tokens': 1, 'total_tokens': 3},
+    'future': {
+      'nested': [null, true],
+    },
+  };
+  server.listen((request) async {
+    final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map<String, Object?>;
+    records.add((path: request.uri.path, body: body, auth: request.headers.value('authorization')));
+    request.response.headers.set('x-request-id', 'native-id');
+    if (request.uri.path.startsWith('/chat')) {
+      if (body['stream'] == true) {
+        request.response.headers.contentType = ContentType('text', 'event-stream');
+        request.response.write(
+          'data: ${jsonEncode({
+            'id': 'chat',
+            'model': 'actual-model',
+            'choices': [
+              {
+                'index': 0,
+                'delta': {'role': 'assistant', 'content': 'hello'},
+                'finish_reason': null,
+              },
+            ],
+          })}\n\n',
+        );
+        request.response.write(
+          'data: ${jsonEncode({
+            'id': 'chat',
+            'model': 'actual-model',
+            'choices': [
+              {'index': 0, 'delta': {}, 'finish_reason': 'stop'},
+            ],
+            'usage': {'prompt_tokens': 2, 'completion_tokens': 1, 'total_tokens': 3},
+          })}\n\n',
+        );
+        if (request.uri.path == '/chat-a') request.response.write('data: [DONE]\n\n');
+      } else {
+        request.response.write(
+          jsonEncode({
+            'id': 'chat',
+            'model': 'actual-model',
+            'choices': [
+              {
+                'index': 0,
+                'message': {'role': 'assistant', 'content': 'hello'},
+                'finish_reason': 'stop',
+              },
+            ],
+            'usage': {'prompt_tokens': 2, 'completion_tokens': 1, 'total_tokens': 3},
+            'future': {
+              'nested': [null, true],
+            },
+          }),
+        );
+      }
+      await request.response.close();
+      return;
+    }
+    if (body['stream'] == true) {
+      request.response.headers.contentType = ContentType('text', 'event-stream');
+      final renamed = request.uri.path == '/responses-b';
+      request.response.write(
+        'data: ${jsonEncode({'type': renamed ? 'vendor.text' : 'response.output_text.delta', 'output_index': 0, 'content_index': 0, 'delta': 'hello'})}\n\n',
+      );
+      request.response.write(
+        'data: ${jsonEncode({
+          'type': 'vendor.future',
+          'unknown': [1],
+        })}\n\n',
+      );
+      request.response.write(
+        'data: ${jsonEncode({'type': renamed ? 'vendor.done' : 'response.completed', 'response': responseBody()})}\n\n',
+      );
+    } else {
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode(responseBody()));
+    }
+    await request.response.close();
+  });
+  try {
+    for (final alternate in [false, true]) {
+      final path = alternate ? '/responses-b' : '/responses-a';
+      final codec = ResponsesCodec(
+        ResponsesDialect(
+          providerId: alternate ? 'second' : 'first',
+          route: (_) => base.resolve(path),
+          authentication: () => {'authorization': 'explicit-fixture'},
+          instructionRole: alternate ? 'developer' : null,
+          eventAliases: alternate
+              ? {'vendor.text': 'response.output_text.delta', 'vendor.done': 'response.completed'}
+              : {},
+        ),
+      );
+      final model = CompatibleResponsesModel(
+        modelId: 'unknown-model',
+        client: client,
+        codec: codec,
+      );
+      final request = GenerationRequest(
+        messages: [UserMessage.text('question')],
+        instructions: 'instruction',
+      );
+      final before = records.length;
+      final raw = success(
+        await runtime.run(
+          model.rawGenerate(
+            request,
+            options: const ResponsesOptions(extraBody: Setting.set({'neutral': true})),
+          ),
+        ),
+      );
+      final normalized = result(
+        codec.normalize(raw.value, raw.raw, metadata: raw.metadata),
+      );
+      if (records.length != before + 1 || normalized.text != 'hello')
+        throw StateError('native normalization repeated inference');
+      if ((raw.raw.data as Map)['future'] == null)
+        throw StateError('lost unknown native JSON');
+      final body = records.last.body;
+      if (body['store'] != false ||
+          body['neutral'] != true ||
+          body['max_output_tokens'] != 4096 ||
+          records.last.auth != 'explicit-fixture')
+        throw StateError('Responses wire policy');
+      if (alternate ? body.containsKey('instructions') : body['instructions'] != 'instruction')
+        throw StateError('instruction dialect');
+      final common = model as LanguageModel;
+      final unary = success(await runtime.run(common.generate(request)));
+      final events = success(await runtime.run(common.stream(request).runCollect()));
+      final streamed = events.whereType<GenerationFinished>().single.result;
+      if (streamed.text != unary.text ||
+          streamed.usage?.totalTokens != unary.usage?.totalTokens)
+        throw StateError('Responses stream differs');
+      if (streamed.native.unknownEvents.single['event'] != 'vendor.future')
+        throw StateError('unknown stream event missing');
+      final nativeRequest = result(codec.encode(request, 'unknown-model'));
+      success(await runtime.run(model.create(nativeRequest)));
+    }
+    if (records.length != 8) throw StateError('unexpected Responses attempts');
+    for (final alternate in [false, true]) {
+      final dialect = ChatDialect(
+        providerId: alternate ? 'second' : 'first',
+        api: 'chat',
+        endpoint: base.resolve(alternate ? '/chat-b' : '/chat-a'),
+        headers: {'authorization': 'explicit-chat'},
+        instructionRole: alternate ? 'developer' : 'system',
+        maxTokensField: alternate ? 'max_completion_tokens' : 'max_tokens',
+        terminalPolicy: alternate ? ChatTerminalPolicy.finishThenEof : ChatTerminalPolicy.sentinel,
+      );
+      final model = ChatLanguageModel(
+        client: client,
+        dialect: dialect,
+        modelId: 'unknown-chat-model',
+      );
+      final request = GenerationRequest(
+        messages: [UserMessage.text('question')],
+        instructions: 'instruction',
+      );
+      final before = records.length;
+      final raw = success(
+        await runtime.run(
+          model.rawGenerate(request, options: const ChatOptions(seed: Setting.set(7))),
+        ),
+      );
+      final normalized = result(model.codec.normalize(raw));
+      if (records.length != before + 1 || normalized.text != 'hello')
+        throw StateError('Chat normalization repeated inference');
+      if ((raw.raw.data as Map)['future'] == null) throw StateError('Chat unknown JSON');
+      final body = records.last.body;
+      if (body['n'] != 1 || body['seed'] != 7 || body[dialect.maxTokensField] != 4096)
+        throw StateError('Chat wire options');
+      if ((body['messages'] as List).first['role'] != dialect.instructionRole ||
+          records.last.auth != 'explicit-chat')
+        throw StateError('Chat configured dialect');
+      final common = model as LanguageModel;
+      final unary = success(await runtime.run(common.generate(request)));
+      final events = success(await runtime.run(common.stream(request).runCollect()));
+      final streamed = events.whereType<GenerationFinished>().single.result;
+      if (streamed.text != unary.text || streamed.usage?.totalTokens != unary.usage?.totalTokens)
+        throw StateError('Chat stream differs');
+      final native = NativeChatRequest(
+        model: 'unknown-chat-model',
+        messages: [
+          {'role': 'user', 'content': 'question'},
+        ],
+      );
+      success(await runtime.run(model.native(native)));
+    }
+    if (records.length != 16) throw StateError('unexpected total protocol attempts');
+  } finally {
+    await client.close();
+    await runtime.close();
+    await server.close(force: true);
+  }
+}
+
+T success<T>(Exit<T, AiError> exit) => switch (exit) {
+  Succeeded(:final value) => value,
+  Failed(:final cause) => throw StateError(
+    'Provider failed: ${cause.expectedErrors.map((e) => e.message)}',
+  ),
+};
+T result<T>(Result<T, AiError> result) => switch (result) {
+  Success(:final value) => value,
+  Failure(:final error) => throw StateError(error.message),
+};

@@ -6,6 +6,7 @@ import 'support/metric_aggregation.dart';
 import 'support/metric_clock.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   late MetricClock clock;
   late Runtime runtime;
 

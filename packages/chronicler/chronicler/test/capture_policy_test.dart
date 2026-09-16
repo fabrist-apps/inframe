@@ -7,6 +7,7 @@ import 'support/exporter.dart';
 import 'support/runtime.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler capture policy', () {
     test('should drop logs before buffering when sampling is zero', () async {
       final exporter = TestExporter();

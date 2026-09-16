@@ -5,6 +5,7 @@ import 'package:test/test.dart';
 import 'support/records.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler model schemas', () {
     test('should enforce the attribute snapshot byte budget', () {
       final record = testLogRecord('hello').copyWith(

@@ -6,6 +6,7 @@ import 'support/events_support.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler Context identity', () {
     test('should replace complete identity while preserving other context state', () async {
       final exporter = TestExporter();

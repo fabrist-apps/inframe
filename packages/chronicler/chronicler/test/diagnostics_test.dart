@@ -7,6 +7,7 @@ import 'package:test/test.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler diagnostics', () {
     test('should coalesce callbacks without suppressing exact counters', () async {
       final notifications = <ChroniclerDiagnostic>[];

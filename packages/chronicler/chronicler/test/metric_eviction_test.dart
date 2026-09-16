@@ -6,6 +6,7 @@ import 'support/exporter.dart';
 import 'support/metric_aggregation.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler metric idle eviction', () {
     test('should finalize an expired series before admitting its replacement', () async {
       final harness = MetricHarness(

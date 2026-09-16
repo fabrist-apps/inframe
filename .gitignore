@@ -36,6 +36,7 @@ doc/api/
 *.g.dart
 *.freezed.dart
 *.mapper.dart
+*.init.dart
 *.rivet.dart
 *.voxel.dart
 *.voxel_migrations.dart

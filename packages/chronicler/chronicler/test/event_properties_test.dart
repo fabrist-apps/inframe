@@ -6,6 +6,7 @@ import 'support/events_support.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerEvents user properties', () {
     test('should emit distinct property removals without changing Context identity', () async {
       final exporter = TestExporter();

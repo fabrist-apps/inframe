@@ -7,6 +7,7 @@ import 'support/exporter.dart';
 import 'support/runtime.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler retries', () {
     test('should retry a retryable record with stable identity', () async {
       final exporter = TestExporter();

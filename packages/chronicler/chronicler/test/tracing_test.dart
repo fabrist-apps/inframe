@@ -10,6 +10,7 @@ import 'support/trace_controller.dart';
 import 'support/tracing_support.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler tracing lifecycle', () {
     test('should record nested callback spans and correlate logs', () async {
       final exporter = TestExporter(acceptImmediately: true);

@@ -5,6 +5,7 @@ generate: build-runner
 build-runner: bindings
     cd packages/conflux && dart run build_runner build
     cd packages/chronicler/chronicler && dart run build_runner build
+    cd packages/artificer/providers/artificer_core && dart run build_runner build
     dart format .
 
 # Regenerate native bindings produced by ffigen.

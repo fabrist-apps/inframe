@@ -6,6 +6,7 @@ import 'support/events_support.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerEvents identity links', () {
     test('should emit an explicit identity link without changing Context identity', () async {
       final exporter = TestExporter();
