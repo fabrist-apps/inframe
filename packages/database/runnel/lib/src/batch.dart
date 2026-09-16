@@ -1,75 +1,40 @@
 import 'dart:async';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/command_validation.dart';
+import 'package:runnel/src/connection/operation.dart';
+import 'package:runnel/src/errors.dart';
 
 /// A typed reference to one entry in a batch.
 final class BatchRef<T> {
   BatchRef._(this._owner, this._index);
-
   final Object _owner;
   final int _index;
-}
-
-/// The settled outcome of one batch entry.
-sealed class BatchOutcome<T> {
-  const BatchOutcome();
-}
-
-/// A successfully decoded batch entry.
-final class BatchSuccess<T> extends BatchOutcome<T> {
-  /// Creates a successful outcome.
-  const BatchSuccess(this.value);
-
-  /// The decoded command value.
-  final T value;
-}
-
-/// A failed batch entry.
-final class BatchFailure<T> extends BatchOutcome<T> {
-  /// Creates a failed outcome.
-  const BatchFailure(this.error, this.stackTrace);
-
-  /// The command-specific error.
-  final Object error;
-
-  /// The stack trace captured when the command failed.
-  final StackTrace stackTrace;
 }
 
 /// Immutable heterogeneous results from one batch execution.
 final class BatchResults {
   BatchResults._(this._owner, this._outcomes);
-
   final Object _owner;
-  final List<BatchOutcome<Object?>> _outcomes;
+  final List<Result<Object?, RunnelError>> _outcomes;
 
-  /// Returns an entry's decoded value or throws that entry's error.
-  T value<T>(BatchRef<T> reference) {
-    return switch (outcome(reference)) {
-      BatchSuccess<T>(:final value) => value,
-      BatchFailure<T>(:final error, :final stackTrace) => Error.throwWithStackTrace(
-        error,
-        stackTrace,
-      ),
-    };
-  }
-
-  /// Returns an entry's success or failure without throwing its individual error.
-  BatchOutcome<T> outcome<T>(BatchRef<T> reference) {
+  /// Retrieves the exact entry type, preserving nullable values and nested Options.
+  ///
+  /// References from another batch are programmer errors. Bind a Result through
+  /// `$.sync(results.outcome(reference))` to propagate its expected failure.
+  Result<T, RunnelError> outcome<T>(BatchRef<T> reference) {
     if (!identical(reference._owner, _owner)) {
       throw ArgumentError.value(reference, 'reference', 'belongs to another batch');
     }
-    return switch (_outcomes[reference._index]) {
-      BatchSuccess<Object?>(:final value) => BatchSuccess<T>(value as T),
-      BatchFailure<Object?>(:final error, :final stackTrace) => BatchFailure<T>(error, stackTrace),
-    };
+    return _outcomes[reference._index].map((value) => value as T);
   }
 }
 
 /// Builds a single-use typed pipeline or transaction without performing I/O.
 final class RedisBatch {
-  /// Creates a builder for Runnel's internal pipeline or transaction executor.
+  /// Internal composition boundary for Runnel's transport executors.
   RedisBatch.internal({
     required this._maxCommands,
     required this._maxBytes,
@@ -83,19 +48,21 @@ final class RedisBatch {
   final int _maxBytes;
   final int _reservedCommands;
   final Duration _defaultTimeout;
-  final Future<List<BatchOutcome<Object?>>> Function(
+  final Future<List<Result<Object?, RunnelError>>> Function(
     List<RedisCommand<Object?>> commands,
     Duration timeout,
+    RunnelOperation operation,
   )
   _executor;
   final Object _owner = Object();
   final List<RedisCommand<Object?>> _commands = [];
   int _encodedBytes;
-  bool _executed = false;
+  bool _frozen = false;
+  bool _claimed = false;
 
-  /// Adds one command and returns a reference for retrieving its typed result.
+  /// Adds a command until [exec] freezes this builder; invalid builder usage throws.
   BatchRef<T> add<T>(RedisCommand<T> command) {
-    if (_executed) throw StateError('This batch has already executed.');
+    if (_frozen) throw StateError('This batch is frozen.');
     validateOrdinaryCommand(command as RedisCommand<Object?>);
     final encodedBytes = command.encodedLength;
     if (_commands.length + _reservedCommands >= _maxCommands) {
@@ -110,29 +77,40 @@ final class RedisBatch {
     return reference;
   }
 
-  /// Executes all entries exactly once and preserves every individual outcome.
-  Future<BatchResults> exec({Duration? timeout}) async {
-    if (_executed) throw StateError('This batch has already executed.');
-    _executed = true;
-    if (_commands.isEmpty) throw StateError('A batch must contain at least one command.');
-    final deadline = timeout ?? _defaultTimeout;
-    if (deadline <= Duration.zero) {
-      throw ArgumentError.value(deadline, 'timeout', 'must be positive');
-    }
-    final outcomes = await _executor(List.unmodifiable(_commands), deadline);
-    return BatchResults._(_owner, List.unmodifiable(outcomes));
+  /// Freezes now and claims the batch only when the returned Effect starts.
+  ///
+  /// Once claimed, failure or interruption never makes a batch reusable.
+  Effect<BatchResults, RunnelError> exec({Duration? timeout}) {
+    _frozen = true;
+    final commands = List<RedisCommand<Object?>>.unmodifiable(_commands);
+    final duration = timeout ?? _defaultTimeout;
+    return RunnelOperation.run((operation) async {
+      if (_claimed) throw const RunnelUsageError('This batch has already executed.');
+      _claimed = true;
+      if (commands.isEmpty) {
+        throw const RunnelUsageError('A batch must contain at least one command.');
+      }
+      if (duration <= Duration.zero) {
+        throw const RunnelInputError('Batch timeout must be positive.');
+      }
+      final results = await _executor(commands, duration, operation);
+      return BatchResults._(_owner, List.unmodifiable(results));
+    });
   }
 }
 
-/// Settles every command Future without losing individual failures.
-Future<List<BatchOutcome<Object?>>> settleBatch(List<Future<Object?>> futures) async {
-  return Future.wait(
-    futures.map((future) async {
-      try {
-        return BatchSuccess<Object?>(await future);
-      } on Object catch (error, stackTrace) {
-        return BatchFailure<Object?>(error, stackTrace);
-      }
-    }),
-  );
-}
+/// Observes every accepted request, retaining expected errors as entry Results.
+///
+/// Unexpected decoder throws fail the outer operation after observing the other
+/// requests. This is an internal transport boundary, not a public Result type.
+Future<List<Result<Object?, RunnelError>>> settleBatch(List<Future<Object?>> futures) =>
+    Future.wait(
+      futures.map((future) async {
+        try {
+          return Success<Object?, RunnelError>(await future);
+        } on Object catch (error, stack) {
+          if (error is CommandDecoderDefect) rethrow;
+          return Failure<Object?, RunnelError>(RunnelOperation.expected(error, stack));
+        }
+      }),
+    );

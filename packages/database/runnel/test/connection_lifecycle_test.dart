@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:test/test.dart';
@@ -18,29 +21,33 @@ void main() {
       final client = await Runnel.connect(
         peer.endpoint,
         limits: const RunnelLimits(maxPendingCommands: 1, maxPendingBytes: 14),
-      );
-      addTearDown(client.close);
+      ).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final first = client.ping();
+      final first = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 1);
-      final rejected = client.ping();
+      final rejected = client.ping().runFuture();
 
       await expectLater(
         rejected,
         throwsA(
-          isA<RedisLimitException>()
-              .having((error) => error.limit, 'limit', 1)
-              .having(
-                (error) => error.deliveryStatus,
-                'delivery status',
-                RedisDeliveryStatus.notSent,
-              ),
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelLimitError>()
+                .having((error) => error.limit, 'limit', 1)
+                .having(
+                  (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+                  'delivery status',
+                  RedisDeliveryStatus.notSent,
+                ),
+          ),
         ),
       );
       peer.replyToNextHeld('+PONG\r\n');
       expect(await first, isTrue);
 
-      final afterRelease = client.ping();
+      final afterRelease = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 2);
       peer.replyToNextHeld('+PONG\r\n');
       expect(await afterRelease, isTrue);
@@ -53,21 +60,25 @@ void main() {
       final client = await Runnel.connect(
         peer.endpoint,
         limits: const RunnelLimits(maxPendingBytes: 14),
-      );
-      addTearDown(client.close);
+      ).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final exact = client.ping();
+      final exact = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 1);
       await expectLater(
-        client.ping(),
+        client.ping().runFuture(),
         throwsA(
-          isA<RedisLimitException>()
-              .having((error) => error.limit, 'limit', 14)
-              .having(
-                (error) => error.deliveryStatus,
-                'delivery status',
-                RedisDeliveryStatus.notSent,
-              ),
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelLimitError>()
+                .having((error) => error.limit, 'limit', 14)
+                .having(
+                  (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+                  'delivery status',
+                  RedisDeliveryStatus.notSent,
+                ),
+          ),
         ),
       );
       peer.replyToNextHeld('+PONG\r\n');
@@ -77,23 +88,29 @@ void main() {
     test('should report a locally expired encoded command as not sent', () async {
       final peer = await _LifecyclePeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
       final largeArgument = Uint8List(8 * 1024 * 1024);
 
       await expectLater(
-        client.execute(
-          RedisCommand<bool>([
-            RedisArgument.text('ECHO'),
-            RedisArgument.bytes(largeArgument),
-          ], (_) => true),
-          timeout: const Duration(microseconds: 1),
-        ),
+        client
+            .execute(
+              RedisCommand<bool>([
+                RedisArgument.text('ECHO'),
+                RedisArgument.bytes(largeArgument),
+              ], (_) => const Success(true)),
+              timeout: const Duration(microseconds: 1),
+            )
+            .runFuture(),
         throwsA(
-          isA<RedisTimeoutException>().having(
-            (error) => error.deliveryStatus,
-            'delivery status',
-            RedisDeliveryStatus.notSent,
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>().having(
+              (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+              'delivery status',
+              RedisDeliveryStatus.notSent,
+            ),
           ),
         ),
       );
@@ -104,32 +121,46 @@ void main() {
     test('should reject a reply whose synchronous decoder exceeds the deadline', () async {
       final peer = await _LifecyclePeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final delayedDecode = client.execute(
-        RedisCommand<bool>([RedisArgument.text('PING')], (_) {
-          final work = Stopwatch()..start();
-          while (work.elapsed < const Duration(milliseconds: 75)) {}
-          return true;
-        }),
-        timeout: const Duration(milliseconds: 50),
-      );
+      final delayedDecode = client
+          .execute(
+            RedisCommand<bool>([RedisArgument.text('PING')], (_) {
+              final work = Stopwatch()..start();
+              while (work.elapsed < const Duration(milliseconds: 75)) {}
+              return const Success(true);
+            }),
+            timeout: const Duration(milliseconds: 50),
+          )
+          .runFuture();
 
       await expectLater(
         delayedDecode,
         throwsA(
-          isA<RedisTimeoutException>().having(
-            (error) => error.deliveryStatus,
-            'delivery status',
-            RedisDeliveryStatus.outcomeUnknown,
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>().having(
+              (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+              'delivery status',
+              RedisDeliveryStatus.outcomeUnknown,
+            ),
           ),
         ),
       );
       await _eventually(() async {
         try {
-          return await client.ping();
-        } on RedisTransportException {
+          return await client.ping().runFuture();
+        } on EffectException<RunnelError> catch (error) {
+          expect(
+            error.cause,
+            isA<Expected<RunnelError>>().having(
+              (cause) => cause.error,
+              'error',
+              isA<RunnelTransportError>(),
+            ),
+          );
           return false;
         }
       });
@@ -140,26 +171,24 @@ void main() {
       final peer = await _LifecyclePeer.start()
         ..holdCommands = true;
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final timedOut = client.ping(timeout: const Duration(milliseconds: 20));
+      final timedOut = client.ping(timeout: const Duration(milliseconds: 20)).runFuture();
       await peer.waitForCommandCount('PING', 1);
 
       await expectLater(
         timedOut,
         throwsA(
-          isA<RedisTimeoutException>()
-              .having(
-                (error) => error.category,
-                'category',
-                RedisFailureCategory.timeout,
-              )
-              .having(
-                (error) => error.deliveryStatus,
-                'delivery status',
-                RedisDeliveryStatus.outcomeUnknown,
-              ),
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>().having(
+              (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+              'delivery status',
+              RedisDeliveryStatus.outcomeUnknown,
+            ),
+          ),
         ),
       );
       await peer.waitForConnections(2);
@@ -170,8 +199,16 @@ void main() {
         ..holdCommands = false;
       await _eventually(() async {
         try {
-          return await client.ping();
-        } on RedisTransportException {
+          return await client.ping().runFuture();
+        } on EffectException<RunnelError> catch (error) {
+          expect(
+            error.cause,
+            isA<Expected<RunnelError>>().having(
+              (cause) => cause.error,
+              'error',
+              isA<RunnelTransportError>(),
+            ),
+          );
           return false;
         }
       });
@@ -182,21 +219,34 @@ void main() {
       final peer = await _LifecyclePeer.start()
         ..holdCommands = true;
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final first = client.ping(timeout: const Duration(milliseconds: 20));
-      final sibling = client.ping(timeout: const Duration(seconds: 1));
+      final first = client.ping(timeout: const Duration(milliseconds: 20)).runFuture();
+      final sibling = client.ping(timeout: const Duration(seconds: 1)).runFuture();
       await peer.waitForCommandCount('PING', 2);
 
-      await expectLater(first, throwsA(isA<RedisTimeoutException>()));
+      await expectLater(
+        first,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>(),
+          ),
+        ),
+      );
       await expectLater(
         sibling,
         throwsA(
-          isA<RunnelException>().having(
-            (error) => error.deliveryStatus,
-            'delivery status',
-            RedisDeliveryStatus.outcomeUnknown,
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelError>().having(
+              (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+              'delivery status',
+              RedisDeliveryStatus.outcomeUnknown,
+            ),
           ),
         ),
       );
@@ -206,27 +256,25 @@ void main() {
       final peer = await _LifecyclePeer.start()
         ..holdCommands = true;
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final command = client.ping();
+      final command = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 1);
       peer.destroyLatest();
 
       await expectLater(
         command,
         throwsA(
-          isA<RedisTransportException>()
-              .having(
-                (error) => error.category,
-                'category',
-                RedisFailureCategory.transport,
-              )
-              .having(
-                (error) => error.deliveryStatus,
-                'delivery status',
-                RedisDeliveryStatus.outcomeUnknown,
-              ),
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTransportError>().having(
+              (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+              'delivery status',
+              RedisDeliveryStatus.outcomeUnknown,
+            ),
+          ),
         ),
       );
     });
@@ -234,8 +282,8 @@ void main() {
     test('should reject work while reconnecting and resume after a complete handshake', () async {
       final peer = await _LifecyclePeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
       peer
         ..holdHandshakes = true
@@ -244,12 +292,16 @@ void main() {
       await peer.waitForCommandCount('HELLO', 2);
 
       await expectLater(
-        client.ping(),
+        client.ping().runFuture(),
         throwsA(
-          isA<RedisTransportException>().having(
-            (error) => error.deliveryStatus,
-            'delivery status',
-            RedisDeliveryStatus.notSent,
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTransportError>().having(
+              (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+              'delivery status',
+              RedisDeliveryStatus.notSent,
+            ),
           ),
         ),
       );
@@ -258,8 +310,16 @@ void main() {
         ..holdHandshakes = false;
       await _eventually(() async {
         try {
-          return await client.ping();
-        } on RedisTransportException {
+          return await client.ping().runFuture();
+        } on EffectException<RunnelError> catch (error) {
+          expect(
+            error.cause,
+            isA<Expected<RunnelError>>().having(
+              (cause) => cause.error,
+              'error',
+              isA<RunnelTransportError>(),
+            ),
+          );
           return false;
         }
       });
@@ -273,17 +333,26 @@ void main() {
       final client = await Runnel.connect(
         peer.endpoint,
         shutdownTimeout: const Duration(seconds: 1),
-      );
+      ).runFuture();
 
-      final command = client.ping();
+      final command = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 1);
-      final closing = client.close();
-      await expectLater(client.ping(), throwsA(isA<RedisClosedException>()));
+      final closing = client.close().runFuture();
+      await expectLater(
+        client.ping().runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
       peer.replyToNextHeld('+PONG\r\n');
 
       expect(await command, isTrue);
       await closing;
-      await client.close();
+      await client.close().runFuture();
     });
 
     test('should destroy submitted work after the shutdown deadline', () async {
@@ -293,19 +362,23 @@ void main() {
       final client = await Runnel.connect(
         peer.endpoint,
         shutdownTimeout: const Duration(milliseconds: 20),
-      );
+      ).runFuture();
 
-      final command = client.ping();
+      final command = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 1);
-      await client.close();
+      await client.close().runFuture();
 
       await expectLater(
         command,
         throwsA(
-          isA<RedisClosedException>().having(
-            (error) => error.deliveryStatus,
-            'delivery status',
-            RedisDeliveryStatus.outcomeUnknown,
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>().having(
+              (error) => (error.deliveryStatus as Some<RedisDeliveryStatus>).value,
+              'delivery status',
+              RedisDeliveryStatus.outcomeUnknown,
+            ),
           ),
         ),
       );
@@ -319,29 +392,61 @@ void main() {
       final client = await Runnel.connect(
         peer.endpoint,
         shutdownTimeout: const Duration(milliseconds: 20),
-      );
-      final blocking = await client.blocking();
-      final pubSub = await client.openPubSub();
+      ).runFuture();
+      final blocking = await client.blocking().runFuture();
+      final pubSub = await client.openPubSub().runFuture();
 
-      final ordinary = client.ping();
-      final transaction = (client.transaction()..add(_pingCommand())).exec();
-      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30));
-      final subscription = pubSub.subscribe(['orders']);
-      final ordinaryFailure = expectLater(ordinary, throwsA(isA<RedisClosedException>()));
-      final transactionFailure = expectLater(transaction, throwsA(isA<RunnelException>()));
-      final blockingFailure = expectLater(blocked, throwsA(isA<RedisClosedException>()));
+      final ordinary = client.ping().runFuture();
+      final transaction = (client.transaction()..add(_pingCommand())).exec().runFuture();
+      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30)).runFuture();
+      final subscription = pubSub.subscribe(['orders']).runFuture();
+      final ordinaryFailure = expectLater(
+        ordinary,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
+      final transactionFailure = expectLater(
+        transaction,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'error',
+            isA<RunnelError>(),
+          ),
+        ),
+      );
+      final blockingFailure = expectLater(
+        blocked,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
       final subscriptionFailure = expectLater(
         subscription,
-        throwsA(isA<RedisClosedException>()),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
       );
       await peer.waitForCommandCount('PING', 2);
       await peer.waitForCommandCount('EXEC', 1);
       await peer.waitForCommandCount('BLPOP', 1);
       await peer.waitForCommandCount('SUBSCRIBE', 1);
 
-      final firstClose = client.close();
-      final secondClose = client.close();
-      expect(identical(firstClose, secondClose), isTrue);
+      final firstClose = client.close().runFuture();
+      final secondClose = client.close().runFuture();
       await firstClose.timeout(const Duration(seconds: 1));
       await Future.wait([
         ordinaryFailure,
@@ -364,23 +469,50 @@ void main() {
       final client = await Runnel.connect(
         peer.endpoint,
         shutdownTimeout: const Duration(milliseconds: 50),
-      );
-      final blocking = await client.blocking();
-      final pubSub = await client.openPubSub();
+      ).runFuture();
+      final blocking = await client.blocking().runFuture();
+      final pubSub = await client.openPubSub().runFuture();
       peer.holdCommands = true;
 
-      final malformed = client.ping();
+      final malformed = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 1);
       peer.replyToNextHeld('?\r\n');
-      await expectLater(malformed, throwsA(isA<RedisProtocolException>()));
-      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30));
-      final subscribed = pubSub.subscribe(['orders']);
-      final blockedFailure = expectLater(blocked, throwsA(isA<RedisClosedException>()));
-      final subscribeFailure = expectLater(subscribed, throwsA(isA<RedisClosedException>()));
+      await expectLater(
+        malformed,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelProtocolError>(),
+          ),
+        ),
+      );
+      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30)).runFuture();
+      final subscribed = pubSub.subscribe(['orders']).runFuture();
+      final blockedFailure = expectLater(
+        blocked,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
+      final subscribeFailure = expectLater(
+        subscribed,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
       await peer.waitForCommandCount('BLPOP', 1);
       await peer.waitForCommandCount('SUBSCRIBE', 1);
 
-      await client.close().timeout(const Duration(seconds: 1));
+      await client.close().runFuture().timeout(const Duration(seconds: 1));
       await Future.wait([blockedFailure, subscribeFailure]);
       expect(pubSub.state, PubSubState.closed);
     });
@@ -392,18 +524,18 @@ void main() {
         peer.endpoint,
         connectTimeout: const Duration(seconds: 30),
         shutdownTimeout: const Duration(milliseconds: 50),
-      );
+      ).runFuture();
       peer.holdHandshakes = true;
 
-      final openingBlocking = client.blocking();
-      final openingPubSub = client.openPubSub();
-      final openingTransaction = (client.transaction()..add(_pingCommand())).exec();
+      final openingBlocking = client.blocking().runFuture();
+      final openingPubSub = client.openPubSub().runFuture();
+      final openingTransaction = (client.transaction()..add(_pingCommand())).exec().runFuture();
       final blockingFailure = expectLater(openingBlocking, throwsA(anything));
       final pubSubFailure = expectLater(openingPubSub, throwsA(anything));
       final transactionFailure = expectLater(openingTransaction, throwsA(anything));
       await peer.waitForConnections(4);
 
-      await client.close().timeout(const Duration(seconds: 1));
+      await client.close().runFuture().timeout(const Duration(seconds: 1));
       await Future.wait([blockingFailure, pubSubFailure, transactionFailure]);
       await _eventually(() async => peer.activeConnections == 0);
     });
@@ -415,13 +547,13 @@ void main() {
         peer.endpoint,
         connectTimeout: const Duration(seconds: 30),
         shutdownTimeout: const Duration(milliseconds: 50),
-      );
+      ).runFuture();
       peer
         ..holdHandshakes = true
         ..destroyLatest();
       await peer.waitForConnections(2);
 
-      await client.close().timeout(const Duration(seconds: 1));
+      await client.close().runFuture().timeout(const Duration(seconds: 1));
       await _eventually(() async => peer.activeConnections == 0);
       final connectionsAfterClose = peer.connectionCount;
       await Future<void>.delayed(const Duration(milliseconds: 150));
@@ -432,22 +564,26 @@ void main() {
       final peer = await _LifecyclePeer.start()
         ..holdCommands = true;
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final failed = client.ping();
+      final failed = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 1);
       peer.replyToNextHeld('-READONLY replica\r\n');
       await expectLater(
         failed,
         throwsA(
-          isA<RedisServerException>()
-              .having((error) => error.code, 'code', 'READONLY')
-              .having((error) => error.message, 'message', 'replica'),
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelServerError>()
+                .having((error) => error.code, 'code', 'READONLY')
+                .having((error) => error.message, 'message', 'replica'),
+          ),
         ),
       );
 
-      final next = client.ping();
+      final next = client.ping().runFuture();
       await peer.waitForCommandCount('PING', 2);
       peer.replyToNextHeld('+PONG\r\n');
       expect(await next, isTrue);
@@ -458,12 +594,12 @@ void main() {
       final peer = await _LifecyclePeer.start()
         ..holdCommands = true;
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final ping = client.ping();
-      final get = client.get('key');
-      final set = client.set('key', 'value');
+      final ping = client.ping().runFuture();
+      final get = client.get('key').runFuture();
+      final set = client.set('key', 'value').runFuture();
       await peer.waitForCommandCount('SET', 1);
 
       expect(peer.ordinaryCommands, ['PING', 'GET', 'SET']);
@@ -472,15 +608,15 @@ void main() {
         ..replyToNextHeld('\$5\r\nvalue\r\n')
         ..replyToNextHeld('+OK\r\n');
       expect(await ping, isTrue);
-      expect(await get, 'value');
+      expect(await get, isA<Some<String>>().having((value) => value.value, 'value', 'value'));
       expect(await set, isTrue);
     });
 
     test('should stop reconnecting after a terminal handshake rejection', () async {
       final peer = await _LifecyclePeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.hostnameEndpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.hostnameEndpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
       peer
         ..rejectHandshakes = true
@@ -489,7 +625,16 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
       expect(peer.connectionCount, 2);
-      await expectLater(client.ping(), throwsA(isA<RedisClosedException>()));
+      await expectLater(
+        client.ping().runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
     });
   });
 
@@ -512,7 +657,7 @@ void main() {
 
 RedisCommand<bool> _pingCommand() => RedisCommand<bool>(
   [RedisArgument.text('PING')],
-  (reply) => respText(reply) == 'PONG',
+  (reply) => Success(respText(reply) == 'PONG'),
 );
 
 final class _LifecyclePeer {

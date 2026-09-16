@@ -3,9 +3,15 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
+import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
+import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
+import 'package:runnel/src/pubsub/session.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 import 'package:test/test.dart';
 
@@ -23,8 +29,11 @@ void main() {
         ascii.encode('updates'),
         [0, 255, 1],
       ]);
-      expect(command.decode(const RespInteger(3)), 3);
-      expect(() => command.decode(const RespSimpleString('3')), throwsFormatException);
+      expect(command.decode(const RespInteger(3)).getOrThrowWith((error) => error), 3);
+      expect(
+        () => command.decode(const RespSimpleString('3')).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
+      );
     });
   });
 
@@ -36,9 +45,9 @@ void main() {
           ..holdAcknowledgements = true;
         addTearDown(peer.close);
         final session = await _connect(peer);
-        addTearDown(session.close);
+        addTearDown(() => session.close().runFuture());
 
-        final subscribing = session.subscribe(['orders', 'notifications', 'orders']);
+        final subscribing = session.subscribe(['orders', 'notifications', 'orders']).runFuture();
         await peer.waitForCommandCount('SUBSCRIBE', 1);
         expect(peer.connectionCount, 1);
         expect(session.state, PubSubState.subscribing);
@@ -54,7 +63,7 @@ void main() {
         expect(session.acknowledgedChannels, {'orders', 'notifications'});
         expect(() => session.desiredChannels.add('mutated'), throwsUnsupportedError);
 
-        await session.subscribe(['orders']);
+        await session.subscribe(['orders']).runFuture();
         expect(peer.commandCount('SUBSCRIBE'), 1);
       },
     );
@@ -63,10 +72,10 @@ void main() {
       final peer = await _PubSubPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
-      await session.subscribe(['binary']);
+      addTearDown(() => session.close().runFuture());
+      await session.subscribe(['binary']).runFuture();
       final messages = <PubSubMessage>[];
-      final listener = session.events.listen((event) {
+      final listener = session.events.toStream().listen((event) {
         if (event is PubSubMessage) messages.add(event);
       });
       addTearDown(listener.cancel);
@@ -77,7 +86,7 @@ void main() {
       await _eventually(() => messages.isNotEmpty);
 
       expect(messages.single.payload, [0, 255, 1]);
-      expect(() => messages.single.text, throwsFormatException);
+      expect(messages.single.decodeText().isFailure, isTrue);
     });
 
     test('should let a later unsubscribe supersede an unfinished subscribe', () async {
@@ -85,15 +94,24 @@ void main() {
         ..holdAcknowledgements = true;
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
 
-      final subscribing = session.subscribe(['orders']);
+      final subscribing = session.subscribe(['orders']).runFuture();
       await peer.waitForCommandCount('SUBSCRIBE', 1);
-      final unsubscribing = session.unsubscribe(['orders']);
-      expect(session.desiredChannels, isEmpty);
+      final unsubscribing = session.unsubscribe(['orders']).runFuture();
+      await _eventually(() => session.desiredChannels.isEmpty);
       peer.acknowledgeNextChannel();
 
-      await expectLater(subscribing, throwsA(isA<SubscriptionSupersededException>()));
+      await expectLater(
+        subscribing,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelSubscriptionError>(),
+          ),
+        ),
+      );
       await peer.waitForCommandCount('UNSUBSCRIBE', 1);
       peer.acknowledgeNextChannel();
       await unsubscribing;
@@ -104,15 +122,15 @@ void main() {
       final peer = await _PubSubPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
-      await session.subscribe(['orders']);
+      addTearDown(() => session.close().runFuture());
+      await session.subscribe(['orders']).runFuture();
 
       peer.publish('orders', [1]);
       await Future<void>.delayed(Duration.zero);
-      await session.unsubscribe(['orders']);
+      await session.unsubscribe(['orders']).runFuture();
       peer.publish('orders', [2]);
       final events = <PubSubEvent>[];
-      final listener = session.events.listen(events.add);
+      final listener = session.events.toStream().listen(events.add, onError: _expectFlowFailure);
       addTearDown(listener.cancel);
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -128,9 +146,9 @@ void main() {
         limits: const PubSubLimits(maxChannels: 513),
         connectionLimits: const RunnelLimits(maxPendingCommands: 2),
       );
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
 
-      await session.subscribe(channels);
+      await session.subscribe(channels).runFuture();
 
       final commands = peer.commands.where((command) => command.name == 'SUBSCRIBE').toList();
       expect(commands, hasLength(2));
@@ -138,8 +156,14 @@ void main() {
       expect(commands[1].arguments, hasLength(1));
       expect(session.desiredChannels, hasLength(513));
       await expectLater(
-        session.subscribe(['excess']),
-        throwsA(isA<RedisLimitException>().having((error) => error.limit, 'limit', 513)),
+        session.subscribe(['excess']).runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelLimitError>().having((error) => error.limit, 'limit', 513),
+          ),
+        ),
       );
     });
 
@@ -151,11 +175,20 @@ void main() {
         peer,
         connectionLimits: const RunnelLimits(maxPendingCommands: 1),
       );
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
 
-      final first = session.subscribe(['one']);
+      final first = session.subscribe(['one']).runFuture();
       await peer.waitForCommandCount('SUBSCRIBE', 1);
-      await expectLater(session.subscribe(['two']), throwsA(isA<RedisLimitException>()));
+      await expectLater(
+        session.subscribe(['two']).runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelLimitError>(),
+          ),
+        ),
+      );
       expect(session.desiredChannels, {'one'});
       peer.acknowledgeNextChannel();
       await first;
@@ -170,13 +203,13 @@ void main() {
         limits: const PubSubLimits(maxBufferedEvents: 1),
         onClosed: (_) => released = true,
       );
-      await session.subscribe(['orders']);
+      await session.subscribe(['orders']).runFuture();
 
       peer
         ..publish('orders', [1])
         ..publish('orders', [2]);
       await _eventually(() => session.state == PubSubState.closed);
-      final events = await session.events.toList();
+      final events = await session.events.take(1).runCollect().runFuture();
 
       expect(events, [
         isA<PubSubInterrupted>()
@@ -194,16 +227,20 @@ void main() {
         peer,
         limits: const PubSubLimits(maxBufferedBytes: 3),
       );
-      await session.subscribe(['c']);
+      await session.subscribe(['c']).runFuture();
       final events = <PubSubEvent>[];
       final done = Completer<void>();
-      final listener = session.events.listen(events.add, onDone: done.complete)..pause();
+      final listener = session.events.toStream().listen(
+        events.add,
+        onError: _expectFlowFailure,
+        onDone: done.complete,
+      )..pause();
 
       peer
         ..publish('c', [1, 2])
         ..publish('c', [3]);
       await _eventually(() => session.state == PubSubState.closed);
-      await session.close().timeout(const Duration(seconds: 1));
+      await session.close().runFuture().timeout(const Duration(seconds: 1));
       expect(events, isEmpty);
 
       listener.resume();
@@ -219,10 +256,14 @@ void main() {
         peer,
         limits: const PubSubLimits(maxBufferedBytes: 3),
       );
-      await session.subscribe(['c']);
+      await session.subscribe(['c']).runFuture();
       final events = <PubSubEvent>[];
       final done = Completer<void>();
-      final listener = session.events.listen(events.add, onDone: done.complete);
+      final listener = session.events.toStream().listen(
+        events.add,
+        onError: _expectFlowFailure,
+        onDone: done.complete,
+      );
 
       peer.publish('c', [1, 2, 3]);
       await done.future.timeout(const Duration(seconds: 1));
@@ -231,7 +272,7 @@ void main() {
         isA<PubSubInterrupted>()
             .having((event) => event.cause, 'cause', PubSubInterruptionCause.bufferOverflow)
             .having(
-              (event) => (event.error! as RedisLimitException).limit,
+              (event) => ((event.error as Some<RunnelError>).value as RunnelLimitError).limit,
               'limit',
               3,
             ),
@@ -250,13 +291,19 @@ void main() {
           if (!released.isCompleted) released.complete();
         },
       );
-      final listener = session.events.listen((_) {});
+      final listener = session.events.toStream().listen((_) {});
 
-      expect(() => session.events.listen((_) {}), throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      final rejected = await session.events.runCollect().runFutureExit();
+      expect(
+        (rejected as Failed<List<PubSubEvent>, RunnelError>).cause.expectedErrors.single,
+        isA<RunnelUsageError>(),
+      );
+      expect(session.state, PubSubState.ready);
       await listener.cancel().timeout(const Duration(seconds: 1));
       await released.future;
       expect(session.state, PubSubState.closed);
-      await session.close();
+      await session.close().runFuture();
     });
   });
 }
@@ -266,14 +313,14 @@ Future<PubSubSession> _connect(
   PubSubLimits limits = const PubSubLimits(),
   RunnelLimits connectionLimits = const RunnelLimits(),
   void Function(PubSubSession)? onClosed,
-}) => PubSubSession.connect(
-  PubSubConnectionConfiguration(
+}) => PubSubSessionOwnership.connect(
+  ConnectionConfiguration(
     host: InternetAddress.loopbackIPv4.address,
     port: peer.port,
     tls: false,
-    connectTimeout: const Duration(seconds: 1),
-    connectionLimits: connectionLimits,
   ),
+  connectTimeout: const Duration(seconds: 1),
+  connectionLimits: connectionLimits,
   limits: limits,
   controlTimeout: const Duration(seconds: 1),
   onClosed: onClosed,
@@ -378,4 +425,9 @@ final class _PendingAcknowledgement {
   final Socket socket;
   final String kind;
   final String channel;
+}
+
+void _expectFlowFailure(Object error) {
+  expect(error, isA<FlowException<RunnelError>>());
+  expect((error as FlowException<RunnelError>).cause.expectedErrors.single, isA<RunnelError>());
 }

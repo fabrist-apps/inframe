@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:runnel/src/connection/connection_attempt.dart';
+import 'package:runnel/src/deadline.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -16,7 +17,7 @@ void main() {
         port: peer.port,
         tls: true,
         securityContext: SecurityContext(),
-        timeout: const Duration(milliseconds: 50),
+        deadline: Deadline(const Duration(milliseconds: 50)),
         attempt: attempt,
       );
       await peer.connected;
@@ -37,7 +38,7 @@ void main() {
         port: peer.port,
         tls: true,
         securityContext: SecurityContext(),
-        timeout: const Duration(seconds: 5),
+        deadline: Deadline(const Duration(seconds: 5)),
         attempt: attempt,
       );
       final openingFailure = expectLater(

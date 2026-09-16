@@ -1,8 +1,13 @@
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
+import 'package:conflux/option.dart';
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/commands/execution.dart';
 import 'package:runnel/src/commands/reply_decoding.dart';
+import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// Controls whether Redis applies a SET operation.
@@ -73,22 +78,22 @@ final class ScanPage {
 }
 
 /// Builds a typed GET command for strict UTF-8 text.
-RedisCommand<String?> getCommand(String key) => Get(key);
+RedisCommand<Option<String>> getCommand(String key) => Get(key);
 
 /// A typed GET command for strict UTF-8 text.
-final class Get extends RedisCommand<String?> {
+final class Get extends RedisCommand<Option<String>> {
   /// Creates a GET command for [key].
   Get(String key)
     : super(
         [RedisArgument.text('GET'), RedisArgument.text(key)],
-        (reply) => reply.nullableText,
+        builtInDecoder((reply) => reply is RespNull ? const None() : Some(respText(reply))),
       );
 }
 
 /// Builds a typed binary GET command.
-RedisCommand<Uint8List?> getBytesCommand(String key) => RedisCommand<Uint8List?>(
+RedisCommand<Option<Uint8List>> getBytesCommand(String key) => builtInCommand<Option<Uint8List>>(
   [RedisArgument.text('GET'), RedisArgument.text(key)],
-  _decodeNullableBytes,
+  _decodeBytes,
 );
 
 /// Builds a typed text SET command.
@@ -118,11 +123,11 @@ RedisCommand<bool> setBytesCommand(
 );
 
 /// Builds an MGET command that preserves key order and duplicates.
-RedisCommand<List<String?>> mgetCommand(Iterable<String> keys) {
+RedisCommand<List<Option<String>>> mgetCommand(Iterable<String> keys) {
   final snapshot = _nonEmpty(keys, 'keys');
-  return RedisCommand<List<String?>>(
+  return builtInCommand<List<Option<String>>>(
     [RedisArgument.text('MGET'), ...snapshot.map(RedisArgument.text)],
-    (reply) => reply.nullableTextList,
+    (reply) => reply.optionalTextList,
   );
 }
 
@@ -130,7 +135,7 @@ RedisCommand<List<String?>> mgetCommand(Iterable<String> keys) {
 RedisCommand<void> msetCommand(Map<String, String> values) {
   if (values.isEmpty) throw ArgumentError.value(values, 'values', 'must not be empty');
   final entries = List<MapEntry<String, String>>.of(values.entries);
-  return RedisCommand<void>([
+  return builtInCommand<void>([
     RedisArgument.text('MSET'),
     for (final entry in entries) ...[
       RedisArgument.text(entry.key),
@@ -146,7 +151,10 @@ RedisCommand<int> incrCommand(String key) => Incr(key);
 final class Incr extends RedisCommand<int> {
   /// Creates an INCR command for [key].
   Incr(String key)
-    : super([RedisArgument.text('INCR'), RedisArgument.text(key)], (reply) => reply.integer);
+    : super([
+        RedisArgument.text('INCR'),
+        RedisArgument.text(key),
+      ], builtInDecoder((reply) => reply.integer));
 }
 
 /// Builds an INCRBY command.
@@ -182,7 +190,7 @@ RedisCommand<bool> expireCommand(String key, Duration duration) {
 RedisCommand<int> pttlCommand(String key) => _integerCommand('PTTL', [key]);
 
 /// Builds a TYPE command.
-RedisCommand<String> typeCommand(String key) => RedisCommand<String>(
+RedisCommand<String> typeCommand(String key) => builtInCommand<String>(
   [RedisArgument.text('TYPE'), RedisArgument.text(key)],
   respText,
 );
@@ -196,7 +204,7 @@ RedisCommand<ScanPage> scanCommand(
   if (count != null && count <= 0) {
     throw ArgumentError.value(count, 'count', 'must be positive');
   }
-  return RedisCommand<ScanPage>([
+  return builtInCommand<ScanPage>([
     RedisArgument.text('SCAN'),
     RedisArgument.text(cursor),
     if (match != null) ...[RedisArgument.text('MATCH'), RedisArgument.text(match)],
@@ -206,105 +214,152 @@ RedisCommand<ScanPage> scanCommand(
 
 /// Scalar and key conveniences for [Runnel].
 extension RunnelScalarCommands on Runnel {
-  /// Reads strict UTF-8 text, returning null when [key] is missing.
-  Future<String?> get(String key, {Duration? timeout}) =>
-      execute(getCommand(key), timeout: timeout);
+  /// Reads strict UTF-8 text, returning None when [key] is missing.
+  Effect<Option<String>, RunnelError> get(String key, {Duration? timeout}) =>
+      deferCommand(() => getCommand(key), timeout: timeout);
 
-  /// Reads binary data, returning null when [key] is missing.
-  Future<Uint8List?> getBytes(String key, {Duration? timeout}) =>
-      execute(getBytesCommand(key), timeout: timeout);
+  /// Reads binary data, returning None when [key] is missing.
+  Effect<Option<Uint8List>, RunnelError> getBytes(String key, {Duration? timeout}) =>
+      deferCommand(() => getBytesCommand(key), timeout: timeout);
 
   /// Stores text and reports whether Redis applied the write.
-  Future<bool> set(
+  Effect<bool, RunnelError> set(
     String key,
     String value, {
     SetCondition condition = SetCondition.always,
     Expiry? expiry,
     Duration? timeout,
-  }) => execute(
-    setCommand(key, value, condition: condition, expiry: expiry),
+  }) => deferCommand(
+    () => setCommand(key, value, condition: condition, expiry: expiry),
     timeout: timeout,
   );
 
   /// Stores binary data and reports whether Redis applied the write.
-  Future<bool> setBytes(
+  Effect<bool, RunnelError> setBytes(
     String key,
     Uint8List value, {
     SetCondition condition = SetCondition.always,
     Expiry? expiry,
     Duration? timeout,
-  }) => execute(
-    setBytesCommand(key, value, condition: condition, expiry: expiry),
-    timeout: timeout,
-  );
+  }) {
+    final snapshot = Uint8List.fromList(value);
+    return deferCommand(
+      () => setBytesCommand(key, snapshot, condition: condition, expiry: expiry),
+      timeout: timeout,
+    );
+  }
 
   /// Reads multiple strict UTF-8 values in key order.
-  Future<List<String?>> mget(Iterable<String> keys, {Duration? timeout}) =>
-      execute(mgetCommand(keys), timeout: timeout);
+  Effect<List<Option<String>>, RunnelError> mget(Iterable<String> keys, {Duration? timeout}) {
+    final snapshot = List<String>.of(keys);
+    return deferCommand(() => mgetCommand(snapshot), timeout: timeout);
+  }
 
   /// Stores multiple text values atomically.
-  Future<void> mset(Map<String, String> values, {Duration? timeout}) =>
-      execute(msetCommand(values), timeout: timeout);
+  Effect<void, RunnelError> mset(Map<String, String> values, {Duration? timeout}) {
+    final snapshot = Map<String, String>.of(values);
+    return deferCommand(() => msetCommand(snapshot), timeout: timeout);
+  }
 
   /// Increments the integer value at [key] by one.
-  Future<int> incr(String key, {Duration? timeout}) => execute(incrCommand(key), timeout: timeout);
+  Effect<int, RunnelError> incr(String key, {Duration? timeout}) =>
+      deferCommand(() => incrCommand(key), timeout: timeout);
 
   /// Increments the integer value at [key] by [increment].
-  Future<int> incrby(String key, int increment, {Duration? timeout}) =>
-      execute(incrbyCommand(key, increment), timeout: timeout);
+  Effect<int, RunnelError> incrby(String key, int increment, {Duration? timeout}) =>
+      deferCommand(() => incrbyCommand(key, increment), timeout: timeout);
 
   /// Decrements the integer value at [key] by one.
-  Future<int> decr(String key, {Duration? timeout}) => execute(decrCommand(key), timeout: timeout);
+  Effect<int, RunnelError> decr(String key, {Duration? timeout}) =>
+      deferCommand(() => decrCommand(key), timeout: timeout);
 
   /// Decrements the integer value at [key] by [decrement].
-  Future<int> decrby(String key, int decrement, {Duration? timeout}) =>
-      execute(decrbyCommand(key, decrement), timeout: timeout);
+  Effect<int, RunnelError> decrby(String key, int decrement, {Duration? timeout}) =>
+      deferCommand(() => decrbyCommand(key, decrement), timeout: timeout);
 
   /// Deletes [keys] synchronously and returns the number removed.
-  Future<int> del(Iterable<String> keys, {Duration? timeout}) =>
-      execute(delCommand(keys), timeout: timeout);
+  Effect<int, RunnelError> del(Iterable<String> keys, {Duration? timeout}) {
+    final snapshot = List<String>.of(keys);
+    return deferCommand(() => delCommand(snapshot), timeout: timeout);
+  }
 
   /// Schedules [keys] for asynchronous deletion and returns the number removed.
-  Future<int> unlink(Iterable<String> keys, {Duration? timeout}) =>
-      execute(unlinkCommand(keys), timeout: timeout);
+  Effect<int, RunnelError> unlink(Iterable<String> keys, {Duration? timeout}) {
+    final snapshot = List<String>.of(keys);
+    return deferCommand(() => unlinkCommand(snapshot), timeout: timeout);
+  }
 
   /// Counts how many of [keys] exist, preserving duplicate-key Redis semantics.
-  Future<int> exists(Iterable<String> keys, {Duration? timeout}) =>
-      execute(existsCommand(keys), timeout: timeout);
+  Effect<int, RunnelError> exists(Iterable<String> keys, {Duration? timeout}) {
+    final snapshot = List<String>.of(keys);
+    return deferCommand(() => existsCommand(snapshot), timeout: timeout);
+  }
 
   /// Removes the expiration from [key].
-  Future<bool> persist(String key, {Duration? timeout}) =>
-      execute(persistCommand(key), timeout: timeout);
+  Effect<bool, RunnelError> persist(String key, {Duration? timeout}) =>
+      deferCommand(() => persistCommand(key), timeout: timeout);
 
   /// Applies a whole-millisecond expiration to [key].
   ///
   /// Zero and negative durations retain Redis's immediate-deletion behavior.
-  Future<bool> expire(String key, Duration duration, {Duration? timeout}) =>
-      execute(expireCommand(key, duration), timeout: timeout);
+  Effect<bool, RunnelError> expire(String key, Duration duration, {Duration? timeout}) =>
+      deferCommand(() => expireCommand(key, duration), timeout: timeout);
 
   /// Returns the remaining expiration in milliseconds, including `-1` and `-2`.
-  Future<int> pttl(String key, {Duration? timeout}) => execute(pttlCommand(key), timeout: timeout);
+  Effect<int, RunnelError> pttl(String key, {Duration? timeout}) =>
+      deferCommand(() => pttlCommand(key), timeout: timeout);
 
   /// Returns Redis's type name for [key], including `none` when it is missing.
-  Future<String> type(String key, {Duration? timeout}) =>
-      execute(typeCommand(key), timeout: timeout);
+  Effect<String, RunnelError> type(String key, {Duration? timeout}) =>
+      deferCommand(() => typeCommand(key), timeout: timeout);
 
-  /// Iterates SCAN pages as requested by the listener.
+  /// Iterates SCAN pages on demand in an independent scope per consumption.
   ///
-  /// SCAN is not a snapshot and can emit duplicate keys. Each page receives its own [timeout].
-  /// Cancelling stops new page requests but cannot retract a page already sent to Redis.
-  Stream<String> scan({String? match, int? count, Duration? timeout}) async* {
-    var cursor = '0';
-    do {
-      final page = await execute(
-        scanCommand(cursor, match: match, count: count),
-        timeout: timeout,
+  /// SCAN is not a snapshot and can emit duplicate keys. Each page receives its
+  /// own [timeout]. Early termination stops later pages; cancellation of an
+  /// outstanding page follows ordinary-command cancellation and FIFO safety.
+  Flow<String, RunnelError> scan({String? match, int? count, Duration? timeout}) =>
+      Flow.fromPull<String, RunnelError, _ScanSource>(
+        Effect.sync(
+          (_) => _ScanSource(
+            (cursor) => deferCommand(
+              () => scanCommand(cursor, match: match, count: count),
+              timeout: timeout,
+            ),
+          ),
+        ),
+        next: (source, _) => source.next(),
+        release: (source, _) => Effect.sync((_) => source.close()),
       );
-      cursor = page.cursor;
-      for (final key in page.keys) {
-        yield key;
-      }
-    } while (cursor != '0');
+}
+
+/// One consumption owns only its current page and the next Redis cursor.
+final class _ScanSource {
+  _ScanSource(this._readPage);
+
+  final Effect<ScanPage, RunnelError> Function(String cursor) _readPage;
+  var _cursor = '0';
+  var _keys = <String>[];
+  var _index = 0;
+  var _started = false;
+
+  Effect<Option<String>, RunnelError> next() => Effect.build(($) async {
+    while (_index == _keys.length) {
+      if (_started && _cursor == '0') return const None();
+      final page = await $(_readPage(_cursor));
+      _started = true;
+      _cursor = page.cursor;
+      _keys = page.keys;
+      _index = 0;
+    }
+    return Some(_keys[_index++]);
+  });
+
+  void close() {
+    _keys = const [];
+    _index = 0;
+    _cursor = '0';
+    _started = true;
   }
 }
 
@@ -313,7 +368,7 @@ RedisCommand<bool> _setCommand(
   RedisArgument value, {
   required SetCondition condition,
   required Expiry? expiry,
-}) => RedisCommand<bool>([
+}) => builtInCommand<bool>([
   RedisArgument.text('SET'),
   RedisArgument.text(key),
   value,
@@ -340,13 +395,13 @@ RedisCommand<int> _keysCommand(String name, Iterable<String> keys) {
   return _integerCommand(name, snapshot);
 }
 
-RedisCommand<int> _integerCommand(String name, Iterable<String> arguments) => RedisCommand<int>([
+RedisCommand<int> _integerCommand(String name, Iterable<String> arguments) => builtInCommand<int>([
   RedisArgument.text(name),
   ...arguments.map(RedisArgument.text),
 ], (reply) => reply.integer);
 
 RedisCommand<bool> _predicateCommand(String name, Iterable<String> arguments) =>
-    RedisCommand<bool>([
+    builtInCommand<bool>([
       RedisArgument.text(name),
       ...arguments.map(RedisArgument.text),
     ], _decodePredicate);
@@ -357,9 +412,9 @@ List<String> _nonEmpty(Iterable<String> values, String name) {
   return snapshot;
 }
 
-Uint8List? _decodeNullableBytes(RespValue reply) => switch (reply) {
-  RespNull() => null,
-  RespBlobString(:final value) => Uint8List.fromList(value),
+Option<Uint8List> _decodeBytes(RespValue reply) => switch (reply) {
+  RespNull() => const None(),
+  RespBlobString(:final value) => Some(Uint8List.fromList(value)),
   _ => throw FormatException('Expected a binary or null reply, received ${reply.runtimeType}.'),
 };
 

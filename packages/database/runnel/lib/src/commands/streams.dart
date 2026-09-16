@@ -1,9 +1,12 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/commands/execution.dart';
 import 'package:runnel/src/commands/reply_decoding.dart';
+import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 final BigInt _maximumStreamIdComponent = (BigInt.one << 64) - BigInt.one;
@@ -183,7 +186,7 @@ RedisCommand<StreamId> xaddCommand(
     throw ArgumentError.value(approximate, 'approximate', 'requires maxLength');
   }
 
-  return RedisCommand<StreamId>([
+  return builtInCommand<StreamId>([
     RedisArgument.text('XADD'),
     RedisArgument.text(key),
     if (maxLength != null) ...[
@@ -228,14 +231,14 @@ RedisCommand<List<StreamEntry>> xrevrangeCommand(
 );
 
 /// Builds an XTRIM command for an explicit trimming strategy.
-RedisCommand<int> xtrimCommand(String key, StreamTrim trim) => RedisCommand<int>([
+RedisCommand<int> xtrimCommand(String key, StreamTrim trim) => builtInCommand<int>([
   RedisArgument.text('XTRIM'),
   RedisArgument.text(key),
   ..._trimArguments(trim),
 ], (reply) => reply.integer);
 
 /// Builds an XLEN command.
-RedisCommand<int> xlenCommand(String key) => RedisCommand<int>([
+RedisCommand<int> xlenCommand(String key) => builtInCommand<int>([
   RedisArgument.text('XLEN'),
   RedisArgument.text(key),
 ], (reply) => reply.integer);
@@ -247,7 +250,7 @@ RedisCommand<List<StreamRead>> xreadCommand(Map<String, StreamId> after, {int? c
   }
   _checkCount(count);
   final cursors = after.entries.toList(growable: false);
-  return RedisCommand<List<StreamRead>>([
+  return builtInCommand<List<StreamRead>>([
     RedisArgument.text('XREAD'),
     if (count != null) ...[
       RedisArgument.text('COUNT'),
@@ -262,61 +265,68 @@ RedisCommand<List<StreamRead>> xreadCommand(Map<String, StreamId> after, {int? c
 /// Typed ordinary Redis Stream commands.
 extension RunnelStreamCommands on Runnel {
   /// Appends [fields] and returns the generated or supplied entry ID.
-  Future<StreamId> xadd(
+  Effect<StreamId, RunnelError> xadd(
     String key,
     List<StreamField> fields, {
     StreamId? id,
     int? maxLength,
     bool approximate = false,
     Duration? timeout,
-  }) => execute(
-    xaddCommand(
-      key,
-      fields,
-      id: id,
-      maxLength: maxLength,
-      approximate: approximate,
-    ),
-    timeout: timeout,
-  );
+  }) {
+    final snapshot = List<StreamField>.of(fields);
+    return deferCommand(
+      () => xaddCommand(
+        key,
+        snapshot,
+        id: id,
+        maxLength: maxLength,
+        approximate: approximate,
+      ),
+      timeout: timeout,
+    );
+  }
 
   /// Reads entries in ascending ID order between inclusive bounds.
-  Future<List<StreamEntry>> xrange(
+  Effect<List<StreamEntry>, RunnelError> xrange(
     String key, {
     StreamBound start = StreamBound.minimum,
     StreamBound end = StreamBound.maximum,
     int? count,
     Duration? timeout,
-  }) => execute(
-    xrangeCommand(key, start: start, end: end, count: count),
+  }) => deferCommand(
+    () => xrangeCommand(key, start: start, end: end, count: count),
     timeout: timeout,
   );
 
   /// Reads entries in descending ID order between inclusive bounds.
-  Future<List<StreamEntry>> xrevrange(
+  Effect<List<StreamEntry>, RunnelError> xrevrange(
     String key, {
     StreamBound start = StreamBound.minimum,
     StreamBound end = StreamBound.maximum,
     int? count,
     Duration? timeout,
-  }) => execute(
-    xrevrangeCommand(key, start: start, end: end, count: count),
+  }) => deferCommand(
+    () => xrevrangeCommand(key, start: start, end: end, count: count),
     timeout: timeout,
   );
 
   /// Trims a Stream and returns the number of entries removed.
-  Future<int> xtrim(String key, StreamTrim trim, {Duration? timeout}) =>
-      execute(xtrimCommand(key, trim), timeout: timeout);
+  Effect<int, RunnelError> xtrim(String key, StreamTrim trim, {Duration? timeout}) =>
+      deferCommand(() => xtrimCommand(key, trim), timeout: timeout);
 
   /// Returns the number of entries in a Stream.
-  Future<int> xlen(String key, {Duration? timeout}) => execute(xlenCommand(key), timeout: timeout);
+  Effect<int, RunnelError> xlen(String key, {Duration? timeout}) =>
+      deferCommand(() => xlenCommand(key), timeout: timeout);
 
   /// Reads entries newer than each concrete cursor without blocking.
-  Future<List<StreamRead>> xread(
+  Effect<List<StreamRead>, RunnelError> xread(
     Map<String, StreamId> after, {
     int? count,
     Duration? timeout,
-  }) => execute(xreadCommand(after, count: count), timeout: timeout);
+  }) {
+    final snapshot = Map<String, StreamId>.of(after);
+    return deferCommand(() => xreadCommand(snapshot, count: count), timeout: timeout);
+  }
 }
 
 RedisCommand<List<StreamEntry>> _rangeCommand({
@@ -327,7 +337,7 @@ RedisCommand<List<StreamEntry>> _rangeCommand({
   required int? count,
 }) {
   _checkCount(count);
-  return RedisCommand<List<StreamEntry>>([
+  return builtInCommand<List<StreamEntry>>([
     RedisArgument.text(command),
     RedisArgument.text(key),
     RedisArgument.text(_boundArgument(firstWireBound)),

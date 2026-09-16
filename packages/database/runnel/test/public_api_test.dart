@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/option.dart';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
@@ -14,19 +16,25 @@ void main() {
       final peer = await _RespPeer.start();
       addTearDown(peer.close);
 
-      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}');
-      addTearDown(client.close);
+      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}').runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      expect(await client.ping(), isTrue);
-      expect(await client.set('name', 'Bhaswanth'), isTrue);
-      expect(await client.get('name'), 'Bhaswanth');
+      expect(await client.ping().runFuture(), isTrue);
+      expect(await client.set('name', 'Bhaswanth').runFuture(), isTrue);
+      expect(
+        await client.get('name').runFuture(),
+        isA<Some<String>>().having((value) => value.value, 'value', 'Bhaswanth'),
+      );
 
       final source = Uint8List.fromList([0, 255, 1]);
-      final write = client.setBytes('blob', source);
+      final write = client.setBytes('blob', source).runFuture();
       source[1] = 7;
       expect(await write, isTrue);
-      expect(await client.getBytes('blob'), [0, 255, 1]);
-      expect(await client.get('missing'), isNull);
+      expect(
+        await client.getBytes('blob').runFuture(),
+        isA<Some<Uint8List>>().having((value) => value.value, 'value', [0, 255, 1]),
+      );
+      expect(await client.get('missing').runFuture(), isA<None>());
 
       expect(peer.commands, [
         ['HELLO', '3'],
@@ -48,19 +56,55 @@ void main() {
         'redis://localhost?query=yes',
         'redis://localhost#fragment',
       ]) {
-        await expectLater(Runnel.connect(endpoint), throwsArgumentError);
+        await expectLater(
+          Runnel.connect(endpoint).runFuture(),
+          throwsA(
+            isA<EffectException<RunnelError>>().having(
+              (error) => error.cause,
+              'cause',
+              isA<Expected<RunnelError>>().having(
+                (cause) => cause.error,
+                'error',
+                isA<RunnelInputError>(),
+              ),
+            ),
+          ),
+        );
       }
 
       await expectLater(
         Runnel.connect(
           'redis://localhost:6379',
           securityContext: SecurityContext(),
+        ).runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause,
+            'cause',
+            isA<Expected<RunnelError>>().having(
+              (cause) => cause.error,
+              'error',
+              isA<RunnelInputError>(),
+            ),
+          ),
         ),
-        throwsArgumentError,
       );
       await expectLater(
-        Runnel.connect('redis://localhost:6379', limits: const RunnelLimits(maxFrameBytes: 0)),
-        throwsArgumentError,
+        Runnel.connect(
+          'redis://localhost:6379',
+          limits: const RunnelLimits(maxFrameBytes: 0),
+        ).runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause,
+            'cause',
+            isA<Expected<RunnelError>>().having(
+              (cause) => cause.error,
+              'error',
+              isA<RunnelInputError>(),
+            ),
+          ),
+        ),
       );
     });
 
@@ -71,7 +115,7 @@ void main() {
 
       Object? failure;
       try {
-        await Runnel.connect('redis://secret-user:secret-password@127.0.0.1:$port');
+        await Runnel.connect('redis://secret-user:secret-password@127.0.0.1:$port').runFuture();
       } on Object catch (error) {
         failure = error;
       }
@@ -87,9 +131,9 @@ void main() {
 
       final connecting = Runnel.connect(
         'redis://user:p%40ss@127.0.0.1:${peer.port}/2',
-      );
+      ).runFuture();
       final client = await connecting;
-      addTearDown(client.close);
+      addTearDown(() => client.close().runFuture());
 
       expect(peer.commands.take(2), [
         ['HELLO', '3', 'AUTH', 'user', 'p@ss'],
@@ -103,8 +147,14 @@ void main() {
       addTearDown(peer.close);
 
       await expectLater(
-        Runnel.connect('redis://:wrong@127.0.0.1:${peer.port}'),
-        throwsA(isA<RedisServerException>()),
+        Runnel.connect('redis://:wrong@127.0.0.1:${peer.port}').runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelServerError>(),
+          ),
+        ),
       );
       await peer.socketClosed.future.timeout(const Duration(seconds: 1));
     });
@@ -112,15 +162,32 @@ void main() {
     test('should keep reply alignment after a command decoder fails', () async {
       final peer = await _RespPeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}');
-      addTearDown(client.close);
+      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}').runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final invalid = client.execute(
-        RedisCommand<int>([RedisArgument.text('PING')], (_) => throw const FormatException('bad')),
+      final invalid = client
+          .execute(
+            RedisCommand<int>([
+              RedisArgument.text('PING'),
+            ], (_) => throw const FormatException('bad')),
+          )
+          .runFuture();
+      final valid = client.ping().runFuture();
+
+      await expectLater(
+        invalid,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause,
+            'cause',
+            isA<Defect<RunnelError>>().having(
+              (cause) => cause.error,
+              'error',
+              isA<FormatException>(),
+            ),
+          ),
+        ),
       );
-      final valid = client.ping();
-
-      await expectLater(invalid, throwsFormatException);
       expect(await valid, isTrue);
     });
 
@@ -128,36 +195,72 @@ void main() {
       final peer = await _RespPeer.start()
         ..pushBeforeNextReply = true;
       addTearDown(peer.close);
-      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}');
-      addTearDown(client.close);
+      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}').runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      expect(await client.ping(), isTrue);
-      expect(await client.ping(), isTrue);
+      expect(await client.ping().runFuture(), isTrue);
+      expect(await client.ping().runFuture(), isTrue);
     });
 
     test('should invalidate the connection when a reply is malformed', () async {
       final peer = await _RespPeer.start()
         ..malformNextReply = true;
       addTearDown(peer.close);
-      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}');
-      addTearDown(client.close);
+      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}').runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      final first = client.ping();
-      final second = client.ping();
+      final first = client.ping().runFuture();
+      final second = client.ping().runFuture();
 
-      await expectLater(first, throwsA(isA<RedisProtocolException>()));
-      await expectLater(second, throwsA(isA<RedisProtocolException>()));
-      await expectLater(client.ping(), throwsA(isA<RedisClosedException>()));
+      await expectLater(
+        first,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelProtocolError>(),
+          ),
+        ),
+      );
+      await expectLater(
+        second,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelProtocolError>(),
+          ),
+        ),
+      );
+      await expectLater(
+        client.ping().runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
     });
 
     test('should reject work after idempotent close', () async {
       final peer = await _RespPeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}');
+      final client = await Runnel.connect('redis://127.0.0.1:${peer.port}').runFuture();
 
-      await Future.wait([client.close(), client.close()]);
+      await Future.wait([client.close().runFuture(), client.close().runFuture()]);
 
-      await expectLater(client.ping(), throwsA(isA<RedisClosedException>()));
+      await expectLater(
+        client.ping().runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
     });
   });
 }

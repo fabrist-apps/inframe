@@ -1,10 +1,10 @@
 /// A pure Dart client for standalone Redis and Valkey endpoints.
 library;
 
-export 'src/batch.dart';
-export 'src/blocking.dart';
+export 'src/batch.dart' show BatchRef, BatchResults, RedisBatch;
+export 'src/blocking.dart' show BlockingSession;
 export 'src/client.dart';
-export 'src/command.dart';
+export 'src/command.dart' show RedisArgument, RedisCommand, encodeCommand;
 export 'src/commands/collections.dart';
 export 'src/commands/scalars.dart';
 export 'src/commands/streams.dart';

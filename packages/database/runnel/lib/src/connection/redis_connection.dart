@@ -1,22 +1,26 @@
-// This class is package-internal; callers use the documented Runnel API.
-
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/connection/connection_attempt.dart';
+import 'package:runnel/src/connection/operation.dart';
+import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/resp/resp_parser.dart';
 import 'package:runnel/src/resp/resp_value.dart';
+
+// This class is package-internal; callers use the documented Runnel API.
 
 /// Receives an unexpected terminal failure from [connection].
 typedef ConnectionTerminated = void Function(RedisConnection connection, Object cause);
 
 /// One physical socket owns submission order, reply alignment, timers, and reservations.
 ///
-/// Accepted commands remain in [_pending] until their reply or terminal failure. Removing a
+/// Accepted commands move from [_queued] to [_submitted] when their bytes are sent. Removing a
 /// submitted slot without closing the generation would let a late reply complete another command,
 /// so submitted timeouts always terminate the connection and every submitted sibling.
 final class RedisConnection {
@@ -38,7 +42,9 @@ final class RedisConnection {
   final ConnectionTerminated _onTerminated;
   final RespParser _parser;
   late final StreamSubscription<Uint8List> _subscription;
-  final List<_Pending<Object?>> _pending = [];
+  // Insertion-ordered sets keep FIFO replies and constant-time cancellation.
+  final _queued = <_Pending<Object?>>{};
+  final _submitted = <_Pending<Object?>>{};
   var _pendingBytes = 0;
   var _flushScheduled = false;
   var _closed = false;
@@ -48,10 +54,10 @@ final class RedisConnection {
   bool get isClosed => _closed;
 
   /// Whether every accepted command has settled.
-  bool get isIdle => _pending.isEmpty;
+  bool get isIdle => _queued.isEmpty && _submitted.isEmpty;
 
   /// Number of commands accepted and awaiting settlement.
-  int get pendingCount => _pending.length;
+  int get pendingCount => _queued.length + _submitted.length;
 
   /// Encoded bytes reserved by commands awaiting settlement.
   int get pendingBytes => _pendingBytes;
@@ -63,8 +69,8 @@ final class RedisConnection {
     required bool tls,
     required SecurityContext? securityContext,
     required RunnelLimits limits,
-    required Duration timeout,
     required ConnectionTerminated onTerminated,
+    required Deadline deadline,
     ConnectionAttempt? attempt,
   }) async {
     final socket = await openSocket(
@@ -72,8 +78,8 @@ final class RedisConnection {
       port: port,
       tls: tls,
       securityContext: securityContext,
-      timeout: timeout,
       attempt: attempt,
+      deadline: deadline,
     );
     final connection = RedisConnection._(socket, limits, onTerminated);
     if (!(attempt?.attachResource(
@@ -81,35 +87,57 @@ final class RedisConnection {
         ) ??
         true)) {
       await connection.close(commandsAreUncertain: true);
-      throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+      throw RunnelClosedError(
+        'The connection attempt was cancelled.',
+        stackTrace: StackTrace.current,
+      );
     }
     return connection;
   }
 
-  /// Accepts [command] for ordered execution within [timeout].
+  /// Accepts [command] for ordered execution within [deadline].
   Future<T> execute<T>(
     RedisCommand<T> command, {
-    required Duration timeout,
+    required Deadline deadline,
     bool enforceLimits = true,
+    RunnelOperation? operation,
+  }) => executeDecoded(
+    command,
+    deadline: deadline,
+    enforceLimits: enforceLimits,
+    operation: operation,
+  ).then((result) => result.getOrThrowWith((error) => error));
+
+  /// Keeps decoder failures separate from wire failures for server-error recovery.
+  ///
+  /// The Future fails for wire errors; a successful Future contains the decoder's
+  /// result. Decoding still runs inside reply handling and its deadline, so an
+  /// expired decoder terminates submitted siblings before another reply is used.
+  Future<Result<T, RunnelError>> executeDecoded<T>(
+    RedisCommand<T> command, {
+    required Deadline deadline,
+    bool enforceLimits = true,
+    RunnelOperation? operation,
   }) {
-    final acceptedAt = Stopwatch()..start();
     if (_closed) {
-      return Future.error(const RedisClosedException(message: 'The Redis connection is closed.'));
+      return Future.error(
+        RunnelClosedError('The Redis connection is closed.', stackTrace: StackTrace.current),
+      );
     }
     final encoded = encodeCommand(command as RedisCommand<Object?>);
     try {
       final remaining = _admit(
         count: 1,
         bytes: encoded.length,
-        acceptedAt: acceptedAt,
-        timeout: timeout,
+        deadline: deadline,
         enforceLimits: enforceLimits,
         batch: false,
       );
-      final pending = _register(command, encoded, acceptedAt, timeout, remaining);
+      final pending = _register(command, encoded, deadline, remaining);
+      pending.detachCancellation = operation?.onCancel(() => _cancel(pending));
       _scheduleFlush();
       return pending.completer.future;
-    } on RunnelException catch (error, stackTrace) {
+    } on RunnelError catch (error, stackTrace) {
       return Future.error(error, stackTrace);
     }
   }
@@ -117,63 +145,71 @@ final class RedisConnection {
   /// Atomically reserves capacity for [commands] and queues them in order.
   List<Future<Object?>> executeBatch(
     List<RedisCommand<Object?>> commands, {
-    required Duration timeout,
+    required Deadline deadline,
+    RunnelOperation? operation,
   }) {
-    final acceptedAt = Stopwatch()..start();
     if (_closed) {
-      throw const RedisClosedException(message: 'The Redis connection is closed.');
+      throw RunnelClosedError('The Redis connection is closed.', stackTrace: StackTrace.current);
     }
     final encoded = commands.map(encodeCommand).toList(growable: false);
     final encodedBytes = encoded.fold<int>(0, (total, bytes) => total + bytes.length);
     final remaining = _admit(
       count: commands.length,
       bytes: encodedBytes,
-      acceptedAt: acceptedAt,
-      timeout: timeout,
+      deadline: deadline,
       enforceLimits: true,
       batch: true,
     );
     final accepted = <_Pending<Object?>>[
       for (var index = 0; index < commands.length; index++)
-        _register(commands[index], encoded[index], acceptedAt, timeout, remaining),
+        _register(commands[index], encoded[index], deadline, remaining),
     ];
+    for (final pending in accepted) {
+      pending.detachCancellation = operation?.onCancel(() => _cancel(pending));
+    }
     _scheduleFlush();
-    return List.unmodifiable(accepted.map((pending) => pending.completer.future));
+    return List.unmodifiable(
+      accepted.map(
+        (pending) =>
+            pending.completer.future.then((result) => result.getOrThrowWith((error) => error)),
+      ),
+    );
   }
 
   Duration _admit({
     required int count,
     required int bytes,
-    required Stopwatch acceptedAt,
-    required Duration timeout,
+    required Deadline deadline,
     required bool enforceLimits,
     required bool batch,
   }) {
     if (enforceLimits &&
         (batch
-            ? _pending.length + count > _limits.maxPendingCommands
-            : _pending.length == _limits.maxPendingCommands)) {
-      throw RedisLimitException(
-        message: batch
+            ? pendingCount + count > _limits.maxPendingCommands
+            : pendingCount == _limits.maxPendingCommands)) {
+      throw RunnelLimitError(
+        batch
             ? 'The batch would exceed ${_limits.maxPendingCommands} pending commands.'
             : 'The connection already has ${_limits.maxPendingCommands} pending commands.',
-        deliveryStatus: RedisDeliveryStatus.notSent,
+        deliveryStatus: const Some(RedisDeliveryStatus.notSent),
         limit: _limits.maxPendingCommands,
+        stackTrace: StackTrace.current,
       );
     }
     if (enforceLimits && _pendingBytes + bytes > _limits.maxPendingBytes) {
-      throw RedisLimitException(
-        message:
-            'The ${batch ? 'batch' : 'command'} would exceed ${_limits.maxPendingBytes} pending encoded bytes.',
-        deliveryStatus: RedisDeliveryStatus.notSent,
+      throw RunnelLimitError(
+        'The ${batch ? 'batch' : 'command'} would exceed ${_limits.maxPendingBytes} pending encoded bytes.',
+        deliveryStatus: const Some(RedisDeliveryStatus.notSent),
         limit: _limits.maxPendingBytes,
+        stackTrace: StackTrace.current,
       );
     }
-    final remaining = timeout - acceptedAt.elapsed;
+    final remaining = deadline.timeLeft;
     if (remaining <= Duration.zero) {
-      throw RedisTimeoutException(
-        message: 'The Redis ${batch ? 'batch' : 'command'} deadline expired during local encoding.',
-        deliveryStatus: RedisDeliveryStatus.notSent,
+      throw RunnelTimeoutError(
+        'The Redis ${batch ? 'batch' : 'command'} deadline expired during local encoding.',
+        deliveryStatus: const Some(RedisDeliveryStatus.notSent),
+        stackTrace: StackTrace.current,
       );
     }
     return remaining;
@@ -182,12 +218,11 @@ final class RedisConnection {
   _Pending<T> _register<T>(
     RedisCommand<T> command,
     Uint8List encoded,
-    Stopwatch acceptedAt,
-    Duration timeout,
+    Deadline deadline,
     Duration remaining,
   ) {
-    final pending = _Pending<T>(command, encoded, acceptedAt, timeout);
-    _pending.add(pending as _Pending<Object?>);
+    final pending = _Pending<T>(command, encoded, deadline);
+    _queued.add(pending as _Pending<Object?>);
     _pendingBytes += encoded.length;
     pending.timer = Timer(remaining, () => _timeout(pending as _Pending<Object?>));
     return pending;
@@ -202,7 +237,7 @@ final class RedisConnection {
   void _flush() {
     _flushScheduled = false;
     if (_closed) return;
-    final queued = _pending.where((pending) => !pending.submitted).toList(growable: false);
+    final queued = _queued.toList(growable: false);
     if (queued.isEmpty) return;
     final bytes = BytesBuilder(copy: false);
     for (final pending in queued) {
@@ -212,35 +247,59 @@ final class RedisConnection {
       _socket.add(bytes.takeBytes());
       for (final pending in queued) {
         pending.submitted = true;
+        _queued.remove(pending);
+        _submitted.add(pending);
       }
     } on Object catch (error, stackTrace) {
       _terminate(
-        RedisTransportException(
-          message: 'Could not submit Redis command bytes.',
-          deliveryStatus: RedisDeliveryStatus.notSent,
+        RunnelTransportError(
+          'Could not submit Redis command bytes.',
+          deliveryStatus: const Some(RedisDeliveryStatus.notSent),
           cause: error,
+          stackTrace: stackTrace,
         ),
         stackTrace,
       );
     }
   }
 
-  void _timeout(_Pending<Object?> pending) {
-    if (pending.completer.isCompleted || !_pending.contains(pending)) return;
+  void _cancel(_Pending<Object?> pending) {
+    if (pending.completer.isCompleted) return;
     if (!pending.submitted) {
       _remove(pending);
       pending.completer.completeError(
-        const RedisTimeoutException(
-          message: 'The Redis command deadline expired before submission.',
-          deliveryStatus: RedisDeliveryStatus.notSent,
+        RunnelClosedError('Command cancelled before submission.', stackTrace: StackTrace.current),
+      );
+      return;
+    }
+    _terminate(
+      RunnelTransportError(
+        'A submitted command was cancelled.',
+        deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+        stackTrace: StackTrace.current,
+      ),
+      StackTrace.current,
+    );
+  }
+
+  void _timeout(_Pending<Object?> pending) {
+    if (pending.completer.isCompleted) return;
+    if (!pending.submitted) {
+      _remove(pending);
+      pending.completer.completeError(
+        RunnelTimeoutError(
+          'The Redis command deadline expired before submission.',
+          deliveryStatus: const Some(RedisDeliveryStatus.notSent),
+          stackTrace: StackTrace.current,
         ),
       );
       return;
     }
     _terminate(
-      const RedisTimeoutException(
-        message: 'The Redis command deadline expired after submission.',
-        deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+      RunnelTimeoutError(
+        'The Redis command deadline expired after submission.',
+        deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+        stackTrace: StackTrace.current,
       ),
       StackTrace.current,
     );
@@ -254,27 +313,34 @@ final class RedisConnection {
           _ => received,
         };
         if (actual is RespPush) continue;
-        if (_pending.isEmpty || !_pending.first.submitted) {
+        if (_submitted.isEmpty) {
           _terminate(
-            const RedisProtocolException(message: 'Received a reply without a submitted command.'),
+            RunnelProtocolError(
+              'Received a reply without a submitted command.',
+              deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+              stackTrace: StackTrace.current,
+            ),
             StackTrace.current,
           );
           return;
         }
-        final pending = _pending.first;
+        final pending = _submitted.first;
         if (actual case RespError(:final code, :final message)) {
           if (pending.deadlineExpired) {
             _terminate(
-              const RedisTimeoutException(
-                message: 'The Redis command deadline expired during reply decoding.',
-                deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+              RunnelTimeoutError(
+                'The Redis command deadline expired during reply decoding.',
+                deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+                stackTrace: StackTrace.current,
               ),
               StackTrace.current,
             );
             return;
           }
           _remove(pending);
-          pending.completer.completeError(RedisServerException(code: code, message: message));
+          pending.completer.completeError(
+            RunnelServerError(message, code: code, cause: actual, stackTrace: StackTrace.current),
+          );
           continue;
         }
         try {
@@ -282,10 +348,11 @@ final class RedisConnection {
           _remove(pending);
         } on _DecodeDeadlineExpired catch (error, stackTrace) {
           _terminate(
-            RedisTimeoutException(
-              message: 'The Redis command deadline expired during reply decoding.',
-              deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+            RunnelTimeoutError(
+              'The Redis command deadline expired during reply decoding.',
+              deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
               cause: error.cause,
+              stackTrace: stackTrace,
             ),
             stackTrace,
           );
@@ -301,17 +368,19 @@ final class RedisConnection {
   }
 
   void _remove(_Pending<Object?> pending) {
-    if (!_pending.remove(pending)) return;
+    if (!(pending.submitted ? _submitted : _queued).remove(pending)) return;
     pending.timer?.cancel();
+    pending.detachCancellation?.call();
     _pendingBytes -= pending.encoded.length;
-    if (_pending.isEmpty) _notifyIdle();
+    if (isIdle) _notifyIdle();
   }
 
   void _onError(Object error, StackTrace stackTrace) => _terminate(
-    RedisTransportException(
-      message: 'The Redis connection failed.',
-      deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+    RunnelTransportError(
+      'The Redis connection failed.',
+      deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
       cause: error,
+      stackTrace: stackTrace,
     ),
     stackTrace,
   );
@@ -319,9 +388,10 @@ final class RedisConnection {
   void _onDone() {
     if (_closed) return;
     _terminate(
-      const RedisTransportException(
-        message: 'The Redis connection closed before all replies arrived.',
-        deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+      RunnelTransportError(
+        'The Redis connection closed before all replies arrived.',
+        deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+        stackTrace: StackTrace.current,
       ),
       StackTrace.current,
     );
@@ -338,10 +408,10 @@ final class RedisConnection {
   }
 
   void _failPending(Object cause, [StackTrace? stackTrace]) {
-    for (final operation in List<_Pending<Object?>>.of(_pending)) {
+    for (final operation in [..._submitted, ..._queued]) {
       _remove(operation);
       operation.completer.completeError(
-        _failureFor(cause, submitted: operation.submitted),
+        _failureFor(cause, stackTrace: stackTrace, submitted: operation.submitted),
         stackTrace,
       );
     }
@@ -352,41 +422,48 @@ final class RedisConnection {
     _idle = null;
   }
 
-  Object _failureFor(Object cause, {required bool submitted}) {
+  RunnelError _failureFor(Object cause, {required bool submitted, StackTrace? stackTrace}) {
+    final failureStack =
+        stackTrace ?? (cause is RunnelError ? cause.stackTrace : null) ?? StackTrace.current;
     final deliveryStatus = submitted
         ? RedisDeliveryStatus.outcomeUnknown
         : RedisDeliveryStatus.notSent;
     return switch (cause) {
-      RedisTimeoutException() => RedisTimeoutException(
-        message: cause.message,
-        deliveryStatus: deliveryStatus,
+      RunnelTimeoutError() => RunnelTimeoutError(
+        cause.message,
+        deliveryStatus: Some(deliveryStatus),
         cause: cause.cause,
+        stackTrace: failureStack,
       ),
-      RedisProtocolException() => RedisProtocolException(
-        message: cause.message,
+      RunnelProtocolError() => RunnelProtocolError(
+        cause.message,
         cause: cause.cause,
-        deliveryStatus: deliveryStatus,
+        deliveryStatus: Some(deliveryStatus),
+        stackTrace: failureStack,
       ),
-      RedisClosedException() => RedisClosedException(
-        message: cause.message,
-        deliveryStatus: deliveryStatus,
+      RunnelClosedError() => RunnelClosedError(
+        cause.message,
+        deliveryStatus: Some(deliveryStatus),
+        stackTrace: failureStack,
       ),
-      RedisLimitException() => RedisLimitException(
-        message: cause.message,
-        deliveryStatus: deliveryStatus,
+      RunnelLimitError() => RunnelLimitError(
+        cause.message,
+        deliveryStatus: Some(deliveryStatus),
         limit: cause.limit,
+        stackTrace: failureStack,
       ),
-      _ => RedisTransportException(
-        message: cause is RunnelException ? cause.message : 'The Redis connection failed.',
-        deliveryStatus: deliveryStatus,
-        cause: cause is RunnelException ? cause.cause : cause,
+      _ => RunnelTransportError(
+        cause is RunnelError ? cause.message : 'The Redis connection failed.',
+        deliveryStatus: Some(deliveryStatus),
+        cause: cause is RunnelError ? cause.cause : cause,
+        stackTrace: failureStack,
       ),
     };
   }
 
   /// Completes when every accepted command settles or the connection closes.
   Future<void> waitUntilIdle() {
-    if (_closed || _pending.isEmpty) return Future.value();
+    if (_closed || isIdle) return Future.value();
     return (_idle ??= Completer<void>()).future;
   }
 
@@ -405,36 +482,37 @@ final class RedisConnection {
       await _socket.close();
     }
     _failPending(
-      const RedisClosedException(message: 'The Redis connection closed before replying.'),
+      RunnelClosedError(
+        'The Redis connection closed before replying.',
+        stackTrace: StackTrace.current,
+      ),
     );
   }
 }
 
 final class _Pending<T> {
-  _Pending(this.command, this.encoded, this.stopwatch, this.deadline);
+  _Pending(this.command, this.encoded, this.deadline);
 
   final RedisCommand<T> command;
   final Uint8List encoded;
-  final Stopwatch stopwatch;
-  final Duration deadline;
-  final Completer<T> completer = Completer<T>();
+  final Deadline deadline;
+  final completer = Completer<Result<T, RunnelError>>();
   Timer? timer;
+  void Function()? detachCancellation;
   bool submitted = false;
 
-  bool get deadlineExpired => stopwatch.elapsed >= deadline;
+  bool get deadlineExpired => deadline.isExpired;
 
   void complete(RespValue reply) {
-    try {
-      final value = command.decode(reply);
-      if (deadlineExpired) throw const _DecodeDeadlineExpired();
-      completer.complete(value);
-    } on Object catch (error, stackTrace) {
-      if (error is _DecodeDeadlineExpired) rethrow;
-      if (deadlineExpired) {
-        Error.throwWithStackTrace(_DecodeDeadlineExpired(error), stackTrace);
-      }
-      Error.throwWithStackTrace(error, stackTrace);
+    // A thrown decoder defect retains its identity even if decoding overran.
+    final result = command.decode(reply);
+    if (deadlineExpired) {
+      throw _DecodeDeadlineExpired(switch (result) {
+        Failure(:final error) => error,
+        Success() => null,
+      });
     }
+    completer.complete(result);
   }
 }
 

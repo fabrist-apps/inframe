@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:conflux/result.dart';
+import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// One explicitly encoded Redis command argument.
@@ -22,18 +24,27 @@ final class RedisArgument {
 /// A typed ordinary one-command/one-reply operation.
 base class RedisCommand<T> {
   /// Creates a custom typed command from explicit arguments and a reply decoder.
-  RedisCommand(List<RedisArgument> arguments, T Function(RespValue reply) decode)
-    : arguments = List.unmodifiable(arguments),
+  RedisCommand(
+    List<RedisArgument> arguments,
+    Result<T, RunnelError> Function(RespValue reply) decode,
+  ) : arguments = List.unmodifiable(arguments),
       _decode = decode {
     if (arguments.isEmpty) throw ArgumentError.value(arguments, 'arguments', 'must not be empty');
   }
 
   /// Immutable command arguments, including the command name.
   final List<RedisArgument> arguments;
-  final T Function(RespValue reply) _decode;
+  final Result<T, RunnelError> Function(RespValue reply) _decode;
 
   /// Converts one non-error reply into the command result.
-  T decode(RespValue reply) => _decode(reply);
+  Result<T, RunnelError> decode(RespValue reply) {
+    try {
+      return _decode(reply);
+    } on Object catch (error, stack) {
+      if (error is CommandDecoderDefect) rethrow;
+      throw CommandDecoderDefect(error, stack);
+    }
+  }
 
   /// Exact RESP wire size without allocating the encoded command.
   int get encodedLength {
@@ -64,3 +75,32 @@ Uint8List encodeCommand(RedisCommand<Object?> command) {
   }
   return output.takeBytes();
 }
+
+/// Internal distinction between returned expected failures and thrown callbacks.
+final class CommandDecoderDefect {
+  /// Retains the original callback error and stack without classifying it as expected.
+  const CommandDecoderDefect(this.error, this.stackTrace);
+
+  /// The object thrown by the callback.
+  final Object error;
+
+  /// The callback stack, before crossing the Future boundary.
+  final StackTrace stackTrace;
+}
+
+/// Internal built-in boundary: reply-shape and UTF-8 errors are expected.
+RedisCommand<T> builtInCommand<T>(
+  List<RedisArgument> arguments,
+  T Function(RespValue reply) decode,
+) => RedisCommand(arguments, builtInDecoder(decode));
+
+/// Adapts only known built-in reply-shape failures to typed errors.
+Result<T, RunnelError> Function(RespValue) builtInDecoder<T>(
+  T Function(RespValue) decode,
+) => (reply) {
+  try {
+    return Success(decode(reply));
+  } on FormatException catch (error, stack) {
+    return Failure(RunnelDecodingError(error.message, cause: error, stackTrace: stack));
+  }
+};

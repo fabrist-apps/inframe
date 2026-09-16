@@ -3,9 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
+import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
+import 'package:runnel/src/pubsub/session.dart';
 import 'package:test/test.dart';
 
 import 'support/resp_peer.dart';
@@ -16,11 +20,11 @@ void main() {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
       final events = <PubSubEvent>[];
-      final listener = session.events.listen(events.add);
+      final listener = session.events.toStream().listen(events.add, onError: _expectFlowFailure);
       addTearDown(listener.cancel);
-      await session.subscribe(['orders']);
+      await session.subscribe(['orders']).runFuture();
 
       peer.destroyLatest();
       await peer.waitForConnections(2);
@@ -50,17 +54,17 @@ void main() {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
       final events = <PubSubEvent>[];
-      final listener = session.events.listen(events.add);
+      final listener = session.events.toStream().listen(events.add, onError: _expectFlowFailure);
       addTearDown(listener.cancel);
-      await session.subscribe(['orders', 'notifications']);
+      await session.subscribe(['orders', 'notifications']).runFuture();
 
       peer
         ..holdAcknowledgementsFromConnection = 2
         ..destroyLatest();
       await peer.waitForCommandCount('SUBSCRIBE', 2);
-      await session.unsubscribe(['orders']);
+      await session.unsubscribe(['orders']).runFuture();
       expect(session.desiredChannels, {'notifications'});
       peer.releaseAcknowledgements();
       await _eventually(() => events.whereType<PubSubRestored>().isNotEmpty);
@@ -79,17 +83,35 @@ void main() {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
-      await session.subscribe(['established']);
+      addTearDown(() => session.close().runFuture());
+      await session.subscribe(['established']).runFuture();
       peer.partialAcknowledgementsBeforeRejection = 1;
 
-      final first = session.subscribe(['first', 'overlap']);
+      final first = session.subscribe(['first', 'overlap']).runFuture();
       await peer.waitForHeldRejection();
-      final newer = session.subscribe(['overlap', 'newer']);
+      final newer = session.subscribe(['overlap', 'newer']).runFuture();
       peer.rejectHeldControl();
 
-      await expectLater(first, throwsA(isA<RedisServerException>()));
-      await expectLater(newer, throwsA(isA<RedisServerException>()));
+      await expectLater(
+        first,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelServerError>(),
+          ),
+        ),
+      );
+      await expectLater(
+        newer,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelServerError>(),
+          ),
+        ),
+      );
       await peer.waitForConnections(2);
       await _eventually(() => session.state == PubSubState.ready);
       expect(session.desiredChannels, {'established', 'overlap', 'newer'});
@@ -100,13 +122,19 @@ void main() {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
-      await session.subscribe(['established']);
+      addTearDown(() => session.close().runFuture());
+      await session.subscribe(['established']).runFuture();
       peer.holdAcknowledgementsFromConnection = 1;
 
       await expectLater(
-        session.subscribe(['timed-out'], timeout: const Duration(milliseconds: 20)),
-        throwsA(isA<RedisTimeoutException>()),
+        session.subscribe(['timed-out'], timeout: const Duration(milliseconds: 20)).runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>(),
+          ),
+        ),
       );
       peer.holdAcknowledgementsFromConnection = null;
       await peer.waitForConnections(2);
@@ -126,24 +154,33 @@ void main() {
         controlTimeout: const Duration(seconds: 1),
         connectionLimits: const RunnelLimits(maxPendingCommands: 2),
       );
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
 
-      final first = session.subscribe(['first']);
+      final first = session.subscribe(['first']).runFuture();
       await peer.waitForCommandCount('SUBSCRIBE', 1);
       final stopwatch = Stopwatch()..start();
       final queued = session.subscribe(
         ['expired'],
         timeout: const Duration(milliseconds: 20),
-      );
+      ).runFuture();
 
-      await expectLater(queued, throwsA(isA<RedisTimeoutException>()));
+      await expectLater(
+        queued,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>(),
+          ),
+        ),
+      );
       expect(stopwatch.elapsed, lessThan(const Duration(milliseconds: 200)));
       expect(session.desiredChannels, {'first'});
       peer.releaseAcknowledgements();
       await first;
 
       final channels = List.generate(513, (index) => 'channel-$index');
-      await session.subscribe(channels);
+      await session.subscribe(channels).runFuture();
       expect(session.acknowledgedChannels, {'first', ...channels});
     });
 
@@ -154,19 +191,37 @@ void main() {
         peer,
         controlTimeout: const Duration(seconds: 1),
       );
-      addTearDown(session.close);
-      await session.subscribe(['established']);
+      addTearDown(() => session.close().runFuture());
+      await session.subscribe(['established']).runFuture();
       peer.holdAcknowledgementsFromConnection = 1;
 
-      final preceding = session.subscribe(['retained']);
-      final precedingFailure = expectLater(preceding, throwsA(isA<RedisTimeoutException>()));
+      final preceding = session.subscribe(['retained']).runFuture();
+      final precedingFailure = expectLater(
+        preceding,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>(),
+          ),
+        ),
+      );
       await peer.waitForCommandCount('SUBSCRIBE', 2);
       final removal = session.unsubscribe(
         ['established'],
         timeout: const Duration(milliseconds: 20),
-      );
+      ).runFuture();
 
-      await expectLater(removal, throwsA(isA<RedisTimeoutException>()));
+      await expectLater(
+        removal,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>(),
+          ),
+        ),
+      );
       await precedingFailure;
       await peer.waitForConnections(2);
       await _eventually(() => session.state == PubSubState.ready);
@@ -188,11 +243,20 @@ void main() {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
-      await session.subscribe(['orders']);
+      addTearDown(() => session.close().runFuture());
+      await session.subscribe(['orders']).runFuture();
       peer.rejectNextControl = true;
 
-      await expectLater(session.unsubscribe(['orders']), throwsA(isA<RedisServerException>()));
+      await expectLater(
+        session.unsubscribe(['orders']).runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelServerError>(),
+          ),
+        ),
+      );
       await peer.waitForConnections(2);
       await _eventually(() => session.state == PubSubState.ready);
 
@@ -205,11 +269,11 @@ void main() {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
       final events = <PubSubEvent>[];
-      final listener = session.events.listen(events.add);
+      final listener = session.events.toStream().listen(events.add, onError: _expectFlowFailure);
       addTearDown(listener.cancel);
-      await session.subscribe(['orders']);
+      await session.subscribe(['orders']).runFuture();
       peer
         ..rejectSubscriptionsFromConnection = 2
         ..destroyLatest();
@@ -220,20 +284,29 @@ void main() {
       expect(terminal.terminal, isTrue);
       expect(terminal.cause, PubSubInterruptionCause.subscriptionRejection);
       expect(session.generation, 2);
-      await expectLater(session.reconnect(), throwsA(isA<RedisClosedException>()));
+      await expectLater(
+        session.reconnect().runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
     });
 
     test('should explicitly reconnect and restore the starting desired channels', () async {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
       final events = <PubSubEvent>[];
-      final listener = session.events.listen(events.add);
+      final listener = session.events.toStream().listen(events.add, onError: _expectFlowFailure);
       addTearDown(listener.cancel);
-      await session.subscribe(['orders']);
+      await session.subscribe(['orders']).runFuture();
 
-      await session.reconnect();
+      await session.reconnect().runFuture();
 
       expect(peer.connectionCount, 2);
       expect(session.generation, 2);
@@ -254,14 +327,32 @@ void main() {
           ..holdHelloFromConnection = 2;
         addTearDown(peer.close);
         final session = await _connect(peer);
-        addTearDown(session.close);
+        addTearDown(() => session.close().runFuture());
 
-        final first = session.reconnect(timeout: const Duration(milliseconds: 30));
-        final second = session.reconnect(timeout: const Duration(seconds: 1));
+        final first = session.reconnect(timeout: const Duration(milliseconds: 30)).runFuture();
+        final second = session.reconnect(timeout: const Duration(seconds: 1)).runFuture();
 
-        expect(identical(first, second), isTrue);
-        await expectLater(first, throwsA(isA<RedisTimeoutException>()));
-        await expectLater(second, throwsA(isA<RedisTimeoutException>()));
+        // Each Effect has its own run while the session coalesces physical reconnect work.
+        await expectLater(
+          first,
+          throwsA(
+            isA<EffectException<RunnelError>>().having(
+              (e) => e.cause.expectedErrors.single,
+              'expected error',
+              isA<RunnelTimeoutError>(),
+            ),
+          ),
+        );
+        await expectLater(
+          second,
+          throwsA(
+            isA<EffectException<RunnelError>>().having(
+              (e) => e.cause.expectedErrors.single,
+              'expected error',
+              isA<RunnelTimeoutError>(),
+            ),
+          ),
+        );
         expect(session.state, PubSubState.closed);
         expect(peer.connectionCount, 2);
         expect(session.lastInterruption?.cause, PubSubInterruptionCause.explicitReconnect);
@@ -273,8 +364,8 @@ void main() {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
-      await session.subscribe(['orders']);
+      addTearDown(() => session.close().runFuture());
+      await session.subscribe(['orders']).runFuture();
       peer
         ..delayHelloFromConnection = 2
         ..helloDelay = const Duration(milliseconds: 60)
@@ -282,8 +373,14 @@ void main() {
       Timer(const Duration(milliseconds: 100), peer.releaseAcknowledgements);
 
       await expectLater(
-        session.reconnect(timeout: const Duration(milliseconds: 80)),
-        throwsA(isA<RedisTimeoutException>()),
+        session.reconnect(timeout: const Duration(milliseconds: 80)).runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>(),
+          ),
+        ),
       );
 
       expect(session.state, PubSubState.closed);
@@ -295,21 +392,55 @@ void main() {
         ..holdHelloFromConnection = 2;
       addTearDown(peer.close);
       final session = await _connect(peer);
-      addTearDown(session.close);
+      addTearDown(() => session.close().runFuture());
       peer.destroyLatest();
       await peer.waitForConnections(2);
 
       await expectLater(
-        session.reconnect(timeout: const Duration(milliseconds: 20)),
-        throwsA(isA<RedisTimeoutException>()),
+        session.reconnect(timeout: const Duration(milliseconds: 20)).runFuture(),
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelTimeoutError>(),
+          ),
+        ),
       );
 
       expect(session.state, PubSubState.closed);
       await peer.waitForConnectionClosed(2);
-      await session.close().timeout(const Duration(seconds: 1));
+      await session.close().runFuture().timeout(const Duration(seconds: 1));
       final connectionsAfterTimeout = peer.connectionCount;
       await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(peer.connectionCount, connectionsAfterTimeout);
+    });
+
+    test('should close stalled recovery and settle controls waiting for readiness', () async {
+      final peer = await _RecoveryPeer.start()
+        ..holdHelloFromConnection = 2;
+      addTearDown(peer.close);
+      final session = await _connect(peer);
+      addTearDown(() => session.close().runFuture());
+      peer.destroyLatest();
+      await _eventually(() => peer.connectionCount == 2);
+
+      final subscribing = session.subscribe(['orders']).runFuture();
+      final rejected = expectLater(
+        subscribing,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
+      await _eventually(() => session.desiredChannels.contains('orders'));
+      await session.close().runFuture().timeout(const Duration(seconds: 1));
+      await rejected.timeout(const Duration(seconds: 1));
+      await peer.waitForConnectionClosed(2);
+      expect(session.state, PubSubState.closed);
+      expect(peer.connectionCount, 2);
     });
 
     test('should close during backoff without opening another socket', () async {
@@ -319,7 +450,7 @@ void main() {
       peer.destroyLatest();
       await _eventually(() => session.state == PubSubState.reconnecting);
 
-      await session.close().timeout(const Duration(seconds: 1));
+      await session.close().runFuture().timeout(const Duration(seconds: 1));
       final connectionsAfterClose = peer.connectionCount;
       await Future<void>.delayed(const Duration(milliseconds: 150));
 
@@ -335,7 +466,7 @@ void main() {
           connectionLimits: const RunnelLimits(maxFrameBytes: 16),
         );
         final events = <PubSubEvent>[];
-        final listener = session.events.listen(events.add);
+        final listener = session.events.toStream().listen(events.add, onError: _expectFlowFailure);
 
         peer.sendRaw(frame);
         await _eventually(() => session.state == PubSubState.closed);
@@ -349,7 +480,7 @@ void main() {
               .having((event) => event.terminal, 'terminal', isTrue),
         );
         await listener.cancel();
-        await session.close();
+        await session.close().runFuture();
         await peer.close();
       }
     });
@@ -366,14 +497,14 @@ Future<PubSubSession> _connect(
   _RecoveryPeer peer, {
   Duration controlTimeout = const Duration(milliseconds: 200),
   RunnelLimits connectionLimits = const RunnelLimits(),
-}) => PubSubSession.connect(
-  PubSubConnectionConfiguration(
+}) => PubSubSessionOwnership.connect(
+  ConnectionConfiguration(
     host: InternetAddress.loopbackIPv4.address,
     port: peer.port,
     tls: false,
-    connectTimeout: const Duration(milliseconds: 200),
-    connectionLimits: connectionLimits,
   ),
+  connectTimeout: const Duration(milliseconds: 200),
+  connectionLimits: connectionLimits,
   controlTimeout: controlTimeout,
 );
 
@@ -542,4 +673,9 @@ final class _HeldAcknowledgement {
   final _PeerConnection connection;
   final String kind;
   final String channel;
+}
+
+void _expectFlowFailure(Object error) {
+  expect(error, isA<FlowException<RunnelError>>());
+  expect((error as FlowException<RunnelError>).cause.expectedErrors.single, isA<RunnelError>());
 }

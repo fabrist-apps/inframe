@@ -6,7 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:runnel/src/connection/connection_attempt.dart';
-
+import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 
 /// Byte-stream socket operations shared by plain and raw TLS transports.
@@ -21,44 +21,47 @@ abstract class ConnectionSocket extends Stream<Uint8List> {
   Future<void> close();
 }
 
-/// Opens an owned plain or TLS socket within one absolute [timeout].
+/// Opens an owned plain or TLS socket within one shared [deadline].
 Future<ConnectionSocket> openSocket({
   required String host,
   required int port,
   required bool tls,
   required SecurityContext? securityContext,
-  required Duration timeout,
+  required Deadline deadline,
   ConnectionAttempt? attempt,
 }) {
-  final elapsed = Stopwatch()..start();
   return tls
-      ? _openSecureSocket(host, port, securityContext, timeout, elapsed, attempt)
-      : _openPlainSocket(host, port, timeout, elapsed, attempt);
+      ? _openSecureSocket(host, port, securityContext, deadline, attempt)
+      : _openPlainSocket(host, port, deadline, attempt);
 }
 
 Future<ConnectionSocket> _openPlainSocket(
   String host,
   int port,
-  Duration timeout,
-  Stopwatch elapsed,
+  Deadline deadline,
   ConnectionAttempt? attempt,
 ) async {
   final task = await Socket.startConnect(host, port);
   if (!(attempt?.attachConnect(task.cancel) ?? true)) {
     await _discardTaskResult(task.socket, (socket) => socket.destroy());
-    throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+    throw RunnelClosedError(
+      'The connection attempt was cancelled.',
+      stackTrace: StackTrace.current,
+    );
   }
   try {
     final socket = await _awaitTask(
       task,
-      timeout,
-      elapsed,
+      deadline,
       (socket) => socket.destroy(),
     );
     final connection = _IoConnectionSocket(socket);
     if (!(attempt?.attachResource(() async => connection.destroy()) ?? true)) {
       connection.destroy();
-      throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+      throw RunnelClosedError(
+        'The connection attempt was cancelled.',
+        stackTrace: StackTrace.current,
+      );
     }
     return connection;
   } finally {
@@ -70,21 +73,22 @@ Future<ConnectionSocket> _openSecureSocket(
   String host,
   int port,
   SecurityContext? securityContext,
-  Duration timeout,
-  Stopwatch elapsed,
+  Deadline deadline,
   ConnectionAttempt? attempt,
 ) async {
   final task = await RawSocket.startConnect(host, port);
   if (!(attempt?.attachConnect(task.cancel) ?? true)) {
     await _discardTaskResult(task.socket, (socket) => unawaited(socket.close()));
-    throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+    throw RunnelClosedError(
+      'The connection attempt was cancelled.',
+      stackTrace: StackTrace.current,
+    );
   }
   late final RawSocket plainSocket;
   try {
     plainSocket = await _awaitTask(
       task,
-      timeout,
-      elapsed,
+      deadline,
       (socket) => unawaited(socket.close()),
     );
   } finally {
@@ -99,7 +103,10 @@ Future<ConnectionSocket> _openSecureSocket(
 
   if (!(attempt?.attachResource(closeHandshake) ?? true)) {
     await closeHandshake();
-    throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+    throw RunnelClosedError(
+      'The connection attempt was cancelled.',
+      stackTrace: StackTrace.current,
+    );
   }
   final securing = RawSecureSocket.secure(
     plainSocket,
@@ -116,7 +123,7 @@ Future<ConnectionSocket> _openSecureSocket(
   );
   try {
     final socket = await securing.timeout(
-      _remaining(timeout, elapsed),
+      deadline.remaining,
       onTimeout: () {
         unawaited(closeHandshake());
         throw TimeoutException('The socket connection deadline expired.');
@@ -125,7 +132,10 @@ Future<ConnectionSocket> _openSecureSocket(
     final connection = _RawSecureConnectionSocket(socket);
     if (abandoned || !(attempt?.attachResource(() async => connection.destroy()) ?? true)) {
       connection.destroy();
-      throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+      throw RunnelClosedError(
+        'The connection attempt was cancelled.',
+        stackTrace: StackTrace.current,
+      );
     }
     return connection;
   } on Object {
@@ -134,18 +144,9 @@ Future<ConnectionSocket> _openSecureSocket(
   }
 }
 
-Duration _remaining(Duration timeout, Stopwatch elapsed) {
-  final remaining = timeout - elapsed.elapsed;
-  if (remaining <= Duration.zero) {
-    throw TimeoutException('The socket connection deadline expired.');
-  }
-  return remaining;
-}
-
 Future<T> _awaitTask<T>(
   ConnectionTask<T> task,
-  Duration timeout,
-  Stopwatch elapsed,
+  Deadline deadline,
   void Function(T resource) dispose,
 ) async {
   var abandoned = false;
@@ -159,7 +160,7 @@ Future<T> _awaitTask<T>(
   );
   try {
     return await task.socket.timeout(
-      _remaining(timeout, elapsed),
+      deadline.remaining,
       onTimeout: () {
         abandoned = true;
         task.cancel();
@@ -180,7 +181,7 @@ Future<void> _discardTaskResult<T>(
   try {
     dispose(await result);
   } on Object {
-    // Cancellation is represented to the caller by RedisClosedException.
+    // Cancellation is represented to the caller by RunnelClosedError.
   }
 }
 

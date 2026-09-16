@@ -1,3 +1,5 @@
+import 'package:conflux/option.dart';
+
 /// Whether an unsuccessful command could have reached Redis.
 enum RedisDeliveryStatus {
   /// No bytes belonging to the command were submitted.
@@ -7,132 +9,127 @@ enum RedisDeliveryStatus {
   outcomeUnknown,
 }
 
-/// Stable categories for failures produced by Runnel.
-enum RedisFailureCategory {
-  /// Invalid client configuration or command input.
-  configuration,
-
-  /// Socket, DNS, or TLS transport failure.
-  transport,
-
-  /// Operation deadline expiry.
-  timeout,
-
-  /// Malformed or unsupported protocol data.
-  protocol,
-
-  /// Configured resource limit exceeded.
-  resourceLimit,
-
-  /// Work attempted after shutdown.
-  closed,
-}
-
-/// Base class for client-side Runnel failures.
-sealed class RunnelException implements Exception {
-  const RunnelException({
-    required this.message,
-    required this.category,
-    required this.deliveryStatus,
+/// Expected Runnel failures. Cancellation and unexpected defects use Conflux Cause.
+sealed class RunnelError {
+  const RunnelError(
+    this.message, {
+    this.deliveryStatus = const None(),
     this.cause,
+    this.stackTrace,
   });
 
-  /// Human-readable detail with credentials removed.
+  /// Diagnostic detail with endpoint credentials removed.
   final String message;
 
-  /// Failure category, independent of delivery uncertainty.
-  final RedisFailureCategory category;
+  /// Applicable submission uncertainty; absent for a conclusive server reply.
+  final Option<RedisDeliveryStatus> deliveryStatus;
 
-  /// Whether command delivery can be ruled out.
-  final RedisDeliveryStatus deliveryStatus;
-
-  /// Underlying failure when one exists.
+  /// Original known failure and its captured stack, when available.
   final Object? cause;
+
+  /// Stack captured where the underlying failure occurred.
+  final StackTrace? stackTrace;
 
   @override
   String toString() => message;
 }
 
-/// A transport connection failed or was interrupted.
-final class RedisTransportException extends RunnelException {
-  /// Creates a transport failure.
-  const RedisTransportException({
-    required super.message,
+/// Invalid configuration or command input.
+final class RunnelInputError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelInputError(super.message, {super.cause, super.stackTrace})
+    : super(deliveryStatus: const Some(RedisDeliveryStatus.notSent));
+}
+
+/// A socket connection failed.
+final class RunnelTransportError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelTransportError(
+    super.message, {
     required super.deliveryStatus,
     super.cause,
-  }) : super(category: RedisFailureCategory.transport);
+    super.stackTrace,
+  });
 }
 
-/// A client operation exceeded its deadline.
-final class RedisTimeoutException extends RunnelException {
-  /// Creates a deadline failure.
-  const RedisTimeoutException({
-    required super.message,
+/// The operation deadline expired.
+final class RunnelTimeoutError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelTimeoutError(
+    super.message, {
     required super.deliveryStatus,
     super.cause,
-  }) : super(category: RedisFailureCategory.timeout);
+    super.stackTrace,
+  });
 }
 
-/// Incoming bytes violated the RESP contract.
-final class RedisProtocolException extends RunnelException {
-  /// Creates a malformed-protocol failure.
-  const RedisProtocolException({
-    required super.message,
-    super.cause,
-    super.deliveryStatus = RedisDeliveryStatus.outcomeUnknown,
-  }) : super(
-         category: RedisFailureCategory.protocol,
-       );
-}
-
-/// A connection or client has already closed.
-final class RedisClosedException extends RunnelException {
-  /// Creates a failure for work rejected after close.
-  const RedisClosedException({
-    required super.message,
-    super.deliveryStatus = RedisDeliveryStatus.notSent,
-  }) : super(category: RedisFailureCategory.closed);
-}
-
-/// A configured command or protocol resource budget was exceeded.
-final class RedisLimitException extends RunnelException {
-  /// Creates a resource-limit failure.
-  const RedisLimitException({
-    required super.message,
+/// Received bytes violated the RESP contract.
+final class RunnelProtocolError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelProtocolError(
+    super.message, {
     required super.deliveryStatus,
+    super.cause,
+    super.stackTrace,
+  });
+}
+
+/// A configured resource bound was exceeded.
+final class RunnelLimitError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelLimitError(
+    super.message, {
     required this.limit,
-  }) : super(category: RedisFailureCategory.resourceLimit);
+    required super.deliveryStatus,
+    super.cause,
+    super.stackTrace,
+  });
 
-  /// Boundary that the operation exceeded.
+  /// Configured boundary exceeded by this operation.
   final int limit;
 }
 
-/// A Redis error reply.
-final class RedisServerException implements Exception {
-  /// Creates an error returned by Redis.
-  const RedisServerException({required this.code, required this.message});
-
-  /// Redis error prefix, such as `ERR` or `NOAUTH`.
-  final String code;
-
-  /// Redis error detail without the prefix.
-  final String message;
-
-  @override
-  String toString() => '$code $message';
+/// The resource no longer accepts work.
+final class RunnelClosedError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelClosedError(
+    super.message, {
+    super.deliveryStatus = const Some(RedisDeliveryStatus.notSent),
+    super.cause,
+    super.stackTrace,
+  });
 }
 
-/// A MULTI/EXEC transaction was rejected before it produced command results.
-final class RedisTransactionException implements Exception {
-  /// Creates a transaction-level rejection.
-  const RedisTransactionException(this.message, {this.cause});
+/// Redis returned a conclusive error reply.
+final class RunnelServerError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelServerError(super.message, {required this.code, super.cause, super.stackTrace});
 
-  /// Human-readable rejection detail.
-  final String message;
+  /// Redis error prefix, such as NOSCRIPT or NOAUTH.
+  final String code;
+}
 
-  /// The underlying Redis or protocol failure when one exists.
-  final Object? cause;
+/// A transaction could not produce command results.
+final class RunnelTransactionError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelTransactionError(super.message, {super.cause, super.stackTrace});
+}
 
-  @override
-  String toString() => message;
+/// A later subscription change superseded this operation.
+final class RunnelSubscriptionError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelSubscriptionError(super.message, {super.cause, super.stackTrace});
+}
+
+/// A built-in reply shape or text encoding was invalid.
+final class RunnelDecodingError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelDecodingError(super.message, {super.cause, super.stackTrace});
+}
+
+/// The operation conflicts with resource usage rules.
+final class RunnelUsageError extends RunnelError {
+  /// Creates this expected failure.
+  const RunnelUsageError(super.message, {super.cause, super.stackTrace})
+    : super(deliveryStatus: const Some(RedisDeliveryStatus.notSent));
 }

@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
+import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
@@ -137,62 +141,106 @@ void main() {
     });
 
     test('should decode nullable, integer, predicate, and status replies strictly', () {
-      expect(getCommand('key').decode(RespBlobString(utf8.encode('value'))), 'value');
-      expect(getCommand('key').decode(const RespNull()), isNull);
-      expect(getBytesCommand('key').decode(RespBlobString([0, 255])), [0, 255]);
-      expect(incrCommand('key').decode(const RespInteger(3)), 3);
-      expect(pttlCommand('key').decode(const RespInteger(-2)), -2);
-      expect(persistCommand('key').decode(const RespInteger(1)), isTrue);
-      expect(persistCommand('key').decode(const RespInteger(0)), isFalse);
-      expect(typeCommand('key').decode(const RespSimpleString('none')), 'none');
       expect(
-        () => msetCommand({'a': 'b'}).decode(const RespSimpleString('OK')),
+        getCommand('key')
+            .decode(RespBlobString(utf8.encode('value')))
+            .getOrThrowWith((error) => error),
+        isA<Some<String>>().having((value) => value.value, 'value', 'value'),
+      );
+      expect(
+        getCommand('key').decode(const RespNull()).getOrThrowWith((error) => error),
+        isA<None>(),
+      );
+      expect(
+        getBytesCommand('key').decode(RespBlobString([0, 255])).getOrThrowWith((error) => error),
+        isA<Some<Uint8List>>().having((value) => value.value, 'value', [0, 255]),
+      );
+      expect(incrCommand('key').decode(const RespInteger(3)).getOrThrowWith((error) => error), 3);
+      expect(pttlCommand('key').decode(const RespInteger(-2)).getOrThrowWith((error) => error), -2);
+      expect(
+        persistCommand('key').decode(const RespInteger(1)).getOrThrowWith((error) => error),
+        isTrue,
+      );
+      expect(
+        persistCommand('key').decode(const RespInteger(0)).getOrThrowWith((error) => error),
+        isFalse,
+      );
+      expect(
+        typeCommand('key').decode(const RespSimpleString('none')).getOrThrowWith((error) => error),
+        'none',
+      );
+      expect(
+        () =>
+            msetCommand({'a': 'b'})
+                .decode(const RespSimpleString('OK'))
+                .getOrThrowWith((error) => error),
         returnsNormally,
       );
 
       expect(
-        () => getCommand('key').decode(RespBlobString([0xFF])),
-        throwsFormatException,
+        () => getCommand('key').decode(RespBlobString([0xFF])).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
-      expect(() => incrCommand('key').decode(const RespSimpleString('3')), throwsFormatException);
-      expect(() => persistCommand('key').decode(const RespInteger(2)), throwsFormatException);
       expect(
-        () => msetCommand({'a': 'b'}).decode(const RespSimpleString('NO')),
-        throwsFormatException,
+        () =>
+            incrCommand('key').decode(const RespSimpleString('3')).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
+      );
+      expect(
+        () => persistCommand('key').decode(const RespInteger(2)).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
+      );
+      expect(
+        () =>
+            msetCommand({'a': 'b'})
+                .decode(const RespSimpleString('NO'))
+                .getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
     });
 
     test('should distinguish a conditional SET miss from an invalid reply', () {
       final command = setCommand('key', 'value', condition: SetCondition.ifAbsent);
 
-      expect(command.decode(const RespNull()), isFalse);
-      expect(command.decode(const RespSimpleString('OK')), isTrue);
-      expect(() => command.decode(const RespSimpleString('NO')), throwsFormatException);
+      expect(command.decode(const RespNull()).getOrThrowWith((error) => error), isFalse);
+      expect(command.decode(const RespSimpleString('OK')).getOrThrowWith((error) => error), isTrue);
+      expect(
+        () => command.decode(const RespSimpleString('NO')).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
+      );
     });
 
     test('should preserve ordered missing MGET values in an unmodifiable list', () {
-      final values = mgetCommand(['a', 'missing', 'a']).decode(
-        RespArray([
-          RespBlobString(utf8.encode('one')),
-          const RespNull(),
-          RespBlobString(utf8.encode('two')),
-        ]),
-      );
+      final values = mgetCommand(['a', 'missing', 'a'])
+          .decode(
+            RespArray([
+              RespBlobString(utf8.encode('one')),
+              const RespNull(),
+              RespBlobString(utf8.encode('two')),
+            ]),
+          )
+          .getOrThrowWith((error) => error);
 
-      expect(values, ['one', null, 'two']);
-      expect(() => values.add('changed'), throwsUnsupportedError);
+      expect(values, [
+        isA<Some<String>>().having((value) => value.value, 'value', 'one'),
+        isA<None>(),
+        isA<Some<String>>().having((value) => value.value, 'value', 'two'),
+      ]);
+      expect(() => values.add(const Some('changed')), throwsUnsupportedError);
     });
 
     test('should decode SCAN cursor and keys without removing duplicates', () {
-      final page = scanCommand('0').decode(
-        RespArray([
-          RespBlobString(ascii.encode('7')),
-          RespArray([
-            RespBlobString(utf8.encode('a')),
-            RespBlobString(utf8.encode('a')),
-          ]),
-        ]),
-      );
+      final page = scanCommand('0')
+          .decode(
+            RespArray([
+              RespBlobString(ascii.encode('7')),
+              RespArray([
+                RespBlobString(utf8.encode('a')),
+                RespBlobString(utf8.encode('a')),
+              ]),
+            ]),
+          )
+          .getOrThrowWith((error) => error);
 
       expect(page.cursor, '7');
       expect(page.keys, ['a', 'a']);
@@ -204,31 +252,39 @@ void main() {
     test('should keep conditional SET misses distinct from server rejection', () async {
       final peer = await _ScalarPeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
       expect(
-        await client.execute(
-          setCommand('conditional-miss', 'value', condition: SetCondition.ifAbsent),
-        ),
+        await client
+            .execute(
+              setCommand('conditional-miss', 'value', condition: SetCondition.ifAbsent),
+            )
+            .runFuture(),
         isFalse,
       );
       await expectLater(
-        client.execute(setCommand('server-error', 'value')),
+        client.execute(setCommand('server-error', 'value')).runFuture(),
         throwsA(
-          isA<RedisServerException>()
-              .having((error) => error.code, 'code', 'ERR')
-              .having((error) => error.message, 'message', 'write rejected'),
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelServerError>()
+                .having((error) => error.code, 'code', 'ERR')
+                .having((error) => error.message, 'message', 'write rejected'),
+          ),
         ),
       );
       expect(
-        await client.execute(
-          setCommand(
-            'accepted',
-            'value',
-            expiry: Expiry.after(const Duration(seconds: 1)),
-          ),
-        ),
+        await client
+            .execute(
+              setCommand(
+                'accepted',
+                'value',
+                expiry: Expiry.after(const Duration(seconds: 1)),
+              ),
+            )
+            .runFuture(),
         isTrue,
       );
       expect(peer.commands.last, ['SET', 'accepted', 'value', 'PX', '1000']);
@@ -237,33 +293,37 @@ void main() {
     test('should execute typed conveniences through the connection', () async {
       final peer = await _ScalarPeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
-      expect(await client.mget(['a', 'missing', 'a']), ['one', null, 'two']);
-      await client.mset({'a': 'one', 'b': 'two'});
-      expect(await client.incr('counter'), 2);
-      expect(await client.incrby('counter', 4), 6);
-      expect(await client.decr('counter'), 5);
-      expect(await client.decrby('counter', 3), 2);
-      expect(await client.del(['a', 'a']), 1);
-      expect(await client.unlink(['b']), 1);
-      expect(await client.exists(['a', 'a']), 2);
-      expect(await client.persist('a'), isTrue);
-      expect(await client.expire('a', Duration.zero), isTrue);
-      expect(await client.pttl('a'), -2);
-      expect(await client.type('a'), 'none');
+      expect(await client.mget(['a', 'missing', 'a']).runFuture(), [
+        isA<Some<String>>().having((value) => value.value, 'value', 'one'),
+        isA<None>(),
+        isA<Some<String>>().having((value) => value.value, 'value', 'two'),
+      ]);
+      await client.mset({'a': 'one', 'b': 'two'}).runFuture();
+      expect(await client.incr('counter').runFuture(), 2);
+      expect(await client.incrby('counter', 4).runFuture(), 6);
+      expect(await client.decr('counter').runFuture(), 5);
+      expect(await client.decrby('counter', 3).runFuture(), 2);
+      expect(await client.del(['a', 'a']).runFuture(), 1);
+      expect(await client.unlink(['b']).runFuture(), 1);
+      expect(await client.exists(['a', 'a']).runFuture(), 2);
+      expect(await client.persist('a').runFuture(), isTrue);
+      expect(await client.expire('a', Duration.zero).runFuture(), isTrue);
+      expect(await client.pttl('a').runFuture(), -2);
+      expect(await client.type('a').runFuture(), 'none');
     });
 
     test('should request SCAN pages lazily and preserve duplicates', () async {
       final peer = await _ScalarPeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
 
       final stream = client.scan(match: 'item:*', count: 2);
       expect(peer.commandCount('SCAN'), 0);
-      expect(await stream.toList(), ['a', 'b', 'b', 'c']);
+      expect(await stream.runCollect().runFuture(), ['a', 'b', 'b', 'c']);
       expect(peer.commandCount('SCAN'), 2);
       expect(peer.commands.where((parts) => parts.first == 'SCAN'), [
         ['SCAN', '0', 'MATCH', 'item:*', 'COUNT', '2'],
@@ -274,12 +334,12 @@ void main() {
     test('should stop requesting SCAN pages after cancellation', () async {
       final peer = await _ScalarPeer.start();
       addTearDown(peer.close);
-      final client = await Runnel.connect(peer.endpoint);
-      addTearDown(client.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
       final firstKey = Completer<void>();
       late final StreamSubscription<String> subscription;
 
-      subscription = client.scan().listen((_) {
+      subscription = client.scan().toStream().listen((_) {
         if (!firstKey.isCompleted) {
           firstKey.complete();
           unawaited(subscription.cancel());

@@ -1,19 +1,20 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
+import 'package:conflux/option.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/connection/connection_attempt.dart';
+import 'package:runnel/src/connection/operation.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
-import 'package:runnel/src/pubsub/event_stream.dart';
+import 'package:runnel/src/pubsub/event_queue.dart';
 import 'package:runnel/src/pubsub/events.dart';
 import 'package:runnel/src/pubsub/transport.dart';
-import 'package:runnel/src/resp/resp_value.dart';
 
 /// Resource limits for one Pub/Sub session.
 final class PubSubLimits {
@@ -84,84 +85,32 @@ final class PubSubConnectionConfiguration {
 
   /// Inherited command and incoming-frame limits.
   final RunnelLimits connectionLimits;
-
-  void _validate() {
-    if (host.isEmpty) throw ArgumentError.value(host, 'host', 'must not be empty');
-    if (port <= 0 || port > 65535) {
-      throw ArgumentError.value(port, 'port', 'must be between 1 and 65535');
-    }
-    if (database < 0) throw ArgumentError.value(database, 'database', 'must be nonnegative');
-    if (connectTimeout <= Duration.zero) {
-      throw ArgumentError.value(connectTimeout, 'connectTimeout', 'must be positive');
-    }
-    if (!tls && securityContext != null) {
-      throw ArgumentError.value(securityContext, 'securityContext', 'requires TLS');
-    }
-    connectionLimits.validate();
-  }
 }
 
 /// One bounded, dynamically subscribed Pub/Sub connection.
 final class PubSubSession {
   PubSubSession._(
-    this._configuration,
+    this._endpoint,
+    this._connectTimeout,
+    this._connectionLimits,
     this._controlTimeout,
     this._limits,
     this._onClosed,
   ) {
-    _endpoint = ConnectionConfiguration(
-      host: _configuration.host,
-      port: _configuration.port,
-      tls: _configuration.tls,
-      securityContext: _configuration.securityContext,
-      database: _configuration.database,
-      username: _configuration.username,
-      password: _configuration.password,
-    );
-    _events = PubSubEventStream(
+    _events = PubSubEventQueue(
       maxBufferedEvents: _limits.maxBufferedEvents,
       maxBufferedBytes: _limits.maxBufferedBytes,
       onOverflow: (limit) => _overflow(limit: limit),
-      onCancel: () => _closing ??= _close(listenerCancelled: true),
     );
   }
 
-  /// Opens a dedicated connection and completes its HELLO/SELECT handshake.
-  ///
-  /// [onClosed] is invoked once after the socket is released so a parent client can
-  /// unregister ownership.
-  static Future<PubSubSession> connect(
-    PubSubConnectionConfiguration configuration, {
-    Duration controlTimeout = const Duration(seconds: 5),
-    PubSubLimits limits = const PubSubLimits(),
-    void Function(PubSubSession session)? onClosed,
-    void Function(PubSubSession session)? onCreated,
-  }) async {
-    configuration._validate();
-    limits._validate();
-    if (controlTimeout <= Duration.zero) {
-      throw ArgumentError.value(controlTimeout, 'controlTimeout', 'must be positive');
-    }
-    final session = PubSubSession._(configuration, controlTimeout, limits, onClosed);
-    onCreated?.call(session);
-    try {
-      await session._openInitialTransport();
-      return session;
-    } on Object {
-      await session._transport?.close();
-      session
-        .._state = PubSubState.closed
-        .._notifyClosed();
-      rethrow;
-    }
-  }
-
-  final PubSubConnectionConfiguration _configuration;
-  late final ConnectionConfiguration _endpoint;
+  final ConnectionConfiguration _endpoint;
+  final Duration _connectTimeout;
+  final RunnelLimits _connectionLimits;
   final Duration _controlTimeout;
   final PubSubLimits _limits;
   final void Function(PubSubSession session)? _onClosed;
-  late final PubSubEventStream _events;
+  late final PubSubEventQueue _events;
   final Map<String, int> _channelRevisions = {};
   final Set<String> _desiredChannels = {};
   final Set<String> _acknowledgedChannels = {};
@@ -174,7 +123,6 @@ final class PubSubSession {
   Future<void>? _closing;
   Future<void>? _recovery;
   Future<void>? _explicitReconnect;
-  Completer<void>? _readyAfterRecovery;
   Timer? _reconnectTimer;
   Completer<bool>? _reconnectWaiter;
   PubSubState _state = PubSubState.reconnecting;
@@ -185,8 +133,32 @@ final class PubSubSession {
   bool _closedCallbackSent = false;
   PubSubInterrupted? _lastInterruption;
 
-  /// Ordered single-listener message and lifecycle events.
-  Stream<PubSubEvent> get events => _events;
+  /// Hot events with one successful consumer acquisition per session lifetime.
+  ///
+  /// Consumption pulls from the session's bounded queue. Early completion,
+  /// interruption, and scope exit close the session. Terminal faults discard
+  /// normal queued events, emit one interruption event, then fail the next pull.
+  /// A second consumer fails without disturbing the original owner.
+  Flow<PubSubEvent, RunnelError> get events => Flow.fromPull(
+    Effect.defer((_) {
+      if (_consumerClaimed) {
+        return Effect.fail<PubSubSession, RunnelError>(
+          const RunnelUsageError('Pub/Sub events permit one consumer per session lifetime.'),
+        );
+      }
+      _consumerClaimed = true;
+      return Effect.succeed<PubSubSession, RunnelError>(this);
+    }),
+    next: (session, _) => RunnelOperation.run((operation) {
+      operation.onCancel(() => session._closing ??= session._close(listenerCancelled: true));
+      return session._events.next();
+    }),
+    release: (session, _) => RunnelOperation.release(
+      () => session._closing ??= session._close(listenerCancelled: true),
+    ),
+  );
+
+  bool _consumerClaimed = false;
 
   /// Current connection and reconciliation state.
   PubSubState get state => _state;
@@ -204,14 +176,19 @@ final class PubSubSession {
   PubSubInterrupted? get lastInterruption => _lastInterruption;
 
   Future<void> _openInitialTransport() async {
-    await _openTransport(_configuration.connectTimeout);
+    await _openTransport(Deadline(_connectTimeout));
+    if (_state == PubSubState.closed || _state == PubSubState.closing) {
+      throw RunnelClosedError(
+        'The Pub/Sub session closed during acquisition.',
+        stackTrace: StackTrace.current,
+      );
+    }
     _generation = 1;
     _backoff.reset();
     _state = PubSubState.ready;
   }
 
-  Future<void> _openTransport(Duration timeout) async {
-    final deadline = ConnectionDeadline(timeout);
+  Future<void> _openTransport(Deadline deadline) async {
     final attempt = ConnectionAttempt();
     _openingTransport = attempt;
     late final PubSubTransport transport;
@@ -219,11 +196,24 @@ final class PubSubSession {
     try {
       transport = await PubSubTransport.open(
         _endpoint,
-        limits: _configuration.connectionLimits,
-        timeout: deadline.remaining,
+        limits: _connectionLimits,
+        deadline: deadline,
         attempt: attempt,
-        onFrame: (value) {
-          if (identical(_transport, transport)) _onFrame(value);
+        acceptsChannel: (channel) =>
+            identical(_transport, transport) && _desiredChannels.contains(channel),
+        onMessage: (channel, payload) {
+          if (identical(_transport, transport)) {
+            _emit(PubSubMessage(generation: _generation, channel: channel, payload: payload));
+          }
+        },
+        onAcknowledgement: (kind, channel) {
+          if (!identical(_transport, transport)) return;
+          switch (kind) {
+            case ControlKind.subscribe:
+              _acknowledgedChannels.add(channel);
+            case ControlKind.unsubscribe:
+              _acknowledgedChannels.remove(channel);
+          }
         },
         onTerminated: (error) {
           if (identical(_transport, transport)) _onTransportTerminated(error);
@@ -232,11 +222,11 @@ final class PubSubSession {
       transportOpened = true;
       if (_state == PubSubState.closing || _state == PubSubState.closed) {
         await transport.close();
-        throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
+        throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
       }
       _transport = transport;
       for (final command in _endpoint.handshakeCommands) {
-        await transport.requestReply(command, timeout: deadline.remaining);
+        await transport.requestReply(command, deadline: deadline);
       }
     } on Object {
       if (transportOpened) {
@@ -251,19 +241,31 @@ final class PubSubSession {
   }
 
   /// Adds [channels] to desired state and waits for every relevant acknowledgement.
-  Future<void> subscribe(List<String> channels, {Duration? timeout}) async {
-    final deadline = _validatedTimeout(timeout);
-    final requested = _validatedChannels(channels);
+  Effect<void, RunnelError> subscribe(List<String> channels, {Duration? timeout}) {
+    final captured = List<String>.unmodifiable(channels);
+    return RunnelOperation.run((operation) => _subscribe(captured, timeout, operation));
+  }
+
+  Future<void> _subscribe(
+    List<String> channels,
+    Duration? timeout,
+    RunnelOperation execution,
+  ) async {
+    final deadline = RunnelOperation.validate(() => _validatedTimeout(timeout));
+    final requested = RunnelOperation.validate(() => _validatedChannels(channels));
     if (_state == PubSubState.closed || _state == PubSubState.closing) {
-      return Future.error(const RedisClosedException(message: 'The Pub/Sub session is closed.'));
+      return Future.error(
+        RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current),
+      );
     }
     final resultingCount = _desiredChannels.union(requested.toSet()).length;
     if (resultingCount > _limits.maxChannels) {
       return Future.error(
-        RedisLimitException(
-          message: 'The subscription would exceed ${_limits.maxChannels} desired channels.',
-          deliveryStatus: RedisDeliveryStatus.notSent,
+        RunnelLimitError(
+          'The subscription would exceed ${_limits.maxChannels} desired channels.',
+          deliveryStatus: const Some(RedisDeliveryStatus.notSent),
           limit: _limits.maxChannels,
+          stackTrace: StackTrace.current,
         ),
       );
     }
@@ -272,6 +274,7 @@ final class PubSubSession {
         .where((channel) => !_acknowledgedChannels.contains(channel))
         .toList();
     final reservation = _reserveControl('SUBSCRIBE', needsWire);
+    execution.onCancel(() => _closing ??= _close(listenerCancelled: true));
     final operationRevision = ++_revision;
     final additions = <String>{};
     for (final channel in requested) {
@@ -291,11 +294,22 @@ final class PubSubSession {
   }
 
   /// Removes [channels] from desired state immediately, then waits for wire acknowledgement.
-  Future<void> unsubscribe(List<String> channels, {Duration? timeout}) async {
-    final deadline = _validatedTimeout(timeout);
-    final requested = _validatedChannels(channels);
+  Effect<void, RunnelError> unsubscribe(List<String> channels, {Duration? timeout}) {
+    final captured = List<String>.unmodifiable(channels);
+    return RunnelOperation.run((operation) => _unsubscribe(captured, timeout, operation));
+  }
+
+  Future<void> _unsubscribe(
+    List<String> channels,
+    Duration? timeout,
+    RunnelOperation execution,
+  ) async {
+    final deadline = RunnelOperation.validate(() => _validatedTimeout(timeout));
+    final requested = RunnelOperation.validate(() => _validatedChannels(channels));
     if (_state == PubSubState.closed || _state == PubSubState.closing) {
-      return Future.error(const RedisClosedException(message: 'The Pub/Sub session is closed.'));
+      return Future.error(
+        RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current),
+      );
     }
     final disconnected = _state == PubSubState.reconnecting;
     final needsWire = requested
@@ -307,6 +321,7 @@ final class PubSubSession {
     final reservation = disconnected
         ? const _ControlReservation(0, 0)
         : _reserveControl('UNSUBSCRIBE', needsWire);
+    execution.onCancel(() => _closing ??= _close(listenerCancelled: true));
     final operationRevision = ++_revision;
     for (final channel in requested) {
       _desiredChannels.remove(channel);
@@ -327,16 +342,24 @@ final class PubSubSession {
   }
 
   /// Replaces the physical connection and restores the desired channel set.
-  Future<void> reconnect({Duration? timeout}) {
+  Effect<void, RunnelError> reconnect({Duration? timeout}) =>
+      RunnelOperation.run((operation) => _reconnect(timeout, operation));
+
+  Future<void> _reconnect(Duration? timeout, RunnelOperation execution) {
     if (_state == PubSubState.closed || _state == PubSubState.closing) {
-      return Future.error(const RedisClosedException(message: 'The Pub/Sub session is closed.'));
+      return Future.error(
+        RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current),
+      );
     }
+    RunnelOperation.validate(() {
+      if (timeout != null && timeout <= Duration.zero) {
+        throw ArgumentError.value(timeout, 'timeout');
+      }
+    });
+    execution.onCancel(() => _closing ??= _close(listenerCancelled: true));
     final existing = _explicitReconnect;
     if (existing != null) return existing;
-    final deadline = timeout ?? _configuration.connectTimeout + _controlTimeout;
-    if (deadline <= Duration.zero) {
-      return Future.error(ArgumentError.value(deadline, 'timeout', 'must be positive'));
-    }
+    final deadline = timeout ?? _connectTimeout + _controlTimeout;
     final operation = _startExplicitReconnect(deadline);
     _explicitReconnect = operation;
     unawaited(
@@ -352,18 +375,14 @@ final class PubSubSession {
     return operation;
   }
 
-  /// Releases the dedicated socket and completes the event stream without an error event.
-  Future<void> close() => _closing ??= _close(listenerCancelled: false);
+  /// Releases the dedicated socket and completes event consumption normally.
+  Effect<void, Never> close() => RunnelOperation.release(closeFuture);
 
   Future<void> _close({required bool listenerCancelled}) async {
     if (_state == PubSubState.closed) return;
     _state = PubSubState.closing;
     _cancelReconnectDelay();
-    final ready = _readyAfterRecovery;
-    if (ready != null && !ready.isCompleted) {
-      ready.completeError(const RedisClosedException(message: 'The Pub/Sub session closed.'));
-    }
-    _failControls(const RedisClosedException(message: 'The Pub/Sub session closed.'));
+    _failControls(RunnelClosedError('The Pub/Sub session closed.', stackTrace: StackTrace.current));
     _desiredChannels.clear();
     _acknowledgedChannels.clear();
     final transport = _transport;
@@ -409,21 +428,21 @@ final class PubSubSession {
       commands++;
       bytes += _controlCommand(command, chunk).encodedLength;
     }
-    final connectionLimits = _configuration.connectionLimits;
+    final connectionLimits = _connectionLimits;
     if (_reservedControlCommands + commands > connectionLimits.maxPendingCommands) {
-      throw RedisLimitException(
-        message:
-            'The request would exceed ${connectionLimits.maxPendingCommands} pending controls.',
-        deliveryStatus: RedisDeliveryStatus.notSent,
+      throw RunnelLimitError(
+        'The request would exceed ${connectionLimits.maxPendingCommands} pending controls.',
+        deliveryStatus: const Some(RedisDeliveryStatus.notSent),
         limit: connectionLimits.maxPendingCommands,
+        stackTrace: StackTrace.current,
       );
     }
     if (_reservedControlBytes + bytes > connectionLimits.maxPendingBytes) {
-      throw RedisLimitException(
-        message:
-            'The request would exceed ${connectionLimits.maxPendingBytes} pending control bytes.',
-        deliveryStatus: RedisDeliveryStatus.notSent,
+      throw RunnelLimitError(
+        'The request would exceed ${connectionLimits.maxPendingBytes} pending control bytes.',
+        deliveryStatus: const Some(RedisDeliveryStatus.notSent),
         limit: connectionLimits.maxPendingBytes,
+        stackTrace: StackTrace.current,
       );
     }
     _reservedControlCommands += commands;
@@ -456,10 +475,10 @@ final class PubSubSession {
       if (_state == PubSubState.reconnecting) {
         final remaining = operation.remaining;
         if (remaining <= Duration.zero) throw TimeoutException('Subscription control timed out.');
-        await _readyAfterRecovery!.future.timeout(remaining);
+        await _recovery!.timeout(remaining);
       }
       if (_state == PubSubState.closed || _state == PubSubState.closing) {
-        throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
+        throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
       }
       _state = PubSubState.subscribing;
       _ensureCurrent(operation);
@@ -485,22 +504,23 @@ final class PubSubSession {
             .timeout(remaining);
       }
       _ensureCurrent(operation);
-    } on SubscriptionSupersededException {
+    } on RunnelSubscriptionError {
       _rollbackAdditions(operation);
       rethrow;
     } on TimeoutException catch (error, stackTrace) {
       _rollbackAdditions(operation);
-      final failure = RedisTimeoutException(
-        message: 'The Pub/Sub subscription deadline expired.',
-        deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+      final failure = RunnelTimeoutError(
+        'The Pub/Sub subscription deadline expired.',
+        deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
         cause: error,
+        stackTrace: stackTrace,
       );
       _terminateForControlFailure(
         PubSubInterruptionCause.subscriptionTimeout,
         failure,
       );
       Error.throwWithStackTrace(failure, stackTrace);
-    } on RedisServerException catch (error, stackTrace) {
+    } on RunnelServerError catch (error, stackTrace) {
       _rollbackAdditions(operation);
       _terminateForControlFailure(PubSubInterruptionCause.subscriptionRejection, error);
       Error.throwWithStackTrace(error, stackTrace);
@@ -515,11 +535,12 @@ final class PubSubSession {
   void _expireControl(_ControlOperation operation) {
     if (operation.isCompleted) return;
     _rollbackAdditions(operation);
-    final failure = RedisTimeoutException(
-      message: 'The Pub/Sub subscription deadline expired.',
-      deliveryStatus: operation.submitted
-          ? RedisDeliveryStatus.outcomeUnknown
-          : RedisDeliveryStatus.notSent,
+    final failure = RunnelTimeoutError(
+      'The Pub/Sub subscription deadline expired.',
+      deliveryStatus: Some(
+        operation.submitted ? RedisDeliveryStatus.outcomeUnknown : RedisDeliveryStatus.notSent,
+      ),
+      stackTrace: StackTrace.current,
     );
     if (operation.submitted || operation.kind == ControlKind.unsubscribe) {
       _terminateForControlFailure(PubSubInterruptionCause.subscriptionTimeout, failure);
@@ -531,11 +552,16 @@ final class PubSubSession {
 
   void _ensureCurrent(_ControlOperation operation) {
     if (operation.isCompleted) {
-      throw const RedisClosedException(message: 'The Pub/Sub control operation was cancelled.');
+      throw RunnelClosedError(
+        'The Pub/Sub control operation was cancelled.',
+        stackTrace: StackTrace.current,
+      );
     }
     for (final channel in operation.channels) {
       if (_channelRevisions[channel] != operation.revision) {
-        throw const SubscriptionSupersededException();
+        throw const RunnelSubscriptionError(
+          'A later subscription change superseded this operation.',
+        );
       }
     }
   }
@@ -558,69 +584,18 @@ final class PubSubSession {
     _releaseReservation(operation.reservation);
   }
 
-  void _onFrame(RespValue received) {
-    try {
-      final value = switch (received) {
-        RespAttributed(:final value) => value,
-        _ => received,
-      };
-      if (value case RespError(:final code, :final message)) {
-        _transport?.rejectControl(RedisServerException(code: code, message: message));
-        return;
-      }
-      final parts = switch (value) {
-        RespPush(:final values) => values,
-        _ => throw const FormatException('Expected a Pub/Sub push frame.'),
-      };
-      if (parts.isEmpty) throw const FormatException('Received an empty Pub/Sub frame.');
-      final type = respText(parts.first).toLowerCase();
-      switch (type) {
-        case 'message':
-          if (parts.length != 3) throw const FormatException('Malformed Pub/Sub message.');
-          final channel = respText(parts[1]);
-          if (!_desiredChannels.contains(channel)) return;
-          final payload = _replyBytes(parts[2]);
-          _emit(PubSubMessage(generation: _generation, channel: channel, payload: payload));
-        case 'subscribe':
-          _handleAcknowledgement(parts, ControlKind.subscribe);
-        case 'unsubscribe':
-          _handleAcknowledgement(parts, ControlKind.unsubscribe);
-        case 'pong':
-          break;
-        default:
-          throw FormatException('Unsupported Pub/Sub frame type $type.');
-      }
-    } on Object catch (error) {
-      _terminateTerminal(PubSubInterruptionCause.protocolFailure, error);
-    }
-  }
-
-  void _handleAcknowledgement(List<RespValue> parts, ControlKind kind) {
-    if (parts.length != 3) throw const FormatException('Malformed Pub/Sub acknowledgement.');
-    final channel = respText(parts[1]);
-    switch (kind) {
-      case ControlKind.subscribe:
-        _acknowledgedChannels.add(channel);
-      case ControlKind.unsubscribe:
-        _acknowledgedChannels.remove(channel);
-    }
-    _transport?.acknowledge(kind, channel);
-  }
-
   void _onTransportTerminated(Object error) {
     if (_state == PubSubState.closing || _state == PubSubState.closed) return;
     if (_generation == 0) return;
-    _transport = null;
-    if (error is RedisProtocolException ||
-        error is RedisLimitException ||
-        error is FormatException) {
+    if (error is RunnelProtocolError || error is RunnelLimitError || error is FormatException) {
       _terminateTerminal(PubSubInterruptionCause.protocolFailure, error);
       return;
     }
-    final failure = RedisTransportException(
-      message: 'The Pub/Sub connection was interrupted.',
-      deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+    final failure = RunnelTransportError(
+      'The Pub/Sub connection was interrupted.',
+      deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
       cause: error,
+      stackTrace: StackTrace.current,
     );
     _interrupt(PubSubInterruptionCause.networkLoss, failure);
     if (_state != PubSubState.closed && _recovery == null) {
@@ -645,7 +620,9 @@ final class PubSubSession {
       generation: _generation,
       cause: cause,
       terminal: false,
-      error: error,
+      error: cause == PubSubInterruptionCause.explicitReconnect
+          ? const None()
+          : Some(RunnelOperation.expected(error, StackTrace.current)),
     );
     _lastInterruption = interruption;
     _emit(interruption);
@@ -656,7 +633,7 @@ final class PubSubSession {
   }
 
   Future<void> _startExplicitReconnect(Duration timeout) async {
-    final deadline = ConnectionDeadline(timeout);
+    final deadline = Deadline(timeout);
     final startingChannels = Set<String>.of(_desiredChannels);
     final automaticRecovery = _recovery;
     if (automaticRecovery != null) {
@@ -668,47 +645,48 @@ final class PubSubSession {
       }
     }
     if (_state == PubSubState.closed || _state == PubSubState.closing) {
-      throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
+      throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
     }
     _interrupt(
       PubSubInterruptionCause.explicitReconnect,
-      const RedisTransportException(
-        message: 'The Pub/Sub connection was replaced explicitly.',
-        deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+      RunnelTransportError(
+        'The Pub/Sub connection was replaced explicitly.',
+        deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+        stackTrace: StackTrace.current,
       ),
     );
     if (_state == PubSubState.closed) {
-      Error.throwWithStackTrace(lastInterruption!.error!, StackTrace.current);
+      Error.throwWithStackTrace(
+        (lastInterruption!.error as Some<RunnelError>).value,
+        StackTrace.current,
+      );
     }
     await _beginRecovery(
       immediate: true,
-      overallTimeout: deadline.remaining,
+      deadline: deadline,
       restorationTarget: startingChannels,
     );
   }
 
   Future<void> _beginRecovery({
     required bool immediate,
-    Duration? overallTimeout,
+    Deadline? deadline,
     Set<String>? restorationTarget,
   }) {
     final existing = _recovery;
     if (existing != null) return existing;
-    final ready = Completer<void>();
-    _readyAfterRecovery = ready;
-    unawaited(ready.future.then<void>((_) {}, onError: (_, _) {}));
-    final recovery = overallTimeout == null
-        ? _recoverAutomatically(immediate: immediate)
-        : _recoverExplicitly(overallTimeout, restorationTarget!);
+    final recovery = _recover(
+      immediate: immediate,
+      deadline: deadline,
+      restorationTarget: restorationTarget,
+    );
     _recovery = recovery;
     unawaited(
       recovery.then<void>(
         (_) {
-          if (!ready.isCompleted) ready.complete();
           if (identical(_recovery, recovery)) _recovery = null;
         },
         onError: (Object error, StackTrace stackTrace) {
-          if (!ready.isCompleted) ready.completeError(error, stackTrace);
           if (identical(_recovery, recovery)) _recovery = null;
         },
       ),
@@ -716,71 +694,69 @@ final class PubSubSession {
     return recovery;
   }
 
-  Future<void> _recoverAutomatically({required bool immediate}) async {
+  // Automatic recovery follows current desires without an overall deadline.
+  // Explicit recovery shares one deadline and restores its starting snapshot.
+  Future<void> _recover({
+    required bool immediate,
+    Deadline? deadline,
+    Set<String>? restorationTarget,
+  }) async {
     var skipDelay = immediate;
     while (_state == PubSubState.reconnecting) {
-      if (!skipDelay && !await _waitForReconnectDelay(_backoff.next())) return;
-      skipDelay = false;
       try {
-        await _replaceAndRestore(
-          connectTimeout: _configuration.connectTimeout,
-          controlTimeout: _controlTimeout,
-        );
-        return;
-      } on Object catch (error, stackTrace) {
-        _throwTerminalRecoveryFailure(error, stackTrace, automatic: true);
-        if (_state == PubSubState.reconnecting && _transport != null) {
-          _interrupt(
-            error is TimeoutException
-                ? PubSubInterruptionCause.subscriptionTimeout
-                : PubSubInterruptionCause.networkLoss,
-            error,
-          );
+        if (!skipDelay && !await _waitForReconnectDelay(_backoff.next(), deadline: deadline)) {
+          if (deadline != null) {
+            throw TimeoutException('The explicit Pub/Sub reconnect deadline expired.');
+          }
+          return;
         }
-        if (_state != PubSubState.reconnecting) return;
-      }
-    }
-  }
-
-  Future<void> _recoverExplicitly(Duration timeout, Set<String> restorationTarget) async {
-    final deadline = ConnectionDeadline(timeout);
-    var firstAttempt = true;
-    while (_state == PubSubState.reconnecting) {
-      try {
-        if (!firstAttempt && !await _waitForReconnectDelay(_backoff.next(), deadline: deadline)) {
-          throw TimeoutException('The explicit Pub/Sub reconnect deadline expired.');
-        }
-        firstAttempt = false;
-        final remaining = deadline.remaining;
+        skipDelay = false;
         await _replaceAndRestore(
-          connectTimeout: remaining,
-          controlTimeout: remaining,
+          deadline: deadline,
           restorationTarget: restorationTarget,
-          overallDeadline: deadline,
         );
         return;
-      } on TimeoutException catch (error, stackTrace) {
-        _failExplicitReconnect(error, stackTrace);
       } on Object catch (error, stackTrace) {
-        _throwTerminalRecoveryFailure(error, stackTrace, automatic: false);
-        if (_state != PubSubState.reconnecting) {
-          throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
-        }
-        try {
-          deadline.remaining;
-        } on TimeoutException catch (error, stackTrace) {
+        if (deadline != null && error is TimeoutException) {
           _failExplicitReconnect(error, stackTrace);
         }
+        _throwTerminalRecoveryFailure(error, stackTrace, automatic: deadline == null);
+        if (deadline == null) {
+          if (_state == PubSubState.reconnecting && _transport != null) {
+            _interrupt(
+              error is TimeoutException
+                  ? PubSubInterruptionCause.subscriptionTimeout
+                  : PubSubInterruptionCause.networkLoss,
+              error,
+            );
+          }
+          if (_state != PubSubState.reconnecting) return;
+        } else {
+          if (_state != PubSubState.reconnecting) {
+            throw RunnelClosedError(
+              'The Pub/Sub session is closed.',
+              stackTrace: StackTrace.current,
+            );
+          }
+          try {
+            deadline.remaining;
+          } on TimeoutException catch (error, stackTrace) {
+            _failExplicitReconnect(error, stackTrace);
+          }
+        }
       }
     }
-    throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
+    if (deadline != null) {
+      throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
+    }
   }
 
   Never _failExplicitReconnect(TimeoutException error, StackTrace stackTrace) {
-    final failure = RedisTimeoutException(
-      message: 'The explicit Pub/Sub reconnect deadline expired.',
-      deliveryStatus: RedisDeliveryStatus.notSent,
+    final failure = RunnelTimeoutError(
+      'The explicit Pub/Sub reconnect deadline expired.',
+      deliveryStatus: const Some(RedisDeliveryStatus.notSent),
       cause: error,
+      stackTrace: stackTrace,
     );
     _terminateTerminal(PubSubInterruptionCause.explicitReconnect, failure);
     Error.throwWithStackTrace(failure, stackTrace);
@@ -795,8 +771,8 @@ final class PubSubSession {
       _terminateTerminal(PubSubInterruptionCause.subscriptionRejection, error.error);
       Error.throwWithStackTrace(error.error, stackTrace);
     }
-    if (error is RedisServerException ||
-        error is RedisProtocolException ||
+    if (error is RunnelServerError ||
+        error is RunnelProtocolError ||
         (automatic && error is HandshakeException)) {
       _terminateTerminal(PubSubInterruptionCause.protocolFailure, error);
       Error.throwWithStackTrace(error, stackTrace);
@@ -804,34 +780,31 @@ final class PubSubSession {
   }
 
   Future<void> _replaceAndRestore({
-    required Duration connectTimeout,
-    required Duration controlTimeout,
+    Deadline? deadline,
     Set<String>? restorationTarget,
-    ConnectionDeadline? overallDeadline,
   }) async {
     final previous = _transport;
     _transport = null;
     await previous?.close();
-    await _openTransport(overallDeadline?.remaining ?? connectTimeout);
+    await _openTransport(deadline ?? Deadline(_connectTimeout));
     _generation++;
     _backoff.reset();
     try {
       await _restoreDesiredChannels(
-        overallDeadline?.remaining ?? controlTimeout,
+        deadline ?? Deadline(_controlTimeout),
         restorationTarget: restorationTarget,
       );
-    } on RedisServerException catch (error) {
+    } on RunnelServerError catch (error) {
       throw _RestorationRejected(error);
     }
     if (_state != PubSubState.reconnecting) {
-      throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
+      throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
     }
     _state = PubSubState.ready;
     _emit(PubSubRestored(generation: _generation, channels: _acknowledgedChannels));
   }
 
-  Future<void> _restoreDesiredChannels(Duration timeout, {Set<String>? restorationTarget}) async {
-    final deadline = ConnectionDeadline(timeout);
+  Future<void> _restoreDesiredChannels(Deadline deadline, {Set<String>? restorationTarget}) async {
     while (_state == PubSubState.reconnecting) {
       final target = restorationTarget == null
           ? Set<String>.of(_desiredChannels)
@@ -849,7 +822,7 @@ final class PubSubSession {
         }
       }
     }
-    throw const RedisClosedException(message: 'The Pub/Sub session is closed.');
+    throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
   }
 
   Future<void> _sendRestorationControl(
@@ -860,18 +833,19 @@ final class PubSubSession {
     final name = kind == ControlKind.subscribe ? 'SUBSCRIBE' : 'UNSUBSCRIBE';
     final command = _controlCommand(name, channels);
     final encoded = encodeCommand(command as RedisCommand<Object?>);
-    final connectionLimits = _configuration.connectionLimits;
+    final connectionLimits = _connectionLimits;
     if (encoded.length > connectionLimits.maxPendingBytes) {
-      throw RedisLimitException(
-        message: 'Restoration exceeds ${connectionLimits.maxPendingBytes} pending control bytes.',
-        deliveryStatus: RedisDeliveryStatus.notSent,
+      throw RunnelLimitError(
+        'Restoration exceeds ${connectionLimits.maxPendingBytes} pending control bytes.',
+        deliveryStatus: const Some(RedisDeliveryStatus.notSent),
         limit: connectionLimits.maxPendingBytes,
+        stackTrace: StackTrace.current,
       );
     }
     return _transport!.sendControl(encoded, kind: kind, channels: channels).timeout(timeout);
   }
 
-  Future<bool> _waitForReconnectDelay(Duration delay, {ConnectionDeadline? deadline}) {
+  Future<bool> _waitForReconnectDelay(Duration delay, {Deadline? deadline}) {
     if (_state != PubSubState.reconnecting) return Future.value(false);
     var actualDelay = delay;
     if (deadline != null) {
@@ -894,16 +868,14 @@ final class PubSubSession {
       generation: _generation,
       cause: cause,
       terminal: true,
-      error: error,
+      error: Some(RunnelOperation.expected(error, StackTrace.current)),
     );
     _lastInterruption = interruption;
-    _emit(interruption);
-    if (_state == PubSubState.closed) return;
     _state = PubSubState.closed;
     _cancelReconnectDelay();
     _acknowledgedChannels.clear();
     _failControls(error);
-    _events.finish();
+    _events.finish(discard: true, terminal: interruption);
     final transport = _transport;
     _transport = null;
     final release = _releaseTerminalResources(_openingTransport, transport);
@@ -915,30 +887,15 @@ final class PubSubSession {
     _events.add(event);
   }
 
-  void _overflow({required int limit}) {
-    if (_state == PubSubState.closed) return;
-    _state = PubSubState.closed;
-    _cancelReconnectDelay();
-    _acknowledgedChannels.clear();
-    final failure = RedisLimitException(
-      message: 'The Pub/Sub event buffer exceeded its configured limit.',
-      deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+  void _overflow({required int limit}) => _terminateTerminal(
+    PubSubInterruptionCause.bufferOverflow,
+    RunnelLimitError(
+      'The Pub/Sub event buffer exceeded its configured limit.',
+      deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
       limit: limit,
-    );
-    _failControls(failure);
-    final interruption = PubSubInterrupted(
-      generation: _generation,
-      cause: PubSubInterruptionCause.bufferOverflow,
-      terminal: true,
-      error: failure,
-    );
-    _lastInterruption = interruption;
-    _events.finish(discard: true, terminal: interruption);
-    final transport = _transport;
-    _transport = null;
-    final release = _releaseTerminalResources(_openingTransport, transport);
-    _closing ??= release.whenComplete(_notifyClosed);
-  }
+      stackTrace: StackTrace.current,
+    ),
+  );
 
   Future<void> _releaseTerminalResources(
     ConnectionAttempt? opening,
@@ -972,7 +929,7 @@ final class PubSubSession {
   }
 }
 
-RedisCommand<void> _controlCommand(String name, List<String> channels) => RedisCommand<void>([
+RedisCommand<void> _controlCommand(String name, List<String> channels) => builtInCommand<void>([
   RedisArgument.text(name),
   ...channels.map(RedisArgument.text),
 ], (_) {});
@@ -984,16 +941,10 @@ Iterable<List<String>> _chunks(List<String> channels) sync* {
   }
 }
 
-Uint8List _replyBytes(RespValue reply) => switch (reply) {
-  RespBlobString(:final value) => Uint8List.fromList(value),
-  RespSimpleString(:final value) => Uint8List.fromList(utf8.encode(value)),
-  _ => throw FormatException('Expected a Pub/Sub payload, received ${reply.runtimeType}.'),
-};
-
 final class _RestorationRejected implements Exception {
   const _RestorationRejected(this.error);
 
-  final RedisServerException error;
+  final RunnelServerError error;
 }
 
 final class _ControlReservation {
@@ -1010,19 +961,18 @@ final class _ControlOperation {
     required this.channels,
     required this.additions,
     required this.revision,
-    required this._deadline,
+    required Duration deadline,
     required this.reservation,
     required this._onRelease,
-  });
+  }) : _deadline = Deadline(deadline);
 
   final ControlKind kind;
   final List<String> channels;
   final Set<String> additions;
   final int revision;
   final _ControlReservation reservation;
-  final Duration _deadline;
+  final Deadline _deadline;
   final void Function(_ControlOperation) _onRelease;
-  final Stopwatch _stopwatch = Stopwatch()..start();
   final Completer<void> _result = Completer<void>();
   Timer? _timer;
   bool submitted = false;
@@ -1030,7 +980,7 @@ final class _ControlOperation {
 
   Future<void> get future => _result.future;
   bool get isCompleted => _result.isCompleted;
-  Duration get remaining => _deadline - _stopwatch.elapsed;
+  Duration get remaining => _deadline.timeLeft;
 
   void startDeadline(void Function() onExpire) => _timer = Timer(remaining, onExpire);
 
@@ -1050,4 +1000,54 @@ final class _ControlOperation {
     _timer?.cancel();
     _onRelease(this);
   }
+}
+
+/// Package-internal parent ownership operations.
+extension PubSubSessionOwnership on PubSubSession {
+  /// Opens a dedicated connection and completes its HELLO/SELECT handshake.
+  ///
+  /// [onClosed] is invoked once after the socket is released so a parent client can
+  /// unregister ownership.
+  static Future<PubSubSession> connect(
+    ConnectionConfiguration configuration, {
+    required Duration connectTimeout,
+    required RunnelLimits connectionLimits,
+    Duration controlTimeout = const Duration(seconds: 5),
+    PubSubLimits limits = const PubSubLimits(),
+    void Function(PubSubSession session)? onClosed,
+    void Function(PubSubSession session)? onCreated,
+  }) async {
+    RunnelOperation.validate(() {
+      connectionLimits.validate();
+      if (connectTimeout <= Duration.zero) {
+        throw ArgumentError.value(connectTimeout, 'connectTimeout', 'must be positive');
+      }
+      limits._validate();
+      if (controlTimeout <= Duration.zero) {
+        throw ArgumentError.value(controlTimeout, 'controlTimeout', 'must be positive');
+      }
+    });
+    final session = PubSubSession._(
+      configuration,
+      connectTimeout,
+      connectionLimits,
+      controlTimeout,
+      limits,
+      onClosed,
+    );
+    onCreated?.call(session);
+    try {
+      await session._openInitialTransport();
+      return session;
+    } on Object {
+      await session._transport?.close();
+      session
+        .._state = PubSubState.closed
+        .._notifyClosed();
+      rethrow;
+    }
+  }
+
+  /// Releases this session for its owning client without starting another runtime.
+  Future<void> closeFuture() => _closing ??= _close(listenerCancelled: false);
 }

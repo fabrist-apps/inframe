@@ -3,12 +3,25 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
 import 'support/resp_peer.dart';
 
 void main() {
+  final throwsInputError = throwsA(
+    isA<EffectException<RunnelError>>().having(
+      (error) => error.cause,
+      'cause',
+      isA<Expected<RunnelError>>().having(
+        (cause) => cause.error,
+        'error',
+        isA<RunnelInputError>(),
+      ),
+    ),
+  );
+
   group('StreamId', () {
     test('should preserve and compare unsigned 64-bit components exactly', () {
       final maximum = BigInt.parse('18446744073709551615');
@@ -50,11 +63,11 @@ void main() {
 
     setUp(() async {
       peer = await _StreamPeer.start();
-      client = await Runnel.connect('redis://127.0.0.1:${peer.port}');
+      client = await Runnel.connect('redis://127.0.0.1:${peer.port}').runFuture();
     });
 
     tearDown(() async {
-      await client.close();
+      await client.close().runFuture();
       await peer.close();
     });
 
@@ -66,12 +79,14 @@ void main() {
         StreamField(sourceField, Uint8List.fromList([2])),
       ];
 
-      final generated = client.xadd(
-        'history',
-        fields,
-        maxLength: 10,
-        approximate: true,
-      );
+      final generated = client
+          .xadd(
+            'history',
+            fields,
+            maxLength: 10,
+            approximate: true,
+          )
+          .runFuture();
       sourceField[0] = 9;
       sourceValue[0] = 9;
       fields.clear();
@@ -81,15 +96,17 @@ void main() {
           'history',
           [StreamField.text('kind', 'created')],
           id: StreamId(BigInt.two, BigInt.from(3)),
-        ),
+        ).runFuture(),
         StreamId(BigInt.two, BigInt.from(3)),
       );
 
-      final entries = await client.xrange(
-        'history',
-        start: StreamBound.id(StreamId(BigInt.one, BigInt.zero)),
-        count: 2,
-      );
+      final entries = await client
+          .xrange(
+            'history',
+            start: StreamBound.id(StreamId(BigInt.one, BigInt.zero)),
+            count: 2,
+          )
+          .runFuture();
       expect(entries, hasLength(1));
       expect(entries.single.id, StreamId.parse('18446744073709551615-7'));
       expect(entries.single.fields, hasLength(2));
@@ -103,31 +120,38 @@ void main() {
       ]);
 
       expect(
-        await client.xrevrange(
-          'history',
-          end: StreamBound.id(StreamId(BigInt.from(9), BigInt.zero)),
-          count: 1,
-        ),
+        await client
+            .xrevrange(
+              'history',
+              end: StreamBound.id(StreamId(BigInt.from(9), BigInt.zero)),
+              count: 1,
+            )
+            .runFuture(),
         isEmpty,
       );
-      expect(await client.xtrim('history', StreamTrim.maxLength(2)), 3);
+      expect(await client.xtrim('history', StreamTrim.maxLength(2)).runFuture(), 3);
       expect(
-        await client.xtrim(
-          'history',
-          StreamTrim.minId(StreamId(BigInt.one, BigInt.zero), approximate: true),
-        ),
+        await client
+            .xtrim(
+              'history',
+              StreamTrim.minId(StreamId(BigInt.one, BigInt.zero), approximate: true),
+            )
+            .runFuture(),
         4,
       );
-      expect(await client.xlen('history'), 5);
+      expect(await client.xlen('history').runFuture(), 5);
 
       final reads = await client.xread({
         'history': StreamId(BigInt.one, BigInt.zero),
         'other': StreamId(BigInt.two, BigInt.zero),
-      }, count: 3);
+      }, count: 3).runFuture();
       expect(reads, hasLength(1));
       expect(reads.single.key, 'history');
       expect(reads.single.entries.single.id, StreamId(BigInt.two, BigInt.zero));
-      expect(await client.xread({'history': StreamId(BigInt.two, BigInt.zero)}), isEmpty);
+      expect(
+        await client.xread({'history': StreamId(BigInt.two, BigInt.zero)}).runFuture(),
+        isEmpty,
+      );
 
       expect(peer.commands.skip(1), [
         [
@@ -199,7 +223,7 @@ void main() {
     });
 
     test('should snapshot returned binary fields', () async {
-      final entries = await client.xrange('history');
+      final entries = await client.xrange('history').runFuture();
       final field = entries.single.fields.first;
 
       final fieldBytes = field.field..[0] = 9;
@@ -214,25 +238,37 @@ void main() {
     });
 
     test('should treat Stream keys as opaque after the STREAMS marker', () async {
-      await client.xread({'BLOCK': StreamId(BigInt.zero, BigInt.zero)});
-      await client.xread({'café': StreamId(BigInt.zero, BigInt.zero)});
+      await client.xread({'BLOCK': StreamId(BigInt.zero, BigInt.zero)}).runFuture();
+      await client.xread({'café': StreamId(BigInt.zero, BigInt.zero)}).runFuture();
 
       expect(peer.commands[1][2], ascii.encode('BLOCK'));
       expect(peer.commands[2][2], utf8.encode('café'));
     });
 
     test('should reject empty fields, cursors, and nonpositive count hints', () async {
-      expect(() => client.xadd('history', []), throwsArgumentError);
-      expect(
-        () => client.xadd('history', [StreamField.text('field', 'value')], maxLength: -1),
-        throwsRangeError,
+      await expectLater(
+        client.xadd('history', []).runFuture(),
+        throwsInputError,
       );
-      expect(() => client.xrange('history', count: 0), throwsArgumentError);
-      expect(() => client.xrevrange('history', count: -1), throwsArgumentError);
-      expect(() => client.xread({}, count: 1), throwsArgumentError);
-      expect(
-        () => client.xread({'history': StreamId(BigInt.zero, BigInt.zero)}, count: 0),
-        throwsArgumentError,
+      await expectLater(
+        client.xadd('history', [StreamField.text('field', 'value')], maxLength: -1).runFuture(),
+        throwsInputError,
+      );
+      await expectLater(
+        client.xrange('history', count: 0).runFuture(),
+        throwsInputError,
+      );
+      await expectLater(
+        client.xrevrange('history', count: -1).runFuture(),
+        throwsInputError,
+      );
+      await expectLater(
+        client.xread({}, count: 1).runFuture(),
+        throwsInputError,
+      );
+      await expectLater(
+        client.xread({'history': StreamId(BigInt.zero, BigInt.zero)}, count: 0).runFuture(),
+        throwsInputError,
       );
       expect(() => StreamTrim.maxLength(-1), throwsRangeError);
 
