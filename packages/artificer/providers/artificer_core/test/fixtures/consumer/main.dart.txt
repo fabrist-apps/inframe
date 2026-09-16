@@ -1,0 +1,112 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:artificer_core/artificer_core.dart';
+import 'package:artificer_core/transport.dart';
+import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
+import 'package:dart_mappable/dart_mappable.dart';
+
+final class TestOptions {
+  const TestOptions(this.tag);
+  final String tag;
+}
+
+final class TextProvider implements LanguageModelProvider {
+  TextProvider(this.endpoint);
+  final Uri endpoint;
+  final client = ProviderHttpClient();
+  @override
+  TextModel languageModel(String modelId) => TextModel(this, modelId);
+  Future<void> close() => client.close();
+}
+
+final class TextModel implements LanguageModel {
+  TextModel(this.provider, this.modelId) {
+    if (modelId.isEmpty) throw ArgumentError.value(modelId, 'modelId');
+  }
+  final TextProvider provider;
+  @override
+  final String modelId;
+  @override
+  String get providerId => 'fixture';
+  @override
+  ModelCapabilities get capabilities => const ModelCapabilities();
+  @override
+  Effect<GenerationResult, AiError> generate(GenerationRequest request, {TestOptions? options}) =>
+      Effect.defer((_) => provider.client.requestJson(
+        url: provider.endpoint,
+        body: {
+          'model': modelId,
+          'messages': [for (final message in request.messages)
+            if (message is UserMessage) {'role': 'user', 'content': [for (final part in message.parts) if (part is TextInputPart) part.text].join()}],
+          'max_tokens': request.options.maxOutputTokens,
+          if (request.options.temperature case final value?) 'temperature': value,
+          if (options != null) 'tag': options.tag,
+        },
+      ).map((response, _) {
+        final data = response.data as Map<String, Object?>;
+        return GenerationResult(
+          message: AssistantMessage([TextOutputPart(data['reply'] as String)]),
+          finishReason: FinishReason.stop,
+          native: NativePayload(providerId: providerId, api: 'fixture', modelId: modelId, data: data),
+          metadata: response.metadata,
+        );
+      }));
+  @override
+  Flow<GenerationEvent, AiError> stream(GenerationRequest request) =>
+      generate(request).asFlow().map((result, _) => GenerationFinished(result));
+}
+
+Future<void> main() async {
+  initializeMappers();
+  initializeMappers();
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final bodies = <Map<String, Object?>>[];
+  server.listen((request) async {
+    bodies.add(jsonDecode(await utf8.decoder.bind(request).join()) as Map<String, Object?>);
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(jsonEncode({'reply': 'hello', 'unknown': {'nested': [1, true]}}));
+    await request.response.close();
+  });
+  final provider = TextProvider(Uri.parse('http://127.0.0.1:${server.port}/generate'));
+  final runtime = Runtime();
+  try {
+    final model = provider.languageModel('unfamiliar-model');
+    final common = model as LanguageModel;
+    final parts = <InputPart>[const TextInputPart('question')];
+    final request = GenerationRequest(messages: [UserMessage(parts)]);
+    final operation = common.generate(request);
+    if (bodies.isNotEmpty) throw StateError('eager inference');
+    parts.add(const TextInputPart('!'));
+    final results = await runtime.run(Effect.all([operation, operation]));
+    if (results case Succeeded(:final value)) {
+      for (final result in value) {
+        final restored = GenerationResult.fromJson(result.toJson());
+        if (restored.text != 'hello' || restored.usage != null) throw StateError('result persistence');
+        final viaMap = GenerationResult.fromMap(restored.toMap());
+        if ((viaMap.native.data as Map)['unknown'] == null) throw StateError('unknown data lost');
+        final polymorphic = MapperContainer.globals.fromMap<Message>(result.message.toMap());
+        if (polymorphic is! AssistantMessage) throw StateError('polymorphic decoding');
+        if (result.toString().contains('hello') || result.metadata.toString().contains('headers')) throw StateError('diagnostic leak');
+      }
+    } else {
+      throw StateError('$results');
+    }
+    final override = await runtime.run(model.generate(request, options: const TestOptions('typed')));
+    if (override is! Succeeded<GenerationResult, AiError>) throw StateError('typed options');
+    if (bodies.length != 3 || bodies.first['model'] != 'unfamiliar-model' || bodies.first['max_tokens'] != 4096 || bodies.first.containsKey('temperature')) throw StateError('wire defaults/attempts');
+    if ((bodies.first['messages'] as List).first['content'] != 'question!') throw StateError('cold ordinary collections');
+    if (bodies.last['tag'] != 'typed') throw StateError('concrete options');
+    final restoredRequest = GenerationRequest.fromJson(request.toJson());
+    if (restoredRequest.messages.length != 1) throw StateError('request persistence');
+    final unknownVersion = AssistantMessage([]).toMap()..['schemaVersion'] = 2;
+    var rejected = false;
+    try { AssistantMessage.fromMap(unknownVersion); } on Object { rejected = true; }
+    if (!rejected) throw StateError('unknown version accepted');
+  } finally {
+    await provider.close();
+    await runtime.close();
+    await server.close(force: true);
+  }
+}

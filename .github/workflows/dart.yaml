@@ -25,6 +25,12 @@ jobs:
       - name: Resolve workspace dependencies
         run: dart pub get
 
+      - name: Generate provider foundation mappers
+        working-directory: packages/artificer/providers/artificer_core
+        run: |
+          dart run build_runner build
+          dart format lib
+
       - name: Generate Conflux mappers
         working-directory: packages/conflux
         run: |
@@ -47,6 +53,9 @@ jobs:
 
       - name: Analyze
         run: dart analyze
+
+      - name: Run provider foundation tests and consumer checks
+        run: dart test packages/artificer/providers/artificer_core/test --chain-stack-traces
 
       - name: Run context tests and consumer checks
         run: dart test packages/context/test --chain-stack-traces
