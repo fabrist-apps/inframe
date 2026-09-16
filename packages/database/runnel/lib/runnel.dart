@@ -2,7 +2,7 @@
 library;
 
 export 'src/batch.dart';
-export 'src/blocking.dart';
+export 'src/blocking.dart' show BlockingSession;
 export 'src/client.dart';
 export 'src/command.dart' show RedisArgument, RedisCommand, encodeCommand;
 export 'src/commands/collections.dart';

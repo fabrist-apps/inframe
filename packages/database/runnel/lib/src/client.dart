@@ -110,10 +110,14 @@ final class Runnel {
     }
   }
 
-  Future<RedisConnection> _openPhysicalConnection({Duration? timeout}) async {
+  Future<RedisConnection> _openPhysicalConnection({
+    Duration? timeout,
+    RunnelOperation? operation,
+  }) async {
     final deadline = ConnectionDeadline(timeout ?? _connectTimeout);
     final attempt = ConnectionAttempt();
     _openingConnections.add(attempt);
+    final detach = operation?.onCancel(attempt.cancel);
     RedisConnection? connection;
     try {
       connection = await RedisConnection.open(
@@ -129,12 +133,17 @@ final class Runnel {
       for (final command in _endpoint.handshakeCommands) {
         await connection.execute(command, timeout: deadline.remaining, enforceLimits: false);
       }
+      if (operation?.isCancelled ?? false) {
+        await connection.close(commandsAreUncertain: true);
+        throw const RedisClosedException(message: 'Connection acquisition cancelled.');
+      }
       _unclaimedConnections.add(connection);
       return connection;
     } on Object {
       await connection?.close(commandsAreUncertain: true);
       rethrow;
     } finally {
+      detach?.call();
       attempt.finish();
       _openingConnections.remove(attempt);
     }
@@ -265,11 +274,14 @@ final class Runnel {
   }
 
   /// Opens a dedicated connection for one blocking operation at a time.
-  Future<BlockingSession> blocking() async {
+  Effect<BlockingSession, RunnelError> blocking() => RunnelOperation.run(_blocking);
+
+  Future<BlockingSession> _blocking(RunnelOperation operation) async {
     _readyConnection();
     late RedisConnection openingConnection;
     final session = await BlockingSession.internal(
-      openConnection: () async => openingConnection = await _openPhysicalConnection(),
+      openConnection: () async =>
+          openingConnection = await _openPhysicalConnection(operation: operation),
       commandTimeout: _commandTimeout,
       onClosed: _blockingSessions.remove,
       onCreated: (session) {
@@ -277,10 +289,11 @@ final class Runnel {
         _blockingSessions.add(session);
       },
     );
-    if (_state != _ClientState.ready) {
-      await session.close();
+    if (_state != _ClientState.ready || operation.isCancelled) {
+      await session.closeFuture();
       throw const RedisClosedException(message: 'The Runnel client is closing.');
     }
+    operation.onCancel(session.closeFuture);
     return session;
   }
 
@@ -387,7 +400,7 @@ final class Runnel {
     await _withinShutdown(
       Future.wait([
         ...opening.map((attempt) => attempt.cancel()),
-        ...blockingSessions.map((session) => session.close()),
+        ...blockingSessions.map((session) => session.closeFuture()),
         ...pubSubSessions.map((session) => session.close()),
         ...transactions.map(
           (transaction) => transaction.close(commandsAreUncertain: true),

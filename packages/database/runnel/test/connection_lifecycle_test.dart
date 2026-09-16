@@ -394,12 +394,12 @@ void main() {
         peer.endpoint,
         shutdownTimeout: const Duration(milliseconds: 20),
       ).runFuture();
-      final blocking = await client.blocking();
+      final blocking = await client.blocking().runFuture();
       final pubSub = await client.openPubSub();
 
       final ordinary = client.ping().runFuture();
       final transaction = (client.transaction()..add(_pingCommand())).exec();
-      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30));
+      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30)).runFuture();
       final subscription = pubSub.subscribe(['orders']);
       final ordinaryFailure = expectLater(
         ordinary,
@@ -412,7 +412,16 @@ void main() {
         ),
       );
       final transactionFailure = expectLater(transaction, throwsA(isA<RunnelException>()));
-      final blockingFailure = expectLater(blocked, throwsA(isA<RedisClosedException>()));
+      final blockingFailure = expectLater(
+        blocked,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
       final subscriptionFailure = expectLater(
         subscription,
         throwsA(isA<RedisClosedException>()),
@@ -447,7 +456,7 @@ void main() {
         peer.endpoint,
         shutdownTimeout: const Duration(milliseconds: 50),
       ).runFuture();
-      final blocking = await client.blocking();
+      final blocking = await client.blocking().runFuture();
       final pubSub = await client.openPubSub();
       peer.holdCommands = true;
 
@@ -464,9 +473,18 @@ void main() {
           ),
         ),
       );
-      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30));
+      final blocked = blocking.blpop(['jobs'], wait: const Duration(seconds: 30)).runFuture();
       final subscribed = pubSub.subscribe(['orders']);
-      final blockedFailure = expectLater(blocked, throwsA(isA<RedisClosedException>()));
+      final blockedFailure = expectLater(
+        blocked,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (e) => e.cause.expectedErrors.single,
+            'error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
       final subscribeFailure = expectLater(subscribed, throwsA(isA<RedisClosedException>()));
       await peer.waitForCommandCount('BLPOP', 1);
       await peer.waitForCommandCount('SUBSCRIBE', 1);
@@ -486,7 +504,7 @@ void main() {
       ).runFuture();
       peer.holdHandshakes = true;
 
-      final openingBlocking = client.blocking();
+      final openingBlocking = client.blocking().runFuture();
       final openingPubSub = client.openPubSub();
       final openingTransaction = (client.transaction()..add(_pingCommand())).exec();
       final blockingFailure = expectLater(openingBlocking, throwsA(anything));

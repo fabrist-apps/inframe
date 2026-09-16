@@ -374,35 +374,47 @@ void main() {
               isA<Some<String>>().having((value) => value.value, 'value', 'written'),
             );
 
-            final blocking = await client.blocking();
-            addTearDown(blocking.close);
+            final blocking = await client.blocking().runFuture();
+            addTearDown(() => blocking.close().runFuture());
             final blockingList = 'runnel:integration:blocking-list:$suffix';
             final leftPop = blocking.blpop(
               [blockingList],
               wait: const Duration(seconds: 1),
-            );
+            ).runFuture();
             expect(await client.rpush(blockingList, ['left']), 1);
-            expect(await leftPop, (key: blockingList, value: 'left'));
+            expect(
+              await leftPop,
+              isA<Some<({String key, String value})>>().having((s) => s.value, 'value', (
+                key: blockingList,
+                value: 'left',
+              )),
+            );
 
             final rightPop = blocking.brpop(
               [blockingList],
               wait: const Duration(seconds: 1),
-            );
+            ).runFuture();
             expect(await client.lpush(blockingList, ['right']), 1);
-            expect(await rightPop, (key: blockingList, value: 'right'));
+            expect(
+              await rightPop,
+              isA<Some<({String key, String value})>>().having((s) => s.value, 'value', (
+                key: blockingList,
+                value: 'right',
+              )),
+            );
             expect(
               await blocking.blpop(
                 ['runnel:integration:empty-list:$suffix'],
                 wait: const Duration(milliseconds: 1),
-              ),
-              isNull,
+              ).runFuture(),
+              isA<None>(),
             );
 
             final blockingStream = 'runnel:integration:blocking-stream:$suffix';
             final blockingRead = blocking.xread(
               {blockingStream: StreamId(BigInt.zero, BigInt.zero)},
               wait: const Duration(seconds: 1),
-            );
+            ).runFuture();
             final deliveredStreamId = await client.xadd(
               blockingStream,
               [StreamField.text('event', 'delivered')],
@@ -412,14 +424,14 @@ void main() {
               await blocking.xread(
                 {blockingStream: deliveredStreamId},
                 wait: const Duration(milliseconds: 1),
-              ),
+              ).runFuture(),
               isEmpty,
             );
 
             final isolatedWait = blocking.blpop(
               [blockingList],
               wait: const Duration(seconds: 1),
-            );
+            ).runFuture();
             expect(await client.set('$blockingList:ordinary', 'ready').runFuture(), isTrue);
             expect(
               await client.get('$blockingList:ordinary').runFuture(),

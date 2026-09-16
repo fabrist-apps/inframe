@@ -51,6 +51,7 @@ base class RedisCommand<T> {
     try {
       return _decode(reply);
     } on Object catch (error, stack) {
+      if (error is CommandDecoderDefect) rethrow;
       throw CommandDecoderDefect(error, stack);
     }
   }
