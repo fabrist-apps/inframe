@@ -86,7 +86,12 @@ final class RunnelOperation {
       deliveryStatus: Some(error.deliveryStatus),
       stackTrace: stack,
     ),
-    RedisServerException() => RunnelServerError(error.message, code: error.code, stackTrace: stack),
+    RedisServerException() => RunnelServerError(
+      error.message,
+      code: error.code,
+      cause: error,
+      stackTrace: stack,
+    ),
     RedisTransactionException() => RunnelTransactionError(
       error.message,
       cause: error.cause,

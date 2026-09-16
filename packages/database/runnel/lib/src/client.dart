@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:conflux/effect.dart';
+import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:runnel/src/batch.dart';
 import 'package:runnel/src/blocking.dart';
@@ -226,29 +227,42 @@ final class Runnel {
   ///
   /// Both attempts share one deadline. The fallback is a later command, so callers
   /// should await script dependencies before submitting independent work.
-  Future<T> runScript<T>(
+  Effect<T, RunnelError> runScript<T>(
     RedisScript<T> script, {
     required List<String> keys,
     required List<RedisArgument> arguments,
     Duration? timeout,
-  }) async {
-    final duration = timeout ?? _commandTimeout;
-    _positive(duration, 'timeout');
-    final acceptedAt = Stopwatch()..start();
+  }) {
     final ownedKeys = List<String>.unmodifiable(keys);
     final ownedArguments = List<RedisArgument>.unmodifiable(arguments);
-    try {
-      return await executeFuture(
-        evalshaCommand(script, keys: ownedKeys, arguments: ownedArguments),
-        timeout: _scriptTimeRemaining(duration, acceptedAt),
-      );
-    } on RedisServerException catch (error) {
-      if (error.code.toUpperCase() != 'NOSCRIPT') rethrow;
-    }
-    return executeFuture(
-      evalCommand(script, keys: ownedKeys, arguments: ownedArguments),
-      timeout: _scriptTimeRemaining(duration, acceptedAt),
-    );
+    final duration = timeout ?? _commandTimeout;
+    return Effect.defer((_) {
+      if (duration <= Duration.zero) {
+        return Effect.fail(const RunnelInputError('Script timeout must be positive.'));
+      }
+      final acceptedAt = Stopwatch()..start();
+      Effect<T, RunnelError> submit(RedisCommand<T> command) => Effect.defer((_) {
+        final remaining = duration - acceptedAt.elapsed;
+        if (remaining <= Duration.zero) {
+          return Effect.fail(
+            const RunnelTimeoutError(
+              'The Redis script deadline expired before submission.',
+              deliveryStatus: Some(RedisDeliveryStatus.notSent),
+            ),
+          );
+        }
+        return execute(command, timeout: remaining);
+      });
+      return submit(evalshaCommand(script, keys: ownedKeys, arguments: ownedArguments))
+          .catchError((error, _) {
+            if (error is! RunnelServerError ||
+                error.code.toUpperCase() != 'NOSCRIPT' ||
+                error.cause is! RedisServerException) {
+              return Effect.fail(error);
+            }
+            return submit(evalCommand(script, keys: ownedKeys, arguments: ownedArguments));
+          });
+    });
   }
 
   /// Creates a typed, ordered pipeline builder without performing I/O.
@@ -441,17 +455,6 @@ Future<void> _withinShutdown(Future<void> work, ConnectionDeadline deadline) asy
   } on TimeoutException {
     // Every release has started; shutdown must not outlive its deadline.
   }
-}
-
-Duration _scriptTimeRemaining(Duration timeout, Stopwatch stopwatch) {
-  final remaining = timeout - stopwatch.elapsed;
-  if (remaining <= Duration.zero) {
-    throw const RedisTimeoutException(
-      message: 'The Redis script deadline expired before submission.',
-      deliveryStatus: RedisDeliveryStatus.notSent,
-    );
-  }
-  return remaining;
 }
 
 enum _ClientState { connecting, ready, reconnecting, closing, closed }
