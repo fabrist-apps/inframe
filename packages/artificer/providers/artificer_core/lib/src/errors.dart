@@ -117,7 +117,8 @@ final class ProviderError extends AiError with ProviderErrorMappable {
     }
   }
 
-  /// Output received before failure, when available.
+  /// Raw JSON output received before failure, when available.
+  @MappableField(hook: JsonValueHook())
   final Object? partialOutput;
 
   /// Decodes a map using the shipped generated mapper.
@@ -149,7 +150,8 @@ final class ProtocolError extends AiError with ProtocolErrorMappable {
   /// Creates a [ProtocolError] retaining the supplied values.
   const ProtocolError(super.message, {this.partialOutput});
 
-  /// Output received before failure, when available.
+  /// Raw JSON output received before failure, when available.
+  @MappableField(hook: JsonValueHook())
   final Object? partialOutput;
 
   /// Decodes a map using the shipped generated mapper.
@@ -168,7 +170,8 @@ final class ResponseLimitError extends AiError with ResponseLimitErrorMappable {
   /// Limit.
   final int? limit;
 
-  /// Output received before failure, when available.
+  /// Raw JSON output received before failure, when available.
+  @MappableField(hook: JsonValueHook())
   final Object? partialOutput;
 
   /// Decodes a map using the shipped generated mapper.

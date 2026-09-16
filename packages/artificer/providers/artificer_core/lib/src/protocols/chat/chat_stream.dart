@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:artificer_core/src/errors.dart';
@@ -22,7 +23,7 @@ final class ChatStreamAssembly {
     this.choiceIndex = 0,
     int maxResponseBytes = 64 * 1024 * 1024,
   }) : assembler = GenerationAssembler(maxResponseBytes: maxResponseBytes),
-       _raw = {'model': model, 'choices': <Object?>[]};
+       _raw = _SizedJsonObject({'model': model, 'choices': <Object?>[]});
 
   /// Pure codec owning native normalization and provider identity.
   final ChatCodec codec;
@@ -35,10 +36,10 @@ final class ChatStreamAssembly {
 
   /// Core bounded common/native output assembly.
   final GenerationAssembler assembler;
-  final Map<String, Object?> _raw;
-  final Map<String, Object?> _message = {'role': 'assistant'};
-  final Map<String, Object?> _choice = {};
-  final Map<int, Map<String, Object?>> _tools = {};
+  final _SizedJsonObject _raw;
+  final _SizedJsonObject _message = _SizedJsonObject({'role': 'assistant'});
+  final _SizedJsonObject _choice = _SizedJsonObject({});
+  final Map<int, _SizedJsonObject> _tools = {};
   final Set<String> _parts = {};
   late ResponseMetadata _metadata;
   String? _finish;
@@ -142,7 +143,7 @@ final class ChatStreamAssembly {
                   ),
                 );
               }
-              _message[key] = '${_message[key] ?? ''}$fragment';
+              _message.append(key, fragment);
               if (kind == GenerationPartKind.text) {
                 add(
                   PartDelta(
@@ -165,11 +166,11 @@ final class ChatStreamAssembly {
                 final toolIndex = ChatCodec.integer(call['index']);
                 final target = _tools.putIfAbsent(
                   toolIndex,
-                  () => {
+                  () => _SizedJsonObject({
                     'type': call['type'] ?? 'function',
                     if (call['type'] == null || call['type'] == 'function')
-                      'function': <String, Object?>{'arguments': ''},
-                  },
+                      'function': _SizedJsonObject({'arguments': ''}),
+                  }),
                 );
                 final isFunction = target['type'] == 'function';
                 final id = 'tool-$toolIndex';
@@ -186,11 +187,14 @@ final class ChatStreamAssembly {
                 for (final field in call.entries) {
                   if (field.key == 'index') continue;
                   if (field.key == 'function' && isFunction) {
-                    final function = ChatCodec.object(target['function']);
+                    final nativeFunction = ChatCodec.object(target['function']);
+                    final function = nativeFunction is _SizedJsonObject
+                        ? nativeFunction
+                        : _SizedJsonObject(nativeFunction);
                     for (final part in ChatCodec.object(field.value).entries) {
                       if (part.key == 'arguments' || part.key == 'name') {
                         final fragment = ChatCodec.string(part.value, allowEmpty: true);
-                        function[part.key] = '${function[part.key] ?? ''}$fragment';
+                        function.append(part.key, fragment);
                         if (part.key == 'arguments') {
                           add(
                             PartDelta(
@@ -203,9 +207,10 @@ final class ChatStreamAssembly {
                         function[part.key] = part.value;
                       }
                     }
+                    target['function'] = function;
                   } else if (field.key == 'id') {
                     final incoming = ChatCodec.string(field.value);
-                    if (target['id'] != incoming) target['id'] = '${target['id'] ?? ''}$incoming';
+                    if (target['id'] != incoming) target.append('id', incoming);
                   } else {
                     target[field.key] = field.value;
                   }
@@ -230,7 +235,7 @@ final class ChatStreamAssembly {
           _raw['choices'] = [_choice];
         }
       }
-      if (utf8.encode(jsonEncode(_raw)).length > assembler.maxResponseBytes) {
+      if (_raw.byteLength > assembler.maxResponseBytes) {
         return Failure(
           ResponseLimitError(
             'Assembled Chat response exceeds byte limit.',
@@ -350,4 +355,77 @@ final class ChatStreamAssembly {
       ),
     _ => error,
   };
+}
+
+/// Caches encoded field sizes. Refresh a parent field after mutating its child.
+/// Stream fragments are counted once instead of re-encoding accumulated text.
+final class _SizedJsonObject extends MapBase<String, Object?> {
+  _SizedJsonObject(Map<String, Object?> values) {
+    addAll(values);
+  }
+
+  final Map<String, Object?> _values = {};
+  final Map<String, int> _fieldBytes = {};
+  int byteLength = 2;
+
+  static int _encodedSize(Object? value) => switch (value) {
+    _SizedJsonObject() => value.byteLength,
+    List<Object?>() =>
+      2 +
+          (value.isEmpty ? 0 : value.length - 1) +
+          value.fold(0, (sum, item) => sum + _encodedSize(item)),
+    _ => utf8.encode(jsonEncode(value)).length,
+  };
+
+  @override
+  Object? operator [](Object? key) => _values[key];
+
+  @override
+  void operator []=(String key, Object? value) {
+    _set(key, value, _encodedSize(value));
+  }
+
+  void _set(String key, Object? value, int valueBytes) {
+    final oldBytes = _fieldBytes[key];
+    if (oldBytes == null) {
+      byteLength += _encodedSize(key) + 1 + (_values.isEmpty ? 0 : 1);
+    }
+    byteLength += valueBytes - (oldBytes ?? 0);
+    _fieldBytes[key] = valueBytes;
+    _values[key] = value;
+  }
+
+  void append(String key, String fragment) {
+    final previous = (_values[key] ?? '') as String;
+    var size = (_fieldBytes[key] ?? 2) + _encodedSize(fragment) - 2;
+    // A surrogate pair split across frames encodes differently when joined.
+    if (previous.isNotEmpty && fragment.isNotEmpty) {
+      final last = previous.codeUnitAt(previous.length - 1);
+      final first = fragment.codeUnitAt(0);
+      if (last >= 0xd800 && last <= 0xdbff && first >= 0xdc00 && first <= 0xdfff) {
+        final left = String.fromCharCode(last);
+        final right = String.fromCharCode(first);
+        size += _encodedSize('$left$right') - _encodedSize(left) - _encodedSize(right) + 2;
+      }
+    }
+    _set(key, '$previous$fragment', size);
+  }
+
+  @override
+  Iterable<String> get keys => _values.keys;
+
+  @override
+  Object? remove(Object? key) {
+    final size = _fieldBytes.remove(key);
+    if (size == null) return null;
+    byteLength -= _encodedSize(key) + 1 + size + (_values.length > 1 ? 1 : 0);
+    return _values.remove(key);
+  }
+
+  @override
+  void clear() {
+    _values.clear();
+    _fieldBytes.clear();
+    byteLength = 2;
+  }
 }
