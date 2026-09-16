@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
@@ -322,7 +323,7 @@ void main() {
 
       final stream = client.scan(match: 'item:*', count: 2);
       expect(peer.commandCount('SCAN'), 0);
-      expect(await stream.toList(), ['a', 'b', 'b', 'c']);
+      expect(await stream.runCollect().runFuture(), ['a', 'b', 'b', 'c']);
       expect(peer.commandCount('SCAN'), 2);
       expect(peer.commands.where((parts) => parts.first == 'SCAN'), [
         ['SCAN', '0', 'MATCH', 'item:*', 'COUNT', '2'],
@@ -338,7 +339,7 @@ void main() {
       final firstKey = Completer<void>();
       late final StreamSubscription<String> subscription;
 
-      subscription = client.scan().listen((_) {
+      subscription = client.scan().toStream().listen((_) {
         if (!firstKey.isCompleted) {
           firstKey.complete();
           unawaited(subscription.cancel());

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
 import 'package:conflux/option.dart';
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
@@ -313,22 +314,53 @@ extension RunnelScalarCommands on Runnel {
   Effect<String, RunnelError> type(String key, {Duration? timeout}) =>
       deferCommand(() => typeCommand(key), timeout: timeout);
 
-  /// Iterates SCAN pages as requested by the listener.
+  /// Iterates SCAN pages on demand in an independent scope per consumption.
   ///
-  /// SCAN is not a snapshot and can emit duplicate keys. Each page receives its own [timeout].
-  /// Cancelling stops new page requests but cannot retract a page already sent to Redis.
-  Stream<String> scan({String? match, int? count, Duration? timeout}) async* {
-    var cursor = '0';
-    do {
-      final page = await executeFuture(
-        scanCommand(cursor, match: match, count: count),
-        timeout: timeout,
+  /// SCAN is not a snapshot and can emit duplicate keys. Each page receives its
+  /// own [timeout]. Early termination stops later pages; cancellation of an
+  /// outstanding page follows ordinary-command cancellation and FIFO safety.
+  Flow<String, RunnelError> scan({String? match, int? count, Duration? timeout}) =>
+      Flow.fromPull<String, RunnelError, _ScanSource>(
+        Effect.sync(
+          (_) => _ScanSource(
+            (cursor) => deferCommand(
+              () => scanCommand(cursor, match: match, count: count),
+              timeout: timeout,
+            ),
+          ),
+        ),
+        next: (source, _) => source.next(),
+        release: (source, _) => Effect.sync((_) => source.close()),
       );
-      cursor = page.cursor;
-      for (final key in page.keys) {
-        yield key;
-      }
-    } while (cursor != '0');
+}
+
+/// One consumption owns only its current page and the next Redis cursor.
+final class _ScanSource {
+  _ScanSource(this._readPage);
+
+  final Effect<ScanPage, RunnelError> Function(String cursor) _readPage;
+  var _cursor = '0';
+  var _keys = <String>[];
+  var _index = 0;
+  var _started = false;
+
+  Effect<Option<String>, RunnelError> next() => Effect.build(($) async {
+    while (_index == _keys.length) {
+      if (_started && _cursor == '0') return const None();
+      final page = await $(_readPage(_cursor));
+      _started = true;
+      _cursor = page.cursor;
+      _keys = page.keys;
+      _index = 0;
+    }
+    return Some(_keys[_index++]);
+  });
+
+  void close() {
+    _keys = const [];
+    _index = 0;
+    _cursor = '0';
+    _started = true;
   }
 }
 
