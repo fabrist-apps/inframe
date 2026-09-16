@@ -96,16 +96,21 @@ class ProviderHttpClient {
       }
       final responseBody = response.data;
       if (responseBody == null) return Flow.fail(const ProtocolError('Missing response body.'));
+      // A consumer may open events inside a nested Flow scope. Abort there
+      // before the parser subscription waits for another body chunk to cancel.
       final events =
           Flow.fromStream<SseEvent, AiError>(
-            (_) => parser.decode(responseBody.stream),
-            capacity: eventCapacity,
-            onError: (error, stack, _) => _mapError(error, stack, opened.handle),
-          ).catchError(
-            (error, _) => opened.handle.interrupted
-                ? Effect.failCause<SseEvent, AiError>(const Interrupted('Provider closed')).asFlow()
-                : Flow.fail(error),
-          );
+                (_) => parser.decode(responseBody.stream),
+                capacity: eventCapacity,
+                onError: (error, stack, _) => _mapError(error, stack, opened.handle),
+              )
+              .ensuring(_dispose(opened.handle))
+              .catchError(
+                (error, _) => opened.handle.interrupted
+                    ? Effect.failCause<SseEvent, AiError>(const Interrupted('Provider closed'))
+                          .asFlow()
+                    : Flow.fail(error),
+              );
       // Abort reads before closing the async generator's subscription. This
       // unblocks a parser waiting for the next chunk when the consumer stops.
       return consume(_metadata(response), events).ensuring(_dispose(opened.handle));

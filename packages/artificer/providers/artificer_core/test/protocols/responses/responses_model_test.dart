@@ -61,6 +61,56 @@ void main() {
       expect(result.usage, isNull);
     });
 
+    for (final status in ['completed', 'incomplete']) {
+      test('should finish $status output while the HTTP body stays open', () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        final client = ProviderHttpClient();
+        final runtime = Runtime();
+        addTearDown(() async {
+          await client.close();
+          await runtime.close();
+          await server.close(force: true);
+        });
+        server.listen((request) async {
+          await request.drain<void>();
+          request.response.headers.contentType = ContentType('text', 'event-stream');
+          request.response.bufferOutput = false;
+          final response = responseFixture()..['status'] = status;
+          if (status == 'incomplete') {
+            response['incomplete_details'] = {'reason': 'max_output_tokens'};
+          }
+          request.response.write(
+            'data: ${jsonEncode({'type': 'response.$status', 'response': response})}\n\n',
+          );
+          request.response.write(': padding${'x' * 4096}\n\n');
+          await request.response.flush();
+          // Deliberately leave the body open after the protocol terminal event.
+        });
+        final model = CompatibleResponsesModel(
+          modelId: 'm',
+          client: client,
+          codec: ResponsesCodec(
+            ResponsesDialect(
+              providerId: 'p',
+              route: (_) => Uri.parse('http://127.0.0.1:${server.port}/'),
+              authentication: () => {},
+              hostedToolTypes: {'web_search'},
+            ),
+          ),
+        );
+        final exit = await runtime
+            .run(
+              model.stream(GenerationRequest(messages: [UserMessage.text('x')])).runCollect(),
+            )
+            .timeout(const Duration(seconds: 3));
+        final events = (exit as Succeeded<List<GenerationEvent>, AiError>).value;
+        expect(events.whereType<PartFinished>(), isNotEmpty);
+        expect(events.whereType<UsageUpdated>(), isNotEmpty);
+        expect(events.last, isA<GenerationFinished>());
+        expect(events.whereType<GenerationFinished>().single.result.text, 'hello');
+      });
+    }
+
     for (final alternate in [false, true]) {
       test(
         'should use one native path with ${alternate ? 'alternate' : 'standard'} route auth instruction and event hooks',

@@ -154,11 +154,17 @@ final class CompatibleResponsesModel implements LanguageModel {
             consume: (metadata, events) {
               state.metadata = metadata;
               return Effect.fromResult(state.start()).asFlow().concat(
-                events.concatMap(
-                  (event, _) => Effect.fromResult(state.add(event))
-                      .asFlow()
-                      .concatMap((events, _) => Flow.fromIterable(events).widenError<AiError>()),
-                ),
+                events
+                    .mapEffect((event, _) => Effect.fromResult(state.add(event)))
+                    .concatMap(
+                      (batch, _) => Flow.fromIterable(<GenerationEvent?>[
+                        ...batch,
+                        // Stop after retaining all events from the terminal frame.
+                        if (state.terminal) null,
+                      ]).widenError<AiError>(),
+                    )
+                    .takeWhile((event, _) => event != null)
+                    .map((event, _) => event!),
               );
             },
           ),

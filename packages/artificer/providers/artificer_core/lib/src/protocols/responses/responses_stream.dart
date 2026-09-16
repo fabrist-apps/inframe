@@ -37,6 +37,9 @@ final class ResponsesStreamDecoder {
   GenerationResult? _final;
   AiError? _failure;
 
+  /// Whether a valid terminal response snapshot has been received.
+  bool get terminal => _final != null;
+
   /// Begins the normalized stream after valid response headers.
   Result<GenerationEvent, AiError> start() =>
       _assembler.add(GenerationStarted(requestId: metadata?.requestId));
