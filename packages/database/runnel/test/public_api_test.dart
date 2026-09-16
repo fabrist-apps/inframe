@@ -27,10 +27,13 @@ void main() {
       );
 
       final source = Uint8List.fromList([0, 255, 1]);
-      final write = client.setBytes('blob', source);
+      final write = client.setBytes('blob', source).runFuture();
       source[1] = 7;
       expect(await write, isTrue);
-      expect(await client.getBytes('blob'), [0, 255, 1]);
+      expect(
+        await client.getBytes('blob').runFuture(),
+        isA<Some<Uint8List>>().having((value) => value.value, 'value', [0, 255, 1]),
+      );
       expect(await client.get('missing').runFuture(), isA<None>());
 
       expect(peer.commands, [

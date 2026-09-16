@@ -152,7 +152,7 @@ void main() {
       );
       expect(
         getBytesCommand('key').decode(RespBlobString([0, 255])).getOrThrowWith((error) => error),
-        [0, 255],
+        isA<Some<Uint8List>>().having((value) => value.value, 'value', [0, 255]),
       );
       expect(incrCommand('key').decode(const RespInteger(3)).getOrThrowWith((error) => error), 3);
       expect(pttlCommand('key').decode(const RespInteger(-2)).getOrThrowWith((error) => error), -2);
@@ -220,8 +220,12 @@ void main() {
           )
           .getOrThrowWith((error) => error);
 
-      expect(values, ['one', null, 'two']);
-      expect(() => values.add('changed'), throwsUnsupportedError);
+      expect(values, [
+        isA<Some<String>>().having((value) => value.value, 'value', 'one'),
+        isA<None>(),
+        isA<Some<String>>().having((value) => value.value, 'value', 'two'),
+      ]);
+      expect(() => values.add(const Some('changed')), throwsUnsupportedError);
     });
 
     test('should decode SCAN cursor and keys without removing duplicates', () {
@@ -291,19 +295,23 @@ void main() {
       final client = await Runnel.connect(peer.endpoint).runFuture();
       addTearDown(() => client.close().runFuture());
 
-      expect(await client.mget(['a', 'missing', 'a']), ['one', null, 'two']);
-      await client.mset({'a': 'one', 'b': 'two'});
-      expect(await client.incr('counter'), 2);
-      expect(await client.incrby('counter', 4), 6);
-      expect(await client.decr('counter'), 5);
-      expect(await client.decrby('counter', 3), 2);
-      expect(await client.del(['a', 'a']), 1);
-      expect(await client.unlink(['b']), 1);
-      expect(await client.exists(['a', 'a']), 2);
-      expect(await client.persist('a'), isTrue);
-      expect(await client.expire('a', Duration.zero), isTrue);
-      expect(await client.pttl('a'), -2);
-      expect(await client.type('a'), 'none');
+      expect(await client.mget(['a', 'missing', 'a']).runFuture(), [
+        isA<Some<String>>().having((value) => value.value, 'value', 'one'),
+        isA<None>(),
+        isA<Some<String>>().having((value) => value.value, 'value', 'two'),
+      ]);
+      await client.mset({'a': 'one', 'b': 'two'}).runFuture();
+      expect(await client.incr('counter').runFuture(), 2);
+      expect(await client.incrby('counter', 4).runFuture(), 6);
+      expect(await client.decr('counter').runFuture(), 5);
+      expect(await client.decrby('counter', 3).runFuture(), 2);
+      expect(await client.del(['a', 'a']).runFuture(), 1);
+      expect(await client.unlink(['b']).runFuture(), 1);
+      expect(await client.exists(['a', 'a']).runFuture(), 2);
+      expect(await client.persist('a').runFuture(), isTrue);
+      expect(await client.expire('a', Duration.zero).runFuture(), isTrue);
+      expect(await client.pttl('a').runFuture(), -2);
+      expect(await client.type('a').runFuture(), 'none');
     });
 
     test('should request SCAN pages lazily and preserve duplicates', () async {

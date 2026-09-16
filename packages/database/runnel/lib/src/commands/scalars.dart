@@ -4,6 +4,7 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/commands/execution.dart';
 import 'package:runnel/src/commands/reply_decoding.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
@@ -89,10 +90,11 @@ final class Get extends RedisCommand<Option<String>> {
 }
 
 /// Builds a typed binary GET command.
-RedisCommand<Uint8List?> getBytesCommand(String key) => RedisCommand<Uint8List?>.internal(
-  [RedisArgument.text('GET'), RedisArgument.text(key)],
-  _decodeNullableBytes,
-);
+RedisCommand<Option<Uint8List>> getBytesCommand(String key) =>
+    RedisCommand<Option<Uint8List>>.internal(
+      [RedisArgument.text('GET'), RedisArgument.text(key)],
+      _decodeBytes,
+    );
 
 /// Builds a typed text SET command.
 RedisCommand<bool> setCommand(
@@ -121,11 +123,11 @@ RedisCommand<bool> setBytesCommand(
 );
 
 /// Builds an MGET command that preserves key order and duplicates.
-RedisCommand<List<String?>> mgetCommand(Iterable<String> keys) {
+RedisCommand<List<Option<String>>> mgetCommand(Iterable<String> keys) {
   final snapshot = _nonEmpty(keys, 'keys');
-  return RedisCommand<List<String?>>.internal(
+  return RedisCommand<List<Option<String>>>.internal(
     [RedisArgument.text('MGET'), ...snapshot.map(RedisArgument.text)],
-    (reply) => reply.nullableTextList,
+    (reply) => reply.optionalTextList,
   );
 }
 
@@ -212,13 +214,13 @@ RedisCommand<ScanPage> scanCommand(
 
 /// Scalar and key conveniences for [Runnel].
 extension RunnelScalarCommands on Runnel {
-  /// Reads strict UTF-8 text, returning null when [key] is missing.
+  /// Reads strict UTF-8 text, returning None when [key] is missing.
   Effect<Option<String>, RunnelError> get(String key, {Duration? timeout}) =>
-      execute(getCommand(key), timeout: timeout);
+      deferCommand(() => getCommand(key), timeout: timeout);
 
-  /// Reads binary data, returning null when [key] is missing.
-  Future<Uint8List?> getBytes(String key, {Duration? timeout}) =>
-      executeFuture(getBytesCommand(key), timeout: timeout);
+  /// Reads binary data, returning None when [key] is missing.
+  Effect<Option<Uint8List>, RunnelError> getBytes(String key, {Duration? timeout}) =>
+      deferCommand(() => getBytesCommand(key), timeout: timeout);
 
   /// Stores text and reports whether Redis applied the write.
   Effect<bool, RunnelError> set(
@@ -227,76 +229,89 @@ extension RunnelScalarCommands on Runnel {
     SetCondition condition = SetCondition.always,
     Expiry? expiry,
     Duration? timeout,
-  }) => execute(
-    setCommand(key, value, condition: condition, expiry: expiry),
+  }) => deferCommand(
+    () => setCommand(key, value, condition: condition, expiry: expiry),
     timeout: timeout,
   );
 
   /// Stores binary data and reports whether Redis applied the write.
-  Future<bool> setBytes(
+  Effect<bool, RunnelError> setBytes(
     String key,
     Uint8List value, {
     SetCondition condition = SetCondition.always,
     Expiry? expiry,
     Duration? timeout,
-  }) => executeFuture(
-    setBytesCommand(key, value, condition: condition, expiry: expiry),
-    timeout: timeout,
-  );
+  }) {
+    final snapshot = Uint8List.fromList(value);
+    return deferCommand(
+      () => setBytesCommand(key, snapshot, condition: condition, expiry: expiry),
+      timeout: timeout,
+    );
+  }
 
   /// Reads multiple strict UTF-8 values in key order.
-  Future<List<String?>> mget(Iterable<String> keys, {Duration? timeout}) =>
-      executeFuture(mgetCommand(keys), timeout: timeout);
+  Effect<List<Option<String>>, RunnelError> mget(Iterable<String> keys, {Duration? timeout}) {
+    final snapshot = List<String>.of(keys);
+    return deferCommand(() => mgetCommand(snapshot), timeout: timeout);
+  }
 
   /// Stores multiple text values atomically.
-  Future<void> mset(Map<String, String> values, {Duration? timeout}) =>
-      executeFuture(msetCommand(values), timeout: timeout);
+  Effect<void, RunnelError> mset(Map<String, String> values, {Duration? timeout}) {
+    final snapshot = Map<String, String>.of(values);
+    return deferCommand(() => msetCommand(snapshot), timeout: timeout);
+  }
 
   /// Increments the integer value at [key] by one.
-  Future<int> incr(String key, {Duration? timeout}) =>
-      executeFuture(incrCommand(key), timeout: timeout);
+  Effect<int, RunnelError> incr(String key, {Duration? timeout}) =>
+      deferCommand(() => incrCommand(key), timeout: timeout);
 
   /// Increments the integer value at [key] by [increment].
-  Future<int> incrby(String key, int increment, {Duration? timeout}) =>
-      executeFuture(incrbyCommand(key, increment), timeout: timeout);
+  Effect<int, RunnelError> incrby(String key, int increment, {Duration? timeout}) =>
+      deferCommand(() => incrbyCommand(key, increment), timeout: timeout);
 
   /// Decrements the integer value at [key] by one.
-  Future<int> decr(String key, {Duration? timeout}) =>
-      executeFuture(decrCommand(key), timeout: timeout);
+  Effect<int, RunnelError> decr(String key, {Duration? timeout}) =>
+      deferCommand(() => decrCommand(key), timeout: timeout);
 
   /// Decrements the integer value at [key] by [decrement].
-  Future<int> decrby(String key, int decrement, {Duration? timeout}) =>
-      executeFuture(decrbyCommand(key, decrement), timeout: timeout);
+  Effect<int, RunnelError> decrby(String key, int decrement, {Duration? timeout}) =>
+      deferCommand(() => decrbyCommand(key, decrement), timeout: timeout);
 
   /// Deletes [keys] synchronously and returns the number removed.
-  Future<int> del(Iterable<String> keys, {Duration? timeout}) =>
-      executeFuture(delCommand(keys), timeout: timeout);
+  Effect<int, RunnelError> del(Iterable<String> keys, {Duration? timeout}) {
+    final snapshot = List<String>.of(keys);
+    return deferCommand(() => delCommand(snapshot), timeout: timeout);
+  }
 
   /// Schedules [keys] for asynchronous deletion and returns the number removed.
-  Future<int> unlink(Iterable<String> keys, {Duration? timeout}) =>
-      executeFuture(unlinkCommand(keys), timeout: timeout);
+  Effect<int, RunnelError> unlink(Iterable<String> keys, {Duration? timeout}) {
+    final snapshot = List<String>.of(keys);
+    return deferCommand(() => unlinkCommand(snapshot), timeout: timeout);
+  }
 
   /// Counts how many of [keys] exist, preserving duplicate-key Redis semantics.
-  Future<int> exists(Iterable<String> keys, {Duration? timeout}) =>
-      executeFuture(existsCommand(keys), timeout: timeout);
+  Effect<int, RunnelError> exists(Iterable<String> keys, {Duration? timeout}) {
+    final snapshot = List<String>.of(keys);
+    return deferCommand(() => existsCommand(snapshot), timeout: timeout);
+  }
 
   /// Removes the expiration from [key].
-  Future<bool> persist(String key, {Duration? timeout}) =>
-      executeFuture(persistCommand(key), timeout: timeout);
+  Effect<bool, RunnelError> persist(String key, {Duration? timeout}) =>
+      deferCommand(() => persistCommand(key), timeout: timeout);
 
   /// Applies a whole-millisecond expiration to [key].
   ///
   /// Zero and negative durations retain Redis's immediate-deletion behavior.
-  Future<bool> expire(String key, Duration duration, {Duration? timeout}) =>
-      executeFuture(expireCommand(key, duration), timeout: timeout);
+  Effect<bool, RunnelError> expire(String key, Duration duration, {Duration? timeout}) =>
+      deferCommand(() => expireCommand(key, duration), timeout: timeout);
 
   /// Returns the remaining expiration in milliseconds, including `-1` and `-2`.
-  Future<int> pttl(String key, {Duration? timeout}) =>
-      executeFuture(pttlCommand(key), timeout: timeout);
+  Effect<int, RunnelError> pttl(String key, {Duration? timeout}) =>
+      deferCommand(() => pttlCommand(key), timeout: timeout);
 
   /// Returns Redis's type name for [key], including `none` when it is missing.
-  Future<String> type(String key, {Duration? timeout}) =>
-      executeFuture(typeCommand(key), timeout: timeout);
+  Effect<String, RunnelError> type(String key, {Duration? timeout}) =>
+      deferCommand(() => typeCommand(key), timeout: timeout);
 
   /// Iterates SCAN pages as requested by the listener.
   ///
@@ -367,9 +382,9 @@ List<String> _nonEmpty(Iterable<String> values, String name) {
   return snapshot;
 }
 
-Uint8List? _decodeNullableBytes(RespValue reply) => switch (reply) {
-  RespNull() => null,
-  RespBlobString(:final value) => Uint8List.fromList(value),
+Option<Uint8List> _decodeBytes(RespValue reply) => switch (reply) {
+  RespNull() => const None(),
+  RespBlobString(:final value) => Some(Uint8List.fromList(value)),
   _ => throw FormatException('Expected a binary or null reply, received ${reply.runtimeType}.'),
 };
 

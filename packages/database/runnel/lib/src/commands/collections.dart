@@ -1,6 +1,10 @@
+import 'package:conflux/effect.dart';
+import 'package:conflux/option.dart';
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/commands/execution.dart';
 import 'package:runnel/src/commands/reply_decoding.dart';
+import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// A sorted-set member paired with its Redis score.
@@ -15,14 +19,14 @@ RedisCommand<int> hsetCommand(String key, Map<String, String> fields) {
   ], (reply) => reply.integer);
 }
 
-/// Builds an HGET command for one nullable field value.
-RedisCommand<String?> hgetCommand(String key, String field) =>
-    _command('HGET', [key, field], (reply) => reply.nullableText);
+/// Builds an HGET command for one optional field value.
+RedisCommand<Option<String>> hgetCommand(String key, String field) =>
+    _command('HGET', [key, field], (reply) => reply.optionalText);
 
 /// Builds an HMGET command that preserves field order and duplicates.
-RedisCommand<List<String?>> hmgetCommand(String key, List<String> fields) {
+RedisCommand<List<Option<String>>> hmgetCommand(String key, List<String> fields) {
   final snapshot = _nonEmptyList(fields, 'fields');
-  return _command('HMGET', [key, ...snapshot], (reply) => reply.nullableTextList);
+  return _command('HMGET', [key, ...snapshot], (reply) => reply.optionalTextList);
 }
 
 /// Builds an HGETALL command returning an immutable field map.
@@ -81,12 +85,12 @@ RedisCommand<int> rpushCommand(String key, List<String> elements) {
 }
 
 /// Builds a scalar LPOP command.
-RedisCommand<String?> lpopCommand(String key) =>
-    _command('LPOP', [key], (reply) => reply.nullableText);
+RedisCommand<Option<String>> lpopCommand(String key) =>
+    _command('LPOP', [key], (reply) => reply.optionalText);
 
 /// Builds a scalar RPOP command.
-RedisCommand<String?> rpopCommand(String key) =>
-    _command('RPOP', [key], (reply) => reply.nullableText);
+RedisCommand<Option<String>> rpopCommand(String key) =>
+    _command('RPOP', [key], (reply) => reply.optionalText);
 
 /// Builds an LRANGE command with inclusive rank endpoints.
 RedisCommand<List<String>> lrangeCommand(String key, int start, int stop) =>
@@ -120,9 +124,9 @@ RedisCommand<int> zremCommand(String key, List<String> members) {
 /// Builds a ZCARD command.
 RedisCommand<int> zcardCommand(String key) => _command('ZCARD', [key], (reply) => reply.integer);
 
-/// Builds a ZSCORE command for one nullable member score.
-RedisCommand<double?> zscoreCommand(String key, String member) =>
-    _command('ZSCORE', [key, member], _nullableDouble);
+/// Builds a ZSCORE command for one optional member score.
+RedisCommand<Option<double>> zscoreCommand(String key, String member) =>
+    _command('ZSCORE', [key, member], _optionalDouble);
 
 /// Builds a ZINCRBY command with a finite increment.
 RedisCommand<double> zincrbyCommand(String key, double increment, String member) {
@@ -166,179 +170,206 @@ RedisCommand<int> zremrangebyscoreCommand(
 /// Typed hash, set, list, and sorted-set commands.
 extension RunnelCollectionCommands on Runnel {
   /// Sets [fields] and returns the number of newly added fields.
-  Future<int> hset(
+  Effect<int, RunnelError> hset(
     String key,
     Map<String, String> fields, {
     Duration? timeout,
-  }) => executeFuture(hsetCommand(key, fields), timeout: timeout);
+  }) {
+    final snapshot = Map<String, String>.of(fields);
+    return deferCommand(() => hsetCommand(key, snapshot), timeout: timeout);
+  }
 
-  /// Reads one hash field, returning null when it does not exist.
-  Future<String?> hget(String key, String field, {Duration? timeout}) =>
-      executeFuture(hgetCommand(key, field), timeout: timeout);
+  /// Reads one hash field, returning None when it does not exist.
+  Effect<Option<String>, RunnelError> hget(String key, String field, {Duration? timeout}) =>
+      deferCommand(() => hgetCommand(key, field), timeout: timeout);
 
-  /// Reads hash [fields] in input order, preserving missing entries as null.
-  Future<List<String?>> hmget(
+  /// Reads hash [fields] in input order, preserving missing entries as None.
+  Effect<List<Option<String>>, RunnelError> hmget(
     String key,
     List<String> fields, {
     Duration? timeout,
-  }) => executeFuture(hmgetCommand(key, fields), timeout: timeout);
+  }) {
+    final snapshot = List<String>.of(fields);
+    return deferCommand(() => hmgetCommand(key, snapshot), timeout: timeout);
+  }
 
   /// Reads every field and value from a hash.
-  Future<Map<String, String>> hgetall(String key, {Duration? timeout}) =>
-      executeFuture(hgetallCommand(key), timeout: timeout);
+  Effect<Map<String, String>, RunnelError> hgetall(String key, {Duration? timeout}) =>
+      deferCommand(() => hgetallCommand(key), timeout: timeout);
 
   /// Deletes [fields] and returns the number removed.
-  Future<int> hdel(
+  Effect<int, RunnelError> hdel(
     String key,
     List<String> fields, {
     Duration? timeout,
-  }) => executeFuture(hdelCommand(key, fields), timeout: timeout);
+  }) {
+    final snapshot = List<String>.of(fields);
+    return deferCommand(() => hdelCommand(key, snapshot), timeout: timeout);
+  }
 
   /// Reports whether [field] exists in the hash.
-  Future<bool> hexists(String key, String field, {Duration? timeout}) =>
-      executeFuture(hexistsCommand(key, field), timeout: timeout);
+  Effect<bool, RunnelError> hexists(String key, String field, {Duration? timeout}) =>
+      deferCommand(() => hexistsCommand(key, field), timeout: timeout);
 
   /// Returns the number of fields in the hash.
-  Future<int> hlen(String key, {Duration? timeout}) =>
-      executeFuture(hlenCommand(key), timeout: timeout);
+  Effect<int, RunnelError> hlen(String key, {Duration? timeout}) =>
+      deferCommand(() => hlenCommand(key), timeout: timeout);
 
   /// Adds [increment] to an integer hash field and returns its new value.
-  Future<int> hincrby(
+  Effect<int, RunnelError> hincrby(
     String key,
     String field,
     int increment, {
     Duration? timeout,
-  }) => executeFuture(hincrbyCommand(key, field, increment), timeout: timeout);
+  }) => deferCommand(() => hincrbyCommand(key, field, increment), timeout: timeout);
 
   /// Adds [members] and returns the number newly added.
-  Future<int> sadd(
+  Effect<int, RunnelError> sadd(
     String key,
     List<String> members, {
     Duration? timeout,
-  }) => executeFuture(saddCommand(key, members), timeout: timeout);
+  }) {
+    final snapshot = List<String>.of(members);
+    return deferCommand(() => saddCommand(key, snapshot), timeout: timeout);
+  }
 
   /// Removes [members] and returns the number removed.
-  Future<int> srem(
+  Effect<int, RunnelError> srem(
     String key,
     List<String> members, {
     Duration? timeout,
-  }) => executeFuture(sremCommand(key, members), timeout: timeout);
+  }) {
+    final snapshot = List<String>.of(members);
+    return deferCommand(() => sremCommand(key, snapshot), timeout: timeout);
+  }
 
   /// Reports whether [member] belongs to the set.
-  Future<bool> sismember(String key, String member, {Duration? timeout}) =>
-      executeFuture(sismemberCommand(key, member), timeout: timeout);
+  Effect<bool, RunnelError> sismember(String key, String member, {Duration? timeout}) =>
+      deferCommand(() => sismemberCommand(key, member), timeout: timeout);
 
   /// Reads the set's members as an immutable snapshot.
-  Future<Set<String>> smembers(String key, {Duration? timeout}) =>
-      executeFuture(smembersCommand(key), timeout: timeout);
+  Effect<Set<String>, RunnelError> smembers(String key, {Duration? timeout}) =>
+      deferCommand(() => smembersCommand(key), timeout: timeout);
 
   /// Returns the set's member count.
-  Future<int> scard(String key, {Duration? timeout}) =>
-      executeFuture(scardCommand(key), timeout: timeout);
+  Effect<int, RunnelError> scard(String key, {Duration? timeout}) =>
+      deferCommand(() => scardCommand(key), timeout: timeout);
 
   /// Prepends [elements] and returns the list's new length.
-  Future<int> lpush(
+  Effect<int, RunnelError> lpush(
     String key,
     List<String> elements, {
     Duration? timeout,
-  }) => executeFuture(lpushCommand(key, elements), timeout: timeout);
+  }) {
+    final snapshot = List<String>.of(elements);
+    return deferCommand(() => lpushCommand(key, snapshot), timeout: timeout);
+  }
 
   /// Appends [elements] and returns the list's new length.
-  Future<int> rpush(
+  Effect<int, RunnelError> rpush(
     String key,
     List<String> elements, {
     Duration? timeout,
-  }) => executeFuture(rpushCommand(key, elements), timeout: timeout);
+  }) {
+    final snapshot = List<String>.of(elements);
+    return deferCommand(() => rpushCommand(key, snapshot), timeout: timeout);
+  }
 
-  /// Removes and returns the first element, or null when the list is empty.
-  Future<String?> lpop(String key, {Duration? timeout}) =>
-      executeFuture(lpopCommand(key), timeout: timeout);
+  /// Removes and returns the first element, or None when the list is empty.
+  Effect<Option<String>, RunnelError> lpop(String key, {Duration? timeout}) =>
+      deferCommand(() => lpopCommand(key), timeout: timeout);
 
-  /// Removes and returns the last element, or null when the list is empty.
-  Future<String?> rpop(String key, {Duration? timeout}) =>
-      executeFuture(rpopCommand(key), timeout: timeout);
+  /// Removes and returns the last element, or None when the list is empty.
+  Effect<Option<String>, RunnelError> rpop(String key, {Duration? timeout}) =>
+      deferCommand(() => rpopCommand(key), timeout: timeout);
 
   /// Reads the inclusive rank range from [start] through [stop].
-  Future<List<String>> lrange(
+  Effect<List<String>, RunnelError> lrange(
     String key,
     int start,
     int stop, {
     Duration? timeout,
-  }) => executeFuture(lrangeCommand(key, start, stop), timeout: timeout);
+  }) => deferCommand(() => lrangeCommand(key, start, stop), timeout: timeout);
 
   /// Returns the list length.
-  Future<int> llen(String key, {Duration? timeout}) =>
-      executeFuture(llenCommand(key), timeout: timeout);
+  Effect<int, RunnelError> llen(String key, {Duration? timeout}) =>
+      deferCommand(() => llenCommand(key), timeout: timeout);
 
   /// Keeps the inclusive rank range.
-  Future<void> ltrim(
+  Effect<void, RunnelError> ltrim(
     String key,
     int start,
     int stop, {
     Duration? timeout,
-  }) => executeFuture(ltrimCommand(key, start, stop), timeout: timeout);
+  }) => deferCommand(() => ltrimCommand(key, start, stop), timeout: timeout);
 
   /// Adds or updates [members] and returns the number newly added.
-  Future<int> zadd(
+  Effect<int, RunnelError> zadd(
     String key,
     Map<String, double> members, {
     Duration? timeout,
-  }) => executeFuture(zaddCommand(key, members), timeout: timeout);
+  }) {
+    final snapshot = Map<String, double>.of(members);
+    return deferCommand(() => zaddCommand(key, snapshot), timeout: timeout);
+  }
 
   /// Removes [members] and returns the number removed.
-  Future<int> zrem(
+  Effect<int, RunnelError> zrem(
     String key,
     List<String> members, {
     Duration? timeout,
-  }) => executeFuture(zremCommand(key, members), timeout: timeout);
+  }) {
+    final snapshot = List<String>.of(members);
+    return deferCommand(() => zremCommand(key, snapshot), timeout: timeout);
+  }
 
   /// Returns the sorted set's member count.
-  Future<int> zcard(String key, {Duration? timeout}) =>
-      executeFuture(zcardCommand(key), timeout: timeout);
+  Effect<int, RunnelError> zcard(String key, {Duration? timeout}) =>
+      deferCommand(() => zcardCommand(key), timeout: timeout);
 
-  /// Reads [member]'s score, returning null when it does not exist.
-  Future<double?> zscore(String key, String member, {Duration? timeout}) =>
-      executeFuture(zscoreCommand(key, member), timeout: timeout);
+  /// Reads [member]'s score, returning None when it does not exist.
+  Effect<Option<double>, RunnelError> zscore(String key, String member, {Duration? timeout}) =>
+      deferCommand(() => zscoreCommand(key, member), timeout: timeout);
 
   /// Adds [increment] to [member]'s score and returns its new score.
-  Future<double> zincrby(
+  Effect<double, RunnelError> zincrby(
     String key,
     double increment,
     String member, {
     Duration? timeout,
-  }) => executeFuture(zincrbyCommand(key, increment, member), timeout: timeout);
+  }) => deferCommand(() => zincrbyCommand(key, increment, member), timeout: timeout);
 
   /// Reads members in the inclusive rank range from [start] through [stop].
-  Future<List<String>> zrange(
+  Effect<List<String>, RunnelError> zrange(
     String key,
     int start,
     int stop, {
     Duration? timeout,
-  }) => executeFuture(zrangeCommand(key, start, stop), timeout: timeout);
+  }) => deferCommand(() => zrangeCommand(key, start, stop), timeout: timeout);
 
   /// Reads members and scores in the inclusive rank range.
-  Future<List<ScoredMember>> zrangeWithScores(
+  Effect<List<ScoredMember>, RunnelError> zrangeWithScores(
     String key,
     int start,
     int stop, {
     Duration? timeout,
-  }) => executeFuture(zrangeWithScoresCommand(key, start, stop), timeout: timeout);
+  }) => deferCommand(() => zrangeWithScoresCommand(key, start, stop), timeout: timeout);
 
   /// Reads members whose scores are within the inclusive finite bounds.
-  Future<List<String>> zrangebyscore(
+  Effect<List<String>, RunnelError> zrangebyscore(
     String key,
     double minimum,
     double maximum, {
     Duration? timeout,
-  }) => executeFuture(zrangebyscoreCommand(key, minimum, maximum), timeout: timeout);
+  }) => deferCommand(() => zrangebyscoreCommand(key, minimum, maximum), timeout: timeout);
 
   /// Removes members whose scores are within the inclusive finite bounds.
-  Future<int> zremrangebyscore(
+  Effect<int, RunnelError> zremrangebyscore(
     String key,
     double minimum,
     double maximum, {
     Duration? timeout,
-  }) => executeFuture(zremrangebyscoreCommand(key, minimum, maximum), timeout: timeout);
+  }) => deferCommand(() => zremrangebyscoreCommand(key, minimum, maximum), timeout: timeout);
 }
 
 RedisCommand<T> _command<T>(
@@ -377,9 +408,9 @@ bool _predicate(RespValue reply) => switch (reply) {
   _ => throw FormatException('Expected a predicate reply, received ${reply.runtimeType}.'),
 };
 
-double? _nullableDouble(RespValue reply) => switch (reply) {
-  const RespNull() => null,
-  _ => _double(reply),
+Option<double> _optionalDouble(RespValue reply) => switch (reply) {
+  const RespNull() => const None(),
+  _ => Some(_double(reply)),
 };
 
 double _double(RespValue reply) {

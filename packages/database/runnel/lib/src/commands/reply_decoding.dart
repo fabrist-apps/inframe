@@ -1,3 +1,4 @@
+import 'package:conflux/option.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// Shared reply shapes used by ordinary command families.
@@ -14,12 +15,12 @@ extension CommandReply on RespValue {
     _ => throw FormatException('Expected an array reply, received $runtimeType.'),
   };
 
-  /// Decodes null or strict UTF-8 text.
-  String? get nullableText => this is RespNull ? null : respText(this);
+  /// Decodes domain absence or a present strict UTF-8 value.
+  Option<String> get optionalText => this is RespNull ? const None() : Some(respText(this));
 
-  /// Decodes an immutable array of nullable text values.
-  List<String?> get nullableTextList => List.unmodifiable(
-    array.map((value) => value.nullableText),
+  /// Decodes an immutable array of optional text values.
+  List<Option<String>> get optionalTextList => List.unmodifiable(
+    array.map((value) => value.optionalText),
   );
 
   /// Requires Redis's OK acknowledgement.
