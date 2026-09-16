@@ -6,7 +6,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 part 'chat_models.mapper.dart';
 
 /// Compatible Chat settings that do not duplicate common request fields.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ChatOptions with ChatOptionsMappable {
   /// Creates per-call overrides; omission inherits provider defaults.
   const ChatOptions({
@@ -36,7 +36,7 @@ final class ChatOptions with ChatOptionsMappable {
 }
 
 /// A foreground native Chat request, independent of common generation defaults.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class NativeChatRequest with NativeChatRequestMappable {
   /// Retains supplied native text messages and optional fields.
   NativeChatRequest({
@@ -113,7 +113,7 @@ final class NativeChatRequest with NativeChatRequestMappable {
 }
 
 /// Typed Chat response view; its NativeResponse separately retains all JSON.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ChatResponse with ChatResponseMappable {
   /// Retains choices and available native identity/accounting.
   const ChatResponse({required this.model, required this.choices, this.id, this.usage});
@@ -138,7 +138,7 @@ final class ChatResponse with ChatResponseMappable {
 }
 
 /// A native candidate that callers may select explicitly for normalization.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ChatChoice with ChatChoiceMappable {
   /// Retains the native message without losing unknown fields.
   const ChatChoice({required this.index, required this.message, this.finishReason});

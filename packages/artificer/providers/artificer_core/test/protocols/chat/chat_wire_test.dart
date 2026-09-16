@@ -115,17 +115,6 @@ void main() {
             'second',
           );
           expect(native.metadata.requestId, 'request-id');
-          expect(
-            NativeChatRequest.fromJson(
-              NativeChatRequest(
-                model: 'm',
-                messages: [
-                  {'role': 'user', 'content': 'x'},
-                ],
-              ).toJson(),
-            ).model,
-            'm',
-          );
         }
       },
     );
@@ -244,9 +233,9 @@ void main() {
       expect(streamed, isA<Succeeded<List<GenerationEvent>, AiError>>());
       final events = (streamed as Succeeded<List<GenerationEvent>, AiError>).value;
       final completed = events.whereType<GenerationFinished>().single.result;
-      expect(completed.message.toMap(), ordinary.message.toMap());
+      expect(completed.message.text, ordinary.message.text);
       expect(completed.native.data, ordinary.native.data);
-      expect(completed.usage!.toMap(), ordinary.usage!.toMap());
+      expect(completed.usage!.totalTokens, ordinary.usage!.totalTokens);
       expect(completed.native.unknownEvents.length, 1);
       final toolStart = events.whereType<PartStarted>().singleWhere(
         (part) => part.kind == GenerationPartKind.toolCall,

@@ -10,10 +10,10 @@ void main() {
     expect(date.retryAfterDate, DateTime.utc(2015, 10, 21, 7, 28));
     expect(date.retryAfterDelay, isNull);
     for (final raw in ['unknown', '-2', '1.5', '']) {
-      final restored = ProviderError.fromJson(ProviderError('error', retryAfter: raw).toJson());
-      expect(restored.retryAfter, raw);
-      expect(restored.retryAfterDelay, isNull);
-      expect(restored.retryAfterDate, isNull);
+      final error = ProviderError('error', retryAfter: raw);
+      expect(error.retryAfter, raw);
+      expect(error.retryAfterDelay, isNull);
+      expect(error.retryAfterDate, isNull);
     }
   });
 }

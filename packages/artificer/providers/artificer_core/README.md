@@ -19,7 +19,9 @@ try {
 
 Factories accept nonempty provider-local string model IDs. Unknown IDs do not imply unsupported capabilities and do not trigger discovery. Credentials and endpoints belong to provider construction, never serialized model data. Native JSON uses ordinary Dart maps, lists and primitive values.
 
-`GenerationResult.fromJson(result.toJson())` restores a persisted result, including its complete native payload. Public data classes expose `fromMap` and `fromJson`; JSON entry points consume/return strings. Call `initializeArtificerCoreMappers()` before container-based decoding of nested or polymorphic values. Initialization is synchronous, repeatable and makes no network requests. Generated mappers are shipped with core; consuming applications need no builder dependency or code generation. Domain messages and results use schema version 1 and reject unknown versions. Native wire bodies use their endpoint schema, without domain tags.
+`GenerationResult.fromJson(result.toJson())` restores a persisted result, including its complete native payload. Public data classes expose `fromMap` and `fromJson`; JSON entry points consume/return strings. Call `ArtificerCore.initialize()` at startup in each isolate before serialization or container-based decoding. It initializes Conflux’s mappers and timezone database, then registers all core mappers. Initialization is synchronous, repeatable and makes no network requests. Generate core’s mappers and initializer after checkout with `just generate` from the workspace root. Consuming applications need no builder dependency or code generation of their own. Domain messages and results use schema version 1 and reject unknown versions. Native wire bodies use their endpoint schema, without domain tags.
+
+Model generation enables encoding, decoding, value equality, and `copyWith` through `build.yaml`. Generated `toString` is disabled. `Message` and `AssistantMessage` use the same defaults. `AssistantMessage.withParts` clears replay state; generated `copyWith` preserves it unless explicitly replaced. Models retain caller-owned collections, so their equality and hash codes can change if those collections are mutated.
 
 Collections are ordinary Dart collections. Do not mutate requests or configuration during execution. Cold operations read their supplied values when executed, so reusing an Effect performs a new request with independent request state. Diagnostic strings omit content and raw headers; native payloads and metadata are available for explicit inspection.
 
@@ -55,7 +57,7 @@ dart test packages/artificer/providers/artificer_core/test --chain-stack-traces
 dart analyze
 ```
 
-Generate from this package with `dart run build_runner build`. CI regenerates and requires a clean diff. The separate consumer fixture resolves and runs outside the workspace using only public imports and shipped mappers. HTTP tests use loopback servers and require no live credentials. [Conformance coverage](test/README.md) maps the foundation contracts to focused suites.
+Generated mappers and the initializer are ignored by Git. Run `just generate` from the workspace root, or `dart run build_runner build` followed by `dart format lib` from this package, before analysis or tests. The workspace’s `just generate` recipe and CI also generate these files. The separate consumer fixture resolves and runs outside the workspace using only public imports and the locally generated mappers. HTTP tests use loopback servers and require no live credentials. [Conformance coverage](test/README.md) maps the foundation contracts to focused suites.
 
 ## Options and preflight
 
@@ -79,7 +81,7 @@ Provider codecs use `TextRequestPolicy` from `protocols.dart` with their pinned 
 
 Assistant output distinguishes application calls from provider-owned tool records, including pending records without a result. Tool arguments preserve parsed JSON with original text, declared free-form input, tagged native actions, or malformed original arguments. Tool results retain success/application failure and JSON, ordered text or tagged native content.
 
-Persist the returned `AssistantMessage` with its `ProviderReplay` to resubmit signed or opaque native items to the same provider/API/model. Incompatible targets fail explicitly. `withParts` and `copyWith` drop replay on content edits. If you mutate `parts` or nested collections directly, set `message.replay = null` before resubmission. Generated copy helpers are disabled for these data models so they cannot retain stale replay. Opaque native base64 strings remain native strings; the SDK does not infer private reasoning from them.
+Persist the returned `AssistantMessage` with its `ProviderReplay` to resubmit signed or opaque native items to the same provider/API/model. Incompatible targets fail explicitly. Use `withParts` to replace content and clear replay. Generated `copyWith` retains replay by default; pass `replay: null` when editing content through it. If you mutate `parts` or nested collections directly, set `message.replay = null` before resubmission. Opaque native base64 strings remain native strings; the SDK does not infer private reasoning from them.
 
 ## Text embeddings
 
@@ -130,21 +132,6 @@ Chat defaults to a `[DONE]` terminal sentinel. A configured `ChatTerminalPolicy.
 
 Responses always sends `store:false` and rejects stop sequences. Dialects can configure instruction placement, hosted tool types, schema support, native error envelopes and tool event/item variations. They must explicitly represent a supported native input or reject it; unknown model names never determine capabilities. Tool results preserve ordered text parts, and application code remains responsible for executing application-owned calls.
 
-## Invocation observations
-
-Supply `ProviderHttpClient(observer: callback)` to receive ordered, content-free `ProviderObservation` records. Provider implementations wrap the complete decoding and normalization path with `client.observe` or `client.observeFlow`; nested transport calls share one execution-local attempt. Normalizing an already obtained response is pure and emits no new attempt.
-
-Bind optional caller IDs at the application's execution boundary:
-
-```dart
-import 'package:context/context.dart';
-
-final context = Context().withBinding(invocationContextKey.bind(
-  const InvocationContext(operationId: 'job-42', attemptId: 'attempt-1'),
-));
-final runtime = Runtime(context: context);
-```
-
-Without a supplied attempt ID, core allocates one for each run. A caller-provided attempt ID should identify one attempt; use an operation ID to group several calls. Records include identity, status, available usage, verdict and one terminal outcome. They omit prompts, generated content, credentials, raw headers and error payloads. Callbacks run synchronously; exceptions remain defects and protected request cleanup still runs. Partial consumption is recorded as interrupted. Observation does not add retry or exporter behavior.
+## Provider errors
 
 `ProviderError` preserves native diagnostics and the raw `retryAfter` header. `retryAfterDelay` parses nonnegative delay-seconds; `retryAfterDate` parses HTTP dates. Malformed values remain available as raw text and return null from parsed accessors. Applications decide whether and when to retry.

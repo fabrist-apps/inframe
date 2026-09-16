@@ -8,6 +8,8 @@ recording, validation, redaction, and metric observations remain synchronous.
 import 'package:chronicler/chronicler.dart';
 import 'package:context/context.dart';
 
+Chronicler.initialize();
+
 final chronicler = Chronicler(
   appId: 'app_123',
   release: '1.0.0',
@@ -34,6 +36,13 @@ await request.trace('checkout', run: (trace) async {
 final report = await chronicler.flush();
 await chronicler.close();
 ```
+
+Call `Chronicler.initialize()` once at startup in each isolate, before recording or using
+Chronicler serialization, including model `toMap`, `toJson`, `fromMap`, `fromJson`,
+and container-based decoding. It initializes Conflux’s mappers and timezone
+database, then registers Chronicler’s mappers. Repeated calls are safe and create
+no runtime or exporter. The generated `initializeMappers()` only registers
+Chronicler’s mappers; it does not replace this required setup.
 
 ## Runnable base SDK example
 

@@ -8,6 +8,7 @@ import 'support/metric_aggregation.dart';
 import 'support/metric_clock.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler metric lifecycle', () {
     test('should reject oversized dimensions before retaining a series', () async {
       final exporter = TestExporter(acceptImmediately: true);

@@ -8,6 +8,7 @@ import 'package:test/test.dart';
 import 'support/memory_exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Conflux Cause conversion', () {
     test('should preserve the ordered tree and the first genuine defect stack', () {
       final repeated = StateError('repeated');

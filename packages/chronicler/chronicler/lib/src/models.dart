@@ -88,7 +88,7 @@ enum MetricTemporality {
 }
 
 /// Fields shared by every version-one record.
-@MappableClass(includeCustomMappers: [MomentMapper()])
+@MappableClass()
 final class RecordEnvelope with RecordEnvelopeMappable {
   /// Creates the shared identity and attribution for one record.
   const RecordEnvelope({
@@ -433,7 +433,7 @@ final class ErrorPayload with ErrorPayloadMappable {
 }
 
 /// Payload carried by one finalized metric series interval.
-@MappableClass(includeCustomMappers: [MomentMapper()])
+@MappableClass()
 final class MetricPayload with MetricPayloadMappable {
   /// Creates an immutable finalized metric interval.
   MetricPayload({

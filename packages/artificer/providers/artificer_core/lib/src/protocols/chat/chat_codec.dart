@@ -303,20 +303,31 @@ final class ChatCodec {
     final value = data['error'];
     if (value is Map<String, Object?> || (value is String && value.isNotEmpty)) {
       return ProviderError(
-        'Provider returned a native error.',
+        value is String
+            ? value
+            : value is Map<String, Object?> && value['message'] is String
+            ? value['message']! as String
+            : 'Provider returned a native error.',
         statusCode: metadata.statusCode,
         code: value is Map<String, Object?> && value['code'] is String
             ? value['code']! as String
             : null,
         details: data,
         requestId: metadata.requestId,
+        retryAfter: metadata.headers['retry-after']?.firstOrNull,
       );
     }
     return null;
   }
 
   /// Decodes a native response once while preserving its complete raw object.
-  Result<NativeResponse<ChatResponse>, AiError> decode(Object? data, ResponseMetadata metadata) {
+  /// Supply [requestedModelId] to keep aliases usable for same-target replay;
+  /// the actual returned model remains on the typed and raw response data.
+  Result<NativeResponse<ChatResponse>, AiError> decode(
+    Object? data,
+    ResponseMetadata metadata, {
+    String? requestedModelId,
+  }) {
     final Map<String, Object?> raw;
     try {
       JsonValues.validate(data);
@@ -358,7 +369,7 @@ final class ChatCodec {
           raw: NativePayload(
             providerId: dialect.providerId,
             api: dialect.api,
-            modelId: model,
+            modelId: requestedModelId ?? model,
             data: raw,
           ),
           metadata: metadata,
@@ -375,6 +386,9 @@ final class ChatCodec {
     NativeResponse<ChatResponse> response, {
     int? choiceIndex,
   }) {
+    if (response.raw.providerId != dialect.providerId || response.raw.api != dialect.api) {
+      return const Failure(InvalidRequestError('Native payload target differs from this codec.'));
+    }
     if (choiceIndex == null && response.value.choices.length != 1) {
       return const Failure(InvalidRequestError('Select an explicit native choice index.'));
     }
@@ -394,7 +408,7 @@ final class ChatCodec {
             replay: ProviderReplay(
               providerId: dialect.providerId,
               api: dialect.api,
-              modelId: response.value.model,
+              modelId: response.raw.modelId,
               items: [choice.message],
             ),
           ),

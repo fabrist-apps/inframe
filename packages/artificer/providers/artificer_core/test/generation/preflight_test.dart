@@ -20,8 +20,7 @@ void main() {
         temperature: const Setting.clear(),
         stop: Setting.set(replacement),
       );
-      final restored = GenerationOptions.fromJson(options.toJson());
-      final resolved = restored.resolve(defaults);
+      final resolved = options.resolve(defaults);
       expect(resolved.toWire(), {
         'max_tokens': 4096,
         'stop': ['new'],
@@ -36,10 +35,10 @@ void main() {
     });
   });
   group('NativeField', () {
-    test('should persist omitted, null and present independently of wire encoding', () {
+    test('should encode omitted, null and present fields distinctly', () {
       final body = <String, Object?>{};
-      NativeField.fromJson<String>(NativeField<String>.omitted().toJson()).writeTo(body, 'absent');
-      NativeField.fromMap<String>(NativeField<String>.present(null).toMap()).writeTo(body, 'null');
+      NativeField<String>.omitted().writeTo(body, 'absent');
+      NativeField<String>.present(null).writeTo(body, 'null');
       NativeField<String>.present('text').writeTo(body, 'present');
       expect(body, {'null': null, 'present': 'text'});
       expect(() => NativeField<String>(isPresent: false, value: 'invalid'), throwsArgumentError);

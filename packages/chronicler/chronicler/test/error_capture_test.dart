@@ -7,6 +7,7 @@ import 'support/error_capture_support.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerErrors capture', () {
     test('should export a handled error with attribution and raw stack', () async {
       final exporter = TestExporter();

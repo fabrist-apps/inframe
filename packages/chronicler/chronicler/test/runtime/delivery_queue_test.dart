@@ -11,6 +11,7 @@ import '../support/exporter.dart';
 import '../support/records.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('DeliveryQueue', () {
     test('should use five total attempts with default exponential ceilings', () {
       _expectRetrySchedule(

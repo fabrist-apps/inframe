@@ -1,9 +1,11 @@
+import 'package:chronicler/chronicler.dart';
 import 'package:chronicler/src/metrics/series.dart';
 import 'package:test/test.dart';
 
 import 'support/moments.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   final maximumCount = int.parse('9223372036854775807');
 
   group('SumSeries', () {

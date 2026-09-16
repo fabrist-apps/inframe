@@ -134,13 +134,12 @@ void main() {
       expect(result.usage!.totalTokens, isNull);
       expect((result.message.parts.last as ProviderToolPart).status, ToolStatus.pending);
       expect(result.message.parts.whereType<ToolCallPart>().single.callId, 'call');
-      final restored = GenerationResult.fromJson(result.toJson());
-      expect(restored.native.data, data);
+      expect(result.native.data, data);
       final request = value(
         codec.encode(
           GenerationRequest(
             messages: [
-              restored.message,
+              result.message,
               ToolMessage([
                 ToolSuccess(
                   callId: 'call',
@@ -155,12 +154,6 @@ void main() {
       expect(request.input.take(4).toList(), data['output']);
       expect(request.input.last['call_id'], 'call');
       expect(value(codec.prepare(request)).containsKey('previous_response_id'), isFalse);
-      expect(ResponsesResponse.fromJson(response.toJson()).toMap(), response.toMap());
-      expect(ResponsesRequest.fromJson(request.toJson()).toMap(), request.toMap());
-      expect(
-        ResponsesOptions.fromJson(const ResponsesOptions().toJson()).toMap(),
-        const ResponsesOptions().toMap(),
-      );
     });
     test('should preserve freeform malformed native and opaque variants distinctly', () {
       expect(

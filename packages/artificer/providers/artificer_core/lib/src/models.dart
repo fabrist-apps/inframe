@@ -36,7 +36,7 @@ enum ModelCapability {
 }
 
 /// Declared capabilities; unfamiliar models retain unknown support.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ModelCapabilities with ModelCapabilitiesMappable {
   /// Creates a [ModelCapabilities] retaining the supplied values.
   const ModelCapabilities([this.values = const {}]);

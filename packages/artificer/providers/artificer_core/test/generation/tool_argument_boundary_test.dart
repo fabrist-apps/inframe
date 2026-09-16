@@ -7,8 +7,7 @@ void main() {
       const original = '{"number":1e999}';
       final arguments = ToolArguments.parse(original);
       expect(arguments, isA<MalformedToolArguments>());
-      final restored = ToolArguments.fromJson(arguments.toJson());
-      expect((restored as MalformedToolArguments).original, original);
+      expect((arguments as MalformedToolArguments).original, original);
     });
   });
 }

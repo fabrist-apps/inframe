@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:artificer_core/src/errors.dart';
 import 'package:artificer_core/src/generation/generation.dart';
+import 'package:artificer_core/src/json/json_value.dart';
 import 'package:artificer_core/src/messages/messages.dart';
 import 'package:artificer_core/src/native.dart';
 import 'package:artificer_core/src/protocols/generation_assembler.dart';
@@ -48,10 +49,16 @@ final class ResponsesStreamDecoder {
     }
     final events = <GenerationEvent>[];
     try {
-      final decoded = jsonDecode(frame.data);
-      if (decoded is! Map<String, Object?>) throw const FormatException('Expected event object.');
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(frame.data);
+        JsonValues.validate(decoded);
+      } on FormatException {
+        return _malformed();
+      }
+      if (decoded is! Map<String, Object?>) throw const _MalformedEvent('Expected event object.');
       final nativeType = decoded['type'] ?? frame.event;
-      if (nativeType is! String) throw const FormatException('Missing event type.');
+      if (nativeType is! String) throw const _MalformedEvent('Missing event type.');
       final type = codec.dialect.eventAliases[nativeType] ?? nativeType;
       final nativeError = codec.errorFrom(decoded, metadata: metadata);
       if (nativeError != null) return _fail(withPartial(nativeError));
@@ -114,7 +121,7 @@ final class ResponsesStreamDecoder {
             owner: kind == GenerationPartKind.toolCall ? ToolExecutionOwner.application : null,
           );
           final text = decoded['delta'];
-          if (text is! String) throw const FormatException('Delta must be text.');
+          if (text is! String) throw const _MalformedEvent('Delta must be text.');
           _emit(
             events,
             PartDelta(
@@ -194,10 +201,10 @@ final class ResponsesStreamDecoder {
           if (result == null) return Failure(_failure!);
           final expected = type == 'response.completed' ? 'completed' : 'incomplete';
           if (response['status'] != expected) {
-            throw const FormatException('Terminal event contradicts response status.');
+            throw const _MalformedEvent('Terminal event contradicts response status.');
           }
           final output = response['output'];
-          if (output is! List) throw const FormatException('Missing terminal output.');
+          if (output is! List) throw const _MalformedEvent('Missing terminal output.');
           for (var oi = 0; oi < output.length; oi++) {
             _finishItem(events, oi, _object(output[oi]));
             if (_failure case final error?) return Failure(error);
@@ -217,12 +224,14 @@ final class ResponsesStreamDecoder {
       }
       if (_failure case final error?) return Failure(error);
       return Success(events);
-    } on FormatException {
-      return _fail(
-        ProtocolError('Malformed Responses stream event.', partialOutput: _assembler.partialOutput),
-      );
+    } on _MalformedEvent {
+      return _malformed();
     }
   }
+
+  Failure<List<GenerationEvent>, AiError> _malformed() => _fail(
+    ProtocolError('Malformed Responses stream event.', partialOutput: _assembler.partialOutput),
+  );
 
   /// Returns the final result after the transport owner has completed cleanup.
   Result<GenerationFinished, AiError> complete() {
@@ -289,7 +298,7 @@ final class ResponsesStreamDecoder {
   }) {
     final id = '$oi:$ci';
     if (!_parts.containsKey(id)) {
-      if (ci >= 1000000) throw const FormatException('Content index is too large.');
+      if (ci >= 1000000) throw const _MalformedEvent('Content index is too large.');
       _emit(
         events,
         PartStarted(
@@ -303,7 +312,7 @@ final class ResponsesStreamDecoder {
       );
       _parts[id] = kind;
     } else if (_parts[id] != kind) {
-      throw const FormatException('Part kind changed.');
+      throw const _MalformedEvent('Part kind changed.');
     }
     return id;
   }
@@ -353,14 +362,20 @@ final class ResponsesStreamDecoder {
   }
 
   static Map<String, Object?> _object(Object? value) {
-    if (value is! Map<String, Object?>) throw const FormatException('Expected object.');
+    if (value is! Map<String, Object?>) throw const _MalformedEvent('Expected object.');
     return value;
   }
 
   static int _index(Map<String, Object?> data, String key, {bool optional = false}) {
     final value = data[key];
     if (value == null && optional) return 0;
-    if (value is! int || value < 0) throw const FormatException('Invalid stream index.');
+    if (value is! int || value < 0) throw const _MalformedEvent('Invalid stream index.');
     return value;
   }
+}
+
+// Only structural event checks use this marker. A provider hook's own
+// FormatException must escape unchanged as a Conflux defect.
+class _MalformedEvent extends FormatException {
+  const _MalformedEvent(super.message);
 }

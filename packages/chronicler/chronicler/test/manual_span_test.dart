@@ -6,6 +6,7 @@ import 'support/exporter.dart';
 import 'support/tracing_support.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerSpan', () {
     test('should derive nested recorders and honor explicit status precedence', () async {
       final exporter = TestExporter();

@@ -7,6 +7,7 @@ import 'support/exporter.dart';
 import 'support/runtime.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler collection controls', () {
     test('disabled logs never enter delivery and toggles are independent', () async {
       final exporter = TestExporter();

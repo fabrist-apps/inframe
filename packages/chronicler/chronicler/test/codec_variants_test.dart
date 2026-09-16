@@ -10,6 +10,7 @@ import 'package:test/test.dart';
 import 'support/moments.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerCodec version one', () {
     test('should round-trip every record variant and metric form', () {
       final records = _records();

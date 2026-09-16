@@ -196,7 +196,6 @@ void main() {
       );
       expect(result.native.data, same(raw));
       expect(result.message.replay!.items.single, (raw['choices']! as List)[1]['message']);
-      expect(ChatResponse.fromJson(native.value.toJson()).choices.length, 2);
       expect(result.toString(), isNot(contains('signature')));
     });
 

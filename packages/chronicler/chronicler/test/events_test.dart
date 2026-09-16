@@ -6,6 +6,7 @@ import 'support/events_support.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerEvents tracking', () {
     test('should deduplicate and validate every removal atomically', () async {
       final exporter = TestExporter();

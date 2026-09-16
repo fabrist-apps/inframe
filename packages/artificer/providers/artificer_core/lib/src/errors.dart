@@ -19,10 +19,7 @@ enum DeliveryState {
 }
 
 /// Expected provider failure data. Diagnostic strings deliberately omit payloads.
-@MappableClass(
-  discriminatorKey: 'type',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorKey: 'type')
 sealed class AiError with AiErrorMappable {
   /// Creates a [AiError] retaining the supplied values.
   const AiError(this.message);
@@ -40,10 +37,7 @@ sealed class AiError with AiErrorMappable {
 }
 
 /// InvalidRequest failure with inspectable details.
-@MappableClass(
-  discriminatorValue: 'InvalidRequestError',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'InvalidRequestError')
 final class InvalidRequestError extends AiError with InvalidRequestErrorMappable {
   /// Creates a [InvalidRequestError] retaining the supplied values.
   const InvalidRequestError(super.message);
@@ -56,10 +50,7 @@ final class InvalidRequestError extends AiError with InvalidRequestErrorMappable
 }
 
 /// UnsupportedFeature failure with inspectable details.
-@MappableClass(
-  discriminatorValue: 'UnsupportedFeatureError',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'UnsupportedFeatureError')
 final class UnsupportedFeatureError extends AiError with UnsupportedFeatureErrorMappable {
   /// Creates a [UnsupportedFeatureError] retaining the supplied values.
   const UnsupportedFeatureError(super.message, {this.feature});
@@ -75,10 +66,7 @@ final class UnsupportedFeatureError extends AiError with UnsupportedFeatureError
 }
 
 /// Provider failure with inspectable details.
-@MappableClass(
-  discriminatorValue: 'ProviderError',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'ProviderError')
 final class ProviderError extends AiError with ProviderErrorMappable {
   /// Creates a [ProviderError] retaining the supplied values.
   const ProviderError(
@@ -139,10 +127,7 @@ final class ProviderError extends AiError with ProviderErrorMappable {
 }
 
 /// Transport failure with inspectable details.
-@MappableClass(
-  discriminatorValue: 'TransportError',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'TransportError')
 final class TransportError extends AiError with TransportErrorMappable {
   /// Creates a [TransportError] retaining the supplied values.
   const TransportError(super.message, {this.deliveryState = DeliveryState.notSent});
@@ -158,10 +143,7 @@ final class TransportError extends AiError with TransportErrorMappable {
 }
 
 /// Protocol failure with inspectable details.
-@MappableClass(
-  discriminatorValue: 'ProtocolError',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'ProtocolError')
 final class ProtocolError extends AiError with ProtocolErrorMappable {
   /// Creates a [ProtocolError] retaining the supplied values.
   const ProtocolError(super.message, {this.partialOutput});
@@ -177,10 +159,7 @@ final class ProtocolError extends AiError with ProtocolErrorMappable {
 }
 
 /// ResponseLimit failure with inspectable details.
-@MappableClass(
-  discriminatorValue: 'ResponseLimitError',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'ResponseLimitError')
 final class ResponseLimitError extends AiError with ResponseLimitErrorMappable {
   /// Creates a [ResponseLimitError] retaining the supplied values.
   const ResponseLimitError(super.message, {this.limit, this.partialOutput});
@@ -199,10 +178,7 @@ final class ResponseLimitError extends AiError with ResponseLimitErrorMappable {
 }
 
 /// Work attempted after provider shutdown began.
-@MappableClass(
-  discriminatorValue: 'ClientClosedError',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'ClientClosedError')
 final class ClientClosedError extends AiError with ClientClosedErrorMappable {
   /// Creates a [ClientClosedError] retaining the supplied values.
   const ClientClosedError([super.message = 'Provider client is closed.']);

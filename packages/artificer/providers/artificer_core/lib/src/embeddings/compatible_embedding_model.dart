@@ -1,6 +1,5 @@
 import 'package:artificer_core/src/embeddings/embeddings.dart';
 import 'package:artificer_core/src/errors.dart';
-import 'package:artificer_core/src/generation/generation.dart';
 import 'package:artificer_core/src/models.dart';
 import 'package:artificer_core/src/native.dart';
 import 'package:artificer_core/src/protocols/text_request_policy.dart';
@@ -12,7 +11,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 part 'compatible_embedding_model.mapper.dart';
 
 /// Compatible native-only configuration, separate from common input/dimensions.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class EmbeddingOptions with EmbeddingOptionsMappable {
   /// Creates inherited or per-call options.
   const EmbeddingOptions({
@@ -82,38 +81,14 @@ final class CompatibleEmbeddingModel implements EmbeddingModel {
   /// Executes native inference once and normalizes the same response.
   @override
   Effect<EmbeddingResult, AiError> embed(EmbeddingRequest request, {EmbeddingOptions? options}) =>
-      client.observe(
-        rawEmbed(request, options: options).flatMap(
-          (response, _) => Effect.fromResult(
-            response.value.normalize(request, response.raw, metadata: response.metadata),
-          ),
+      rawEmbed(request, options: options).flatMap(
+        (response, _) => Effect.fromResult(
+          response.value.normalize(request, response.raw, metadata: response.metadata),
         ),
-        providerId: providerId,
-        api: 'embeddings',
-        modelId: modelId,
-        usage: (value) => value.usage,
       );
 
   /// Returns typed and complete raw views of one synchronous native response.
   Effect<NativeResponse<EmbeddingBatch>, AiError> rawEmbed(
-    EmbeddingRequest request, {
-    EmbeddingOptions? options,
-  }) => client.observe(
-    _rawEmbed(request, options: options),
-    providerId: providerId,
-    api: 'embeddings',
-    modelId: modelId,
-    usage: (response) {
-      final native = response.value.usage;
-      if (native == null) return null;
-      return Usage(
-        inputTokens: native['prompt_tokens'] is int ? native['prompt_tokens']! as int : null,
-        totalTokens: native['total_tokens'] is int ? native['total_tokens']! as int : null,
-      );
-    },
-  );
-
-  Effect<NativeResponse<EmbeddingBatch>, AiError> _rawEmbed(
     EmbeddingRequest request, {
     EmbeddingOptions? options,
   }) => Effect.build(($) async {

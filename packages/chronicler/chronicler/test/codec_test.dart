@@ -8,6 +8,7 @@ import 'package:test/test.dart';
 import 'support/moments.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerCodec', () {
     test('should encode canonical batch framing and UTC microseconds', () {
       final record = LogRecord(

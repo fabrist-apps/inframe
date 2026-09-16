@@ -4,6 +4,7 @@ import 'package:test/test.dart';
 import 'support/records.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerCodec metric limits', () {
     for (final instrument in MetricInstrument.values) {
       test('should accept the large count for ${instrument.name}', () {

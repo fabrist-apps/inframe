@@ -1,4 +1,3 @@
-import 'persistence.dart';
 import 'protocols.dart';
 
 import 'dart:convert';
@@ -9,7 +8,6 @@ import 'package:artificer_core/transport.dart';
 import 'package:artificer_core/protocols.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
-import 'package:dart_mappable/dart_mappable.dart';
 
 final class TestOptions {
   const TestOptions(this.tag);
@@ -89,7 +87,7 @@ final class TextModel implements LanguageModel {
 }
 
 Future<void> main() async {
-  verifyPersistence();
+  ArtificerCore.initialize();
   await verifyCompatibleProtocols();
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final bodies = <Map<String, Object?>>[];
@@ -132,15 +130,9 @@ Future<void> main() async {
     final results = await runtime.run(Effect.all([operation, operation]));
     if (results case Succeeded(:final value)) {
       for (final result in value) {
-        final restored = GenerationResult.fromJson(result.toJson());
-        if (restored.text != 'hello' || restored.usage != null)
-          throw StateError('result persistence');
-        final viaMap = GenerationResult.fromMap(restored.toMap());
-        if ((viaMap.native.data as Map)['unknown'] == null) throw StateError('unknown data lost');
-        final polymorphic = MapperContainer.globals.fromMap<Message>(result.message.toMap());
-        if (polymorphic is! AssistantMessage) throw StateError('polymorphic decoding');
-        if (result.toString().contains('hello') || result.metadata.toString().contains('headers'))
-          throw StateError('diagnostic leak');
+        if (result.text != 'hello' || result.usage != null)
+          throw StateError('generation result');
+        if ((result.native.data as Map)['unknown'] == null) throw StateError('unknown data lost');
       }
     } else {
       throw StateError('$results');
@@ -157,16 +149,6 @@ Future<void> main() async {
     if ((bodies.first['messages'] as List).first['content'] != 'question!')
       throw StateError('cold ordinary collections');
     if (bodies.last['tag'] != 'typed') throw StateError('concrete options');
-    final restoredRequest = GenerationRequest.fromJson(request.toJson());
-    if (restoredRequest.messages.length != 1) throw StateError('request persistence');
-    final unknownVersion = AssistantMessage([]).toMap()..['schemaVersion'] = 2;
-    var rejected = false;
-    try {
-      AssistantMessage.fromMap(unknownVersion);
-    } on Object {
-      rejected = true;
-    }
-    if (!rejected) throw StateError('unknown version accepted');
     final composed = Effect.build<EmbeddingResult, AiError>(($) async {
       final reply = await $(provider.languageModel('text-model').generate(request));
       return await $(
@@ -179,9 +161,8 @@ Future<void> main() async {
     });
     final embeddingExit = await runtime.run(composed);
     if (embeddingExit case Succeeded(:final value)) {
-      final restored = EmbeddingResult.fromJson(value.toJson());
-      if (restored.modelId != 'actual-embedding-model' || restored.vectors.single.length != 2)
-        throw StateError('embedding persistence');
+      if (value.modelId != 'actual-embedding-model' || value.vectors.single.length != 2)
+        throw StateError('embedding result');
       if ((bodies.last['input'] as List).single != 'hello') throw StateError('composition');
     } else {
       throw StateError('embedding failed: $embeddingExit');

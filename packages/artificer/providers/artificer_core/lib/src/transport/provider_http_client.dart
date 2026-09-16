@@ -4,13 +4,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:artificer_core/src/errors.dart';
-import 'package:artificer_core/src/generation/generation.dart';
 import 'package:artificer_core/src/json/json_value.dart';
 import 'package:artificer_core/src/native.dart';
-import 'package:artificer_core/src/observations.dart';
 import 'package:artificer_core/src/protocols/sse.dart';
 import 'package:artificer_core/src/transport/provider_dio_adapter.dart';
-import 'package:artificer_core/src/transport/provider_observations.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
 import 'package:dio/dio.dart';
@@ -35,11 +32,9 @@ class ProviderHttpClient {
   /// Borrows a compatible supplied Dio, or creates an owned Dio.
   ProviderHttpClient({
     Dio? dio,
-    ProviderObserver? observer,
     this.connectTimeout = const Duration(seconds: 30),
     this.maxResponseBytes = 64 * 1024 * 1024,
-  }) : _observations = ProviderObservations(observer),
-       _ownsDio = dio == null,
+  }) : _ownsDio = dio == null,
        _dio = dio ?? (Dio()..httpClientAdapter = ProviderDioAdapter()) {
     if (_dio.httpClientAdapter is! ProviderDioAdapter) {
       throw ArgumentError('Borrowed Dio must use ProviderDioAdapter.');
@@ -47,7 +42,6 @@ class ProviderHttpClient {
     if (connectTimeout.isNegative) throw ArgumentError.value(connectTimeout, 'connectTimeout');
     if (maxResponseBytes <= 0) throw ArgumentError.value(maxResponseBytes, 'maxResponseBytes');
   }
-  final ProviderObservations _observations;
   final Dio _dio;
   final bool _ownsDio;
 
@@ -66,15 +60,13 @@ class ProviderHttpClient {
     String method = 'POST',
     Map<String, Object?> headers = const {},
     Object? body,
-  }) => observe(
-    Effect.using(
-      _openRequest(
-        url,
-        method,
-        headers,
-        body,
-      ).flatMap((opened, _) => _io(opened.handle, () => _decodeJson(opened.response))),
-    ),
+  }) => Effect.using(
+    _openRequest(
+      url,
+      method,
+      headers,
+      body,
+    ).flatMap((opened, _) => _io(opened.handle, () => _decodeJson(opened.response))),
   );
 
   /// Consumes one bounded SSE response within this provider's request scope.
@@ -95,32 +87,29 @@ class ProviderHttpClient {
   }) {
     if (eventCapacity <= 0) throw ArgumentError.value(eventCapacity, 'eventCapacity');
     final parser = SseParser(maxEventBytes: maxEventBytes);
-    return observeFlow(
-      _openRequest(url, method, headers, body).asFlow().concatMap((opened, _) {
-        final response = opened.response;
-        if (response.statusCode! < 200 || response.statusCode! >= 300) {
-          return _io(opened.handle, () => _decodeJson(response)).asFlow().concatMap<T>(
-            (_, _) => Flow.fail(const ProtocolError('Expected an SSE response.')),
+    return _openRequest(url, method, headers, body).asFlow().concatMap((opened, _) {
+      final response = opened.response;
+      if (response.statusCode! < 200 || response.statusCode! >= 300) {
+        return _io(opened.handle, () => _decodeJson(response)).asFlow().concatMap<T>(
+          (_, _) => Flow.fail(const ProtocolError('Expected an SSE response.')),
+        );
+      }
+      final responseBody = response.data;
+      if (responseBody == null) return Flow.fail(const ProtocolError('Missing response body.'));
+      final events =
+          Flow.fromStream<SseEvent, AiError>(
+            (_) => parser.decode(responseBody.stream),
+            capacity: eventCapacity,
+            onError: (error, stack, _) => _mapError(error, stack, opened.handle),
+          ).catchError(
+            (error, _) => opened.handle.interrupted
+                ? Effect.failCause<SseEvent, AiError>(const Interrupted('Provider closed')).asFlow()
+                : Flow.fail(error),
           );
-        }
-        final responseBody = response.data;
-        if (responseBody == null) return Flow.fail(const ProtocolError('Missing response body.'));
-        final events =
-            Flow.fromStream<SseEvent, AiError>(
-              (_) => parser.decode(responseBody.stream),
-              capacity: eventCapacity,
-              onError: (error, stack, _) => _mapError(error, stack, opened.handle),
-            ).catchError(
-              (error, _) => opened.handle.interrupted
-                  ? Effect.failCause<SseEvent, AiError>(const Interrupted('Provider closed'))
-                        .asFlow()
-                  : Flow.fail(error),
-            );
-        // Abort reads before closing the async generator's subscription. This
-        // unblocks a parser waiting for the next chunk when the consumer stops.
-        return consume(_metadata(response), events).ensuring(_dispose(opened.handle));
-      }),
-    );
+      // Abort reads before closing the async generator's subscription. This
+      // unblocks a parser waiting for the next chunk when the consumer stops.
+      return consume(_metadata(response), events).ensuring(_dispose(opened.handle));
+    });
   }
 
   Effect<_OpenedResponse, AiError> _openRequest(
@@ -148,8 +137,6 @@ class ProviderHttpClient {
         }),
         release: (handle, _) => _release(handle),
       );
-      final attempt = $.context.read(_observations.key);
-      attempt?.start();
       final response = await $(
         _io(
           handle,
@@ -173,7 +160,6 @@ class ProviderHttpClient {
           ),
         ),
       );
-      attempt?.response(_metadata(response));
       return _OpenedResponse(handle, response);
     });
   });
@@ -262,32 +248,6 @@ class ProviderHttpClient {
     Error.throwWithStackTrace(error, stack);
   }
 
-  /// Correlates a complete model operation with its nested transport attempt.
-  /// Apply outside decoding/normalization; pure normalization itself emits nothing.
-  Effect<T, AiError> observe<T>(
-    Effect<T, AiError> operation, {
-    String? providerId,
-    String? api,
-    String? modelId,
-    Usage? Function(T)? usage,
-    FinishReason? Function(T)? verdict,
-  }) => _observations.effect(
-    operation,
-    providerId: providerId,
-    api: api,
-    modelId: modelId,
-    usage: usage,
-    verdict: verdict,
-  );
-
-  /// Observes one stream, including early termination and cleanup failures.
-  Flow<T, AiError> observeFlow<T>(
-    Flow<T, AiError> operation, {
-    String? providerId,
-    String? api,
-    String? modelId,
-  }) => _observations.flow(operation, providerId: providerId, api: api, modelId: modelId);
-
   /// Interrupts this provider's active requests and awaits owned cleanup.
   /// A borrowed Dio remains usable by its other callers.
   Future<void> close() {
@@ -300,9 +260,8 @@ class ProviderHttpClient {
 
   Future<void> _close() async {
     try {
-      // Caller Flow callbacks are outside this client's ownership. Joining the
-      // transport fence, rather than their cursor scopes, also permits callers
-      // to close a provider from inside a response observer without self-waiting.
+      // Await transport cleanup only; caller Flow callbacks are outside this
+      // client's ownership and may themselves be waiting for close().
       await Future.wait(_active.toList().map((handle) => handle.dispose(interrupt: true)));
     } finally {
       if (_ownsDio) _dio.close(force: true);

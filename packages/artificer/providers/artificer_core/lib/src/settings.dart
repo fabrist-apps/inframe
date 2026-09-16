@@ -2,10 +2,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 part 'settings.mapper.dart';
 
 /// An override that distinguishes inheritance, replacement and explicit removal.
-@MappableClass(
-  discriminatorKey: 'type',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorKey: 'type')
 sealed class Setting<T> with SettingMappable<T> {
   /// Creates an override.
   const Setting();
@@ -34,10 +31,7 @@ sealed class Setting<T> with SettingMappable<T> {
 }
 
 /// The inherit branch of an option override.
-@MappableClass(
-  discriminatorValue: 'inherit',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'inherit')
 final class InheritSetting<T> extends Setting<T> with InheritSettingMappable<T> {
   /// Creates the inherit override.
   const InheritSetting();
@@ -50,10 +44,7 @@ final class InheritSetting<T> extends Setting<T> with InheritSettingMappable<T> 
 }
 
 /// The set branch of an option override.
-@MappableClass(
-  discriminatorValue: 'set',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'set')
 final class ValueSetting<T> extends Setting<T> with ValueSettingMappable<T> {
   /// Creates the set override.
   const ValueSetting(this.value);
@@ -69,10 +60,7 @@ final class ValueSetting<T> extends Setting<T> with ValueSettingMappable<T> {
 }
 
 /// The clear branch of an option override.
-@MappableClass(
-  discriminatorValue: 'clear',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'clear')
 final class ClearSetting<T> extends Setting<T> with ClearSettingMappable<T> {
   /// Creates the clear override.
   const ClearSetting();
@@ -85,7 +73,7 @@ final class ClearSetting<T> extends Setting<T> with ClearSettingMappable<T> {
 }
 
 /// Presence in a native schema, independent of domain option inheritance.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class NativeField<T> with NativeFieldMappable<T> {
   /// Creates an omitted or explicitly supplied field.
   NativeField({required this.isPresent, this.value}) {

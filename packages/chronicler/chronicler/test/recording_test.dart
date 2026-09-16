@@ -5,6 +5,7 @@ import 'package:test/test.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler recording', () {
     test('should expose all log severities with immutable captured values', () async {
       final exporter = TestExporter();

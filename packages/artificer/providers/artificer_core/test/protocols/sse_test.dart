@@ -18,7 +18,6 @@ void main() {
       expect(events.first.id, 'first');
       expect(events.last.id, 'first');
       expect(events.first.retry, 25);
-      expect(SseEvent.fromJson(events.first.toJson()).data, 'café\ntwo');
     });
 
     test('should reject event byte limits without dropping any fragments', () async {

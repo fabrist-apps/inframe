@@ -25,7 +25,7 @@ jobs:
       - name: Resolve workspace dependencies
         run: dart pub get
 
-      - name: Generate provider foundation mappers
+      - name: Generate Artificer Core mappers and initializer
         working-directory: packages/artificer/providers/artificer_core
         run: |
           dart run build_runner build
@@ -45,7 +45,7 @@ jobs:
         working-directory: packages/database/turso
         run: dart run ffigen --config ffigen.yaml
 
-      - name: Check generated files
+      - name: Check tracked generated files
         run: git diff --exit-code
 
       - name: Check formatting

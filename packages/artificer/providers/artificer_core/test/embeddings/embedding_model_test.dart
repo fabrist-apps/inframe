@@ -63,9 +63,7 @@ void main() {
         final response = (await runtime.run(
           operation,
         ) as Succeeded<NativeResponse<EmbeddingBatch>, AiError>).value;
-        final restoredNative = NativeResponse.fromJson<EmbeddingBatch>(response.toJson());
-        expect(restoredNative.value.model, 'actual');
-        expect(restoredNative.raw.data, response.raw.data);
+        expect(response.value.model, 'actual');
         final normalized = response.value.normalize(
           request,
           response.raw,

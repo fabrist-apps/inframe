@@ -27,7 +27,7 @@ final class ChatStreamAssembly {
   /// Pure codec owning native normalization and provider identity.
   final ChatCodec codec;
 
-  /// Requested model alias, replaced by actual native identity when available.
+  /// Requested model alias retained for same-target replay compatibility.
   final String model;
 
   /// Explicit candidate index represented by this stream.
@@ -263,7 +263,7 @@ final class ChatStreamAssembly {
         ),
       );
     }
-    final decoded = codec.decode(_raw, _metadata);
+    final decoded = codec.decode(_raw, _metadata, requestedModelId: model);
     if (decoded case Failure<NativeResponse<ChatResponse>, AiError>(:final error)) {
       return Failure(error);
     }
@@ -317,7 +317,7 @@ final class ChatStreamAssembly {
       replay: ProviderReplay(
         providerId: codec.dialect.providerId,
         api: codec.dialect.api,
-        modelId: response.value.model,
+        modelId: response.raw.modelId,
         items: [_message],
       ),
     );

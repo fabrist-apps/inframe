@@ -9,6 +9,7 @@ import 'support/exporter.dart';
 import 'support/tracing_support.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler tracing updates', () {
     test('should update active attributes atomically and snapshot values', () async {
       final exporter = TestExporter();

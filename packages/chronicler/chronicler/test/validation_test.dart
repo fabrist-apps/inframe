@@ -5,6 +5,7 @@ import 'package:test/test.dart';
 import 'support/exporter.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler record validation', () {
     test('should diagnose invalid values without exporting or throwing', () async {
       final exporter = TestExporter();

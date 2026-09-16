@@ -7,6 +7,7 @@ import 'support/exporter.dart';
 import 'support/runtime.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler flush', () {
     test('reports accepted, rejected, and exhausted records exactly once', () async {
       final exporter = TestExporter();

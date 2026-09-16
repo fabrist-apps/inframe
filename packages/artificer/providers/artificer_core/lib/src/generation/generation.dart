@@ -10,7 +10,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 part 'generation.mapper.dart';
 
 /// Common per-request overrides; omitted options inherit model and SDK defaults.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class GenerationOptions with GenerationOptionsMappable {
   /// Creates overrides without resolving or copying their values.
   const GenerationOptions({
@@ -49,7 +49,7 @@ final class GenerationOptions with GenerationOptionsMappable {
 }
 
 /// Resolved common options ready for endpoint-specific field translation.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ResolvedGenerationOptions with ResolvedGenerationOptionsMappable {
   /// Creates resolved values; null means omit the corresponding native field.
   const ResolvedGenerationOptions({this.maxOutputTokens, this.temperature, this.topP, this.stop});
@@ -96,7 +96,7 @@ final class ResolvedGenerationOptions with ResolvedGenerationOptionsMappable {
 }
 
 /// One foreground inference with explicit ordered history.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class GenerationRequest with GenerationRequestMappable {
   /// Creates a [GenerationRequest] retaining the supplied values.
   GenerationRequest({
@@ -236,7 +236,7 @@ enum FinishReason {
 }
 
 /// Available usage fields are nullable; missing does not mean zero.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class Usage with UsageMappable {
   /// Creates a [Usage] retaining the supplied values.
   const Usage({this.inputTokens, this.outputTokens, this.totalTokens});
@@ -258,7 +258,7 @@ final class Usage with UsageMappable {
 }
 
 /// Normalized and native views of the same result.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class GenerationResult with GenerationResultMappable {
   /// Creates a [GenerationResult] retaining the supplied values.
   GenerationResult({
@@ -309,10 +309,7 @@ final class GenerationResult with GenerationResultMappable {
 }
 
 /// Events of one cold generation stream.
-@MappableClass(
-  discriminatorKey: 'type',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorKey: 'type')
 sealed class GenerationEvent with GenerationEventMappable {
   /// Creates a [GenerationEvent] retaining the supplied values.
   const GenerationEvent();
@@ -325,10 +322,7 @@ sealed class GenerationEvent with GenerationEventMappable {
 }
 
 /// Final assembled result after transport cleanup.
-@MappableClass(
-  discriminatorValue: 'finished',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'finished')
 final class GenerationFinished extends GenerationEvent with GenerationFinishedMappable {
   /// Creates a [GenerationFinished] retaining the supplied values.
   const GenerationFinished(this.result);
@@ -366,10 +360,7 @@ enum GenerationPartKind {
 }
 
 /// Incremental content for one identified generation part.
-@MappableClass(
-  discriminatorKey: 'type',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorKey: 'type')
 sealed class ContentDelta with ContentDeltaMappable {
   /// Creates a variant.
   const ContentDelta();
@@ -382,10 +373,7 @@ sealed class ContentDelta with ContentDeltaMappable {
 }
 
 /// Appends visible model text.
-@MappableClass(
-  discriminatorValue: 'text',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'text')
 final class TextDelta extends ContentDelta with TextDeltaMappable {
   /// Creates this event value without copying supplied data.
   const TextDelta({required this.text});
@@ -401,10 +389,7 @@ final class TextDelta extends ContentDelta with TextDeltaMappable {
 }
 
 /// Appends a public reasoning summary.
-@MappableClass(
-  discriminatorValue: 'reasoning',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'reasoning')
 final class ReasoningDelta extends ContentDelta with ReasoningDeltaMappable {
   /// Creates this event value without copying supplied data.
   const ReasoningDelta({required this.text});
@@ -420,10 +405,7 @@ final class ReasoningDelta extends ContentDelta with ReasoningDeltaMappable {
 }
 
 /// Appends original tool argument text before parsing is possible.
-@MappableClass(
-  discriminatorValue: 'toolArguments',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'toolArguments')
 final class ToolArgumentsDelta extends ContentDelta with ToolArgumentsDeltaMappable {
   /// Creates this event value without copying supplied data.
   const ToolArgumentsDelta({required this.text});
@@ -439,10 +421,7 @@ final class ToolArgumentsDelta extends ContentDelta with ToolArgumentsDeltaMappa
 }
 
 /// Begins one generation after response headers are available.
-@MappableClass(
-  discriminatorValue: 'started',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'started')
 final class GenerationStarted extends GenerationEvent with GenerationStartedMappable {
   /// Creates this event value without copying supplied data.
   const GenerationStarted({this.responseId, this.requestId});
@@ -461,10 +440,7 @@ final class GenerationStarted extends GenerationEvent with GenerationStartedMapp
 }
 
 /// Declares a stable local part identity and its final output order.
-@MappableClass(
-  discriminatorValue: 'partStarted',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'partStarted')
 final class PartStarted extends GenerationEvent with PartStartedMappable {
   /// Creates this event value without copying supplied data.
   const PartStarted({
@@ -502,10 +478,7 @@ final class PartStarted extends GenerationEvent with PartStartedMappable {
 }
 
 /// Adds typed content to an unfinished part.
-@MappableClass(
-  discriminatorValue: 'partDelta',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'partDelta')
 final class PartDelta extends GenerationEvent with PartDeltaMappable {
   /// Creates this event value without copying supplied data.
   const PartDelta({required this.id, required this.delta});
@@ -524,10 +497,7 @@ final class PartDelta extends GenerationEvent with PartDeltaMappable {
 }
 
 /// Supplies the complete part, including metadata received after its deltas.
-@MappableClass(
-  discriminatorValue: 'partFinished',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'partFinished')
 final class PartFinished extends GenerationEvent with PartFinishedMappable {
   /// Creates this event value without copying supplied data.
   const PartFinished({required this.id, required this.part});
@@ -546,10 +516,7 @@ final class PartFinished extends GenerationEvent with PartFinishedMappable {
 }
 
 /// Replaces prior usage with the latest cumulative provider snapshot.
-@MappableClass(
-  discriminatorValue: 'usageUpdated',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'usageUpdated')
 final class UsageUpdated extends GenerationEvent with UsageUpdatedMappable {
   /// Creates this event value without copying supplied data.
   const UsageUpdated({required this.usage});
@@ -565,10 +532,7 @@ final class UsageUpdated extends GenerationEvent with UsageUpdatedMappable {
 }
 
 /// Preserves an unrecognized native event without changing common semantics.
-@MappableClass(
-  discriminatorValue: 'providerEvent',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'providerEvent')
 final class ProviderEvent extends GenerationEvent with ProviderEventMappable {
   /// Creates this event value without copying supplied data.
   const ProviderEvent({

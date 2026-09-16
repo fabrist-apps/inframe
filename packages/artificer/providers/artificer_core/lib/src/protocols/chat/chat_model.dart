@@ -2,7 +2,6 @@ import 'package:artificer_core/src/errors.dart';
 import 'package:artificer_core/src/generation/generation.dart';
 import 'package:artificer_core/src/models.dart';
 import 'package:artificer_core/src/native.dart';
-import 'package:artificer_core/src/observations.dart';
 import 'package:artificer_core/src/protocols/chat/chat_codec.dart';
 import 'package:artificer_core/src/protocols/chat/chat_dialect.dart';
 import 'package:artificer_core/src/protocols/chat/chat_models.dart';
@@ -19,11 +18,10 @@ final class ChatProvider implements LanguageModelProvider {
   ChatProvider({
     required this.dialect,
     Dio? dio,
-    ProviderObserver? observer,
     this.generationDefaults = const GenerationOptions(),
     this.defaultOptions = const ChatOptions(),
     this.capabilities = const ModelCapabilities(),
-  }) : client = ProviderHttpClient(dio: dio, observer: observer);
+  }) : client = ProviderHttpClient(dio: dio);
 
   /// Provider-owned identity, credentials and dialect hooks.
   final ChatDialect dialect;
@@ -95,17 +93,10 @@ final class ChatLanguageModel implements LanguageModel {
   Effect<GenerationResult, AiError> generate(
     GenerationRequest request, {
     ChatOptions options = const ChatOptions(),
-  }) => client.observe(
-    rawGenerate(
-      request,
-      options: options,
-    ).flatMap((response, _) => Effect.fromResult(codec.normalize(response))),
-    providerId: providerId,
-    api: dialect.api,
-    modelId: modelId,
-    usage: (result) => result.usage,
-    verdict: (result) => result.finishReason,
-  );
+  }) => rawGenerate(
+    request,
+    options: options,
+  ).flatMap((response, _) => Effect.fromResult(codec.normalize(response)));
 
   /// Performs one common request and returns its typed and complete native views.
   Effect<NativeResponse<ChatResponse>, AiError> rawGenerate(
@@ -130,18 +121,17 @@ final class ChatLanguageModel implements LanguageModel {
     (_) => Effect.fromResult(codec.nativeRequest(request)).flatMap((body, _) => _execute(body)),
   );
 
-  Effect<NativeResponse<ChatResponse>, AiError> _execute(Map<String, Object?> body) =>
-      client.observe(
-        client
-            .requestJson(url: dialect.endpoint, headers: dialect.headers, body: body)
-            .catchError((error, _) => Effect.fail(_serviceError(error)))
-            .flatMap(
-              (response, _) => Effect.fromResult(codec.decode(response.data, response.metadata)),
-            ),
-        providerId: providerId,
-        api: dialect.api,
-        modelId: body['model']! as String,
-        usage: (raw) => raw.value.usage,
+  Effect<NativeResponse<ChatResponse>, AiError> _execute(Map<String, Object?> body) => client
+      .requestJson(url: dialect.endpoint, headers: dialect.headers, body: body)
+      .catchError((error, _) => Effect.fail(_serviceError(error)))
+      .flatMap(
+        (response, _) => Effect.fromResult(
+          codec.decode(
+            response.data,
+            response.metadata,
+            requestedModelId: body['model']! as String,
+          ),
+        ),
       );
 
   AiError _serviceError(AiError error) {
@@ -260,17 +250,12 @@ final class ChatLanguageModel implements LanguageModel {
             ),
       ),
     );
-    return client.observeFlow(
-      transport
-          .concat(
-            Effect.defer<GenerationEvent, AiError>((_) => Effect.fromResult(state.complete()))
-                .asFlow(),
-          )
-          .mapError((error, _) => state.withPartial(_serviceError(error))),
-      providerId: providerId,
-      api: dialect.api,
-      modelId: model,
-    );
+    return transport
+        .concat(
+          Effect.defer<GenerationEvent, AiError>((_) => Effect.fromResult(state.complete()))
+              .asFlow(),
+        )
+        .mapError((error, _) => state.withPartial(_serviceError(error)));
   }
 
   void _checkLimits(int eventCapacity, int maxEventBytes, int maxResponseBytes) {

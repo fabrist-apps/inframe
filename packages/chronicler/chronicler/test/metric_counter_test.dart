@@ -7,6 +7,7 @@ import 'support/exporter.dart';
 import 'support/metric_aggregation.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('ChroniclerCounter', () {
     test('should export one delta aggregate for a measured interval', () async {
       final exporter = TestExporter(acceptImmediately: true);

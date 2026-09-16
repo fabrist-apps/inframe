@@ -152,7 +152,7 @@ final class ResponsesCodec {
                       : 'function_call_output',
                   'call_id': result.callId,
                   'output': switch (content) {
-                    JsonToolResultContent(:final value) => jsonEncode(value),
+                    JsonToolResultContent(:final value) => _jsonText(value),
                     TextToolResultContent(:final parts) => [
                       for (final text in parts) {'type': 'input_text', 'text': text},
                     ],
@@ -309,7 +309,17 @@ final class ResponsesCodec {
   /// Applies the configured native-error hook consistently across execution paths.
   ProviderError? errorFrom(Map<String, Object?> data, {ResponseMetadata? metadata}) {
     final custom = dialect.nativeError?.call(data, metadata);
-    if (custom != null) return custom;
+    if (custom != null) {
+      return ProviderError(
+        custom.message,
+        statusCode: custom.statusCode ?? metadata?.statusCode,
+        code: custom.code,
+        details: custom.details ?? data,
+        requestId: custom.requestId ?? metadata?.requestId,
+        retryAfter: custom.retryAfter ?? metadata?.headers['retry-after']?.firstOrNull,
+        partialOutput: custom.partialOutput,
+      );
+    }
     if (data['error'] case final Map<String, Object?> error) {
       return ProviderError(
         error['message'] is String ? error['message']! as String : 'Responses provider error.',
@@ -317,6 +327,7 @@ final class ResponsesCodec {
         details: data,
         statusCode: metadata?.statusCode,
         requestId: metadata?.requestId,
+        retryAfter: metadata?.headers['retry-after']?.firstOrNull,
       );
     }
     if (data['status'] == 'failed') {
@@ -325,6 +336,7 @@ final class ResponsesCodec {
         details: data,
         statusCode: metadata?.statusCode,
         requestId: metadata?.requestId,
+        retryAfter: metadata?.headers['retry-after']?.firstOrNull,
       );
     }
     return null;
@@ -519,6 +531,11 @@ final class ResponsesCodec {
     }
   }
 
+  String _jsonText(Object? value, {String? original}) {
+    JsonValues.validate(value);
+    return original ?? jsonEncode(value);
+  }
+
   Map<String, Object?> _portable(OutputPart part) => switch (part) {
     TextOutputPart(:final text, :final citations) => {
       'type': 'message',
@@ -549,7 +566,7 @@ final class ResponsesCodec {
         'type': 'function_call',
         'call_id': callId,
         'name': name,
-        'arguments': original ?? jsonEncode(value),
+        'arguments': _jsonText(value, original: original),
       },
       MalformedToolArguments(:final original) => {
         'type': 'function_call',

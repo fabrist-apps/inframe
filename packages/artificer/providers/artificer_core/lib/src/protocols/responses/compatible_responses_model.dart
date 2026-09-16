@@ -63,17 +63,10 @@ final class CompatibleResponsesModel implements LanguageModel {
   Effect<GenerationResult, AiError> generate(
     GenerationRequest request, {
     ResponsesOptions options = const ResponsesOptions(),
-  }) => client.observe(
-    rawGenerate(request, options: options).flatMap(
-      (response, _) => Effect.fromResult(
-        codec.normalize(response.value, response.raw, metadata: response.metadata),
-      ),
+  }) => rawGenerate(request, options: options).flatMap(
+    (response, _) => Effect.fromResult(
+      codec.normalize(response.value, response.raw, metadata: response.metadata),
     ),
-    providerId: providerId,
-    api: codec.dialect.api,
-    modelId: modelId,
-    usage: (result) => result.usage,
-    verdict: (result) => result.finishReason,
   );
 
   /// Executes the common request once and returns both native views.
@@ -97,45 +90,31 @@ final class CompatibleResponsesModel implements LanguageModel {
 
   /// Native foreground text inference using the same transport and decoder.
   Effect<NativeResponse<ResponsesResponse>, AiError> create(ResponsesRequest request) =>
-      client.observe(
-        Effect.build<NativeResponse<ResponsesResponse>, AiError>(($) async {
-          final body = $.sync(codec.prepare(request));
-          final response = await $(
-            client.requestJson(
-              url: codec.dialect.route(request.model),
-              headers: codec.dialect.authentication(),
-              body: body,
-            ),
-          );
-          if (response.data is! Map<String, Object?>) {
-            return $(Effect.fail(const ProtocolError('Responses response must be an object.')));
-          }
-          final data = response.data! as Map<String, Object?>;
-          final value = $.sync(codec.decode(data, metadata: response.metadata));
-          return NativeResponse(
-            value: value,
-            raw: NativePayload(
-              providerId: providerId,
-              api: codec.dialect.api,
-              modelId: request.model,
-              data: data,
-            ),
-            metadata: response.metadata,
-          );
-        }).catchError((error, _) => Effect.fail(_nativeError(error))),
-        providerId: providerId,
-        api: codec.dialect.api,
-        modelId: request.model,
-        usage: (raw) {
-          final native = raw.value.usage;
-          if (native == null) return null;
-          return Usage(
-            inputTokens: native['input_tokens'] is int ? native['input_tokens']! as int : null,
-            outputTokens: native['output_tokens'] is int ? native['output_tokens']! as int : null,
-            totalTokens: native['total_tokens'] is int ? native['total_tokens']! as int : null,
-          );
-        },
-      );
+      Effect.build<NativeResponse<ResponsesResponse>, AiError>(($) async {
+        final body = $.sync(codec.prepare(request));
+        final response = await $(
+          client.requestJson(
+            url: codec.dialect.route(request.model),
+            headers: codec.dialect.authentication(),
+            body: body,
+          ),
+        );
+        if (response.data is! Map<String, Object?>) {
+          return $(Effect.fail(const ProtocolError('Responses response must be an object.')));
+        }
+        final data = response.data! as Map<String, Object?>;
+        final value = $.sync(codec.decode(data, metadata: response.metadata));
+        return NativeResponse(
+          value: value,
+          raw: NativePayload(
+            providerId: providerId,
+            api: codec.dialect.api,
+            modelId: request.model,
+            data: data,
+          ),
+          metadata: response.metadata,
+        );
+      }).catchError((error, _) => Effect.fail(_nativeError(error)));
 
   @override
   Flow<GenerationEvent, AiError> stream(
@@ -157,47 +136,42 @@ final class CompatibleResponsesModel implements LanguageModel {
 
   /// Streams an explicit native request with common typed events and native replay.
   /// Every consumption opens one attempt; final output follows transport cleanup.
-  Flow<GenerationEvent, AiError> streamNative(ResponsesRequest request) => client.observeFlow(
-    Flow.defer((_) {
-      final state = ResponsesStreamDecoder(
-        codec: codec,
-        modelId: request.model,
-        maxResponseBytes: maxResponseBytes,
-      );
-      final flow = Effect.fromResult(codec.prepare(request, stream: true))
-          .asFlow()
-          .concatMap(
-            (body, _) => client.withSse<GenerationEvent>(
-              url: codec.dialect.route(request.model),
-              headers: codec.dialect.authentication(),
-              body: body,
-              eventCapacity: eventCapacity,
-              maxEventBytes: maxEventBytes,
-              consume: (metadata, events) {
-                state.metadata = metadata;
-                return Effect.fromResult(state.start()).asFlow().concat(
-                  events.concatMap(
-                    (event, _) => Effect.fromResult(state.add(event))
-                        .asFlow()
-                        .concatMap((events, _) => Flow.fromIterable(events).widenError<AiError>()),
-                  ),
-                );
-              },
-            ),
-          )
-          .catchError(
-            (error, _) =>
-                Effect.fail<GenerationEvent, AiError>(state.withPartial(_nativeError(error)))
-                    .asFlow(),
-          );
-      return flow.concat(
-        Effect.defer<GenerationEvent, AiError>((_) => Effect.fromResult(state.complete())).asFlow(),
-      );
-    }),
-    providerId: providerId,
-    api: codec.dialect.api,
-    modelId: request.model,
-  );
+  Flow<GenerationEvent, AiError> streamNative(ResponsesRequest request) => Flow.defer((_) {
+    final state = ResponsesStreamDecoder(
+      codec: codec,
+      modelId: request.model,
+      maxResponseBytes: maxResponseBytes,
+    );
+    final flow = Effect.fromResult(codec.prepare(request, stream: true))
+        .asFlow()
+        .concatMap(
+          (body, _) => client.withSse<GenerationEvent>(
+            url: codec.dialect.route(request.model),
+            headers: codec.dialect.authentication(),
+            body: body,
+            eventCapacity: eventCapacity,
+            maxEventBytes: maxEventBytes,
+            consume: (metadata, events) {
+              state.metadata = metadata;
+              return Effect.fromResult(state.start()).asFlow().concat(
+                events.concatMap(
+                  (event, _) => Effect.fromResult(state.add(event))
+                      .asFlow()
+                      .concatMap((events, _) => Flow.fromIterable(events).widenError<AiError>()),
+                ),
+              );
+            },
+          ),
+        )
+        .catchError(
+          (error, _) =>
+              Effect.fail<GenerationEvent, AiError>(state.withPartial(_nativeError(error)))
+                  .asFlow(),
+        );
+    return flow.concat(
+      Effect.defer<GenerationEvent, AiError>((_) => Effect.fromResult(state.complete())).asFlow(),
+    );
+  });
 
   AiError? _unsupported(
     GenerationRequest request, {

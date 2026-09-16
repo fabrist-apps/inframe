@@ -41,5 +41,8 @@ doc/api/
 *.voxel_migrations.dart
 *_generated.dart
 
-# Provider foundation ships mappers for consumers without build_runner.
-!packages/artificer/providers/artificer_core/**/*.mapper.dart
+# Artificer Core mapper initializer
+/packages/artificer/providers/artificer_core/lib/artificer_core.init.dart
+
+# Chronicler mapper initializer
+/packages/chronicler/chronicler/lib/chronicler.init.dart

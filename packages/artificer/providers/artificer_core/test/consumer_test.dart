@@ -6,7 +6,7 @@ import 'package:test/test.dart';
 
 void main() {
   group('Public consumer', () {
-    test('should execute and persist shipped models without consumer generation', () async {
+    test('should use public provider APIs from an external package', () async {
       final entry = Isolate.resolvePackageUriSync(
         Uri.parse('package:artificer_core/artificer_core.dart'),
       )!;
@@ -23,7 +23,6 @@ dependencies:
     path: ${jsonEncode(package.path)}
   conflux:
     path: ${jsonEncode(Directory('${package.path}/../../../conflux').absolute.path)}
-  dart_mappable: ^4.10.0
 ''');
       await for (final source in Directory('${package.path}/test/fixtures/consumer').list()) {
         if (source is File && source.path.endsWith('.dart.txt')) {

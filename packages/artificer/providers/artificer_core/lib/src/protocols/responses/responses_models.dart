@@ -5,7 +5,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 part 'responses_models.mapper.dart';
 
 /// Provider-native tool inventory and neutral extra fields; common controls remain authoritative.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ResponsesOptions with ResponsesOptionsMappable {
   /// Creates the value retaining supplied collections.
   const ResponsesOptions({
@@ -27,7 +27,7 @@ final class ResponsesOptions with ResponsesOptionsMappable {
 }
 
 /// Typed foreground text request. Wire serialization resolves policy and always sends store false.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ResponsesRequest with ResponsesRequestMappable {
   /// Creates the value retaining supplied collections.
   const ResponsesRequest({
@@ -86,7 +86,7 @@ final class ResponsesRequest with ResponsesRequestMappable {
 }
 
 /// Typed response fields; NativePayload retains every unknown nested field.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ResponsesResponse with ResponsesResponseMappable {
   /// Creates the value retaining supplied collections.
   const ResponsesResponse({

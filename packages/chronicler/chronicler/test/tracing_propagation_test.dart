@@ -8,6 +8,7 @@ const traceId = 'trc_0123456789ABCDEFGHIJKLMN';
 const parentId = 'spn_0123456789ABCDEFGHIJKLMN';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler tracing propagation', () {
     test('should replace stale correlation headers without changing the source', () async {
       final parent = TracePropagation.extract({

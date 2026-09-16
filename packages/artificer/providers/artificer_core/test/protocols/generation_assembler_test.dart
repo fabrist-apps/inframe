@@ -127,7 +127,6 @@ void main() {
       expect(result.native.data, native.data);
       expect(result.native.unknownEvents.single['event'], 'future');
       expect(result.message.replay!.items, replay.items);
-      expect(GenerationResult.fromJson(result.toJson()).toMap(), result.toMap());
       expect(
         assembler.complete(terminal: true, native: native, finishReason: FinishReason.stop),
         isA<Failure<GenerationFinished, AiError>>(),

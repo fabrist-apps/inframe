@@ -10,6 +10,7 @@ import 'support/exporter.dart';
 import 'support/trace_controller.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler tracing sampling', () {
     test('should diagnose and abandon spans when ID generation fails', () {
       final bed = TraceControllerTestBed(

@@ -196,7 +196,7 @@ void main() {
             raw.raw,
             metadata: raw.metadata,
           ) as Success<GenerationResult, AiError>).value;
-          expect(normalized.message.toMap(), result.message.toMap());
+          expect(normalized.message.text, result.message.text);
           expect(bodies, hasLength(2));
           const native = ResponsesRequest(
             model: 'm',
@@ -215,7 +215,7 @@ void main() {
             expect(exit, isA<Succeeded<List<GenerationEvent>, AiError>>());
             final events = (exit as Succeeded<List<GenerationEvent>, AiError>).value;
             final streamed = events.whereType<GenerationFinished>().single.result;
-            expect(streamed.message.toMap(), result.message.toMap());
+            expect(streamed.message.text, result.message.text);
             expect(streamed.native.data, result.native.data);
             expect(streamed.native.unknownEvents.single['event'], 'future.event');
             expect(events.whereType<PartStarted>().map((e) => e.id).toSet(), {

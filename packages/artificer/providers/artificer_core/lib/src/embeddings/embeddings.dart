@@ -11,7 +11,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 part 'embeddings.mapper.dart';
 
 /// One text value producing one embedding vector.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class EmbeddingInput with EmbeddingInputMappable {
   /// Creates one text input without tokenization or concatenation.
   const EmbeddingInput.text(this.text);
@@ -27,7 +27,7 @@ final class EmbeddingInput with EmbeddingInputMappable {
 }
 
 /// An ordered, synchronous text embedding request.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class EmbeddingRequest with EmbeddingRequestMappable {
   /// Retains inputs for lazy execution; callers must not mutate during a run.
   EmbeddingRequest({required this.items, this.dimensions}) {
@@ -49,7 +49,7 @@ final class EmbeddingRequest with EmbeddingRequestMappable {
 }
 
 /// Known text embedding capabilities; an unknown model remains service-validated.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class EmbeddingCapabilities with EmbeddingCapabilitiesMappable {
   /// Creates the known capability description.
   const EmbeddingCapabilities({this.dimensions = CapabilitySupport.unknown});
@@ -86,7 +86,7 @@ abstract interface class EmbeddingModelProvider {
 }
 
 /// One vector per input, in input order, with native data preserved.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class EmbeddingResult with EmbeddingResultMappable {
   /// Retains vectors and metadata without resizing or magnitude normalization.
   EmbeddingResult({
@@ -126,7 +126,7 @@ final class EmbeddingResult with EmbeddingResultMappable {
 }
 
 /// One indexed vector from compatible synchronous embedding endpoints.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class IndexedEmbedding with IndexedEmbeddingMappable {
   /// Creates the typed native view; normalization validates result invariants.
   const IndexedEmbedding({required this.index, required this.embedding});
@@ -145,7 +145,7 @@ final class IndexedEmbedding with IndexedEmbeddingMappable {
 }
 
 /// Typed response view paired with full unknown JSON in a NativeResponse.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class EmbeddingBatch with EmbeddingBatchMappable {
   /// Creates a synchronous batch response view.
   const EmbeddingBatch({required this.model, required this.data, this.usage});

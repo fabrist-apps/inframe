@@ -4,7 +4,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 part 'native.mapper.dart';
 
 /// HTTP metadata retained for explicit inspection, never diagnostic logging.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ResponseMetadata with ResponseMetadataMappable {
   /// Creates a [ResponseMetadata] retaining the supplied values.
   const ResponseMetadata({required this.statusCode, this.requestId, this.headers = const {}});
@@ -26,7 +26,7 @@ final class ResponseMetadata with ResponseMetadataMappable {
 }
 
 /// Complete provider JSON and the target that produced it.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class NativePayload with NativePayloadMappable {
   /// Creates a [NativePayload] retaining the supplied values.
   const NativePayload({
@@ -62,7 +62,7 @@ final class NativePayload with NativePayloadMappable {
 }
 
 /// Typed and complete raw views of the same inference response.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class NativeResponse<T> with NativeResponseMappable<T> {
   /// Creates a [NativeResponse] retaining the supplied values.
   const NativeResponse({required this.value, required this.raw, required this.metadata});

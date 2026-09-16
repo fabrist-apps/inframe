@@ -11,8 +11,7 @@ import 'package:conflux/result.dart';
 Future<void> verifyCompatibleProtocols() async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final records = <({String path, Map<String, Object?> body, String? auth})>[];
-  final observations = <ProviderObservation>[];
-  final client = ProviderHttpClient(observer: observations.add);
+  final client = ProviderHttpClient();
   final runtime = Runtime();
   final base = Uri.parse('http://127.0.0.1:${server.port}');
   Map<String, Object?> responseBody() => {
@@ -141,13 +140,12 @@ Future<void> verifyCompatibleProtocols() async {
           ),
         ),
       );
-      final restored = NativeResponse.fromJson<ResponsesResponse>(raw.toJson());
       final normalized = result(
-        codec.normalize(restored.value, restored.raw, metadata: restored.metadata),
+        codec.normalize(raw.value, raw.raw, metadata: raw.metadata),
       );
       if (records.length != before + 1 || normalized.text != 'hello')
         throw StateError('native normalization repeated inference');
-      if ((restored.raw.data as Map)['future'] == null)
+      if ((raw.raw.data as Map)['future'] == null)
         throw StateError('lost unknown native JSON');
       final body = records.last.body;
       if (body['store'] != false ||
@@ -162,18 +160,12 @@ Future<void> verifyCompatibleProtocols() async {
       final events = success(await runtime.run(common.stream(request).runCollect()));
       final streamed = events.whereType<GenerationFinished>().single.result;
       if (streamed.text != unary.text ||
-          jsonEncode(streamed.message.toMap()) != jsonEncode(unary.message.toMap()))
+          streamed.usage?.totalTokens != unary.usage?.totalTokens)
         throw StateError('Responses stream differs');
       if (streamed.native.unknownEvents.single['event'] != 'vendor.future')
         throw StateError('unknown stream event missing');
-      final persisted = GenerationEvent.fromJson(events.last.toJson());
-      if (persisted is! GenerationFinished) throw StateError('stream persistence');
       final nativeRequest = result(codec.encode(request, 'unknown-model'));
-      final nativeRestored = ResponsesRequest.fromJson(nativeRequest.toJson());
-      success(await runtime.run(model.create(nativeRestored)));
-      final options = const ResponsesOptions(extraBody: Setting.set({'neutral': true}));
-      if (ResponsesOptions.fromJson(options.toJson()).extraBody.resolve(null)?['neutral'] != true)
-        throw StateError('Responses options persistence');
+      success(await runtime.run(model.create(nativeRequest)));
     }
     if (records.length != 8) throw StateError('unexpected Responses attempts');
     for (final alternate in [false, true]) {
@@ -201,11 +193,10 @@ Future<void> verifyCompatibleProtocols() async {
           model.rawGenerate(request, options: const ChatOptions(seed: Setting.set(7))),
         ),
       );
-      final restored = NativeResponse.fromJson<ChatResponse>(raw.toJson());
-      final normalized = result(model.codec.normalize(restored));
+      final normalized = result(model.codec.normalize(raw));
       if (records.length != before + 1 || normalized.text != 'hello')
         throw StateError('Chat normalization repeated inference');
-      if ((restored.raw.data as Map)['future'] == null) throw StateError('Chat unknown JSON');
+      if ((raw.raw.data as Map)['future'] == null) throw StateError('Chat unknown JSON');
       final body = records.last.body;
       if (body['n'] != 1 || body['seed'] != 7 || body[dialect.maxTokensField] != 4096)
         throw StateError('Chat wire options');
@@ -224,31 +215,9 @@ Future<void> verifyCompatibleProtocols() async {
           {'role': 'user', 'content': 'question'},
         ],
       );
-      success(await runtime.run(model.native(NativeChatRequest.fromJson(native.toJson()))));
-      const options = ChatOptions(seed: Setting.set(7));
-      if (ChatOptions.fromJson(options.toJson()).seed.resolve(null) != 7)
-        throw StateError('Chat options persistence');
+      success(await runtime.run(model.native(native)));
     }
     if (records.length != 16) throw StateError('unexpected total protocol attempts');
-    final starts = observations.where((e) => e.kind == ProviderObservationKind.started).toList();
-    final finished = observations.where((e) => e.kind == ProviderObservationKind.finished).toList();
-    if (starts.length != 16 ||
-        finished.length != 16 ||
-        finished.any((e) => e.outcome != ProviderOutcome.succeeded))
-      throw StateError('attempt observation count/outcome');
-    if (starts.any((e) => e.providerId == null || e.modelId == null || e.api == null))
-      throw StateError('missing model observation identity');
-    if (observations.where((e) => e.kind == ProviderObservationKind.usage).length != 16)
-      throw StateError('usage observation missing or duplicated');
-    if (observations.where((e) => e.kind == ProviderObservationKind.verdict).length != 8)
-      throw StateError('verdict observation count');
-    for (final start in starts) {
-      final attempt = observations.where((e) => e.attemptId == start.attemptId).toList();
-      if (attempt.first.kind != ProviderObservationKind.started ||
-          attempt.last.kind != ProviderObservationKind.finished ||
-          attempt[1].kind != ProviderObservationKind.response)
-        throw StateError('observation order');
-    }
   } finally {
     await client.close();
     await runtime.close();

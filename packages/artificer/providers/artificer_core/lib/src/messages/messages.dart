@@ -6,10 +6,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 part 'messages.mapper.dart';
 
 /// One explicit, caller-owned conversation turn.
-@MappableClass(
-  discriminatorKey: 'type',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorKey: 'type')
 sealed class Message with MessageMappable {
   /// Creates a [Message] retaining the supplied values.
   Message({this.schemaVersion = 1}) {
@@ -27,10 +24,7 @@ sealed class Message with MessageMappable {
 }
 
 /// Ordered text supplied by the caller.
-@MappableClass(
-  discriminatorValue: 'user',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'user')
 final class UserMessage extends Message with UserMessageMappable {
   /// Creates a [UserMessage] retaining the supplied values.
   UserMessage(this.parts, {super.schemaVersion}) {
@@ -51,10 +45,7 @@ final class UserMessage extends Message with UserMessageMappable {
 }
 
 /// Model-authored output. Empty output is valid for blocked responses.
-@MappableClass(
-  discriminatorValue: 'assistant',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'assistant')
 final class AssistantMessage extends Message with AssistantMessageMappable {
   /// Creates a [AssistantMessage] retaining the supplied values.
   AssistantMessage(this.parts, {this.replay, super.schemaVersion});
@@ -62,11 +53,8 @@ final class AssistantMessage extends Message with AssistantMessageMappable {
   /// Same-target native replay. Clear after direct mutation of nested content.
   ProviderReplay? replay;
 
-  /// Replaces content and deliberately drops signatures and replay state.
+  /// Replaces content and drops replay state. Generated copyWith retains replay.
   AssistantMessage withParts(List<OutputPart> parts) => AssistantMessage(parts);
-
-  /// Copies content without retaining potentially stale replay state.
-  AssistantMessage copyWith({List<OutputPart>? parts}) => AssistantMessage(parts ?? this.parts);
 
   /// Ordered parts, retained without defensive copying.
   final List<OutputPart> parts;
@@ -82,10 +70,7 @@ final class AssistantMessage extends Message with AssistantMessageMappable {
 }
 
 /// Text-only input family.
-@MappableClass(
-  discriminatorKey: 'type',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorKey: 'type')
 sealed class InputPart with InputPartMappable {
   /// Creates a [InputPart] retaining the supplied values.
   const InputPart();
@@ -98,10 +83,7 @@ sealed class InputPart with InputPartMappable {
 }
 
 /// One text input segment.
-@MappableClass(
-  discriminatorValue: 'text',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'text')
 final class TextInputPart extends InputPart with TextInputPartMappable {
   /// Creates a [TextInputPart] retaining the supplied values.
   const TextInputPart(this.text);
@@ -117,10 +99,7 @@ final class TextInputPart extends InputPart with TextInputPartMappable {
 }
 
 /// Ordered output content.
-@MappableClass(
-  discriminatorKey: 'type',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorKey: 'type')
 sealed class OutputPart with OutputPartMappable {
   /// Creates a [OutputPart] retaining the supplied values.
   const OutputPart();
@@ -133,10 +112,7 @@ sealed class OutputPart with OutputPartMappable {
 }
 
 /// Text returned by the model.
-@MappableClass(
-  discriminatorValue: 'text',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'text')
 final class TextOutputPart extends OutputPart with TextOutputPartMappable {
   /// Creates a [TextOutputPart] retaining the supplied values.
   const TextOutputPart(this.text, {this.citations = const []});
@@ -155,10 +131,7 @@ final class TextOutputPart extends OutputPart with TextOutputPartMappable {
 }
 
 /// Caller supplied application results, in original order.
-@MappableClass(
-  discriminatorValue: 'tool',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'tool')
 final class ToolMessage extends Message with ToolMessageMappable {
   /// Creates a nonempty result turn without copying it.
   ToolMessage(this.results, {super.schemaVersion}) {
@@ -176,7 +149,7 @@ final class ToolMessage extends Message with ToolMessageMappable {
 }
 
 /// Ordered citation details; native data retains unknown provider fields.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class Citation with CitationMappable {
   /// Creates the value retaining supplied collections.
   const Citation({
@@ -211,7 +184,7 @@ final class Citation with CitationMappable {
 }
 
 /// Ordered native JSON blocks for exact same-target resubmission.
-@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+@MappableClass()
 final class ProviderReplay with ProviderReplayMappable {
   /// Creates the value retaining supplied collections.
   ProviderReplay({
@@ -277,10 +250,7 @@ enum ToolStatus {
 }
 
 /// ReasoningOutputPart.
-@MappableClass(
-  discriminatorValue: 'reasoning',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'reasoning')
 final class ReasoningOutputPart extends OutputPart with ReasoningOutputPartMappable {
   /// Creates the value retaining supplied collections.
   const ReasoningOutputPart({required this.summary});
@@ -296,10 +266,7 @@ final class ReasoningOutputPart extends OutputPart with ReasoningOutputPartMappa
 }
 
 /// RefusalOutputPart.
-@MappableClass(
-  discriminatorValue: 'refusal',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'refusal')
 final class RefusalOutputPart extends OutputPart with RefusalOutputPartMappable {
   /// Creates the value retaining supplied collections.
   const RefusalOutputPart({required this.text});
@@ -315,10 +282,7 @@ final class RefusalOutputPart extends OutputPart with RefusalOutputPartMappable 
 }
 
 /// OpaqueOutputPart.
-@MappableClass(
-  discriminatorValue: 'opaque',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'opaque')
 final class OpaqueOutputPart extends OutputPart with OpaqueOutputPartMappable {
   /// Creates the value retaining supplied collections.
   const OpaqueOutputPart({required this.providerId, required this.api, required this.data});
@@ -341,10 +305,7 @@ final class OpaqueOutputPart extends OutputPart with OpaqueOutputPartMappable {
 }
 
 /// ToolCallPart.
-@MappableClass(
-  discriminatorValue: 'toolCall',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'toolCall')
 final class ToolCallPart extends OutputPart with ToolCallPartMappable {
   /// Creates the value retaining supplied collections.
   ToolCallPart({required this.callId, required this.name, required this.arguments}) {
@@ -370,10 +331,7 @@ final class ToolCallPart extends OutputPart with ToolCallPartMappable {
 }
 
 /// ProviderToolPart.
-@MappableClass(
-  discriminatorValue: 'providerTool',
-  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
-)
+@MappableClass(discriminatorValue: 'providerTool')
 final class ProviderToolPart extends OutputPart with ProviderToolPartMappable {
   /// Creates the value retaining supplied collections.
   const ProviderToolPart({

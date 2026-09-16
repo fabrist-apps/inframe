@@ -5,6 +5,7 @@ import 'package:context/context.dart';
 import 'package:test/test.dart';
 
 void main() {
+  setUpAll(Chronicler.initialize);
   group('Chronicler', () {
     test('should export a log recorded through Context', () async {
       final exporter = _Exporter();

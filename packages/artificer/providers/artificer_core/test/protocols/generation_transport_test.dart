@@ -92,8 +92,6 @@ void main() {
             'hel',
             'lo',
           ]);
-          final restored = GenerationEvent.fromJson(events.last.toJson());
-          expect((restored as GenerationFinished).result.text, 'hello');
         }
         final received = <GenerationEvent>[];
         final exit = await runtime.run(

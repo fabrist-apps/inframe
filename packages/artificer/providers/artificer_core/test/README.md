@@ -4,11 +4,8 @@ Run these suites from the workspace root with `dart test packages/artificer/prov
 
 | Foundation contract | Focused coverage |
 | --- | --- |
-| Shipped generated mappers, package registration, repeated initialization, public aliases, generic and nested polymorphic decoding without consumer builders | `consumer_test.dart`, `fixtures/consumer/persistence.dart.txt`, generation serialization tests |
-| Version 1 messages/results, unknown-version rejection, native raw JSON and unknown fields, omitted/null/present values, unresolved options absent from wire | Generation conversation/options tests; Chat/Responses codec tests; external consumer |
-| Ordinary mutable collections, cold reads, replay-clearing edits, no generated stale copy helpers | Generation conversation tests; external consumer |
-| JSON cycles, non-string keys, unsupported objects and nonfinite values; no implicit registered-object coercion | Generation JSON boundary/persistence/tool argument tests |
-| Content-free diagnostics and observations, runtime handles excluded, explicit credentials and application-owned Runtime | Consumer persistence/observation checks; `observations/` |
+| Ordinary mutable collections, cold reads, replay-clearing withParts edits | Generation conversation tests; external consumer |
+| JSON cycles, non-string keys, unsupported objects and nonfinite values | Generation JSON boundary/tool argument tests |
 | Public language/embedding providers, typed concrete options, Effect.build composition, unknown model IDs without discovery | External consumer and embedding/model wire tests |
 | One native/common transport and decoder path, pure authoritative normalization, explicit multi-candidate selection | `protocols/chat/`, `protocols/responses/`, `fixtures/consumer/protocols.dart.txt` |
 | Options inheritance/replacement/clear, known unsupported capabilities and conflicts rejected before I/O | Generation option tests; Chat/Responses/embedding tests |
@@ -22,9 +19,8 @@ Run these suites from the workspace root with `dart test packages/artificer/prov
 | Tracked borrowed adapter required without mutation; shared options/middleware/unrelated users preserved | `transport/` |
 | Fresh requests/tokens on repeated and concurrent execution, one attempt without SDK retries/redirects/fallback | Transport and external consumer wire tests |
 | Cancellation before headers/during body, late acquisition abort-before-send, late response disposal, timeout cleanup, early take | Production adapter lifecycle and SSE transport tests |
-| Cleanup before terminal success or interrupted Exit, retained cleanup defects, conservative delivery states | Transport lifecycle/SSE tests; generation transport tests; `observations/` |
+| Cleanup before terminal success or interrupted Exit, retained cleanup defects, conservative delivery states | Transport lifecycle/SSE tests; generation transport tests |
 | Idempotent close/closeEffect, rejection of new work, active request release and borrowed pool remains usable | Transport lifecycle tests |
-| Correlated start/response/usage/verdict/one terminal outcome, normalization emits no second attempt, observer defects retain cleanup | `observations/`, external protocol consumer |
-| Native status/code/message/details/request ID, raw and parsed Retry-After, service errors distinct from protocol/transport/defect/interruption | Observation diagnostic/model tests; codec error fixtures; transport lifecycle tests |
+| Native status/code/message/details/request ID, raw and parsed Retry-After, service errors distinct from protocol/transport/defect/interruption | Model tests; codec error fixtures; transport lifecycle tests |
 
-CI regenerates the package's mappers, formats generated output, and checks that regeneration leaves the checkout unchanged. The separate consumer resolves from a temporary directory and runs only shipped source and mappers.
+CI generates the package's mappers before analysis and tests. The separate consumer resolves from a temporary directory and exercises public provider APIs against loopback servers.

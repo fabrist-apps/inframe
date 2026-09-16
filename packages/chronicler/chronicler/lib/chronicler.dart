@@ -1,5 +1,10 @@
 /// Structured telemetry capture and bounded delivery for Dart applications.
+@MappableLib(generateInitializerForScope: InitializerScope.package)
 library;
+
+import 'package:dart_mappable/dart_mappable.dart';
+
+export 'chronicler.init.dart';
 
 export 'src/cause_conversion.dart'
     show ChroniclerErrorInput, ConfluxCauseConversion, ConfluxFailure;
