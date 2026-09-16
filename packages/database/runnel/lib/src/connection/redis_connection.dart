@@ -1,15 +1,17 @@
-// This class is package-internal; callers use the documented Runnel API.
-
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/result.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/connection/connection_attempt.dart';
-import 'package:runnel/src/errors.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
+import 'package:runnel/src/connection/operation.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/resp/resp_parser.dart';
 import 'package:runnel/src/resp/resp_value.dart';
+
+// This class is package-internal; callers use the documented Runnel API.
 
 /// Receives an unexpected terminal failure from [connection].
 typedef ConnectionTerminated = void Function(RedisConnection connection, Object cause);
@@ -91,6 +93,7 @@ final class RedisConnection {
     RedisCommand<T> command, {
     required Duration timeout,
     bool enforceLimits = true,
+    RunnelOperation? operation,
   }) {
     final acceptedAt = Stopwatch()..start();
     if (_closed) {
@@ -107,6 +110,7 @@ final class RedisConnection {
         batch: false,
       );
       final pending = _register(command, encoded, acceptedAt, timeout, remaining);
+      pending.detachCancellation = operation?.onCancel(() => _cancel(pending));
       _scheduleFlush();
       return pending.completer.future;
     } on RunnelException catch (error, stackTrace) {
@@ -225,6 +229,24 @@ final class RedisConnection {
     }
   }
 
+  void _cancel(_Pending<Object?> pending) {
+    if (!_pending.contains(pending)) return;
+    if (!pending.submitted) {
+      _remove(pending);
+      pending.completer.completeError(
+        const RedisClosedException(message: 'Command cancelled before submission.'),
+      );
+      return;
+    }
+    _terminate(
+      const RedisTransportException(
+        message: 'A submitted command was cancelled.',
+        deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+      ),
+      StackTrace.current,
+    );
+  }
+
   void _timeout(_Pending<Object?> pending) {
     if (pending.completer.isCompleted || !_pending.contains(pending)) return;
     if (!pending.submitted) {
@@ -303,6 +325,7 @@ final class RedisConnection {
   void _remove(_Pending<Object?> pending) {
     if (!_pending.remove(pending)) return;
     pending.timer?.cancel();
+    pending.detachCancellation?.call();
     _pendingBytes -= pending.encoded.length;
     if (_pending.isEmpty) _notifyIdle();
   }
@@ -419,17 +442,18 @@ final class _Pending<T> {
   final Duration deadline;
   final Completer<T> completer = Completer<T>();
   Timer? timer;
+  void Function()? detachCancellation;
   bool submitted = false;
 
   bool get deadlineExpired => stopwatch.elapsed >= deadline;
 
   void complete(RespValue reply) {
     try {
-      final value = command.decode(reply);
+      final value = command.decode(reply).getOrThrowWith((error) => error);
       if (deadlineExpired) throw const _DecodeDeadlineExpired();
       completer.complete(value);
     } on Object catch (error, stackTrace) {
-      if (error is _DecodeDeadlineExpired) rethrow;
+      if (error is _DecodeDeadlineExpired || error is CommandDecoderDefect) rethrow;
       if (deadlineExpired) {
         Error.throwWithStackTrace(_DecodeDeadlineExpired(error), stackTrace);
       }

@@ -29,18 +29,18 @@ extension RunnelPublishingCommands on Runnel {
   ///
   /// The count is not an end-client delivery acknowledgement or persistence proof.
   Future<int> publish(String channel, String message, {Duration? timeout}) =>
-      execute(publishCommand(channel, message), timeout: timeout);
+      executeFuture(publishCommand(channel, message), timeout: timeout);
 
   /// Publishes exact bytes and returns the broker subscriber count.
   ///
   /// The count is not an end-client delivery acknowledgement or persistence proof.
   Future<int> publishBytes(String channel, Uint8List message, {Duration? timeout}) =>
-      execute(publishBytesCommand(channel, message), timeout: timeout);
+      executeFuture(publishBytesCommand(channel, message), timeout: timeout);
 }
 
 RedisCommand<int> _publishCommand(String channel, RedisArgument message) {
   if (channel.isEmpty) throw ArgumentError.value(channel, 'channel', 'must not be empty');
-  return RedisCommand<int>(
+  return RedisCommand<int>.internal(
     [
       RedisArgument.text('PUBLISH'),
       RedisArgument.text(channel),

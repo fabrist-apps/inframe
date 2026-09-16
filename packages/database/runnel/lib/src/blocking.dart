@@ -1,9 +1,10 @@
 import 'dart:async';
 
+import 'package:conflux/result.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/commands/streams.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
-import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// Opens one fully configured physical connection for a blocking session.
@@ -80,12 +81,12 @@ final class BlockingSession {
         final ordinary = xreadCommand(after, count: count);
         final arguments = ordinary.arguments;
         final streamsIndex = count == null ? 1 : 3;
-        return RedisCommand<List<StreamRead>>([
+        return RedisCommand<List<StreamRead>>.internal([
           ...arguments.take(streamsIndex),
           RedisArgument.text('BLOCK'),
           RedisArgument.text('${wait.inMilliseconds}'),
           ...arguments.skip(streamsIndex),
-        ], ordinary.decode);
+        ], (reply) => ordinary.decode(reply).getOrThrowWith((error) => error));
       },
       timeout: deadline,
     );
@@ -104,7 +105,7 @@ final class BlockingSession {
     final deadline = timeout ?? wait + _commandTimeout;
     _requirePositive(deadline, 'timeout');
     return _execute(
-      () => RedisCommand<({String key, String value})?>([
+      () => RedisCommand<({String key, String value})?>.internal([
         RedisArgument.text(command),
         for (final key in keys) RedisArgument.text(key),
         RedisArgument.text(_secondsArgument(wait)),

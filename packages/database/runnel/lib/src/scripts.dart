@@ -47,7 +47,7 @@ RedisCommand<T> _scriptCommand<T>(
 ) {
   final ownedKeys = List<String>.of(keys);
   final ownedArguments = List<RedisArgument>.of(arguments);
-  return RedisCommand<T>([
+  return RedisCommand<T>.internal([
     RedisArgument.text(command),
     RedisArgument.text(scriptIdentifier),
     RedisArgument.text('${ownedKeys.length}'),

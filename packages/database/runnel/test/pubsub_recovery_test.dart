@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:runnel/src/errors.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
 import 'package:test/test.dart';

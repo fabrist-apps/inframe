@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
@@ -50,11 +51,11 @@ void main() {
 
     setUp(() async {
       peer = await _StreamPeer.start();
-      client = await Runnel.connect('redis://127.0.0.1:${peer.port}');
+      client = await Runnel.connect('redis://127.0.0.1:${peer.port}').runFuture();
     });
 
     tearDown(() async {
-      await client.close();
+      await client.close().runFuture();
       await peer.close();
     });
 

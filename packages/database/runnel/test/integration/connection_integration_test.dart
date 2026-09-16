@@ -6,7 +6,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:test/test.dart';
 
 import '../fixtures/herald_consumer_fixture.dart';
@@ -38,59 +42,70 @@ void main() {
             final client = await Runnel.connect(
               endpoint,
               securityContext: securityContext,
-            );
-            addTearDown(client.close);
+            ).runFuture();
+            addTearDown(() => client.close().runFuture());
             final suffix = '${DateTime.now().microsecondsSinceEpoch}-resp3';
             final textKey = 'runnel:integration:text:$suffix';
             final bytesKey = 'runnel:integration:bytes:$suffix';
 
-            expect(await client.ping(), isTrue);
-            expect(await client.set(textKey, 'café'), isTrue);
-            expect(await client.get(textKey), 'café');
+            expect(await client.ping().runFuture(), isTrue);
+            expect(await client.set(textKey, 'café').runFuture(), isTrue);
+            expect(
+              await client.get(textKey).runFuture(),
+              isA<Some<String>>().having((value) => value.value, 'value', 'café'),
+            );
             expect(await client.setBytes(bytesKey, Uint8List.fromList([0, 255, 13, 10])), isTrue);
             expect(await client.getBytes(bytesKey), [0, 255, 13, 10]);
 
             final conditionalKey = 'runnel:integration:conditional:$suffix';
             expect(
-              await client.set(
-                conditionalKey,
-                'first',
-                condition: SetCondition.ifAbsent,
-                expiry: Expiry.after(const Duration(seconds: 5)),
-              ),
+              await client
+                  .set(
+                    conditionalKey,
+                    'first',
+                    condition: SetCondition.ifAbsent,
+                    expiry: Expiry.after(const Duration(seconds: 5)),
+                  )
+                  .runFuture(),
               isTrue,
             );
             expect(
-              await client.set(
-                conditionalKey,
-                'ignored',
-                condition: SetCondition.ifAbsent,
-              ),
+              await client
+                  .set(
+                    conditionalKey,
+                    'ignored',
+                    condition: SetCondition.ifAbsent,
+                  )
+                  .runFuture(),
               isFalse,
             );
             expect(
-              await client.set(
-                conditionalKey,
-                'second',
-                condition: SetCondition.ifPresent,
-                expiry: const Expiry.keep(),
-              ),
+              await client
+                  .set(
+                    conditionalKey,
+                    'second',
+                    condition: SetCondition.ifPresent,
+                    expiry: const Expiry.keep(),
+                  )
+                  .runFuture(),
               isTrue,
             );
             expect(await client.pttl(conditionalKey), inInclusiveRange(1, 5000));
-            expect(await client.set(conditionalKey, 'without-expiry'), isTrue);
+            expect(await client.set(conditionalKey, 'without-expiry').runFuture(), isTrue);
             expect(await client.pttl(conditionalKey), -1);
             expect(
-              await client.set(
-                conditionalKey,
-                'absolute-expiry',
-                expiry: Expiry.at(
-                  DateTime.fromMillisecondsSinceEpoch(
-                    DateTime.now().millisecondsSinceEpoch + 10000,
-                    isUtc: true,
-                  ),
-                ),
-              ),
+              await client
+                  .set(
+                    conditionalKey,
+                    'absolute-expiry',
+                    expiry: Expiry.at(
+                      DateTime.fromMillisecondsSinceEpoch(
+                        DateTime.now().millisecondsSinceEpoch + 10000,
+                        isUtc: true,
+                      ),
+                    ),
+                  )
+                  .runFuture(),
               isTrue,
             );
             expect(await client.pttl(conditionalKey), inInclusiveRange(1, 10000));
@@ -122,12 +137,14 @@ void main() {
             expect(await client.unlink([conditionalKey]), 1);
 
             expect(
-              await client.execute(
-                RedisCommand<String>(
-                  [RedisArgument.text('ECHO'), RedisArgument.text('custom')],
-                  respText,
-                ),
-              ),
+              await client
+                  .execute(
+                    RedisCommand<String>(
+                      [RedisArgument.text('ECHO'), RedisArgument.text('custom')],
+                      (reply) => Success(respText(reply)),
+                    ),
+                  )
+                  .runFuture(),
               'custom',
             );
 
@@ -216,7 +233,7 @@ void main() {
             expect(reads.single.key, stream);
             expect(reads.single.entries.single.id, secondStreamId);
             expect(await client.xread({stream: secondStreamId}), isEmpty);
-            expect(await client.ping(), isTrue);
+            expect(await client.ping().runFuture(), isTrue);
             expect(await client.xtrim(stream, StreamTrim.maxLength(1)), 1);
             expect(
               await client.xtrim(stream, StreamTrim.minId(secondStreamId)),
@@ -225,13 +242,16 @@ void main() {
 
             final pipelineKey = 'runnel:integration:pipeline:$suffix';
             final pipelineCounter = 'runnel:integration:pipeline-counter:$suffix';
-            await client.set(pipelineKey, 'value');
+            await client.set(pipelineKey, 'value').runFuture();
             final pipeline = client.pipeline();
             final pipelinedValue = pipeline.add(getCommand(pipelineKey));
             final pipelinedCount = pipeline.add(incrCommand(pipelineCounter));
             final pipelinedFailure = pipeline.add(incrCommand(hash));
             final pipelineResults = await pipeline.exec();
-            expect(pipelineResults.value(pipelinedValue), 'value');
+            expect(
+              pipelineResults.value(pipelinedValue),
+              isA<Some<String>>().having((value) => value.value, 'value', 'value'),
+            );
             expect(pipelineResults.value(pipelinedCount), 1);
             expect(
               pipelineResults.outcome(pipelinedFailure),
@@ -254,13 +274,16 @@ void main() {
               isA<BatchFailure<int>>(),
             );
             expect(transactionResults.value(secondIncrement), 2);
-            expect(await client.get(transactionCounter), '2');
+            expect(
+              await client.get(transactionCounter).runFuture(),
+              isA<Some<String>>().having((value) => value.value, 'value', '2'),
+            );
 
             final rejectedTransaction = client.transaction()
               ..add(
                 RedisCommand<void>(
                   [RedisArgument.text('SET')],
-                  (_) {},
+                  (_) => const Success(null),
                 ),
               );
             await expectLater(
@@ -346,7 +369,10 @@ void main() {
               ),
               throwsA(isA<RedisServerException>()),
             );
-            expect(await client.get(partialWriteKey), 'written');
+            expect(
+              await client.get(partialWriteKey).runFuture(),
+              isA<Some<String>>().having((value) => value.value, 'value', 'written'),
+            );
 
             final blocking = await client.blocking();
             addTearDown(blocking.close);
@@ -394,8 +420,11 @@ void main() {
               [blockingList],
               wait: const Duration(seconds: 1),
             );
-            expect(await client.set('$blockingList:ordinary', 'ready'), isTrue);
-            expect(await client.get('$blockingList:ordinary'), 'ready');
+            expect(await client.set('$blockingList:ordinary', 'ready').runFuture(), isTrue);
+            expect(
+              await client.get('$blockingList:ordinary').runFuture(),
+              isA<Some<String>>().having((value) => value.value, 'value', 'ready'),
+            );
             expect(await client.rpush(blockingList, ['release']), 1);
             expect(await isolatedWait, (key: blockingList, value: 'release'));
 
@@ -485,7 +514,10 @@ void main() {
             expect(duplicate.position, 1);
             expect(duplicate.duplicate, isTrue);
             expect(await client.xlen(names.historyKey), 1);
-            expect(await client.get(names.snapshotKey), '1|created');
+            expect(
+              await client.get(names.snapshotKey).runFuture(),
+              isA<Some<String>>().having((value) => value.value, 'value', '1|created'),
+            );
             expect(await client.hget(names.metadataKey, 'position'), '1');
 
             expect(
@@ -528,7 +560,10 @@ void main() {
             interrupted = Completer<PubSubInterrupted>();
             restored = Completer<PubSubRestored>();
             restoredPublication = Completer<PubSubMessage>();
-            expect(await client.execute(_killPubSubClientsCommand()), greaterThanOrEqualTo(1));
+            expect(
+              await client.execute(_killPubSubClientsCommand()).runFuture(),
+              greaterThanOrEqualTo(1),
+            );
             final interruption = await interrupted.future.timeout(const Duration(seconds: 5));
             final restoration = await restored.future.timeout(const Duration(seconds: 5));
             expect(interruption.generation, 1);
@@ -570,7 +605,7 @@ RedisCommand<int> _killPubSubClientsCommand() => RedisCommand<int>(
     RedisArgument.text('PUBSUB'),
   ],
   (reply) => switch (reply) {
-    RespInteger(:final value) => value,
+    RespInteger(:final value) => Success(value),
     _ => throw FormatException('CLIENT KILL returned $reply instead of an integer.'),
   },
 );

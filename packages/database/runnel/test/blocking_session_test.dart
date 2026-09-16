@@ -5,8 +5,8 @@ import 'dart:typed_data';
 
 import 'package:runnel/src/blocking.dart';
 import 'package:runnel/src/commands/streams.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
-import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:test/test.dart';
 

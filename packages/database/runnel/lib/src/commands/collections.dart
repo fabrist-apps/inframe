@@ -170,36 +170,37 @@ extension RunnelCollectionCommands on Runnel {
     String key,
     Map<String, String> fields, {
     Duration? timeout,
-  }) => execute(hsetCommand(key, fields), timeout: timeout);
+  }) => executeFuture(hsetCommand(key, fields), timeout: timeout);
 
   /// Reads one hash field, returning null when it does not exist.
   Future<String?> hget(String key, String field, {Duration? timeout}) =>
-      execute(hgetCommand(key, field), timeout: timeout);
+      executeFuture(hgetCommand(key, field), timeout: timeout);
 
   /// Reads hash [fields] in input order, preserving missing entries as null.
   Future<List<String?>> hmget(
     String key,
     List<String> fields, {
     Duration? timeout,
-  }) => execute(hmgetCommand(key, fields), timeout: timeout);
+  }) => executeFuture(hmgetCommand(key, fields), timeout: timeout);
 
   /// Reads every field and value from a hash.
   Future<Map<String, String>> hgetall(String key, {Duration? timeout}) =>
-      execute(hgetallCommand(key), timeout: timeout);
+      executeFuture(hgetallCommand(key), timeout: timeout);
 
   /// Deletes [fields] and returns the number removed.
   Future<int> hdel(
     String key,
     List<String> fields, {
     Duration? timeout,
-  }) => execute(hdelCommand(key, fields), timeout: timeout);
+  }) => executeFuture(hdelCommand(key, fields), timeout: timeout);
 
   /// Reports whether [field] exists in the hash.
   Future<bool> hexists(String key, String field, {Duration? timeout}) =>
-      execute(hexistsCommand(key, field), timeout: timeout);
+      executeFuture(hexistsCommand(key, field), timeout: timeout);
 
   /// Returns the number of fields in the hash.
-  Future<int> hlen(String key, {Duration? timeout}) => execute(hlenCommand(key), timeout: timeout);
+  Future<int> hlen(String key, {Duration? timeout}) =>
+      executeFuture(hlenCommand(key), timeout: timeout);
 
   /// Adds [increment] to an integer hash field and returns its new value.
   Future<int> hincrby(
@@ -207,55 +208,55 @@ extension RunnelCollectionCommands on Runnel {
     String field,
     int increment, {
     Duration? timeout,
-  }) => execute(hincrbyCommand(key, field, increment), timeout: timeout);
+  }) => executeFuture(hincrbyCommand(key, field, increment), timeout: timeout);
 
   /// Adds [members] and returns the number newly added.
   Future<int> sadd(
     String key,
     List<String> members, {
     Duration? timeout,
-  }) => execute(saddCommand(key, members), timeout: timeout);
+  }) => executeFuture(saddCommand(key, members), timeout: timeout);
 
   /// Removes [members] and returns the number removed.
   Future<int> srem(
     String key,
     List<String> members, {
     Duration? timeout,
-  }) => execute(sremCommand(key, members), timeout: timeout);
+  }) => executeFuture(sremCommand(key, members), timeout: timeout);
 
   /// Reports whether [member] belongs to the set.
   Future<bool> sismember(String key, String member, {Duration? timeout}) =>
-      execute(sismemberCommand(key, member), timeout: timeout);
+      executeFuture(sismemberCommand(key, member), timeout: timeout);
 
   /// Reads the set's members as an immutable snapshot.
   Future<Set<String>> smembers(String key, {Duration? timeout}) =>
-      execute(smembersCommand(key), timeout: timeout);
+      executeFuture(smembersCommand(key), timeout: timeout);
 
   /// Returns the set's member count.
   Future<int> scard(String key, {Duration? timeout}) =>
-      execute(scardCommand(key), timeout: timeout);
+      executeFuture(scardCommand(key), timeout: timeout);
 
   /// Prepends [elements] and returns the list's new length.
   Future<int> lpush(
     String key,
     List<String> elements, {
     Duration? timeout,
-  }) => execute(lpushCommand(key, elements), timeout: timeout);
+  }) => executeFuture(lpushCommand(key, elements), timeout: timeout);
 
   /// Appends [elements] and returns the list's new length.
   Future<int> rpush(
     String key,
     List<String> elements, {
     Duration? timeout,
-  }) => execute(rpushCommand(key, elements), timeout: timeout);
+  }) => executeFuture(rpushCommand(key, elements), timeout: timeout);
 
   /// Removes and returns the first element, or null when the list is empty.
   Future<String?> lpop(String key, {Duration? timeout}) =>
-      execute(lpopCommand(key), timeout: timeout);
+      executeFuture(lpopCommand(key), timeout: timeout);
 
   /// Removes and returns the last element, or null when the list is empty.
   Future<String?> rpop(String key, {Duration? timeout}) =>
-      execute(rpopCommand(key), timeout: timeout);
+      executeFuture(rpopCommand(key), timeout: timeout);
 
   /// Reads the inclusive rank range from [start] through [stop].
   Future<List<String>> lrange(
@@ -263,10 +264,11 @@ extension RunnelCollectionCommands on Runnel {
     int start,
     int stop, {
     Duration? timeout,
-  }) => execute(lrangeCommand(key, start, stop), timeout: timeout);
+  }) => executeFuture(lrangeCommand(key, start, stop), timeout: timeout);
 
   /// Returns the list length.
-  Future<int> llen(String key, {Duration? timeout}) => execute(llenCommand(key), timeout: timeout);
+  Future<int> llen(String key, {Duration? timeout}) =>
+      executeFuture(llenCommand(key), timeout: timeout);
 
   /// Keeps the inclusive rank range.
   Future<void> ltrim(
@@ -274,29 +276,29 @@ extension RunnelCollectionCommands on Runnel {
     int start,
     int stop, {
     Duration? timeout,
-  }) => execute(ltrimCommand(key, start, stop), timeout: timeout);
+  }) => executeFuture(ltrimCommand(key, start, stop), timeout: timeout);
 
   /// Adds or updates [members] and returns the number newly added.
   Future<int> zadd(
     String key,
     Map<String, double> members, {
     Duration? timeout,
-  }) => execute(zaddCommand(key, members), timeout: timeout);
+  }) => executeFuture(zaddCommand(key, members), timeout: timeout);
 
   /// Removes [members] and returns the number removed.
   Future<int> zrem(
     String key,
     List<String> members, {
     Duration? timeout,
-  }) => execute(zremCommand(key, members), timeout: timeout);
+  }) => executeFuture(zremCommand(key, members), timeout: timeout);
 
   /// Returns the sorted set's member count.
   Future<int> zcard(String key, {Duration? timeout}) =>
-      execute(zcardCommand(key), timeout: timeout);
+      executeFuture(zcardCommand(key), timeout: timeout);
 
   /// Reads [member]'s score, returning null when it does not exist.
   Future<double?> zscore(String key, String member, {Duration? timeout}) =>
-      execute(zscoreCommand(key, member), timeout: timeout);
+      executeFuture(zscoreCommand(key, member), timeout: timeout);
 
   /// Adds [increment] to [member]'s score and returns its new score.
   Future<double> zincrby(
@@ -304,7 +306,7 @@ extension RunnelCollectionCommands on Runnel {
     double increment,
     String member, {
     Duration? timeout,
-  }) => execute(zincrbyCommand(key, increment, member), timeout: timeout);
+  }) => executeFuture(zincrbyCommand(key, increment, member), timeout: timeout);
 
   /// Reads members in the inclusive rank range from [start] through [stop].
   Future<List<String>> zrange(
@@ -312,7 +314,7 @@ extension RunnelCollectionCommands on Runnel {
     int start,
     int stop, {
     Duration? timeout,
-  }) => execute(zrangeCommand(key, start, stop), timeout: timeout);
+  }) => executeFuture(zrangeCommand(key, start, stop), timeout: timeout);
 
   /// Reads members and scores in the inclusive rank range.
   Future<List<ScoredMember>> zrangeWithScores(
@@ -320,7 +322,7 @@ extension RunnelCollectionCommands on Runnel {
     int start,
     int stop, {
     Duration? timeout,
-  }) => execute(zrangeWithScoresCommand(key, start, stop), timeout: timeout);
+  }) => executeFuture(zrangeWithScoresCommand(key, start, stop), timeout: timeout);
 
   /// Reads members whose scores are within the inclusive finite bounds.
   Future<List<String>> zrangebyscore(
@@ -328,7 +330,7 @@ extension RunnelCollectionCommands on Runnel {
     double minimum,
     double maximum, {
     Duration? timeout,
-  }) => execute(zrangebyscoreCommand(key, minimum, maximum), timeout: timeout);
+  }) => executeFuture(zrangebyscoreCommand(key, minimum, maximum), timeout: timeout);
 
   /// Removes members whose scores are within the inclusive finite bounds.
   Future<int> zremrangebyscore(
@@ -336,14 +338,14 @@ extension RunnelCollectionCommands on Runnel {
     double minimum,
     double maximum, {
     Duration? timeout,
-  }) => execute(zremrangebyscoreCommand(key, minimum, maximum), timeout: timeout);
+  }) => executeFuture(zremrangebyscoreCommand(key, minimum, maximum), timeout: timeout);
 }
 
 RedisCommand<T> _command<T>(
   String name,
   List<String> arguments,
   T Function(RespValue reply) decode,
-) => RedisCommand<T>([
+) => RedisCommand<T>.internal([
   RedisArgument.text(name),
   for (final argument in arguments) RedisArgument.text(argument),
 ], decode);

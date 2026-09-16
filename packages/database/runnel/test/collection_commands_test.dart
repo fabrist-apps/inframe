@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
@@ -12,11 +14,11 @@ void main() {
 
     setUp(() async {
       peer = await _CommandPeer.start();
-      client = await Runnel.connect(peer.endpoint);
+      client = await Runnel.connect(peer.endpoint).runFuture();
     });
 
     tearDown(() async {
-      await client.close();
+      await client.close().runFuture();
       await peer.close();
     });
 
@@ -157,46 +159,74 @@ void main() {
     });
 
     test('should decode missing scalar values', () {
-      expect(hgetCommand('hash', 'missing').decode(const RespNull()), isNull);
-      expect(zscoreCommand('sorted', 'missing').decode(const RespNull()), isNull);
+      expect(
+        hgetCommand('hash', 'missing').decode(const RespNull()).getOrThrowWith((error) => error),
+        isNull,
+      );
+      expect(
+        zscoreCommand(
+          'sorted',
+          'missing',
+        ).decode(const RespNull()).getOrThrowWith((error) => error),
+        isNull,
+      );
     });
 
     test('should reject malformed collection replies', () {
       expect(
-        () => hexistsCommand('hash', 'field').decode(const RespInteger(2)),
-        throwsFormatException,
+        () => hexistsCommand(
+          'hash',
+          'field',
+        ).decode(const RespInteger(2)).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
       expect(
-        () => ltrimCommand('list', 0, -1).decode(const RespSimpleString('NO')),
-        throwsFormatException,
+        () => ltrimCommand(
+          'list',
+          0,
+          -1,
+        ).decode(const RespSimpleString('NO')).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
       expect(
         () => zrangeWithScoresCommand(
           'sorted',
           0,
           -1,
-        ).decode(RespArray([const RespSimpleString('member')])),
-        throwsFormatException,
+        ).decode(RespArray([const RespSimpleString('member')])).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
       expect(
-        () => hgetallCommand(
-          'hash',
-        ).decode(RespArray([const RespSimpleString('field'), const RespSimpleString('value')])),
-        throwsFormatException,
+        () =>
+            hgetallCommand(
+                  'hash',
+                )
+                .decode(
+                  RespArray([const RespSimpleString('field'), const RespSimpleString('value')]),
+                )
+                .getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
       expect(
         () => smembersCommand(
           'set',
-        ).decode(RespArray([const RespSimpleString('member')])),
-        throwsFormatException,
+        ).decode(RespArray([const RespSimpleString('member')])).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
       expect(
-        () => zscoreCommand('sorted', 'member').decode(const RespSimpleString('1.25')),
-        throwsFormatException,
+        () => zscoreCommand(
+          'sorted',
+          'member',
+        ).decode(const RespSimpleString('1.25')).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
       expect(
-        () => zincrbyCommand('sorted', 1, 'member').decode(const RespInteger(2)),
-        throwsFormatException,
+        () => zincrbyCommand(
+          'sorted',
+          1,
+          'member',
+        ).decode(const RespInteger(2)).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
       );
     });
 
@@ -263,7 +293,7 @@ void main() {
     test('should pass the optional command deadline to execute', () async {
       expect(
         () => client.hlen('hash', timeout: Duration.zero),
-        throwsArgumentError,
+        throwsA(isA<RunnelInputError>()),
       );
       expect(peer.commands, isEmpty);
     });

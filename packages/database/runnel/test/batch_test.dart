@@ -1,10 +1,12 @@
+import 'package:conflux/option.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
 void main() {
   RedisCommand<T> command<T>(String name, T value) => RedisCommand<T>(
     [RedisArgument.text(name)],
-    (_) => value,
+    (_) => Success(value),
   );
 
   test('a batch retains heterogeneous values and individual failures', () async {
@@ -40,7 +42,7 @@ void main() {
       reservedBytes: 0,
       defaultTimeout: const Duration(seconds: 1),
       executor: (commands, timeout) async => const [
-        BatchSuccess<Object?>('Ada'),
+        BatchSuccess<Object?>(Some('Ada')),
         BatchSuccess<Object?>(3),
       ],
     );
@@ -49,7 +51,7 @@ void main() {
 
     final results = await batch.exec();
 
-    expect(results.value(name), 'Ada');
+    expect(results.value(name), isA<Some<String>>().having((value) => value.value, 'value', 'Ada'));
     expect(results.value(visits), 3);
   });
 
@@ -131,7 +133,7 @@ void main() {
             RedisArgument.text('BLOCK'),
             RedisArgument.text('10'),
           ],
-          (_) => true,
+          (_) => const Success(true),
         ),
       ),
       throwsArgumentError,

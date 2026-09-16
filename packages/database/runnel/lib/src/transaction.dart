@@ -1,10 +1,11 @@
 import 'dart:async';
 
+import 'package:conflux/result.dart';
 import 'package:runnel/src/batch.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
 import 'package:runnel/src/deadline.dart';
-import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// Executes MULTI/EXEC on the dedicated connection owned by the client.
@@ -45,7 +46,7 @@ Future<List<BatchOutcome<Object?>>> executeTransaction(
     }
     try {
       _requireTransactionDeadline(deadline);
-      final value = commands[index].decode(reply);
+      final value = commands[index].decode(reply).getOrThrowWith((error) => error);
       _requireTransactionDeadline(deadline);
       return BatchSuccess<Object?>(value);
     } on Object catch (error, stackTrace) {
@@ -58,15 +59,16 @@ Future<List<BatchOutcome<Object?>>> executeTransaction(
 }
 
 /// Constructs a transaction framing command without interpreting its reply.
-RedisCommand<Object?> transactionFrame(String name) => RedisCommand<Object?>(
+RedisCommand<Object?> transactionFrame(String name) => RedisCommand<Object?>.internal(
   [RedisArgument.text(name)],
   (reply) => reply,
 );
 
-RedisCommand<Object?> _queuedCommand(RedisCommand<Object?> command) => RedisCommand<Object?>(
-  command.arguments,
-  (reply) => reply,
-);
+RedisCommand<Object?> _queuedCommand(RedisCommand<Object?> command) =>
+    RedisCommand<Object?>.internal(
+      command.arguments,
+      (reply) => reply,
+    );
 
 Object? _requireTransactionSuccess(BatchOutcome<Object?> outcome, String message) {
   return switch (outcome) {

@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:test/test.dart';
 
 import 'support/resp_peer.dart';
@@ -40,14 +43,14 @@ void main() {
       ['EVALSHA', script.sha1, '2', 'key:one'],
     );
     expect(script.sha1, '6e550ab7cf45e2ef5d2af047fbc92dd7594f4005');
-    expect(eval.decode(const RespInteger(6)), 6);
+    expect(eval.decode(const RespInteger(6)).getOrThrowWith((error) => error), 6);
   });
 
   test('runScript falls back only from NOSCRIPT and warms the cache path', () async {
     final peer = await _ScriptPeer.start(evalshaDelay: const Duration(milliseconds: 10));
     addTearDown(peer.close);
-    final client = await Runnel.connect(peer.endpoint);
-    addTearDown(client.close);
+    final client = await Runnel.connect(peer.endpoint).runFuture();
+    addTearDown(() => client.close().runFuture());
     final script = RedisScript<String>('return ARGV[1]', respText);
     final keys = ['literal:key'];
     final arguments = [RedisArgument.text('decoded')];
@@ -85,8 +88,8 @@ void main() {
   test('a non-NOSCRIPT server error does not execute source', () async {
     final peer = await _ScriptPeer.start(evalshaError: '-ERR script failed\r\n');
     addTearDown(peer.close);
-    final client = await Runnel.connect(peer.endpoint);
-    addTearDown(client.close);
+    final client = await Runnel.connect(peer.endpoint).runFuture();
+    addTearDown(() => client.close().runFuture());
     final script = RedisScript<int>('return 1', (reply) => (reply as RespInteger).value);
 
     await expectLater(
@@ -106,8 +109,8 @@ void main() {
   test('transport loss after EVALSHA never replays with EVAL', () async {
     final peer = await _ScriptPeer.start(dropEvalsha: true);
     addTearDown(peer.close);
-    final client = await Runnel.connect(peer.endpoint);
-    addTearDown(client.close);
+    final client = await Runnel.connect(peer.endpoint).runFuture();
+    addTearDown(() => client.close().runFuture());
     final script = RedisScript<int>('return 1', (reply) => (reply as RespInteger).value);
 
     await expectLater(
@@ -132,8 +135,8 @@ void main() {
   test('an EVALSHA timeout never retries with EVAL', () async {
     final peer = await _ScriptPeer.start(evalshaDelay: const Duration(milliseconds: 100));
     addTearDown(peer.close);
-    final client = await Runnel.connect(peer.endpoint);
-    addTearDown(client.close);
+    final client = await Runnel.connect(peer.endpoint).runFuture();
+    addTearDown(() => client.close().runFuture());
     final script = RedisScript<int>('return 1', (reply) => (reply as RespInteger).value);
 
     await expectLater(
@@ -155,8 +158,8 @@ void main() {
       evalDelay: const Duration(milliseconds: 40),
     );
     addTearDown(peer.close);
-    final client = await Runnel.connect(peer.endpoint);
-    addTearDown(client.close);
+    final client = await Runnel.connect(peer.endpoint).runFuture();
+    addTearDown(() => client.close().runFuture());
     final script = RedisScript<int>('return 1', (reply) => (reply as RespInteger).value);
 
     await expectLater(
@@ -191,9 +194,9 @@ void main() {
       },
     );
     await (batch
-          ..add(RedisCommand<String>([RedisArgument.text('GET')], (_) => 'before'))
+          ..add(RedisCommand<String>([RedisArgument.text('GET')], (_) => const Success('before')))
           ..add(evalCommand(script, keys: const [], arguments: const []))
-          ..add(RedisCommand<String>([RedisArgument.text('GET')], (_) => 'after')))
+          ..add(RedisCommand<String>([RedisArgument.text('GET')], (_) => const Success('after'))))
         .exec();
 
     expect(seen, ['GET', 'EVAL', 'GET']);

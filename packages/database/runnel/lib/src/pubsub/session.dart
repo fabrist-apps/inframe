@@ -6,9 +6,9 @@ import 'dart:typed_data';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/connection/connection_attempt.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/deadline.dart';
-import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub/event_stream.dart';
 import 'package:runnel/src/pubsub/events.dart';
@@ -972,10 +972,11 @@ final class PubSubSession {
   }
 }
 
-RedisCommand<void> _controlCommand(String name, List<String> channels) => RedisCommand<void>([
-  RedisArgument.text(name),
-  ...channels.map(RedisArgument.text),
-], (_) {});
+RedisCommand<void> _controlCommand(String name, List<String> channels) =>
+    RedisCommand<void>.internal([
+      RedisArgument.text(name),
+      ...channels.map(RedisArgument.text),
+    ], (_) {});
 
 Iterable<List<String>> _chunks(List<String> channels) sync* {
   for (var start = 0; start < channels.length; start += 512) {

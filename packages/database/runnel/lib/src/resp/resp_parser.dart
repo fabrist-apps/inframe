@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:runnel/src/errors.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// Incrementally decodes complete RESP3 top-level frames.

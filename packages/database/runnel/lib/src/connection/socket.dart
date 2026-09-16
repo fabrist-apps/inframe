@@ -6,8 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:runnel/src/connection/connection_attempt.dart';
-
-import 'package:runnel/src/errors.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 
 /// Byte-stream socket operations shared by plain and raw TLS transports.
 abstract class ConnectionSocket extends Stream<Uint8List> {

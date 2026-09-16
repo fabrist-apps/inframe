@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:conflux/effect.dart';
 import 'package:runnel/src/batch.dart';
 import 'package:runnel/src/blocking.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/command_validation.dart';
 import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/connection/connection_attempt.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
+import 'package:runnel/src/connection/operation.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
 import 'package:runnel/src/deadline.dart';
@@ -45,19 +48,43 @@ final class Runnel {
   _ClientState _state = _ClientState.connecting;
 
   /// Connects and completes the configured authentication, RESP3, and database handshake.
-  static Future<Runnel> connect(
+  static Effect<Runnel, RunnelError> connect(
     String endpoint, {
     SecurityContext? securityContext,
     Duration connectTimeout = const Duration(seconds: 5),
     Duration commandTimeout = const Duration(seconds: 5),
     Duration shutdownTimeout = const Duration(seconds: 5),
     RunnelLimits limits = const RunnelLimits(),
+  }) => RunnelOperation.run(
+    (operation) => _connect(
+      endpoint,
+      securityContext: securityContext,
+      connectTimeout: connectTimeout,
+      commandTimeout: commandTimeout,
+      shutdownTimeout: shutdownTimeout,
+      limits: limits,
+      operation: operation,
+    ),
+  );
+
+  static Future<Runnel> _connect(
+    String endpoint, {
+    required RunnelOperation operation,
+    SecurityContext? securityContext,
+    Duration connectTimeout = const Duration(seconds: 5),
+    Duration commandTimeout = const Duration(seconds: 5),
+    Duration shutdownTimeout = const Duration(seconds: 5),
+    RunnelLimits limits = const RunnelLimits(),
   }) async {
-    final configuration = ConnectionConfiguration.parse(endpoint, securityContext: securityContext);
-    _positive(connectTimeout, 'connectTimeout');
-    _positive(commandTimeout, 'commandTimeout');
-    _positive(shutdownTimeout, 'shutdownTimeout');
-    limits.validate();
+    final configuration = RunnelOperation.validate(
+      () => ConnectionConfiguration.parse(endpoint, securityContext: securityContext),
+    );
+    RunnelOperation.validate(() {
+      _positive(connectTimeout, 'connectTimeout');
+      _positive(commandTimeout, 'commandTimeout');
+      _positive(shutdownTimeout, 'shutdownTimeout');
+      limits.validate();
+    });
     final client = Runnel._(
       configuration,
       connectTimeout,
@@ -65,8 +92,13 @@ final class Runnel {
       shutdownTimeout,
       limits,
     );
+    operation.onCancel(client._close);
     try {
       final connection = await client._openPhysicalConnection();
+      if (operation.isCancelled) {
+        await connection.close(commandsAreUncertain: true);
+        throw const RedisClosedException(message: 'Connection acquisition cancelled.');
+      }
       client
         .._unclaimedConnections.remove(connection)
         .._connection = connection
@@ -152,11 +184,21 @@ final class Runnel {
   }
 
   /// Executes a custom ordinary typed command.
-  Future<T> execute<T>(RedisCommand<T> command, {Duration? timeout}) {
+  Effect<T, RunnelError> execute<T>(RedisCommand<T> command, {Duration? timeout}) =>
+      RunnelOperation.run(
+        (operation) => executeFuture(command, timeout: timeout, operation: operation),
+      );
+
+  /// Internal transport bridge for command families during the API migration.
+  Future<T> executeFuture<T>(
+    RedisCommand<T> command, {
+    Duration? timeout,
+    RunnelOperation? operation,
+  }) {
     final deadline = timeout ?? _commandTimeout;
-    _positive(deadline, 'timeout');
+    RunnelOperation.validate(() => _positive(deadline, 'timeout'));
     try {
-      validateOrdinaryCommand(command as RedisCommand<Object?>);
+      RunnelOperation.validate(() => validateOrdinaryCommand(command as RedisCommand<Object?>));
     } on Object catch (error, stackTrace) {
       return Future.error(error, stackTrace);
     }
@@ -166,7 +208,7 @@ final class Runnel {
     } on Object catch (error, stackTrace) {
       return Future.error(error, stackTrace);
     }
-    return connection.execute(command, timeout: deadline);
+    return connection.execute(command, timeout: deadline, operation: operation);
   }
 
   /// Executes a typed Lua script, falling back to source only after NOSCRIPT.
@@ -185,14 +227,14 @@ final class Runnel {
     final ownedKeys = List<String>.unmodifiable(keys);
     final ownedArguments = List<RedisArgument>.unmodifiable(arguments);
     try {
-      return await execute(
+      return await executeFuture(
         evalshaCommand(script, keys: ownedKeys, arguments: ownedArguments),
         timeout: _scriptTimeRemaining(duration, acceptedAt),
       );
     } on RedisServerException catch (error) {
       if (error.code.toUpperCase() != 'NOSCRIPT') rethrow;
     }
-    return execute(
+    return executeFuture(
       evalCommand(script, keys: ownedKeys, arguments: ownedArguments),
       timeout: _scriptTimeRemaining(duration, acceptedAt),
     );
@@ -317,13 +359,13 @@ final class Runnel {
   }
 
   /// Checks that Redis can process an ordinary command.
-  Future<bool> ping({Duration? timeout}) => execute(
-    RedisCommand<bool>([RedisArgument.text('PING')], (reply) => respText(reply) == 'PONG'),
+  Effect<bool, RunnelError> ping({Duration? timeout}) => execute(
+    RedisCommand<bool>.internal([RedisArgument.text('PING')], (reply) => respText(reply) == 'PONG'),
     timeout: timeout,
   );
 
   /// Drains accepted ordinary commands within the shutdown deadline, then releases resources.
-  Future<void> close() => _closing ??= _close();
+  Effect<void, Never> close() => RunnelOperation.release(() => _closing ??= _close());
 
   Future<void> _close() async {
     _state = _ClientState.closing;

@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:conflux/effect.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:test/test.dart';
 
 import 'support/resp_peer.dart';
@@ -15,10 +18,10 @@ void main() {
     final client = await Runnel.connect(
       peer.endpoint,
       limits: const RunnelLimits(maxPendingCommands: 2),
-    );
-    addTearDown(client.close);
+    ).runFuture();
+    addTearDown(() => client.close().runFuture());
 
-    final pending = client.ping();
+    final pending = client.ping().runFuture();
     await peer.waitFor('PING', 1);
     final pipeline = client.pipeline()
       ..add(_pingCommand())
@@ -36,8 +39,8 @@ void main() {
     final peer = await _BatchPeer.start()
       ..dropExec = true;
     addTearDown(peer.close);
-    final client = await Runnel.connect(peer.endpoint);
-    addTearDown(client.close);
+    final client = await Runnel.connect(peer.endpoint).runFuture();
+    addTearDown(() => client.close().runFuture());
     final transaction = client.transaction()..add(incrCommand('counter'));
 
     await expectLater(
@@ -53,21 +56,21 @@ void main() {
 
     expect(peer.count('EXEC'), 1);
     expect(peer.count('INCR'), 1);
-    expect(await client.ping(), isTrue);
+    expect(await client.ping().runFuture(), isTrue);
   });
 
   test('transaction result decoding cannot overrun the total deadline', () async {
     final peer = await _BatchPeer.start()
       ..returnOneFromExec = true;
     addTearDown(peer.close);
-    final client = await Runnel.connect(peer.endpoint);
-    addTearDown(client.close);
+    final client = await Runnel.connect(peer.endpoint).runFuture();
+    addTearDown(() => client.close().runFuture());
     final transaction = client.transaction()
       ..add(
         RedisCommand<int>([RedisArgument.text('INCR'), RedisArgument.text('counter')], (reply) {
           final work = Stopwatch()..start();
           while (work.elapsed < const Duration(milliseconds: 75)) {}
-          return (reply as RespInteger).value;
+          return Success((reply as RespInteger).value);
         }),
       );
 
@@ -80,7 +83,7 @@ void main() {
 
 RedisCommand<bool> _pingCommand() => RedisCommand<bool>(
   [RedisArgument.text('PING')],
-  (reply) => respText(reply) == 'PONG',
+  (reply) => Success(respText(reply) == 'PONG'),
 );
 
 final class _BatchPeer {

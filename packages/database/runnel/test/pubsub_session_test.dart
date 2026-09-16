@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conflux/result.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
@@ -23,8 +25,11 @@ void main() {
         ascii.encode('updates'),
         [0, 255, 1],
       ]);
-      expect(command.decode(const RespInteger(3)), 3);
-      expect(() => command.decode(const RespSimpleString('3')), throwsFormatException);
+      expect(command.decode(const RespInteger(3)).getOrThrowWith((error) => error), 3);
+      expect(
+        () => command.decode(const RespSimpleString('3')).getOrThrowWith((error) => error),
+        throwsA(isA<RunnelDecodingError>()),
+      );
     });
   });
 

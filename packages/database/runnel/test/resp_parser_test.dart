@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:runnel/runnel.dart';
+import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:test/test.dart';
 
 void main() {
