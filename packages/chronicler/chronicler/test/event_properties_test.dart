@@ -35,7 +35,7 @@ void main() {
           .withChronicler(chronicler.recorder)
           .events
           .unsetUserProperties(userId: '', keys: const []);
-      chronicler.setCollectionEnabled(ChroniclerSignal.events, false);
+      chronicler.setCollectionEnabled(ChroniclerSignal.events, enabled: false);
       Context()
           .withChronicler(chronicler.recorder)
           .events
@@ -100,7 +100,7 @@ void main() {
     test('should prevent property removals when event collection is disabled', () async {
       final exporter = TestExporter();
       final chronicler = createEventChronicler(exporter)
-        ..setCollectionEnabled(ChroniclerSignal.events, false);
+        ..setCollectionEnabled(ChroniclerSignal.events, enabled: false);
 
       Context()
           .withChronicler(chronicler.recorder)
@@ -171,7 +171,7 @@ void main() {
           .withChronicler(chronicler.recorder)
           .events
           .setUserProperties(userId: '', properties: const {});
-      chronicler.setCollectionEnabled(ChroniclerSignal.events, false);
+      chronicler.setCollectionEnabled(ChroniclerSignal.events, enabled: false);
       Context()
           .withChronicler(chronicler.recorder)
           .events
@@ -262,7 +262,7 @@ void main() {
     test('should prevent nonempty property sets when event collection is disabled', () async {
       final exporter = TestExporter();
       final chronicler = createEventChronicler(exporter)
-        ..setCollectionEnabled(ChroniclerSignal.events, false);
+        ..setCollectionEnabled(ChroniclerSignal.events, enabled: false);
 
       Context()
           .withChronicler(chronicler.recorder)

@@ -1,8 +1,0 @@
-import 'package:context/context.dart';
-import 'package:web_server/web_server.dart';
-
-void main() {
-  final context = Context().withHttp(HttpExchange());
-  context.http.respond('Hello');
-  context.analytics;
-}

@@ -86,7 +86,7 @@ void main() {
     test('should apply collection controls and record-hook suppression to links', () async {
       final disabledExporter = TestExporter();
       final disabled = createEventChronicler(disabledExporter)
-        ..setCollectionEnabled(ChroniclerSignal.events, false);
+        ..setCollectionEnabled(ChroniclerSignal.events, enabled: false);
       Context()
           .withChronicler(disabled.recorder)
           .events

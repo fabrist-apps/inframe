@@ -15,8 +15,8 @@ import 'package:chronicler/src/runtime/record_processing.dart';
 import 'package:chronicler/src/runtime/tracing.dart';
 import 'package:chronicler/src/transport.dart';
 import 'package:chrono_id/chrono_id.dart';
+import 'package:conflux/effect.dart';
 import 'package:conflux/moment.dart';
-import 'package:conflux/result.dart';
 
 /// One caller-supplied cause to snapshot during error capture.
 final class ChroniclerCause {
@@ -42,6 +42,7 @@ final class ChroniclerRuntime {
     required this.exporter,
     required this.buildId,
     required this.options,
+    required this.execution,
   }) : validator = RecordValidator(
          maxSnapshotBytes: options.delivery.maxRecordBytes,
        ),
@@ -51,7 +52,7 @@ final class ChroniclerRuntime {
          maxBatchBytes: options.delivery.maxBatchBytes,
          maxBatchRecords: options.delivery.maxBatchRecords,
        ),
-       diagnostics = DiagnosticChannel(options.diagnostics);
+       diagnostics = DiagnosticChannel(options.diagnostics, runtime: execution);
 
   /// Validates [options] and creates a running delivery state machine.
   factory ChroniclerRuntime.create({
@@ -61,6 +62,7 @@ final class ChroniclerRuntime {
     required ChroniclerExporter exporter,
     required String? buildId,
     required ChroniclerOptions options,
+    Clock? clock,
   }) {
     final snapshot = validateAndSnapshotOptions(options);
     validateConfiguredLabel(appId, 'appId');
@@ -75,6 +77,7 @@ final class ChroniclerRuntime {
       exporter: exporter,
       buildId: buildId,
       options: snapshot,
+      execution: Runtime(clock: clock),
     );
   }
 
@@ -96,6 +99,9 @@ final class ChroniclerRuntime {
   /// Validated immutable runtime options.
   final ChroniclerOptions options;
 
+  /// Owns internal workers and their shared wall and monotonic clock.
+  final Runtime execution;
+
   /// Validator used before records enter delivery.
   final RecordValidator validator;
 
@@ -107,6 +113,7 @@ final class ChroniclerRuntime {
 
   /// Runtime-owned metric registry.
   late final MetricAggregation _metrics = MetricAggregation(
+    runtime: execution,
     options: options.metrics,
     maxRecordBytes: options.delivery.maxRecordBytes,
     canRecord: () => _canRecord(ChroniclerSignal.metrics, null),
@@ -115,8 +122,6 @@ final class ChroniclerRuntime {
     createRecord: _metricRecord,
     finalize: _finalizeAndEnqueue,
     startEnabled: _enabledSignals.contains(ChroniclerSignal.metrics),
-    now: () => _now,
-    elapsed: () => _elapsedNow,
   );
 
   /// Metric instrument contracts borrowed by recorders and Context.
@@ -128,10 +133,10 @@ final class ChroniclerRuntime {
   );
 
   late final DeliveryQueue _delivery = DeliveryQueue(
+    runtime: execution,
     options: options.delivery,
     exporter: exporter,
     diagnostics: diagnostics,
-    elapsed: () => _elapsed.elapsed,
     nextRandom: _random.nextDouble,
   );
 
@@ -173,7 +178,6 @@ final class ChroniclerRuntime {
   }
 
   String _generateId(String prefix) => ChronoID.generate(prefix: prefix);
-  final _elapsed = Stopwatch()..start();
   late final Set<ChroniclerSignal> _enabledSignals = Set.of(options.enabledSignals);
   late bool _propagationEnabled = options.tracing.propagationEnabled;
   final _random = Random();
@@ -181,10 +185,9 @@ final class ChroniclerRuntime {
   /// An immutable snapshot of exact diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => diagnostics.counts;
 
-  Moment get _now =>
-      Moment.fromDateTime(DateTime.now()).getOrThrowWith((error) => StateError(error.message));
+  Moment get _now => execution.clock.wallTime();
 
-  Duration get _elapsedNow => _elapsed.elapsed;
+  Duration get _elapsedNow => execution.clock.monotonic();
 
   /// Validates replacement identity while preserving operation correlation.
   RecorderAttribution withIdentity(
@@ -223,7 +226,19 @@ final class ChroniclerRuntime {
   /// Stops recording and closes the owned exporter within one deadline.
   Future<DeliveryReport> close() {
     _requireOutsideCallback('close');
-    return _delivery.close(finalize: () => _sealRecords(closing: true));
+    return _closeFuture ??= _close();
+  }
+
+  Future<DeliveryReport>? _closeFuture;
+
+  Future<DeliveryReport> _close() async {
+    try {
+      return await _delivery.close(finalize: () => _sealRecords(closing: true));
+    } finally {
+      // Delivery has bounded and accounted for foreign work before its
+      // interruptible observers and the other internal workers are released.
+      await execution.close();
+    }
   }
 
   List<DeliveryDisposition> _sealRecords({required bool closing}) {
@@ -239,9 +254,7 @@ final class ChroniclerRuntime {
   bool isCollectionEnabled(ChroniclerSignal signal) => _enabledSignals.contains(signal);
 
   /// Enables or disables collection for [signal].
-  // API contract uses a positional boolean for symmetric runtime toggles.
-  // ignore: avoid_positional_boolean_parameters
-  void setCollectionEnabled(ChroniclerSignal signal, bool enabled) {
+  void setCollectionEnabled(ChroniclerSignal signal, {required bool enabled}) {
     _requireRunningConfiguration();
     if (enabled == _enabledSignals.contains(signal)) return;
     if (enabled) {
@@ -258,9 +271,7 @@ final class ChroniclerRuntime {
   }
 
   /// Enables or disables trace-context propagation.
-  // API contract uses a positional boolean for symmetric runtime toggles.
-  // ignore: avoid_positional_boolean_parameters
-  void setPropagationEnabled(bool enabled) {
+  void setPropagationEnabled({required bool enabled}) {
     _requireRunningConfiguration();
     _propagationEnabled = enabled;
   }

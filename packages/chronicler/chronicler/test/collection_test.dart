@@ -17,9 +17,9 @@ void main() {
       expect(chronicler.isCollectionEnabled(ChroniclerSignal.logs), isTrue);
       expect(TracePropagation.extract(span.recorder.injectTrace({})), isNotNull);
       chronicler
-        ..setCollectionEnabled(ChroniclerSignal.logs, false)
-        ..setCollectionEnabled(ChroniclerSignal.logs, false)
-        ..setPropagationEnabled(false);
+        ..setCollectionEnabled(ChroniclerSignal.logs, enabled: false)
+        ..setCollectionEnabled(ChroniclerSignal.logs, enabled: false)
+        ..setPropagationEnabled(enabled: false);
       Context().withChronicler(chronicler.recorder).logs.info('disabled');
 
       expect(chronicler.isCollectionEnabled(ChroniclerSignal.logs), isFalse);
@@ -39,7 +39,7 @@ void main() {
       Context().withChronicler(chronicler.recorder).logs.info('discard');
       chronicler.recorder.recordEvent('kept-one');
 
-      chronicler.setCollectionEnabled(ChroniclerSignal.logs, false);
+      chronicler.setCollectionEnabled(ChroniclerSignal.logs, enabled: false);
       chronicler.recorder.recordEvent('kept-two');
       await waitForCondition(() => exporter.attempts.length == 1);
 
@@ -51,7 +51,7 @@ void main() {
     test('identity and property operations use the events switch', () {
       final exporter = TestExporter();
       final chronicler = _chronicler(exporter)
-        ..setCollectionEnabled(ChroniclerSignal.events, false);
+        ..setCollectionEnabled(ChroniclerSignal.events, enabled: false);
 
       chronicler.recorder
         ..identify(anonymousId: 'anonymous', userId: 'user')
@@ -72,7 +72,7 @@ void main() {
         ChroniclerSignal.metrics: (recorder) => recorder.metrics.counter('count').add(1),
       }.entries) {
         final exporter = TestExporter();
-        final chronicler = _chronicler(exporter)..setCollectionEnabled(entry.key, false);
+        final chronicler = _chronicler(exporter)..setCollectionEnabled(entry.key, enabled: false);
 
         entry.value(chronicler.recorder);
         await chronicler.flush();
@@ -104,8 +104,8 @@ void main() {
       final records = exporter.batches.single.records;
 
       chronicler
-        ..setCollectionEnabled(ChroniclerSignal.logs, false)
-        ..setCollectionEnabled(ChroniclerSignal.logs, true);
+        ..setCollectionEnabled(ChroniclerSignal.logs, enabled: false)
+        ..setCollectionEnabled(ChroniclerSignal.logs, enabled: true);
       exporter.attempts.single.completer.complete(
         ExportResult.perRecord([
           for (final record in records)
@@ -135,8 +135,8 @@ void main() {
         await waitForCondition(() => exporter.attempts.length == 1);
 
         chronicler
-          ..setCollectionEnabled(ChroniclerSignal.logs, false)
-          ..setCollectionEnabled(ChroniclerSignal.logs, true);
+          ..setCollectionEnabled(ChroniclerSignal.logs, enabled: false)
+          ..setCollectionEnabled(ChroniclerSignal.logs, enabled: true);
         outcome.value(exporter.attempts.single);
         await settleAsync();
         expect(exporter.batches, hasLength(1));
@@ -159,8 +159,8 @@ void main() {
       Context().withChronicler(chronicler.recorder).logs.info('old');
       await waitForCondition(() => exporter.attempts.length == 1);
       chronicler
-        ..setCollectionEnabled(ChroniclerSignal.logs, false)
-        ..setCollectionEnabled(ChroniclerSignal.logs, true);
+        ..setCollectionEnabled(ChroniclerSignal.logs, enabled: false)
+        ..setCollectionEnabled(ChroniclerSignal.logs, enabled: true);
       await waitForCondition(() => exporter.attempts.single.cancelCount == 1);
       await settleAsync();
       expect(exporter.batches, hasLength(1));

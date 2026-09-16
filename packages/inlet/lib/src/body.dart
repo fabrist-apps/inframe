@@ -1,10 +1,15 @@
-part of 'inlet.dart';
+import 'dart:async';
+import 'dart:typed_data';
 
-const int _defaultBodyLimit = 1024 * 1024;
+/// Default buffering limit in bytes.
+const int defaultBodyLimit = 1024 * 1024;
 
-final class _BodyLimitFailure implements Exception {
-  const _BodyLimitFailure(this.maxBytes);
+/// Internal buffering failure translated into a request or response exception.
+final class BodyLimitFailure implements Exception {
+  /// Records the limit exceeded by the source or cached bytes.
+  const BodyLimitFailure(this.maxBytes);
 
+  /// Maximum permitted buffered byte count.
   final int maxBytes;
 }
 
@@ -15,13 +20,15 @@ final class _BodyLimitFailure implements Exception {
 /// remains exclusive even after delivery finishes. Closing is terminal and
 /// releases the buffer or cancels the active source without subscribing to an
 /// untouched source.
-final class _Body {
-  _Body(Stream<List<int>> source) : _source = source;
+final class Body {
+  /// Takes ownership without subscribing until the body is consumed.
+  Body(Stream<List<int>> source) : _source = source;
 
-  factory _Body.bytes(List<int> bytes) {
+  /// Copies and validates eagerly supplied bytes.
+  factory Body.bytes(List<int> bytes) {
     final copied = _copyAndValidateBytes(bytes);
 
-    return _Body(Stream.value(copied)).._knownLength = copied.length;
+    return Body(Stream.value(copied)).._knownLength = copied.length;
   }
 
   Stream<List<int>>? _source;
@@ -31,14 +38,21 @@ final class _Body {
   int? _knownLength;
   Future<void>? _closeFuture;
 
+  /// Byte count once supplied eagerly or successfully buffered; otherwise null.
   int? get knownLength => _knownLength;
 
+  /// Whether neither consumption nor closing has started.
   bool get isUntouched => _state is _UntouchedBody;
 
+  /// Single-subscription raw delivery, exclusive with buffering.
   Stream<List<int>> get stream => _stream;
 
-  Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
-    _validateMaxBytes(maxBytes);
+  /// Returns a private copy, sharing buffering initiated by the first reader.
+  ///
+  /// The first reader fixes the source limit; each reader also checks its own
+  /// limit against the cached result.
+  Future<List<int>> bytes({int maxBytes = defaultBodyLimit}) async {
+    validateMaxBytes(maxBytes);
     final buffering = _claimBuffering(maxBytes);
     await buffering.settled.future;
 
@@ -56,7 +70,7 @@ final class _Body {
       throw StateError('The body was closed while it was being read.');
     }
 
-    if (cached.length > maxBytes) throw _BodyLimitFailure(maxBytes);
+    if (cached.length > maxBytes) throw BodyLimitFailure(maxBytes);
 
     return Uint8List.fromList(cached);
   }
@@ -103,7 +117,7 @@ final class _Body {
     if (chunk.length > buffering.maxBytes - buffering.builder.length) {
       _failBuffering(
         buffering,
-        _BodyLimitFailure(buffering.maxBytes),
+        BodyLimitFailure(buffering.maxBytes),
         StackTrace.current,
       );
       return;
@@ -229,6 +243,7 @@ final class _Body {
     raw.source.cancel().ignore();
   }
 
+  /// Releases bytes and cancels active consumption; repeated calls share cleanup.
   Future<void> close() {
     final existing = _closeFuture;
     if (existing != null) {
@@ -332,7 +347,7 @@ final class _ClosedBody extends _BodyState {
 final class _BodyStream extends Stream<List<int>> {
   const _BodyStream(this._body);
 
-  final _Body _body;
+  final Body _body;
 
   @override
   StreamSubscription<List<int>> listen(
@@ -446,7 +461,8 @@ final class _TrackedSubscription<T> {
   }
 }
 
-void _validateMaxBytes(int maxBytes) {
+/// Rejects negative byte limits before consumption begins.
+void validateMaxBytes(int maxBytes) {
   if (maxBytes < 0) {
     throw ArgumentError.value(maxBytes, 'maxBytes', 'must not be negative');
   }

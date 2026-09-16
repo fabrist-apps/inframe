@@ -9,12 +9,17 @@ import 'package:chronicler/src/runtime/capture.dart';
 import 'package:chronicler/src/runtime/tracing.dart';
 import 'package:chronicler/src/trace_propagation.dart';
 import 'package:chronicler/src/transport.dart';
+import 'package:conflux/effect.dart';
 
 export 'package:chronicler/src/runtime/capture.dart' show ChroniclerCause;
 
 /// Configured owner of capture and export resources.
 final class Chronicler {
   /// Creates a runtime and transfers ownership of [exporter] to it.
+  ///
+  /// [clock] is borrowed by the owned Conflux runtime. It controls timestamps,
+  /// intervals, retries, and shutdown deadlines; defaults to [SystemClock].
+  /// Recording snapshots values immediately; callers need not execute an Effect.
   Chronicler({
     required String appId,
     required String release,
@@ -22,6 +27,7 @@ final class Chronicler {
     required ChroniclerExporter exporter,
     String? buildId,
     ChroniclerOptions options = const ChroniclerOptions(),
+    Clock? clock,
   }) : _runtime = ChroniclerRuntime.create(
          appId: appId,
          release: release,
@@ -29,6 +35,7 @@ final class Chronicler {
          exporter: exporter,
          buildId: buildId,
          options: options,
+         clock: clock,
        );
 
   /// Default field-name terms replaced before buffering.
@@ -38,10 +45,7 @@ final class Chronicler {
   final ChroniclerRuntime _runtime;
 
   /// A borrowed recorder suitable for binding to a request context.
-  ChroniclerRecorder get recorder => ChroniclerRecorder._(
-    _runtime,
-    const RecorderAttribution(),
-  );
+  ChroniclerRecorder get recorder => ChroniclerRecorder._(_runtime, const RecorderAttribution());
 
   /// An immutable snapshot of exact runtime diagnostic counts.
   Map<DiagnosticReason, BigInt> get diagnosticCounts => _runtime.diagnosticCounts;
@@ -53,19 +57,34 @@ final class Chronicler {
   /// Stops recording, drains bounded work, and releases the owned exporter.
   Future<DeliveryReport> close() => _runtime.close();
 
+  /// Lazily flushes the snapshot captured when this Effect executes.
+  ///
+  /// Interrupting the caller stops waiting, not delivery of its records.
+  Effect<DeliveryReport, Never> flushEffect({Duration? timeout}) => Effect.tryFuture(
+    (_) => flush(timeout: timeout),
+    onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
+  );
+
+  /// Lazily starts the shared, bounded shutdown operation.
+  ///
+  /// Safe as a scope finalizer: uncooperative exporter work is reported through
+  /// [DeliveryReport.cleanupIncomplete] rather than awaited indefinitely.
+  /// Interrupting a caller does not undo shutdown once it has started.
+  Effect<DeliveryReport, Never> closeEffect() => Effect.tryFuture(
+    (_) => close(),
+    onError: (error, stackTrace, _) => Error.throwWithStackTrace(error, stackTrace),
+  );
+
   /// Whether collection currently accepts [signal].
   bool isCollectionEnabled(ChroniclerSignal signal) => _runtime.isCollectionEnabled(signal);
 
   /// Enables or disables collection for [signal] synchronously.
-  // API contract uses a positional boolean for symmetric runtime toggles.
-  // ignore: avoid_positional_boolean_parameters
-  void setCollectionEnabled(ChroniclerSignal signal, bool enabled) =>
-      _runtime.setCollectionEnabled(signal, enabled);
+  void setCollectionEnabled(ChroniclerSignal signal, {required bool enabled}) =>
+      _runtime.setCollectionEnabled(signal, enabled: enabled);
 
   /// Enables or disables trace-context propagation independently of collection.
-  // API contract uses a positional boolean for symmetric runtime toggles.
-  // ignore: avoid_positional_boolean_parameters
-  void setPropagationEnabled(bool enabled) => _runtime.setPropagationEnabled(enabled);
+  void setPropagationEnabled({required bool enabled}) =>
+      _runtime.setPropagationEnabled(enabled: enabled);
 }
 
 /// Borrowed immutable attribution view over one Chronicler runtime.

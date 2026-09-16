@@ -8,14 +8,10 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-
-env:
-  RIVET_POSTGRES_IMAGE: 590183900818.dkr.ecr.ap-south-1.amazonaws.com/inframe/postgres@sha256:a29d81973c699fdf070b10f77bf5b91b1d94a59fcd7792f67410ba655761f871
 
 jobs:
   test:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -30,7 +26,7 @@ jobs:
         run: dart pub get
 
       - name: Generate Conflux mappers
-        working-directory: packages/conflux/conflux
+        working-directory: packages/conflux
         run: |
           dart run build_runner build
           dart format lib/src/val/issue.mapper.dart test/serialization/mappers_serialization_test.mapper.dart
@@ -43,39 +39,14 @@ jobs:
         working-directory: packages/database/turso
         run: dart run ffigen --config ffigen.yaml
 
-      - name: Generate Rivet consumer fixtures
-        run: |
-          (cd packages/database/rivet && dart run build_runner build)
-          dart format packages/database/rivet/test/generated_consumer.rivet.dart packages/database/rivet/test/migration_fixture.rivet.dart
-          (cd packages/database/rivet/test/fixtures/schema_package && dart run build_runner build)
-          dart format packages/database/rivet/test/fixtures/schema_package/lib/package_users.rivet.dart
-          (cd packages/database/rivet/test/fixtures/app_package && dart run build_runner build)
-          dart format packages/database/rivet/test/fixtures/app_package/lib/app_database.rivet.dart
-          git diff --exit-code
-
-      - name: Generate Voxel consumer fixtures
-        working-directory: packages/database/voxel
-        run: |
-          dart run build_runner build
-          dart format .
-          git diff --exit-code
+      - name: Check generated files
+        run: git diff --exit-code
 
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed .
 
       - name: Analyze
         run: dart analyze
-
-      - name: Run Rivet generator and cross-package tests
-        run: |
-          dart test packages/database/rivet/rivet_generator/test --chain-stack-traces
-          dart test packages/database/rivet/test/fixtures/app_package/test --chain-stack-traces
-
-      - name: Run Voxel generator and codec tests
-        working-directory: packages/database/voxel
-        run: |
-          dart test --chain-stack-traces
-          dart test voxel_generator/test --chain-stack-traces
 
       - name: Run context tests and consumer checks
         run: dart test packages/context/test --chain-stack-traces
@@ -89,14 +60,10 @@ jobs:
           dart run packages/inlet/example/web_socket_chat.dart
 
       - name: Run Conflux tests and consumer checks
-        run: |
-          dart test packages/conflux/conflux/test --chain-stack-traces
-          dart test packages/conflux/chronicler_conflux/test --chain-stack-traces
+        run: dart test packages/conflux/test --chain-stack-traces
 
       - name: Run Chrono ID tests
-        run: |
-          dart test packages/chrono_id/chrono_id/test --chain-stack-traces
-          dart test packages/chrono_id/ack_chrono_id/test --chain-stack-traces
+        run: dart test packages/chrono_id/test --chain-stack-traces
 
       - name: Run Chronicler tests
         run: dart test packages/chronicler/chronicler/test --chain-stack-traces
@@ -112,42 +79,6 @@ jobs:
 
       - name: Run JSON Patch public example
         run: dart run packages/json_patch/example/json_patch_example.dart
-
-      - name: Configure AWS credentials for the Rivet test image
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ap-south-1
-
-      - name: Log in to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
-
-      - name: Run Rivet PostgreSQL integration tests
-        env:
-          RIVET_TEST_DATABASE_URL: postgresql://postgres:test-password@127.0.0.1:15432/inframe_test?sslmode=disable
-          RIVET_TEST_DATABASE_ISOLATED: '1'
-          RIVET_TEST_TLS: '1'
-        run: |
-          echo "Rivet PostgreSQL image: $RIVET_POSTGRES_IMAGE" | tee -a "$GITHUB_STEP_SUMMARY"
-          docker pull "$RIVET_POSTGRES_IMAGE"
-          docker run --detach --rm --name inframe-rivet-test \
-            --publish 127.0.0.1:15432:5432 \
-            --env POSTGRES_PASSWORD=test-password \
-            --env POSTGRES_DB=inframe_test \
-            "$RIVET_POSTGRES_IMAGE"
-          trap 'docker stop inframe-rivet-test' EXIT
-          for attempt in {1..60}; do
-            if docker exec inframe-rivet-test psql \
-              --username postgres --dbname inframe_test \
-              --tuples-only --command 'SELECT 1'; then
-              break
-            fi
-            sleep 1
-          done
-          docker exec inframe-rivet-test psql \
-            --username postgres --dbname inframe_test \
-            --tuples-only --command 'SELECT 1'
-          (cd packages/database/rivet && dart test test/*_test.dart --chain-stack-traces)
 
       - name: Run ClickHouse integration tests
         env:

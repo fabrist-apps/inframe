@@ -5,28 +5,29 @@ import 'package:runnel/src/batch.dart';
 import 'package:runnel/src/blocking.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/command_validation.dart';
+import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/connection/connection_attempt.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
+import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 import 'package:runnel/src/scripts.dart';
+import 'package:runnel/src/transaction.dart';
 
 /// A client for one externally managed standalone Redis or Valkey endpoint.
 final class Runnel {
   Runnel._(
     this._endpoint,
-    this._securityContext,
     this._connectTimeout,
     this._commandTimeout,
     this._shutdownTimeout,
     this._limits,
   );
 
-  final _Endpoint _endpoint;
-  final SecurityContext? _securityContext;
+  final ConnectionConfiguration _endpoint;
   final Duration _connectTimeout;
   final Duration _commandTimeout;
   final Duration _shutdownTimeout;
@@ -52,14 +53,13 @@ final class Runnel {
     Duration shutdownTimeout = const Duration(seconds: 5),
     RunnelLimits limits = const RunnelLimits(),
   }) async {
-    final configuration = _Endpoint.parse(endpoint, securityContext: securityContext);
+    final configuration = ConnectionConfiguration.parse(endpoint, securityContext: securityContext);
     _positive(connectTimeout, 'connectTimeout');
     _positive(commandTimeout, 'commandTimeout');
     _positive(shutdownTimeout, 'shutdownTimeout');
     limits.validate();
     final client = Runnel._(
       configuration,
-      securityContext,
       connectTimeout,
       commandTimeout,
       shutdownTimeout,
@@ -79,7 +79,7 @@ final class Runnel {
   }
 
   Future<RedisConnection> _openPhysicalConnection({Duration? timeout}) async {
-    final deadline = _Deadline(timeout ?? _connectTimeout);
+    final deadline = ConnectionDeadline(timeout ?? _connectTimeout);
     final attempt = ConnectionAttempt();
     _openingConnections.add(attempt);
     RedisConnection? connection;
@@ -88,34 +88,14 @@ final class Runnel {
         host: _endpoint.host,
         port: _endpoint.port,
         tls: _endpoint.tls,
-        securityContext: _securityContext,
+        securityContext: _endpoint.securityContext,
         limits: _limits,
         timeout: deadline.remaining,
         onTerminated: _connectionTerminated,
         attempt: attempt,
       );
-      await connection.execute(
-        RedisCommand<Object?>([
-          RedisArgument.text('HELLO'),
-          RedisArgument.text('3'),
-          if (_endpoint.password case final password?) ...[
-            RedisArgument.text('AUTH'),
-            RedisArgument.text(_endpoint.username ?? 'default'),
-            RedisArgument.text(password),
-          ],
-        ], (reply) => reply),
-        timeout: deadline.remaining,
-        enforceLimits: false,
-      );
-      if (_endpoint.database != 0) {
-        await connection.execute(
-          RedisCommand<Object?>([
-            RedisArgument.text('SELECT'),
-            RedisArgument.text('${_endpoint.database}'),
-          ], (reply) => reply),
-          timeout: deadline.remaining,
-          enforceLimits: false,
-        );
+      for (final command in _endpoint.handshakeCommands) {
+        await connection.execute(command, timeout: deadline.remaining, enforceLimits: false);
       }
       _unclaimedConnections.add(connection);
       return connection;
@@ -180,17 +160,11 @@ final class Runnel {
     } on Object catch (error, stackTrace) {
       return Future.error(error, stackTrace);
     }
-    if (_state == _ClientState.reconnecting || _state == _ClientState.connecting) {
-      return Future.error(
-        const RedisTransportException(
-          message: 'The Redis connection is reconnecting; offline queuing is disabled.',
-          deliveryStatus: RedisDeliveryStatus.notSent,
-        ),
-      );
-    }
-    final connection = _connection;
-    if (_state != _ClientState.ready || connection == null || connection.isClosed) {
-      return Future.error(const RedisClosedException(message: 'The Runnel client is closed.'));
+    final RedisConnection connection;
+    try {
+      connection = _readyConnection();
+    } on Object catch (error, stackTrace) {
+      return Future.error(error, stackTrace);
     }
     return connection.execute(command, timeout: deadline);
   }
@@ -237,8 +211,7 @@ final class Runnel {
   /// Creates a typed MULTI/EXEC builder backed by a dedicated connection.
   RedisBatch transaction() {
     final framing =
-        encodeCommand(_transactionFrame('MULTI')).length +
-        encodeCommand(_transactionFrame('EXEC')).length;
+        transactionFrame('MULTI').encodedLength + transactionFrame('EXEC').encodedLength;
     return RedisBatch.internal(
       maxCommands: _limits.maxPendingCommands,
       maxBytes: _limits.maxPendingBytes,
@@ -282,7 +255,7 @@ final class Runnel {
         tls: _endpoint.tls,
         connectTimeout: _connectTimeout,
         connectionLimits: _limits,
-        securityContext: _securityContext,
+        securityContext: _endpoint.securityContext,
         database: _endpoint.database,
         username: _endpoint.username,
         password: _endpoint.password,
@@ -312,7 +285,7 @@ final class Runnel {
     Duration timeout,
   ) async {
     _readyConnection();
-    final deadline = _Deadline(timeout);
+    final deadline = ConnectionDeadline(timeout);
     final connection = await _openPhysicalConnection(timeout: deadline.remaining);
     if (_state != _ClientState.ready) {
       _unclaimedConnections.remove(connection);
@@ -322,46 +295,7 @@ final class Runnel {
     _unclaimedConnections.remove(connection);
     _transactionConnections.add(connection);
     try {
-      final wireCommands = <RedisCommand<Object?>>[
-        _transactionFrame('MULTI'),
-        for (final command in commands) _queuedCommand(command),
-        _transactionFrame('EXEC'),
-      ];
-      final replies = await settleBatch(
-        connection.executeBatch(wireCommands, timeout: deadline.remaining),
-      );
-      _requireTransactionSuccess(replies.first, 'MULTI was rejected.');
-      for (var index = 0; index < commands.length; index++) {
-        _requireTransactionSuccess(replies[index + 1], 'A transaction command was rejected.');
-      }
-      final execReply = _requireTransactionSuccess(replies.last, 'EXEC was rejected.');
-      if (execReply is RespNull) {
-        throw const RedisTransactionException('EXEC did not commit the transaction.');
-      }
-      if (execReply is! RespArray || execReply.values.length != commands.length) {
-        throw const RedisProtocolException(message: 'EXEC returned an invalid result array.');
-      }
-      final results = List.generate(commands.length, (index) {
-        _requireTransactionDeadline(deadline);
-        final reply = execReply.values[index];
-        if (reply case RespError(:final code, :final message)) {
-          return BatchFailure<Object?>(
-            RedisServerException(code: code, message: message),
-            StackTrace.current,
-          );
-        }
-        try {
-          _requireTransactionDeadline(deadline);
-          final value = commands[index].decode(reply);
-          _requireTransactionDeadline(deadline);
-          return BatchSuccess<Object?>(value);
-        } on Object catch (error, stackTrace) {
-          _requireTransactionDeadline(deadline);
-          return BatchFailure<Object?>(error, stackTrace);
-        }
-      }, growable: false);
-      _requireTransactionDeadline(deadline);
-      return results;
+      return await executeTransaction(connection, commands, deadline);
     } finally {
       _transactionConnections.remove(connection);
       await connection.close(commandsAreUncertain: !connection.isIdle);
@@ -393,7 +327,7 @@ final class Runnel {
 
   Future<void> _close() async {
     _state = _ClientState.closing;
-    final deadline = _Deadline(_shutdownTimeout);
+    final deadline = ConnectionDeadline(_shutdownTimeout);
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     final connection = _connection;
@@ -434,7 +368,7 @@ final class Runnel {
   }
 }
 
-Future<void> _withinShutdown(Future<void> work, _Deadline deadline) async {
+Future<void> _withinShutdown(Future<void> work, ConnectionDeadline deadline) async {
   try {
     await work.timeout(deadline.remaining);
   } on TimeoutException {
@@ -453,136 +387,11 @@ Duration _scriptTimeRemaining(Duration timeout, Stopwatch stopwatch) {
   return remaining;
 }
 
-RedisCommand<Object?> _transactionFrame(String name) => RedisCommand<Object?>(
-  [RedisArgument.text(name)],
-  (reply) => reply,
-);
-
-RedisCommand<Object?> _queuedCommand(RedisCommand<Object?> command) => RedisCommand<Object?>(
-  command.arguments,
-  (reply) => reply,
-);
-
-Object? _requireTransactionSuccess(BatchOutcome<Object?> outcome, String message) {
-  return switch (outcome) {
-    BatchSuccess<Object?>(:final value) => value,
-    BatchFailure<Object?>(:final error, :final stackTrace) => Error.throwWithStackTrace(
-      error is RunnelException ? error : RedisTransactionException(message, cause: error),
-      stackTrace,
-    ),
-  };
-}
-
-void _requireTransactionDeadline(_Deadline deadline) {
-  try {
-    deadline.remaining;
-  } on TimeoutException catch (error) {
-    throw RedisTimeoutException(
-      message: 'The Redis transaction deadline expired during reply decoding.',
-      deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
-      cause: error,
-    );
-  }
-}
-
 enum _ClientState { connecting, ready, reconnecting, closing, closed }
 
 bool _terminalConnectFailure(Object error) =>
     error is RedisServerException || error is RedisProtocolException || error is HandshakeException;
 
-final class _Endpoint {
-  const _Endpoint({
-    required this.host,
-    required this.port,
-    required this.tls,
-    required this.database,
-    required this.username,
-    required this.password,
-  });
-
-  factory _Endpoint.parse(String endpoint, {required SecurityContext? securityContext}) {
-    final uri = Uri.tryParse(endpoint);
-    if (uri == null || (uri.scheme != 'redis' && uri.scheme != 'rediss') || uri.host.isEmpty) {
-      throw ArgumentError.value(
-        _redact(endpoint),
-        'endpoint',
-        'must be a redis:// or rediss:// URL',
-      );
-    }
-    if (uri.hasQuery || uri.hasFragment) {
-      throw ArgumentError.value(
-        _redact(endpoint),
-        'endpoint',
-        'query and fragment are unsupported',
-      );
-    }
-    final tls = uri.scheme == 'rediss';
-    if (!tls && securityContext != null) {
-      throw ArgumentError.value(securityContext, 'securityContext', 'requires rediss://');
-    }
-    final segments = uri.pathSegments.where((segment) => segment.isNotEmpty).toList();
-    if (segments.length > 1 || (uri.path.isNotEmpty && uri.path != '/' && segments.isEmpty)) {
-      throw ArgumentError.value(_redact(endpoint), 'endpoint', 'database path is malformed');
-    }
-    final database = segments.isEmpty ? 0 : int.tryParse(segments.single);
-    if (database == null ||
-        database < 0 ||
-        (segments.isNotEmpty && '$database' != segments.single)) {
-      throw ArgumentError.value(
-        _redact(endpoint),
-        'endpoint',
-        'database must be a nonnegative decimal',
-      );
-    }
-    String? username;
-    String? password;
-    if (uri.userInfo.isNotEmpty) {
-      final separator = uri.userInfo.indexOf(':');
-      if (separator < 0) {
-        password = Uri.decodeComponent(uri.userInfo);
-      } else {
-        final rawUsername = uri.userInfo.substring(0, separator);
-        username = rawUsername.isEmpty ? null : Uri.decodeComponent(rawUsername);
-        password = Uri.decodeComponent(uri.userInfo.substring(separator + 1));
-      }
-    }
-    return _Endpoint(
-      host: uri.host,
-      port: uri.hasPort ? uri.port : 6379,
-      tls: tls,
-      database: database,
-      username: username,
-      password: password,
-    );
-  }
-
-  final String host;
-  final int port;
-  final bool tls;
-  final int database;
-  final String? username;
-  final String? password;
-
-  static String _redact(String endpoint) {
-    final uri = Uri.tryParse(endpoint);
-    if (uri == null || uri.userInfo.isEmpty) return endpoint;
-    return uri.replace(userInfo: '').toString();
-  }
-}
-
 void _positive(Duration value, String name) {
   if (value <= Duration.zero) throw ArgumentError.value(value, name, 'must be positive');
-}
-
-final class _Deadline {
-  _Deadline(this.duration) : _stopwatch = Stopwatch()..start();
-
-  final Duration duration;
-  final Stopwatch _stopwatch;
-
-  Duration get remaining {
-    final value = duration - _stopwatch.elapsed;
-    if (value <= Duration.zero) throw TimeoutException('The connection deadline expired.');
-    return value;
-  }
 }

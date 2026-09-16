@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:inlet/inlet.dart';
 import 'package:test/test.dart';
 
-import 'tls_fixture.dart';
+import 'support/tls_fixture.dart';
 
 void main() {
   group('Inlet HTTP server', () {

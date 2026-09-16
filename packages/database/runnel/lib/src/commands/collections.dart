@@ -1,5 +1,6 @@
 import 'package:runnel/src/client.dart';
 import 'package:runnel/src/command.dart';
+import 'package:runnel/src/commands/reply_decoding.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// A sorted-set member paired with its Redis score.
@@ -11,17 +12,17 @@ RedisCommand<int> hsetCommand(String key, Map<String, String> fields) {
   return _command('HSET', [
     key,
     for (final entry in entries) ...[entry.key, entry.value],
-  ], _integer);
+  ], (reply) => reply.integer);
 }
 
 /// Builds an HGET command for one nullable field value.
 RedisCommand<String?> hgetCommand(String key, String field) =>
-    _command('HGET', [key, field], _nullableText);
+    _command('HGET', [key, field], (reply) => reply.nullableText);
 
 /// Builds an HMGET command that preserves field order and duplicates.
 RedisCommand<List<String?>> hmgetCommand(String key, List<String> fields) {
   final snapshot = _nonEmptyList(fields, 'fields');
-  return _command('HMGET', [key, ...snapshot], _nullableTextList);
+  return _command('HMGET', [key, ...snapshot], (reply) => reply.nullableTextList);
 }
 
 /// Builds an HGETALL command returning an immutable field map.
@@ -31,7 +32,7 @@ RedisCommand<Map<String, String>> hgetallCommand(String key) =>
 /// Builds an HDEL command that preserves field order and duplicates.
 RedisCommand<int> hdelCommand(String key, List<String> fields) {
   final snapshot = _nonEmptyList(fields, 'fields');
-  return _command('HDEL', [key, ...snapshot], _integer);
+  return _command('HDEL', [key, ...snapshot], (reply) => reply.integer);
 }
 
 /// Builds an HEXISTS command for one field predicate.
@@ -39,22 +40,22 @@ RedisCommand<bool> hexistsCommand(String key, String field) =>
     _command('HEXISTS', [key, field], _predicate);
 
 /// Builds an HLEN command.
-RedisCommand<int> hlenCommand(String key) => _command('HLEN', [key], _integer);
+RedisCommand<int> hlenCommand(String key) => _command('HLEN', [key], (reply) => reply.integer);
 
 /// Builds an HINCRBY command.
 RedisCommand<int> hincrbyCommand(String key, String field, int increment) =>
-    _command('HINCRBY', [key, field, '$increment'], _integer);
+    _command('HINCRBY', [key, field, '$increment'], (reply) => reply.integer);
 
 /// Builds an SADD command that preserves member order and duplicates.
 RedisCommand<int> saddCommand(String key, List<String> members) {
   final snapshot = _nonEmptyList(members, 'members');
-  return _command('SADD', [key, ...snapshot], _integer);
+  return _command('SADD', [key, ...snapshot], (reply) => reply.integer);
 }
 
 /// Builds an SREM command that preserves member order and duplicates.
 RedisCommand<int> sremCommand(String key, List<String> members) {
   final snapshot = _nonEmptyList(members, 'members');
-  return _command('SREM', [key, ...snapshot], _integer);
+  return _command('SREM', [key, ...snapshot], (reply) => reply.integer);
 }
 
 /// Builds an SISMEMBER command for one member predicate.
@@ -65,36 +66,38 @@ RedisCommand<bool> sismemberCommand(String key, String member) =>
 RedisCommand<Set<String>> smembersCommand(String key) => _command('SMEMBERS', [key], _textSet);
 
 /// Builds an SCARD command.
-RedisCommand<int> scardCommand(String key) => _command('SCARD', [key], _integer);
+RedisCommand<int> scardCommand(String key) => _command('SCARD', [key], (reply) => reply.integer);
 
 /// Builds an LPUSH command that preserves element order and duplicates.
 RedisCommand<int> lpushCommand(String key, List<String> elements) {
   final snapshot = _nonEmptyList(elements, 'elements');
-  return _command('LPUSH', [key, ...snapshot], _integer);
+  return _command('LPUSH', [key, ...snapshot], (reply) => reply.integer);
 }
 
 /// Builds an RPUSH command that preserves element order and duplicates.
 RedisCommand<int> rpushCommand(String key, List<String> elements) {
   final snapshot = _nonEmptyList(elements, 'elements');
-  return _command('RPUSH', [key, ...snapshot], _integer);
+  return _command('RPUSH', [key, ...snapshot], (reply) => reply.integer);
 }
 
 /// Builds a scalar LPOP command.
-RedisCommand<String?> lpopCommand(String key) => _command('LPOP', [key], _nullableText);
+RedisCommand<String?> lpopCommand(String key) =>
+    _command('LPOP', [key], (reply) => reply.nullableText);
 
 /// Builds a scalar RPOP command.
-RedisCommand<String?> rpopCommand(String key) => _command('RPOP', [key], _nullableText);
+RedisCommand<String?> rpopCommand(String key) =>
+    _command('RPOP', [key], (reply) => reply.nullableText);
 
 /// Builds an LRANGE command with inclusive rank endpoints.
 RedisCommand<List<String>> lrangeCommand(String key, int start, int stop) =>
     _command('LRANGE', [key, '$start', '$stop'], _textList);
 
 /// Builds an LLEN command.
-RedisCommand<int> llenCommand(String key) => _command('LLEN', [key], _integer);
+RedisCommand<int> llenCommand(String key) => _command('LLEN', [key], (reply) => reply.integer);
 
 /// Builds an LTRIM command with inclusive rank endpoints.
 RedisCommand<void> ltrimCommand(String key, int start, int stop) =>
-    _command('LTRIM', [key, '$start', '$stop'], _okay);
+    _command('LTRIM', [key, '$start', '$stop'], (reply) => reply.requireOkay());
 
 /// Builds a default add-or-update ZADD command and snapshots [members].
 RedisCommand<int> zaddCommand(String key, Map<String, double> members) {
@@ -105,17 +108,17 @@ RedisCommand<int> zaddCommand(String key, Map<String, double> members) {
   return _command('ZADD', [
     key,
     for (final entry in entries) ...['${entry.value}', entry.key],
-  ], _integer);
+  ], (reply) => reply.integer);
 }
 
 /// Builds a ZREM command that preserves member order and duplicates.
 RedisCommand<int> zremCommand(String key, List<String> members) {
   final snapshot = _nonEmptyList(members, 'members');
-  return _command('ZREM', [key, ...snapshot], _integer);
+  return _command('ZREM', [key, ...snapshot], (reply) => reply.integer);
 }
 
 /// Builds a ZCARD command.
-RedisCommand<int> zcardCommand(String key) => _command('ZCARD', [key], _integer);
+RedisCommand<int> zcardCommand(String key) => _command('ZCARD', [key], (reply) => reply.integer);
 
 /// Builds a ZSCORE command for one nullable member score.
 RedisCommand<double?> zscoreCommand(String key, String member) =>
@@ -157,7 +160,7 @@ RedisCommand<int> zremrangebyscoreCommand(
 ) {
   _finite(minimum, 'minimum');
   _finite(maximum, 'maximum');
-  return _command('ZREMRANGEBYSCORE', [key, '$minimum', '$maximum'], _integer);
+  return _command('ZREMRANGEBYSCORE', [key, '$minimum', '$maximum'], (reply) => reply.integer);
 }
 
 /// Typed hash, set, list, and sorted-set commands.
@@ -365,27 +368,11 @@ void _finite(double value, String name) {
   }
 }
 
-int _integer(RespValue reply) => switch (reply) {
-  RespInteger(:final value) => value,
-  _ => throw FormatException('Expected an integer reply, received ${reply.runtimeType}.'),
-};
-
 bool _predicate(RespValue reply) => switch (reply) {
   RespInteger(value: 0) => false,
   RespInteger(value: 1) => true,
   RespBoolean(:final value) => value,
   _ => throw FormatException('Expected a predicate reply, received ${reply.runtimeType}.'),
-};
-
-void _okay(RespValue reply) {
-  if (respText(reply) != 'OK') {
-    throw const FormatException('Expected an OK reply.');
-  }
-}
-
-String? _nullableText(RespValue reply) => switch (reply) {
-  const RespNull() => null,
-  _ => respText(reply),
 };
 
 double? _nullableDouble(RespValue reply) => switch (reply) {
@@ -400,12 +387,7 @@ double _double(RespValue reply) {
   return reply.value;
 }
 
-List<String?> _nullableTextList(RespValue reply) {
-  final values = _array(reply);
-  return List<String?>.unmodifiable(values.map(_nullableText));
-}
-
-List<String> _textList(RespValue reply) => List<String>.unmodifiable(_array(reply).map(respText));
+List<String> _textList(RespValue reply) => List<String>.unmodifiable(reply.array.map(respText));
 
 Set<String> _textSet(RespValue reply) {
   final values = switch (reply) {
@@ -426,7 +408,7 @@ Map<String, String> _textMap(RespValue reply) {
 }
 
 List<ScoredMember> _scoredMembers(RespValue reply) {
-  final values = _array(reply);
+  final values = reply.array;
   return List<ScoredMember>.unmodifiable(
     values.map((value) {
       if (value is! RespArray || value.values.length != 2) {
@@ -436,8 +418,3 @@ List<ScoredMember> _scoredMembers(RespValue reply) {
     }),
   );
 }
-
-List<RespValue> _array(RespValue reply) => switch (reply) {
-  RespArray(:final values) => values,
-  _ => throw FormatException('Expected an array reply, received ${reply.runtimeType}.'),
-};

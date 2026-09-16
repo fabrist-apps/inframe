@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:clickhouse/clickhouse.dart';
 import 'package:test/test.dart';
 
+import 'support/http_server.dart';
+
 void main() {
   group('ClickHouseClient lifecycle', () {
     test('should time out response headers and keep the request outcome unknown', () async {
@@ -12,7 +14,7 @@ void main() {
       addTearDown(() => server.close(force: true));
       final requestReceived = Completer<HttpRequest>();
       server.listen(requestReceived.complete);
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
 
       final query = client.query('SELECT 1', timeout: const Duration(seconds: 1));
@@ -36,6 +38,44 @@ void main() {
       }
     });
 
+    test('should keep a total deadline while response chunks keep arriving', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final firstChunk = Completer<void>();
+      server.listen((request) async {
+        await request.drain<void>();
+        if (request.uri.queryParameters['param_slow'] == 'yes') {
+          try {
+            request.response.write(' ');
+            await request.response.flush();
+            firstChunk.complete();
+            for (var index = 0; index < 30; index += 1) {
+              await Future<void>.delayed(const Duration(milliseconds: 20));
+              request.response.write(' ');
+              await request.response.flush();
+            }
+          } on IOException {
+            // The operation's deadline aborts the response while it is arriving.
+          }
+        } else {
+          request.response.write(validResult);
+        }
+        await request.response.close();
+      });
+      final client = createClient(serverUrl(server));
+      addTearDown(client.close);
+      final slow = client.query(
+        'SELECT slow',
+        parameters: {'slow': 'yes'},
+        timeout: const Duration(milliseconds: 250),
+      );
+      final timedOut = expectLater(slow, throwsA(isA<ClickHouseTimeoutException>()));
+      await firstChunk.future;
+      expect((await client.query('SELECT fast')).rows.single['value'], 1);
+      await timedOut;
+      expect((await client.query('SELECT after')).rows.single['value'], 1);
+    });
+
     test('should detect a deadline exhausted by encoding before transmission', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
@@ -45,7 +85,7 @@ void main() {
         await request.drain<void>();
         await request.response.close();
       });
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
       final rows = List<Map<String, Object?>>.generate(
         10000,
@@ -74,7 +114,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 100));
         await request.response.close();
       });
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
 
       await expectLater(
@@ -108,7 +148,7 @@ void main() {
         }
         await request.response.close();
       });
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       addTearDown(client.close);
 
       final slow = client.query(
@@ -145,7 +185,7 @@ void main() {
       addTearDown(() => server.close(force: true));
       final requestReceived = Completer<HttpRequest>();
       server.listen(requestReceived.complete);
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       final operation = client.query('SELECT 1');
       final request = await requestReceived.future;
 
@@ -176,7 +216,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 100));
         await request.response.close();
       });
-      final client = createClient(server);
+      final client = createClient(serverUrl(server));
       final operation = client.query('SELECT slow', timeout: const Duration(milliseconds: 20));
       final operationExpectation = expectLater(
         operation,
@@ -207,13 +247,3 @@ void main() {
     });
   });
 }
-
-const validResult = '{"meta":[{"name":"value","type":"UInt8"}],"data":[{"value":1}],"rows":1}';
-
-ClickHouseClient createClient(HttpServer server) => ClickHouseClient(
-  endpoint: 'http://${server.address.host}:${server.port}',
-  database: 'analytics',
-  username: 'tester',
-  password: 'secret',
-  allowInsecureHttp: true,
-);

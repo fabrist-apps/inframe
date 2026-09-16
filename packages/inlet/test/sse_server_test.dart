@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:inlet/inlet.dart';
 import 'package:test/test.dart';
 
-import 'wire_client.dart';
+import 'support/wire_client.dart';
 
 void main() {
   group('Inlet SSE delivery', () {

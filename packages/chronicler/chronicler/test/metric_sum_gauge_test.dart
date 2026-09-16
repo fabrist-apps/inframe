@@ -132,8 +132,8 @@ void main() {
       final gauge = metrics.gauge('depth')..set(5);
 
       chronicler
-        ..setCollectionEnabled(ChroniclerSignal.metrics, false)
-        ..setCollectionEnabled(ChroniclerSignal.metrics, true);
+        ..setCollectionEnabled(ChroniclerSignal.metrics, enabled: false)
+        ..setCollectionEnabled(ChroniclerSignal.metrics, enabled: true);
       changes.add(-2);
       final first = await chronicler.flush();
       expect(first.accepted, 1);

@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:turso/src/internal/parameters.dart' show portableSafeInteger;
+import 'package:turso/src/parameters.dart' show portableSafeInteger;
 
 /// Metadata for one ordered result column.
 final class TursoColumn {

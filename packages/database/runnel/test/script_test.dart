@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:runnel/runnel.dart';
 import 'package:test/test.dart';
 
+import 'support/resp_peer.dart';
+
 void main() {
   test('EVAL and EVALSHA preserve exact keys, binary arguments, and decoding', () {
     final binary = Uint8List.fromList([0, 255, 13, 10]);
@@ -204,34 +206,23 @@ List<List<int>> _arguments(RedisCommand<Object?> command) =>
 List<String> _texts(RedisCommand<Object?> command) =>
     command.arguments.map((argument) => utf8.decode(argument.bytes)).toList(growable: false);
 
-final class _ReceivedCommand {
-  const _ReceivedCommand(this.arguments);
-
-  final List<List<int>> arguments;
-
-  String get name => ascii.decode(arguments.first).toUpperCase();
-  List<String> get textArguments => arguments.map(utf8.decode).toList(growable: false);
-}
-
 final class _ScriptPeer {
-  _ScriptPeer._(
-    this._server, {
+  _ScriptPeer({
     required this.evalshaError,
     required this.dropEvalsha,
     required this.evalshaDelay,
     required this.evalDelay,
   });
 
-  final ServerSocket _server;
+  late final RespPeer _peer;
   final String? evalshaError;
   final bool dropEvalsha;
   final Duration evalshaDelay;
   final Duration evalDelay;
-  final List<Socket> _sockets = [];
-  final List<_ReceivedCommand> commands = [];
   bool _loaded = false;
 
-  String get endpoint => 'redis://127.0.0.1:${_server.port}';
+  String get endpoint => _peer.endpoint;
+  List<RespPeerCommand> get commands => _peer.commands;
 
   static Future<_ScriptPeer> start({
     String? evalshaError,
@@ -239,38 +230,22 @@ final class _ScriptPeer {
     Duration evalshaDelay = Duration.zero,
     Duration evalDelay = Duration.zero,
   }) async {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final peer = _ScriptPeer._(
-      server,
+    final peer = _ScriptPeer(
       evalshaError: evalshaError,
       dropEvalsha: dropEvalsha,
       evalshaDelay: evalshaDelay,
       evalDelay: evalDelay,
     );
-    server.listen(peer._accept);
+    peer._peer = await RespPeer.start(
+      onCommand: (command) {
+        if (!command.replyToHandshake()) unawaited(peer._reply(command.socket, command));
+      },
+    );
     return peer;
   }
 
-  void _accept(Socket socket) {
-    _sockets.add(socket);
-    var buffer = <int>[];
-    socket.listen((bytes) {
-      buffer.addAll(bytes);
-      while (true) {
-        final parsed = _parseCommand(buffer);
-        if (parsed == null) return;
-        buffer = buffer.sublist(parsed.consumed);
-        final received = _ReceivedCommand(parsed.arguments);
-        commands.add(received);
-        unawaited(_reply(socket, received));
-      }
-    });
-  }
-
-  Future<void> _reply(Socket socket, _ReceivedCommand command) async {
+  Future<void> _reply(Socket socket, RespPeerCommand command) async {
     switch (command.name) {
-      case 'HELLO':
-        socket.add(ascii.encode('%1\r\n+proto\r\n:3\r\n'));
       case 'EVALSHA' when dropEvalsha:
         socket.destroy();
       case 'EVALSHA':
@@ -291,7 +266,7 @@ final class _ScriptPeer {
     }
   }
 
-  void _replyWithArgument(Socket socket, _ReceivedCommand command) {
+  void _replyWithArgument(Socket socket, RespPeerCommand command) {
     final keyCount = int.parse(ascii.decode(command.arguments[2]));
     final firstArgument = 3 + keyCount;
     if (firstArgument < command.arguments.length) {
@@ -310,39 +285,5 @@ final class _ScriptPeer {
     }
   }
 
-  Future<void> close() async {
-    for (final socket in _sockets) {
-      socket.destroy();
-    }
-    await _server.close();
-  }
-}
-
-({List<List<int>> arguments, int consumed})? _parseCommand(List<int> bytes) {
-  if (bytes.isEmpty || bytes.first != 42) return null;
-  final countLine = _line(bytes, 1);
-  if (countLine == null) return null;
-  final count = int.parse(ascii.decode(bytes.sublist(1, countLine.index)));
-  var offset = countLine.after;
-  final arguments = <List<int>>[];
-  for (var index = 0; index < count; index++) {
-    if (offset >= bytes.length || bytes[offset] != 36) return null;
-    final lengthLine = _line(bytes, offset + 1);
-    if (lengthLine == null) return null;
-    final length = int.parse(ascii.decode(bytes.sublist(offset + 1, lengthLine.index)));
-    final end = lengthLine.after + length;
-    if (end + 2 > bytes.length) return null;
-    arguments.add(bytes.sublist(lengthLine.after, end));
-    offset = end + 2;
-  }
-  return (arguments: arguments, consumed: offset);
-}
-
-({int index, int after})? _line(List<int> bytes, int start) {
-  for (var index = start; index + 1 < bytes.length; index++) {
-    if (bytes[index] == 13 && bytes[index + 1] == 10) {
-      return (index: index, after: index + 2);
-    }
-  }
-  return null;
+  Future<void> close() => _peer.close();
 }

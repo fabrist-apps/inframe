@@ -1,16 +1,18 @@
-part of 'inlet.dart';
+import 'dart:async';
+
+import 'package:inlet/src/handler.dart';
+import 'package:inlet/src/http_token.dart';
+import 'package:inlet/src/request.dart';
 
 /// An editable collection of route and middleware registrations.
 class Router {
   /// Creates an editable router.
-  Router() : this._(true);
-
-  Router._(this._strict);
+  Router({this._strict = true});
 
   final bool _strict;
-  final List<_RouteRegistration> _registrations = [];
+  final List<RouteRegistration> _registrations = [];
   final List<Middleware> _middleware = [];
-  _CompiledRouter? _compiled;
+  CompiledRouter? _compiled;
   Future<void>? _starting;
 
   /// Registers [handler] for the case-sensitive HTTP [method] and [path].
@@ -22,13 +24,13 @@ class Router {
   }) {
     _ensureEditable();
 
-    final registration = _RouteRegistration(
-      method: _validateMethod(method),
+    final registration = RouteRegistration._(
+      method: validateMethod(method),
       rawPath: path,
       pattern: _RoutePattern.parse(path, strict: _strict),
       handler: handler,
       middleware: List.unmodifiable(middleware),
-    )..ensureNoConflict(_registrations);
+    ).._ensureNoConflict(_registrations);
 
     _registrations.add(registration);
   }
@@ -73,17 +75,17 @@ class Router {
     _validateMountPrefix(prefix);
 
     final childScope = List<Middleware>.unmodifiable(router._middleware);
-    final mounted = <_RouteRegistration>[];
+    final mounted = <RouteRegistration>[];
 
     for (final child in router._registrations) {
       final rawPath = _joinPaths(prefix, child.rawPath);
-      final registration = _RouteRegistration(
+      final registration = RouteRegistration._(
         method: child.method,
         rawPath: rawPath,
         pattern: _RoutePattern.parse(rawPath, strict: _strict),
         handler: child.handler,
         middleware: List.unmodifiable([...childScope, ...child.middleware]),
-      )..ensureNoConflict(_registrations.followedBy(mounted));
+      ).._ensureNoConflict(_registrations.followedBy(mounted));
 
       mounted.add(registration);
     }
@@ -92,59 +94,7 @@ class Router {
     _registrations.addAll(mounted);
   }
 
-  Future<_CompiledRouter> _admit(Request request) async {
-    while (true) {
-      final frozen = _compiled;
-      if (frozen != null) {
-        request._admit();
-
-        return frozen;
-      }
-
-      final starting = _starting;
-      if (starting != null) {
-        await starting;
-        continue;
-      }
-
-      final candidate = _compile();
-      request._admit();
-      _compiled = candidate;
-
-      return candidate;
-    }
-  }
-
-  // A failed bind leaves the router editable; admissions wait for it to settle.
-  Future<T> _freezeAfter<T>(Future<T> Function() start) async {
-    while (true) {
-      if (_compiled != null) {
-        return start();
-      }
-
-      final starting = _starting;
-      if (starting != null) {
-        await starting;
-        continue;
-      }
-
-      final candidate = _compile();
-      final settled = Completer<void>();
-      _starting = settled.future;
-
-      try {
-        final value = await start();
-        _compiled = candidate;
-
-        return value;
-      } finally {
-        _starting = null;
-        settled.complete();
-      }
-    }
-  }
-
-  _CompiledRouter _compile() => _CompiledRouter.compile(
+  CompiledRouter _compile() => CompiledRouter._compile(
     _registrations,
     rootMiddleware: _middleware,
     strict: _strict,
@@ -176,24 +126,89 @@ class Router {
   }
 }
 
-final class _RouteRegistration {
-  const _RouteRegistration({
+/// Internal admission boundary, excluded from the package entrypoint.
+extension RouterRuntime on Router {
+  /// Freezes registration and claims the request for one dispatch.
+  Future<CompiledRouter> admit(Request request) async {
+    while (true) {
+      final frozen = _compiled;
+      if (frozen != null) {
+        request.admit();
+
+        return frozen;
+      }
+
+      final starting = _starting;
+      if (starting != null) {
+        await starting;
+        continue;
+      }
+
+      final candidate = _compile();
+      request.admit();
+      _compiled = candidate;
+
+      return candidate;
+    }
+  }
+
+  /// Freezes after a successful bind; admissions wait for binding to settle.
+  /// A failed bind leaves the router editable.
+  Future<T> freezeAfter<T>(Future<T> Function() start) async {
+    while (true) {
+      if (_compiled != null) {
+        return start();
+      }
+
+      final starting = _starting;
+      if (starting != null) {
+        await starting;
+        continue;
+      }
+
+      final candidate = _compile();
+      final settled = Completer<void>();
+      _starting = settled.future;
+
+      try {
+        final value = await start();
+        _compiled = candidate;
+
+        return value;
+      } finally {
+        _starting = null;
+        settled.complete();
+      }
+    }
+  }
+}
+
+/// A validated route and its mounted middleware snapshot.
+final class RouteRegistration {
+  const RouteRegistration._({
     required this.method,
     required this.rawPath,
-    required this.pattern,
+    required this._pattern,
     required this.handler,
     required this.middleware,
   });
 
+  /// Case-sensitive HTTP method.
   final String method;
+
+  /// Original mounted path, used when copying registrations.
   final String rawPath;
-  final _RoutePattern pattern;
+  final _RoutePattern _pattern;
+
+  /// Handler selected by route matching.
   final Handler handler;
+
+  /// Middleware belonging to this route and its mounted scopes.
   final List<Middleware> middleware;
 
-  void ensureNoConflict(Iterable<_RouteRegistration> existing) {
+  void _ensureNoConflict(Iterable<RouteRegistration> existing) {
     for (final registration in existing) {
-      if (method == registration.method && pattern.hasSameShape(registration.pattern)) {
+      if (method == registration.method && _pattern.hasSameShape(registration._pattern)) {
         throw StateError('An equivalent route is already registered for $method.');
       }
     }
@@ -303,50 +318,56 @@ final class _WildcardSegment extends _PatternSegment {
   const _WildcardSegment();
 }
 
-final class _CompiledRouter {
-  const _CompiledRouter(
-    this.root, {
+/// A routing snapshot whose trie is private and never mutated after creation.
+final class CompiledRouter {
+  const CompiledRouter._(
+    this._root, {
     required this.rootMiddleware,
     required this.strict,
   });
 
-  factory _CompiledRouter.compile(
-    List<_RouteRegistration> registrations, {
+  factory CompiledRouter._compile(
+    List<RouteRegistration> registrations, {
     required List<Middleware> rootMiddleware,
     required bool strict,
   }) {
-    final root = _BuildRouteNode();
+    final root = _RouteNode();
 
     for (final registration in registrations) {
       var node = root;
-      for (final segment in registration.pattern.segments) {
+      for (final segment in registration._pattern.segments) {
         node = switch (segment) {
-          _LiteralSegment(:final value) => node.literals.putIfAbsent(value, _BuildRouteNode.new),
-          _ParameterSegment() => node.parameter ??= _BuildRouteNode(),
-          _WildcardSegment() => node.wildcard ??= _BuildRouteNode(),
+          _LiteralSegment(:final value) => node.literals.putIfAbsent(value, _RouteNode.new),
+          _ParameterSegment() => node.parameter ??= _RouteNode(),
+          _WildcardSegment() => node.wildcard ??= _RouteNode(),
         };
       }
 
       node.endpoints[registration.method] = registration;
     }
 
-    return _CompiledRouter(
-      root.freeze(),
+    return CompiledRouter._(
+      root,
       rootMiddleware: List.unmodifiable(rootMiddleware),
       strict: strict,
     );
   }
 
-  final _CompiledRouteNode root;
+  final _RouteNode _root;
+
+  /// Middleware shared by every matched route in this router.
   final List<Middleware> rootMiddleware;
+
+  /// Whether a trailing slash is significant.
   final bool strict;
 
-  _RouteResolution resolve(Request request) {
+  /// Matches paths in precedence order, then selects the requested method.
+  RouteResolution resolve(Request request) {
     late final List<String> segments;
     try {
       segments = [...request.uri.pathSegments];
     } on FormatException {
-      return const _BadRoutePath();
+      return const BadRoutePath();
     }
 
     if (!strict && segments.isNotEmpty && segments.last.isEmpty) {
@@ -354,9 +375,9 @@ final class _CompiledRouter {
     }
 
     final candidates = <_PathCandidate>[];
-    _collectCandidates(root, segments, 0, const [], candidates);
+    _collectCandidates(_root, segments, 0, const [], candidates);
     if (candidates.isEmpty) {
-      return const _RouteNotFound();
+      return const RouteNotFound();
     }
 
     if (request.method == 'HEAD') {
@@ -367,7 +388,7 @@ final class _CompiledRouter {
 
       final fallback = _matchForMethod(candidates, 'GET');
       if (fallback != null) {
-        return fallback.asHeadFallback();
+        return fallback._asHeadFallback();
       }
     } else {
       final match = _matchForMethod(candidates, request.method);
@@ -385,10 +406,10 @@ final class _CompiledRouter {
     }
 
     final sorted = allowed.toList()..sort();
-    return _MethodNotAllowed(List.unmodifiable(sorted));
+    return MethodNotAllowed(List.unmodifiable(sorted));
   }
 
-  _MatchedRoute? _matchForMethod(
+  MatchedRoute? _matchForMethod(
     List<_PathCandidate> candidates,
     String method,
   ) {
@@ -404,7 +425,7 @@ final class _CompiledRouter {
 
   // Collect in precedence order; method selection may backtrack to a later path.
   void _collectCandidates(
-    _CompiledRouteNode node,
+    _RouteNode node,
     List<String> segments,
     int index,
     List<String> captures,
@@ -441,41 +462,22 @@ final class _CompiledRouter {
   }
 }
 
-final class _BuildRouteNode {
-  final Map<String, _BuildRouteNode> literals = {};
-  _BuildRouteNode? parameter;
-  _BuildRouteNode? wildcard;
-  final Map<String, _RouteRegistration> endpoints = {};
-
-  _CompiledRouteNode freeze() => _CompiledRouteNode(
-    literals: Map.unmodifiable(literals.map((key, value) => MapEntry(key, value.freeze()))),
-    parameter: parameter?.freeze(),
-    wildcard: wildcard?.freeze(),
-    endpoints: Map.unmodifiable(endpoints),
-  );
-}
-
-final class _CompiledRouteNode {
-  const _CompiledRouteNode({
-    required this.literals,
-    required this.parameter,
-    required this.wildcard,
-    required this.endpoints,
-  });
-
-  final Map<String, _CompiledRouteNode> literals;
-  final _CompiledRouteNode? parameter;
-  final _CompiledRouteNode? wildcard;
-  final Map<String, _RouteRegistration> endpoints;
+// Built once by CompiledRouter._compile; no node escapes the routing library or
+// changes after publication.
+final class _RouteNode {
+  final Map<String, _RouteNode> literals = {};
+  _RouteNode? parameter;
+  _RouteNode? wildcard;
+  final Map<String, RouteRegistration> endpoints = {};
 }
 
 final class _PathCandidate {
   const _PathCandidate(this.node, this.captures);
 
-  final _CompiledRouteNode node;
+  final _RouteNode node;
   final List<String> captures;
 
-  _MatchedRoute? matchForMethod(String method) {
+  MatchedRoute? matchForMethod(String method) {
     final registration = node.endpoints[method];
     if (registration == null) {
       return null;
@@ -484,45 +486,61 @@ final class _PathCandidate {
     final parameters = <String, String>{};
 
     for (var index = 0; index < captures.length; index++) {
-      parameters[registration.pattern.captureNames[index]] = captures[index];
+      parameters[registration._pattern.captureNames[index]] = captures[index];
     }
 
-    return _MatchedRoute(registration, Map.unmodifiable(parameters));
+    return MatchedRoute(registration, Map.unmodifiable(parameters));
   }
 }
 
-sealed class _RouteResolution {
-  const _RouteResolution();
+/// Exhaustive result of matching a request against the route snapshot.
+sealed class RouteResolution {
+  /// Creates a route resolution.
+  const RouteResolution();
 }
 
-final class _MatchedRoute extends _RouteResolution {
-  const _MatchedRoute(
+/// A selected endpoint and decoded captures.
+final class MatchedRoute extends RouteResolution {
+  /// Creates a match for an endpoint.
+  const MatchedRoute(
     this.registration,
     this.pathParameters, {
     this.isHeadFallback = false,
   });
 
-  final _RouteRegistration registration;
+  /// Selected handler and middleware registration.
+  final RouteRegistration registration;
+
+  /// Captures decoded once after separating path segments.
   final Map<String, String> pathParameters;
+
+  /// Whether HEAD selected a GET endpoint.
   final bool isHeadFallback;
 
-  _MatchedRoute asHeadFallback() => _MatchedRoute(
+  MatchedRoute _asHeadFallback() => MatchedRoute(
     registration,
     pathParameters,
     isHeadFallback: true,
   );
 }
 
-final class _BadRoutePath extends _RouteResolution {
-  const _BadRoutePath();
+/// The request path contains invalid percent-encoded UTF-8.
+final class BadRoutePath extends RouteResolution {
+  /// Creates an invalid-path result.
+  const BadRoutePath();
 }
 
-final class _RouteNotFound extends _RouteResolution {
-  const _RouteNotFound();
+/// No registered path matches the request.
+final class RouteNotFound extends RouteResolution {
+  /// Creates a missing-route result.
+  const RouteNotFound();
 }
 
-final class _MethodNotAllowed extends _RouteResolution {
-  const _MethodNotAllowed(this.allowedMethods);
+/// Paths matched, but none accepts the requested method.
+final class MethodNotAllowed extends RouteResolution {
+  /// Creates a method mismatch with sorted allowed methods.
+  const MethodNotAllowed(this.allowedMethods);
 
+  /// Sorted methods, including HEAD where GET is registered.
   final List<String> allowedMethods;
 }

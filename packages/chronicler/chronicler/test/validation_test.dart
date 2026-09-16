@@ -1,6 +1,3 @@
-// Tests keep sequential invalid calls visible beside their expected counters.
-// ignore_for_file: cascade_invocations
-
 import 'package:chronicler/chronicler.dart';
 import 'package:context/context.dart';
 import 'package:test/test.dart';
@@ -24,9 +21,10 @@ void main() {
       final cyclic = <String, Object?>{};
       cyclic['self'] = cyclic;
 
-      logs.info('unsupported', attributes: {'value': Object()});
-      logs.info('cycle', attributes: cyclic);
-      logs.info('nan', attributes: {'value': double.nan});
+      logs
+        ..info('unsupported', attributes: {'value': Object()})
+        ..info('cycle', attributes: cyclic)
+        ..info('nan', attributes: {'value': double.nan});
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, isEmpty);
@@ -67,34 +65,33 @@ void main() {
           delivery: DeliveryOptions(maxBatchRecords: 1),
         ),
       );
-      final logs = Context().withChronicler(chronicler.recorder).logs;
-
-      logs.info(
-        'valid',
-        attributes: {
-          'nested': [
-            [
-              {
-                'value': [true],
-              },
+      Context().withChronicler(chronicler.recorder).logs
+        ..info(
+          'valid',
+          attributes: {
+            'nested': [
+              [
+                {
+                  'value': [true],
+                },
+              ],
             ],
-          ],
-        },
-      );
-      logs.info(
-        'invalid',
-        attributes: {
-          'nested': [
-            [
-              {
-                'value': [
-                  [true],
-                ],
-              },
+          },
+        )
+        ..info(
+          'invalid',
+          attributes: {
+            'nested': [
+              [
+                {
+                  'value': [
+                    [true],
+                  ],
+                },
+              ],
             ],
-          ],
-        },
-      );
+          },
+        );
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, hasLength(1));
@@ -112,10 +109,9 @@ void main() {
           delivery: DeliveryOptions(maxBatchRecords: 1, maxRecordBytes: 400),
         ),
       );
-      final logs = Context().withChronicler(chronicler.recorder).logs;
-
-      logs.info('😀');
-      logs.info('😀' * 100);
+      Context().withChronicler(chronicler.recorder).logs
+        ..info('😀')
+        ..info('😀' * 100);
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, hasLength(1));
@@ -136,9 +132,7 @@ void main() {
           ),
         ),
       );
-      final logs = Context().withChronicler(chronicler.recorder).logs;
-
-      logs.info('first');
+      final logs = Context().withChronicler(chronicler.recorder).logs..info('first');
       await Future<void>.delayed(Duration.zero);
       logs.info('second');
 
@@ -157,17 +151,16 @@ void main() {
           delivery: DeliveryOptions(maxBatchRecords: 1, maxRecordBytes: 400),
         ),
       );
-      final logs = Context().withChronicler(chronicler.recorder).logs;
-
-      logs.info('map', attributes: {'a': 'x' * 150, 'b': 'x' * 150});
-      logs.info(
-        'list',
-        attributes: {
-          'a': ['x' * 150, 'x' * 150],
-        },
-      );
-      logs.info('key', attributes: {'x' * 300: 1});
-      logs.info('record', attributes: {'a': 'x' * 300});
+      Context().withChronicler(chronicler.recorder).logs
+        ..info('map', attributes: {'a': 'x' * 150, 'b': 'x' * 150})
+        ..info(
+          'list',
+          attributes: {
+            'a': ['x' * 150, 'x' * 150],
+          },
+        )
+        ..info('key', attributes: {'x' * 300: 1})
+        ..info('record', attributes: {'a': 'x' * 300});
       await Future<void>.delayed(Duration.zero);
 
       expect(exporter.batches, isEmpty);
@@ -191,9 +184,7 @@ void main() {
           ),
         ),
       );
-      final logs = Context().withChronicler(chronicler.recorder).logs;
-
-      logs.info('x' * 150);
+      final logs = Context().withChronicler(chronicler.recorder).logs..info('x' * 150);
       await Future<void>.delayed(Duration.zero);
       logs.info('x' * 150);
 
@@ -212,9 +203,10 @@ void main() {
           delivery: DeliveryOptions(maxBatchRecords: 1),
         ),
       );
-      final logs = Context().withChronicler(chronicler.recorder).logs;
-
-      logs.error('failed', error: _ThrowingText(), stackTrace: _ThrowingStack());
+      Context()
+          .withChronicler(chronicler.recorder)
+          .logs
+          .error('failed', error: _ThrowingText(), stackTrace: _ThrowingStack());
       await Future<void>.delayed(Duration.zero);
 
       final record = exporter.batches.single.records.single as LogRecord;

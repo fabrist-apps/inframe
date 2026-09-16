@@ -1,7 +1,8 @@
 # Chronicler
 
 Chronicler records structured telemetry through the repository's explicit `Context` and delivers
-immutable batches through an application-owned exporter.
+immutable batches through an application-owned exporter. Its asynchronous workers run on Conflux;
+recording, validation, redaction, and metric observations remain synchronous.
 
 ```dart
 import 'package:chronicler/chronicler.dart';
@@ -33,6 +34,75 @@ await request.trace('checkout', run: (trace) async {
 final report = await chronicler.flush();
 await chronicler.close();
 ```
+
+## Runnable base SDK example
+
+Run the [checkout example](example/chronicler_example.dart) from the repository root:
+
+```sh
+dart run packages/chronicler/chronicler/example/chronicler_example.dart
+```
+
+It needs no credentials or external services. Two requests demonstrate successful and failed
+checkouts using ordinary Dart async code: request identity, correlated logs and nested spans,
+product events, explicit error capture, and aggregated metrics. It also shows sensitive-field
+redaction, an event-dropping `beforeRecord` hook, and shutdown in `finally`.
+
+The local exporter prints compact JSON batches to stdout; diagnostics and delivery summaries go
+to stderr. Look for `[REDACTED]` values, matching trace IDs within each request, a failed inventory
+span and error occurrence, and metric series separated by outcome. The `checkout_form_viewed`
+event is intentionally dropped. Successful delivery should leave no pending records or unfinished
+cleanup. The close report is a separate snapshot, so it need not repeat the flush's accepted count.
+
+Console acceptance means only that the local print call returned, not that a server stored the
+records. A real exporter must acknowledge destination outcomes, support cancellation, and release
+its transport resources. The example does not implement persistence or network retries itself.
+
+## Conflux execution
+
+Chronicler owns one Conflux `Runtime` for delivery attempts, batching and retry wakeups, metric
+intervals, and diagnostic notifications. Pass a Conflux `Clock` to the constructor to control wall
+timestamps and monotonic deadlines together. The clock is borrowed; Chronicler cancels its waits
+during shutdown. Its runtime is separate from request runtimes so interrupting a request does not
+cancel queued telemetry.
+
+Effect tracing and Cause conversion are exported directly by `package:chronicler/chronicler.dart`.
+Remove the former `chronicler_conflux` dependency and import when migrating callers.
+
+For a newly constructed `chronicler`, a one-shot Effect can take responsibility for shutdown
+instead of calling `close()` manually:
+
+```dart
+import 'package:conflux/effect.dart';
+
+final program = Effect.build<void, Never>(($) async {
+  $.addFinalizer(chronicler.closeEffect().asVoid());
+  await $(Effect.sync((context) {
+    context.logs.info('Checkout started');
+  }).withSpan('checkout'));
+  final report = await $(chronicler.flushEffect());
+  // Inspect report.accepted, report.dropped, and report.pending.
+});
+
+await program.runFuture(context: Context().withChronicler(chronicler.recorder));
+```
+
+`flushEffect()` and `closeEffect()` are lazy: construction does no work. A flush snapshots records
+when executed. Interrupting its caller stops waiting but leaves shared delivery running. Once
+shutdown starts, it continues independently of caller interruption; repeated calls share the same
+shutdown operation. The Future APIs retain their immediate snapshot and shutdown behavior.
+
+`withSpan` creates a child span, or a root without an active parent. `withRootSpan` starts an explicit
+trace boundary and can continue a validated remote parent. Each wrapper closes its child resource
+scope before ending the span. Expected failures and defects mark it Error; interruption-only Causes
+mark it Cancelled. The original value or complete Cause is preserved. Error occurrences are not
+captured automatically; use `cause.toChroniclerError()` when explicitly capturing one.
+
+Exporter futures remain a foreign-I/O boundary. An attempt timeout requests cancellation but retains
+its slot until the transport settles. Shutdown bounds observation of unresolved transport and
+reports `cleanupIncomplete`; it does not register unbounded exporter cleanup as a protected Conflux
+finalizer. Conflux cannot force an uncooperative transport to stop. Queue accounting, per-record
+acknowledgements, flush snapshots, and retry eligibility remain Chronicler's delivery policy.
 
 The application creates the exporter and gives Chronicler exclusive ownership of it. Recording is
 synchronous: Chronicler validates and snapshots the payload, then schedules transport work. It never
@@ -260,7 +330,7 @@ It encodes zoned moments as their UTC instant. Generated model serialization use
 Conflux's `MomentMapper`; no mapper initialization is required from callers.
 
 Elapsed durations still use `Duration` and monotonic clocks. This migration does not change
-scheduling, retry, or shutdown behavior.
+the wire format. Scheduling, retry wakeups, and shutdown deadlines use the same Conflux clock.
 
 ## Capture policy and privacy
 
@@ -375,10 +445,23 @@ Its internal implementation is organized by responsibility:
 | Queue capacity, retries, flush snapshots, and exporter shutdown | [`runtime/delivery_queue.dart`](lib/src/runtime/delivery_queue.dart) |
 | Instrument registry and interval aggregation | [`metrics/aggregation.dart`](lib/src/metrics/aggregation.dart) |
 
+`ChroniclerRuntime` owns the Conflux runtime and closes it after delivery has
+finished its bounded shutdown. Delivery and metric aggregation borrow that
+runtime and use its clock for both scheduling and elapsed-time accounting.
+Delivery retains accepted or dropped outcomes for independent flush snapshots;
+its shutdown-only state is kept together in the queue.
+
+Record preparation validates caller data before redaction. When a hook runs,
+its replacement is checked and redacted again before encoding. Without a hook,
+there is only one redaction pass. Final encoding still validates the resulting
+record because redaction can change its size.
+
 [`src/codec.dart`](lib/src/codec.dart) owns canonical record encoding. Its
 [`codec/record_decoder.dart`](lib/src/codec/record_decoder.dart) parses untrusted bytes, and
 [`codec/record_schema.dart`](lib/src/codec/record_schema.dart) enforces the model contract in both
-directions. [`src/record_validation.dart`](lib/src/record_validation.dart) handles bounded attribute
+directions. Public model `schema()` methods return Conflux Val schemas; `safeParse` returns
+a Conflux `Result`. Import `package:conflux/result.dart` to use `isSuccess`, `isFailure`,
+and `getOrNull()`. [`src/record_validation.dart`](lib/src/record_validation.dart) handles bounded attribute
 snapshots shared by capture, metrics, and the codec. Text uses Dart's standard JSON/UTF-8 behavior,
 without extra Unicode validation. Attribute keys may be empty, and logs may carry both an error stack
 and a standalone stack. Metric names and units must be nonempty but have no ASCII or grammar restriction.

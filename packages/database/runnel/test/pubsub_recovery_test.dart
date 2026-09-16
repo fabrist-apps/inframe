@@ -8,6 +8,8 @@ import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
 import 'package:test/test.dart';
 
+import 'support/resp_peer.dart';
+
 void main() {
   group('PubSubSession recovery', () {
     test('should order interruptions before restored generations across disconnects', () async {
@@ -384,9 +386,7 @@ Future<void> _eventually(bool Function() condition) async {
 }
 
 final class _RecoveryPeer {
-  _RecoveryPeer._(this._server);
-
-  final ServerSocket _server;
+  late final RespPeer _peer;
   final List<_PeerConnection> _connections = [];
   final List<_PeerCommand> commands = [];
   final List<_HeldAcknowledgement> _heldAcknowledgements = [];
@@ -400,15 +400,22 @@ final class _RecoveryPeer {
   int? partialAcknowledgementsBeforeRejection;
   bool rejectNextControl = false;
 
-  int get port => _server.port;
+  int get port => _peer.port;
   int get connectionCount => _connections.length;
 
   static Future<_RecoveryPeer> start() async {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final peer = _RecoveryPeer._(server);
-    server.listen(peer._accept);
+    final peer = _RecoveryPeer();
+    peer._peer = await RespPeer.start(
+      onConnect: (socket) =>
+          peer._connections.add(_PeerConnection(socket, peer._connections.length + 1)),
+      onDisconnect: (socket) => peer._connectionFor(socket).closed.complete(),
+      onCommand: (command) => peer._handle(peer._connectionFor(command.socket), command.arguments),
+    );
     return peer;
   }
+
+  _PeerConnection _connectionFor(Socket socket) =>
+      _connections.firstWhere((connection) => identical(connection.socket, socket));
 
   void destroyLatest() => _connections.last.socket.destroy();
 
@@ -454,20 +461,6 @@ final class _RecoveryPeer {
       ...payload,
       ...ascii.encode('\r\n'),
     ]);
-  }
-
-  void _accept(Socket socket) {
-    final connection = _PeerConnection(socket, _connections.length + 1);
-    _connections.add(connection);
-    socket.listen((bytes) {
-      connection.buffer.addAll(bytes);
-      while (true) {
-        final parsed = _parseCommand(connection.buffer);
-        if (parsed == null) return;
-        connection.buffer = connection.buffer.sublist(parsed.consumed);
-        _handle(connection, parsed.arguments);
-      }
-    }, onDone: connection.closed.complete);
   }
 
   void _handle(_PeerConnection connection, List<Uint8List> rawArguments) {
@@ -524,12 +517,7 @@ final class _RecoveryPeer {
     ]);
   }
 
-  Future<void> close() async {
-    for (final connection in _connections) {
-      connection.socket.destroy();
-    }
-    await _server.close();
-  }
+  Future<void> close() => _peer.close();
 }
 
 final class _PeerConnection {
@@ -538,7 +526,6 @@ final class _PeerConnection {
   final Socket socket;
   final int number;
   final Completer<void> closed = Completer<void>();
-  List<int> buffer = [];
 }
 
 final class _PeerCommand {
@@ -555,32 +542,4 @@ final class _HeldAcknowledgement {
   final _PeerConnection connection;
   final String kind;
   final String channel;
-}
-
-({List<Uint8List> arguments, int consumed})? _parseCommand(List<int> buffer) {
-  if (buffer.isEmpty || buffer.first != 42) return null;
-  final countLine = _lineEnd(buffer, 1);
-  if (countLine < 0) return null;
-  final count = int.parse(ascii.decode(buffer.sublist(1, countLine)));
-  var offset = countLine + 2;
-  final arguments = <Uint8List>[];
-  for (var index = 0; index < count; index++) {
-    if (offset >= buffer.length || buffer[offset] != 36) return null;
-    final lengthLine = _lineEnd(buffer, offset + 1);
-    if (lengthLine < 0) return null;
-    final length = int.parse(ascii.decode(buffer.sublist(offset + 1, lengthLine)));
-    final valueStart = lengthLine + 2;
-    final valueEnd = valueStart + length;
-    if (valueEnd + 2 > buffer.length) return null;
-    arguments.add(Uint8List.fromList(buffer.sublist(valueStart, valueEnd)));
-    offset = valueEnd + 2;
-  }
-  return (arguments: arguments, consumed: offset);
-}
-
-int _lineEnd(List<int> bytes, int start) {
-  for (var index = start; index + 1 < bytes.length; index++) {
-    if (bytes[index] == 13 && bytes[index + 1] == 10) return index;
-  }
-  return -1;
 }

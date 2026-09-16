@@ -1,4 +1,5 @@
 import 'package:chronicler/src/codec.dart';
+import 'package:chronicler/src/codec/results.dart' show EncodingFailureDetails;
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/lifecycle.dart';
 import 'package:chronicler/src/models.dart';
@@ -48,9 +49,8 @@ final class RecordProcessor {
         } on Object {
           return const RejectedRecord(DropReason.invalidRecord);
         }
-        record = changed;
+        record = _redactRecord(changed);
       }
-      record = _redactRecord(record);
       final bytes = _codec.encodeRecord(record);
       if (bytes.length > _maxRecordBytes) {
         return const RejectedRecord(DropReason.recordTooLarge);
@@ -60,9 +60,7 @@ final class RecordProcessor {
       return const RejectedRecord(DropReason.invalidRecord);
     } on ChroniclerEncodingException catch (error) {
       return RejectedRecord(
-        error.reason == 'record byte limit exceeded'
-            ? DropReason.recordTooLarge
-            : DropReason.invalidRecord,
+        error.isRecordTooLarge ? DropReason.recordTooLarge : DropReason.invalidRecord,
       );
     } on Object {
       return const RejectedRecord(DropReason.invalidRecord);

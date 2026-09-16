@@ -42,10 +42,9 @@ void main() {
       clock.advance(const Duration(seconds: 9));
       counter.add(-1, attributes: {'route': 'old'});
       expect(identical(metrics.counter('requests'), counter), isTrue);
-      clock.rewindWall(const Duration(days: 1));
-      // Reuse this clock after the intervening observation and lookup.
-      // ignore: cascade_invocations
-      clock.advance(const Duration(seconds: 1));
+      clock
+        ..rewindWall(const Duration(days: 1))
+        ..advance(const Duration(seconds: 1));
       counter.add(2, attributes: {'route': 'new'});
       harness.seal();
 
@@ -102,7 +101,7 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 2));
       counter.add(2, attributes: {'route': 'replacement'});
-      chronicler.setCollectionEnabled(ChroniclerSignal.logs, false);
+      chronicler.setCollectionEnabled(ChroniclerSignal.logs, enabled: false);
       await chronicler.flush();
 
       expect(chronicler.diagnosticCounts[DiagnosticReason.queueFull], BigInt.one);

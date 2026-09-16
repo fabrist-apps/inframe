@@ -34,13 +34,24 @@ base class RedisCommand<T> {
 
   /// Converts one non-error reply into the command result.
   T decode(RespValue reply) => _decode(reply);
+
+  /// Exact RESP wire size without allocating the encoded command.
+  int get encodedLength {
+    var length = 1 + '${arguments.length}'.length + 2;
+    for (final argument in arguments) {
+      final byteLength = argument._bytes.length;
+      // Bulk header ($length\r\n), payload, and trailing CRLF.
+      length += 1 + '$byteLength'.length + 2 + byteLength + 2;
+    }
+    return length;
+  }
 }
 
 /// Encodes a command as one RESP array of bulk-string arguments.
 Uint8List encodeCommand(RedisCommand<Object?> command) {
   final output = BytesBuilder(copy: false)..add(ascii.encode('*${command.arguments.length}\r\n'));
   for (final argument in command.arguments) {
-    final bytes = argument.bytes;
+    final bytes = argument._bytes;
     output
       ..add(
         ascii.encode(

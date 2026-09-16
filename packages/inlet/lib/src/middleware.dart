@@ -1,32 +1,47 @@
-part of 'inlet.dart';
+import 'dart:async';
 
-final class _DispatchState {
-  _DispatchState(this._context, this._request, this._report);
+import 'package:context/context.dart';
+import 'package:inlet/src/errors.dart';
+import 'package:inlet/src/handler.dart';
+import 'package:inlet/src/request.dart';
+import 'package:inlet/src/response.dart';
+
+/// Tracks forwarded values and reports cleanup failures for one dispatch.
+final class DispatchState {
+  /// Starts with the values supplied to the root middleware.
+  DispatchState(this._context, this._request, this._report);
 
   Context _context;
   Request _request;
   final void Function(Object, StackTrace) _report;
 
+  /// The latest context accepted by a continuation.
   Context get context => _context;
+
+  /// The latest request view accepted by a continuation.
   Request get request => _request;
 
+  /// Records valid forwarded values for error recovery.
   void forward(Context context, Request request) {
     _context = context;
     _request = request;
   }
 
+  /// Reports unexpected failures unless a continuation already reported them.
   void reportUnexpected(Object error, StackTrace stackTrace) {
-    if (_isUnexpected(error) && !_wasReported(error)) {
+    if (isUnexpected(error) && !wasReported(error)) {
       _report(error, stackTrace);
     }
   }
 
+  /// Reports and throws an invalid continuation use once.
   Never rejectContinuation(String message) {
-    final error = _ContinuationStateError(message, wasReported: true);
+    final error = ContinuationStateError(message, wasReported: true);
     _report(error, StackTrace.current);
     throw error;
   }
 
+  /// Releases an abandoned downstream response when it becomes available.
   void observeOrphan(Future<Response> downstream) {
     Future<void> observe() async {
       try {
@@ -40,6 +55,7 @@ final class _DispatchState {
     unawaited(observe());
   }
 
+  /// Releases a response without replacing the failure being handled.
   Future<void> closeAndReport(Response response) async {
     try {
       await response.close();
@@ -49,16 +65,11 @@ final class _DispatchState {
   }
 }
 
-final class _ContinuationStateError extends StateError {
-  _ContinuationStateError(super.message, {this.wasReported = false});
-
-  final bool wasReported;
-}
-
-Future<Response> _runMiddleware(
+/// Runs a middleware chain while retaining ownership of abandoned work.
+Future<Response> runMiddleware(
   List<Middleware> middleware,
   Handler terminal,
-  _DispatchState dispatch,
+  DispatchState dispatch,
   Context context,
   Request request, [
   int index = 0,
@@ -71,11 +82,34 @@ Future<Response> _runMiddleware(
     }
   }
 
-  // Track invocation lifetime separately from downstream completion: next may
-  // be called once while active, and its work must settle before a response wins.
-  var active = true;
-  var called = false;
-  var downstreamSettled = false;
+  return _MiddlewareInvocation(
+    middleware,
+    terminal,
+    dispatch,
+    request,
+    index,
+  ).run(context);
+}
+
+// Invocation lifetime is separate from downstream completion: next may be
+// called once while active, and its work must settle before a response wins.
+final class _MiddlewareInvocation {
+  _MiddlewareInvocation(
+    this.middleware,
+    this.terminal,
+    this.dispatch,
+    this.request,
+    this.index,
+  );
+
+  final List<Middleware> middleware;
+  final Handler terminal;
+  final DispatchState dispatch;
+  final Request request;
+  final int index;
+  bool active = true;
+  bool called = false;
+  bool downstreamSettled = false;
   Future<Response>? downstream;
 
   Future<Response> next(Context forwardedContext, Request forwardedRequest) {
@@ -85,7 +119,7 @@ Future<Response> _runMiddleware(
       );
     }
 
-    if (!forwardedRequest._isViewOf(request)) {
+    if (!forwardedRequest.isViewOf(request)) {
       dispatch.rejectContinuation(
         'next accepts only views of the current request.',
       );
@@ -99,7 +133,7 @@ Future<Response> _runMiddleware(
 
     called = true;
     dispatch.forward(forwardedContext, forwardedRequest);
-    final future = _runMiddleware(
+    final future = runMiddleware(
       middleware,
       terminal,
       dispatch,
@@ -120,74 +154,54 @@ Future<Response> _runMiddleware(
     return future;
   }
 
-  late final FutureOr<Response> result;
+  Future<Response> run(Context context) {
+    late final FutureOr<Response> result;
+    try {
+      result = middleware[index](context, request, next);
+    } on Object catch (error, stackTrace) {
+      abandon();
+      return Future<Response>.error(error, stackTrace);
+    }
 
-  try {
-    result = middleware[index](context, request, next);
-  } on Object catch (error, stackTrace) {
+    if (result is Future<Response>) {
+      return settle(result);
+    }
+
+    // A synchronous result closes next immediately, before any microtasks run.
+    active = false;
+    return finish(result);
+  }
+
+  Future<Response> settle(Future<Response> result) async {
+    late final Response response;
+    try {
+      response = await result;
+    } on Object {
+      abandon();
+      rethrow;
+    }
+
+    active = false;
+    return finish(response);
+  }
+
+  void abandon() {
     active = false;
     if (called && !downstreamSettled) {
       dispatch.observeOrphan(downstream!);
     }
-
-    return Future<Response>.error(error, stackTrace);
   }
 
-  if (result is Future<Response>) {
-    Future<Response> settle() async {
-      late final Response response;
-
-      try {
-        response = await result;
-      } on Object {
-        active = false;
-        if (called && !downstreamSettled) {
-          dispatch.observeOrphan(downstream!);
-        }
-
-        rethrow;
-      }
-
-      active = false;
-
-      return _finishMiddleware(
-        response,
-        called: called,
-        downstreamSettled: downstreamSettled,
-        downstream: downstream,
-        dispatch: dispatch,
-      );
+  Future<Response> finish(Response response) async {
+    if (!called || downstreamSettled) {
+      return response;
     }
 
-    return settle();
+    await dispatch.closeAndReport(response);
+    dispatch
+      ..observeOrphan(downstream!)
+      ..rejectContinuation(
+        'Middleware finished before its downstream work completed.',
+      );
   }
-
-  active = false;
-
-  return _finishMiddleware(
-    result,
-    called: called,
-    downstreamSettled: downstreamSettled,
-    downstream: downstream,
-    dispatch: dispatch,
-  );
-}
-
-Future<Response> _finishMiddleware(
-  Response response, {
-  required bool called,
-  required bool downstreamSettled,
-  required Future<Response>? downstream,
-  required _DispatchState dispatch,
-}) async {
-  if (!called || downstreamSettled) {
-    return response;
-  }
-
-  await dispatch.closeAndReport(response);
-  dispatch
-    ..observeOrphan(downstream!)
-    ..rejectContinuation(
-      'Middleware finished before its downstream work completed.',
-    );
 }

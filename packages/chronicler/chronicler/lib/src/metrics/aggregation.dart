@@ -6,6 +6,7 @@ import 'package:chronicler/src/metrics/dimensions.dart';
 import 'package:chronicler/src/metrics/instruments.dart';
 import 'package:chronicler/src/metrics/series.dart';
 import 'package:chronicler/src/models.dart';
+import 'package:conflux/effect.dart';
 import 'package:conflux/moment.dart';
 
 /// Registry of metric instruments owned by one Chronicler runtime.
@@ -13,6 +14,8 @@ final class MetricAggregation implements ChroniclerMetrics {
   /// Creates the registry used by the Chronicler runtime.
   ///
   /// Application code obtains this object through `context.metrics`.
+  /// Interval tasks and all time readings use the borrowed runtime.
+  /// [stop] cancels this registry's task without closing the runtime.
   MetricAggregation({
     required this._options,
     required this._canRecord,
@@ -21,14 +24,11 @@ final class MetricAggregation implements ChroniclerMetrics {
     required this._createRecord,
     required this._finalize,
     required bool startEnabled,
-    required Moment Function() now,
-    required Duration Function() elapsed,
+    required this._runtime,
     this._maxRecordBytes = 64 * 1024,
-  }) : _now = now,
-       _elapsed = elapsed,
-       _intervalStart = now(),
-       _intervalElapsed = elapsed(),
-       _enabled = startEnabled {
+  }) : _enabled = startEnabled {
+    _intervalStart = _runtime.clock.wallTime();
+    _intervalElapsed = _runtime.clock.monotonic();
     if (_enabled) _scheduleInterval();
   }
 
@@ -39,12 +39,11 @@ final class MetricAggregation implements ChroniclerMetrics {
   final Map<String, Object?> Function(Map<String, Object?> attributes) _redact;
   final MetricRecord Function(MetricPayload payload) _createRecord;
   final void Function(MetricRecord record) _finalize;
-  final Moment Function() _now;
-  final Duration Function() _elapsed;
-  final _instruments = <String, RegisteredInstrument>{};
+  final Runtime _runtime;
+  final _instruments = <String, RegisteredInstrument<MetricSeries>>{};
   late Moment _intervalStart;
   late Duration _intervalElapsed;
-  Timer? _timer;
+  Fiber<void, Never>? _interval;
   var _generation = 0;
   var _seriesCount = 0;
   bool _enabled;
@@ -141,7 +140,7 @@ final class MetricAggregation implements ChroniclerMetrics {
   }
 
   void _requireCompatible(
-    RegisteredInstrument existing,
+    RegisteredInstrument<MetricSeries> existing,
     MetricInstrument instrument,
     String unit, {
     List<double>? boundaries,
@@ -156,7 +155,7 @@ final class MetricAggregation implements ChroniclerMetrics {
     }
   }
 
-  bool _sameBoundaries(RegisteredInstrument existing, List<double>? boundaries) {
+  bool _sameBoundaries(RegisteredInstrument<MetricSeries> existing, List<double>? boundaries) {
     if (existing is! HistogramInstrument) return boundaries == null;
     if (boundaries == null || existing.boundaries.length != boundaries.length) return false;
     for (var index = 0; index < boundaries.length; index++) {
@@ -222,22 +221,15 @@ final class MetricAggregation implements ChroniclerMetrics {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    late final Map<String, Object?> dimensions;
-    try {
-      dimensions = _redact(
-        snapshotMetricDimensions(attributes, _options, maxRecordBytes: _maxRecordBytes),
-      );
-    } on Object {
-      _diagnose(DiagnosticReason.invalidMeasurement);
-      return;
-    }
+    final dimensions = _admitDimensions(attributes);
+    if (dimensions == null) return;
     final series = _series(instrument, dimensions, SumSeries.new);
     if (series == null) return;
     if (!series.add(value)) {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    series.lastAccepted = _elapsed();
+    series.lastAccepted = _runtime.clock.monotonic();
   }
 
   void _setGauge(
@@ -251,22 +243,15 @@ final class MetricAggregation implements ChroniclerMetrics {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    late final Map<String, Object?> dimensions;
-    try {
-      dimensions = _redact(
-        snapshotMetricDimensions(attributes, _options, maxRecordBytes: _maxRecordBytes),
-      );
-    } on Object {
-      _diagnose(DiagnosticReason.invalidMeasurement);
-      return;
-    }
+    final dimensions = _admitDimensions(attributes);
+    if (dimensions == null) return;
     final series = _series(instrument, dimensions, GaugeSeries.new);
     if (series == null) return;
-    if (!series.set(value, _now)) {
+    if (!series.set(value, _runtime.clock.wallTime)) {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    series.lastAccepted = _elapsed();
+    series.lastAccepted = _runtime.clock.monotonic();
   }
 
   void _recordHistogram(
@@ -280,15 +265,8 @@ final class MetricAggregation implements ChroniclerMetrics {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    late final Map<String, Object?> dimensions;
-    try {
-      dimensions = _redact(
-        snapshotMetricDimensions(attributes, _options, maxRecordBytes: _maxRecordBytes),
-      );
-    } on Object {
-      _diagnose(DiagnosticReason.invalidMeasurement);
-      return;
-    }
+    final dimensions = _admitDimensions(attributes);
+    if (dimensions == null) return;
     final series = _series(
       instrument,
       dimensions,
@@ -299,36 +277,60 @@ final class MetricAggregation implements ChroniclerMetrics {
       _diagnose(DiagnosticReason.invalidMeasurement);
       return;
     }
-    series.lastAccepted = _elapsed();
+    series.lastAccepted = _runtime.clock.monotonic();
+  }
+
+  Map<String, Object?>? _admitDimensions(Map<String, Object?> attributes) {
+    try {
+      return _redact(
+        snapshotMetricDimensions(attributes, _options, maxRecordBytes: _maxRecordBytes),
+      );
+    } on Object {
+      _diagnose(DiagnosticReason.invalidMeasurement);
+      return null;
+    }
   }
 
   T? _series<T extends MetricSeries>(
-    RegisteredInstrument instrument,
+    RegisteredInstrument<T> instrument,
     Map<String, Object?> dimensions,
     T Function(Map<String, Object?> attributes) create,
   ) {
     final key = metricSeriesKey(dimensions);
     final existing = instrument.series[key];
-    if (existing != null) return existing as T;
-    _evictExpired(_now(), _elapsed(), finalizePending: true);
+    if (existing != null) return existing;
+    _evictExpired(_runtime.clock.wallTime(), _runtime.clock.monotonic(), finalizePending: true);
     if (_seriesCount >= _options.maxSeries ||
         instrument.series.length >= _options.maxSeriesPerInstrument) {
       _diagnose(DiagnosticReason.seriesLimitReached);
       return null;
     }
-    final series = create(dimensions)..lastAccepted = _elapsed();
+    final series = create(dimensions)..lastAccepted = _runtime.clock.monotonic();
     instrument.series[key] = series;
     _seriesCount++;
     return series;
   }
 
   void _scheduleInterval() {
-    _timer?.cancel();
+    _cancelInterval();
     final generation = _generation;
-    _timer = Timer(_options.interval, () => _onInterval(generation));
+    final deadline = _runtime.clock.monotonic() + _options.interval;
+    _interval = _runtime.fork(
+      Effect.defer<void, Never>((_) {
+        final remaining = deadline - _runtime.clock.monotonic();
+        return Effect.sleep(remaining.isNegative ? Duration.zero : remaining);
+      }).map((_, _) => _onInterval(generation)),
+    );
+  }
+
+  void _cancelInterval() {
+    final interval = _interval;
+    _interval = null;
+    if (interval != null) unawaited(interval.interrupt());
   }
 
   void _onInterval(int generation) {
+    // A flush or disable invalidates callbacks before interruption settles.
     if (generation != _generation) return;
     seal().forEach(_finalize);
   }
@@ -344,10 +346,10 @@ final class MetricAggregation implements ChroniclerMetrics {
 
   /// Seals the current partial interval and begins a fresh interval.
   List<MetricRecord> seal({bool scheduleNext = true}) {
-    _timer?.cancel();
+    _cancelInterval();
     _generation++;
-    final intervalEnd = _now();
-    final elapsedEnd = _elapsed();
+    final intervalEnd = _runtime.clock.wallTime();
+    final elapsedEnd = _runtime.clock.monotonic();
     final durationMicros = (elapsedEnd - _intervalElapsed).inMicroseconds;
     final records = <MetricRecord>[];
     for (final instrument in _instruments.values) {
@@ -402,7 +404,7 @@ final class MetricAggregation implements ChroniclerMetrics {
 
   /// Discards unfinished aggregates and pauses interval scheduling.
   void disable() {
-    _timer?.cancel();
+    _cancelInterval();
     _generation++;
     _enabled = false;
     for (final instrument in _instruments.values) {
@@ -415,16 +417,15 @@ final class MetricAggregation implements ChroniclerMetrics {
   void enable() {
     _generation++;
     _enabled = true;
-    _intervalStart = _now();
-    _intervalElapsed = _elapsed();
+    _intervalStart = _runtime.clock.wallTime();
+    _intervalElapsed = _runtime.clock.monotonic();
     _scheduleInterval();
   }
 
   /// Stops interval scheduling without finalizing current measurements.
   void stop() {
-    _timer?.cancel();
+    _cancelInterval();
     _generation++;
     _enabled = false;
-    _timer = null;
   }
 }

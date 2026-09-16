@@ -206,12 +206,12 @@ upstream Turso creates a nested worker for OPFS. The upstream loader reserves 25
 shared WASM memory. Queries still buffer their complete result, so applications should issue bounded
 queries.
 
-The hosted verification example can be built and served from this package directory:
+The browser integration harness can be built and served from this package directory:
 
 ```sh
-dart run tool/install_web.dart example/web/turso
-dart compile js example/web/main.dart -O1 -o example/web/main.dart.js
-dart run tool/serve_web_example.dart
+dart run tool/install_web.dart integration_test/web/turso
+dart compile js integration_test/web/main.dart -O1 -o integration_test/web/main.dart.js
+dart run tool/serve_web_verification.dart
 ```
 
 The OPFS persistence, reload, lock-release, memory, and shared SQL contract checks run in current
@@ -239,6 +239,34 @@ Both backends support verified vector conversion and scalar distance functions, 
 `vector_distance_l2(vector32('[0, 0]'), vector32('[3, 4]'))`. General approximate nearest-neighbor
 indexing is not advertised. These checks execute against unchanged Turso `v0.8.0-pre.10`; web FTS is
 unavailable in v1.
+
+## Implementation and verification
+
+Start with `lib/src/turso_database.dart` for root scheduling and shutdown, and
+`lib/src/transaction.dart` for callback lifetime, draining, commit, and rollback. The database
+reserves its queue for the whole transaction. Platform failures retire the connection through the
+database owner.
+
+`backend.dart` exchanges typed parameters and results. `native/backend.dart` owns isolate requests;
+`native/connection.dart` and `native/statement.dart` own the FFI handles. Temporary FFI allocations
+use arenas. Native messages carry `BigInt` and byte lists directly. `web/backend.dart` owns browser
+worker requests and translates the JavaScript wire format at that boundary.
+
+The browser reading path is `turso_bridge.js` → `turso_worker.js` → `turso_database.js`.
+`turso_attachments.js` owns attachment preparation, completion, cleanup, URI validation, and key
+redaction; its registry tracks aliases and file registrations. The pinned upstream OPFS adapter
+remains necessary for persistent ATTACH. See [web/README.md](web/README.md).
+
+Run engine tests from this package directory so the Dart test runner loads its native asset hook:
+
+```sh
+dart test test --chain-stack-traces
+```
+
+`integration_test/support/sql_contract.dart` contains value and transaction scenarios used by both
+native tests and the browser harness. Browser persistence, reload, and fault scenarios live under
+`integration_test/web/`. Fault injection is confined to its test bridge; the installer ships only
+production assets.
 
 ## Upstream
 

@@ -94,7 +94,7 @@ void main() {
 
       final disabledExporter = TestExporter();
       final disabled = createEventChronicler(disabledExporter)
-        ..setCollectionEnabled(ChroniclerSignal.events, false);
+        ..setCollectionEnabled(ChroniclerSignal.events, enabled: false);
       Context().withChronicler(disabled.recorder).events.track('disabled');
       await Future<void>.delayed(Duration.zero);
 

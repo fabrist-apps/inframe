@@ -36,11 +36,14 @@ abstract final class TracePropagation {
   /// Returns a remote parent, or null for missing, duplicate, or invalid metadata.
   static RemoteTraceParent? extract(Map<String, String> headers) {
     final traceId = headers.find(traceIdHeader);
-    final parentSpanId = headers.find(spanIdHeader);
-    final sampled = headers.find(sampledHeader);
     if (traceId == null || !ChronoID.isValid(traceId, prefix: 'trc')) return null;
+
+    final parentSpanId = headers.find(spanIdHeader);
     if (parentSpanId == null || !ChronoID.isValid(parentSpanId, prefix: 'spn')) return null;
+
+    final sampled = headers.find(sampledHeader);
     if (sampled != '0' && sampled != '1') return null;
+
     return RemoteTraceParent._(
       traceId: traceId,
       parentSpanId: parentSpanId,

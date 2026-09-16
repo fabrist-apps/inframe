@@ -1,6 +1,0 @@
-targets:
-  $default:
-    sources:
-      exclude:
-        # These workspace packages run their own builders with their own imports.
-        - test/fixtures/**

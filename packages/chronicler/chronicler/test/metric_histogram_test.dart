@@ -120,18 +120,15 @@ void main() {
       expect(second.payload.bucketCounts, [0, 1]);
 
       chronicler
-        ..setCollectionEnabled(ChroniclerSignal.metrics, false)
-        ..setCollectionEnabled(ChroniclerSignal.metrics, true);
+        ..setCollectionEnabled(ChroniclerSignal.metrics, enabled: false)
+        ..setCollectionEnabled(ChroniclerSignal.metrics, enabled: true);
       expect(
         identical(
           histogram,
           Context()
               .withChronicler(chronicler.recorder)
               .metrics
-              .histogram(
-                'values',
-                boundaries: [0],
-              ),
+              .histogram('values', boundaries: [0]),
         ),
         isTrue,
       );

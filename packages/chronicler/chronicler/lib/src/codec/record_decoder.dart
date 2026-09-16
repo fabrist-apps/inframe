@@ -39,9 +39,13 @@ final class RecordDecoder {
     } on _CodecFailure catch (failure) {
       return DecodeFailure(failure.reason);
     } on RecordValidationException catch (failure) {
-      return DecodeFailure(_validationFailure(failure.reason));
+      return DecodeFailure(
+        failure.isLimitExceeded
+            ? DecodeFailureReason.limitExceeded
+            : DecodeFailureReason.invalidField,
+      );
     } on ChroniclerEncodingException catch (failure) {
-      return DecodeFailure(_validationFailure(failure.reason));
+      return DecodeFailure(failure.decodeReason);
     } on Object {
       return const DecodeFailure(DecodeFailureReason.invalidField);
     }
@@ -75,17 +79,17 @@ final class RecordDecoder {
     } on _CodecFailure catch (failure) {
       return DecodeFailure(failure.reason);
     } on RecordValidationException catch (failure) {
-      return DecodeFailure(_validationFailure(failure.reason));
+      return DecodeFailure(
+        failure.isLimitExceeded
+            ? DecodeFailureReason.limitExceeded
+            : DecodeFailureReason.invalidField,
+      );
     } on ChroniclerEncodingException catch (failure) {
-      return DecodeFailure(_validationFailure(failure.reason));
+      return DecodeFailure(failure.decodeReason);
     } on Object {
       return const DecodeFailure(DecodeFailureReason.invalidField);
     }
   }
-
-  DecodeFailureReason _validationFailure(String reason) => reason.contains('limit')
-      ? DecodeFailureReason.limitExceeded
-      : DecodeFailureReason.invalidField;
 
   DecodeResult<Object?> _parse(Uint8List bytes) {
     late final String text;

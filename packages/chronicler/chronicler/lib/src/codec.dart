@@ -7,7 +7,8 @@ import 'package:chronicler/src/codec/results.dart';
 import 'package:chronicler/src/configuration.dart';
 import 'package:chronicler/src/models.dart';
 
-export 'package:chronicler/src/codec/results.dart';
+export 'package:chronicler/src/codec/results.dart'
+    show ChroniclerEncodingException, DecodeFailure, DecodeFailureReason, DecodeResult, Decoded;
 
 /// Canonical compact UTF-8 JSON codec for version-one records and batches.
 final class ChroniclerCodec {
@@ -58,7 +59,7 @@ final class ChroniclerCodec {
       validateRecord(record);
       final encoded = encodeCanonicalJson(_recordMap(record));
       if (encoded.length > maxRecordBytes) {
-        throw const ChroniclerEncodingException('record byte limit exceeded');
+        throw const ChroniclerEncodingException.recordTooLarge();
       }
       return encoded;
     } on ChroniclerEncodingException {
@@ -78,7 +79,7 @@ final class ChroniclerCodec {
           validateRecord(record);
           final map = _recordMap(record);
           if (encodeCanonicalJson(map).length > maxRecordBytes) {
-            throw const ChroniclerEncodingException('record byte limit exceeded');
+            throw const ChroniclerEncodingException.recordTooLarge();
           }
           return map;
         })
@@ -88,7 +89,7 @@ final class ChroniclerCodec {
       'records': recordMaps,
     });
     if (encoded.length > maxBatchBytes) {
-      throw const ChroniclerEncodingException('batch byte limit exceeded');
+      throw const ChroniclerEncodingException.limitExceeded('batch byte limit exceeded');
     }
     return encoded;
   }
@@ -114,10 +115,21 @@ final class ChroniclerCodec {
       'traceId': ?record.envelope.traceId,
       'spanId': ?record.envelope.spanId,
       'parentSpanId': ?record.envelope.parentSpanId,
-      'kind': record.toMap()['kind'],
+      'kind': _kind(record),
       'payload': _payloadMap(record),
     };
   }
+
+  String _kind(ChroniclerRecord record) => switch (record) {
+    LogRecord() => 'log',
+    ProductEventRecord() => 'event',
+    IdentityLinkRecord() => 'identity_link',
+    UserPropertiesSetRecord() => 'user_properties_set',
+    UserPropertiesUnsetRecord() => 'user_properties_unset',
+    SpanRecord() => 'span',
+    ErrorRecord() => 'error',
+    MetricRecord() => 'metric',
+  };
 
   Map<String, Object?> _payloadMap(ChroniclerRecord record) => switch (record) {
     LogRecord() => {

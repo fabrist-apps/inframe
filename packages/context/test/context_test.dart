@@ -1,6 +1,9 @@
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
+import 'support/analytics.dart';
+import 'support/http.dart';
+
 void main() {
   group('Context', () {
     test('should retrieve the same typed object after binding', () {
@@ -12,6 +15,34 @@ void main() {
       final required = context.require(key);
       expect(read, same(events));
       expect(required, same(events));
+    });
+
+    test('should compose independent extensions in either setup order', () {
+      final events = <String>[];
+      final responses = <String>[];
+      final context = Context().withAnalytics(events).withHttp(responses);
+      final reversed = Context().withHttp(responses).withAnalytics(events);
+
+      context.analytics.add('page_view');
+      context.http.add('Hello');
+
+      expect(events, ['page_view']);
+      expect(responses, ['Hello']);
+      expect(reversed.analytics, same(events));
+      expect(reversed.http, same(responses));
+    });
+
+    test('should report missing setup through an extension', () {
+      expect(
+        () => Context().analytics,
+        throwsA(
+          isA<MissingContextValue>().having(
+            (error) => error.debugName,
+            'debugName',
+            'analytics',
+          ),
+        ),
+      );
     });
     test('should return null for an absent key', () {
       expect(Context().read(ContextKey<String>('missing')), isNull);

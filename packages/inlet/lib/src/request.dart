@@ -1,4 +1,9 @@
-part of 'inlet.dart';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:inlet/src/body.dart';
+import 'package:inlet/src/headers.dart';
+import 'package:inlet/src/http_token.dart';
 
 /// A malformed UTF-8 or JSON request body.
 final class MalformedBodyException implements Exception {
@@ -30,8 +35,8 @@ final class ConnectionInfo {
     required this.localPort,
     required this.isSecure,
   }) {
-    _validatePort(remotePort, 'remotePort');
-    _validatePort(localPort, 'localPort');
+    validatePort(remotePort, 'remotePort');
+    validatePort(localPort, 'localPort');
   }
 
   /// The peer address reported by the transport.
@@ -47,7 +52,7 @@ final class ConnectionInfo {
   final bool isSecure;
 }
 
-/// A request that can be dispatched by [Inlet].
+/// A request that can be dispatched by an Inlet application.
 final class Request {
   /// Creates a request.
   Request({
@@ -57,12 +62,12 @@ final class Request {
     Stream<List<int>> body = const Stream.empty(),
     ConnectionInfo? connection,
   }) : this._(
-         method: _validateMethod(method),
+         method: validateMethod(method),
          uri: _validateUri(uri),
          headers: headers,
          connection: connection,
          pathParameters: const {},
-         exchange: _RequestExchange(_Body(body)),
+         exchange: _RequestExchange(Body(body)),
        );
 
   Request._({
@@ -101,32 +106,24 @@ final class Request {
     exchange: _exchange,
   );
 
-  Request _withPathParameters(Map<String, String> pathParameters) => Request._(
-    method: method,
-    uri: uri,
-    headers: headers,
-    connection: connection,
-    pathParameters: pathParameters,
-    exchange: _exchange,
-  );
-
-  bool _isViewOf(Request other) =>
-      identical(_exchange, other._exchange) && identical(pathParameters, other.pathParameters);
-
   /// The body stream, claimed when it is first listened to.
   Stream<List<int>> get body => _exchange.body.stream;
 
   /// Buffers the body once and returns a private byte copy.
-  Future<List<int>> bytes({int maxBytes = _defaultBodyLimit}) async {
+  ///
+  /// The default limit is 1 MiB. The first buffering call selects the physical
+  /// read limit; later callers share that read but enforce their own limits.
+  /// Raw streaming and buffering are exclusive, even after reading completes.
+  Future<List<int>> bytes({int maxBytes = defaultBodyLimit}) async {
     try {
       return await _exchange.body.bytes(maxBytes: maxBytes);
-    } on _BodyLimitFailure catch (error) {
+    } on BodyLimitFailure catch (error) {
       throw BodyLimitExceededException(error.maxBytes);
     }
   }
 
   /// Strictly decodes the buffered body as UTF-8.
-  Future<String> text({int maxBytes = _defaultBodyLimit}) async {
+  Future<String> text({int maxBytes = defaultBodyLimit}) async {
     final bodyBytes = await bytes(maxBytes: maxBytes);
 
     try {
@@ -137,7 +134,7 @@ final class Request {
   }
 
   /// Strictly decodes the buffered body as UTF-8 JSON.
-  Future<Object?> json({int maxBytes = _defaultBodyLimit}) async {
+  Future<Object?> json({int maxBytes = defaultBodyLimit}) async {
     try {
       return jsonDecode(await text(maxBytes: maxBytes));
     } on FormatException {
@@ -147,14 +144,6 @@ final class Request {
 
   /// Releases body resources without subscribing to an untouched source.
   Future<void> close() => _exchange.body.close();
-
-  void _admit() {
-    if (_exchange.admitted) {
-      throw StateError('A Request can be admitted only once.');
-    }
-
-    _exchange.admitted = true;
-  }
 
   static Uri _validateUri(Uri uri) {
     if (!uri.path.startsWith('/')) {
@@ -184,20 +173,32 @@ final class Request {
 final class _RequestExchange {
   _RequestExchange(this.body);
 
-  final _Body body;
+  final Body body;
   bool admitted = false;
 }
 
-String _validateMethod(String method) {
-  if (!isHttpToken(method)) {
-    throw ArgumentError.value(method, 'method', 'must be a nonempty HTTP token');
-  }
+/// Dispatch-only operations, excluded from the public entrypoint.
+extension RequestRuntime on Request {
+  /// Adds route captures while retaining exchange and body ownership.
+  Request withPathParameters(Map<String, String> pathParameters) => Request._(
+    method: method,
+    uri: uri,
+    headers: headers,
+    connection: connection,
+    pathParameters: pathParameters,
+    exchange: _exchange,
+  );
 
-  return method;
-}
+  /// Whether both views share an exchange and the current route captures.
+  bool isViewOf(Request other) =>
+      identical(_exchange, other._exchange) && identical(pathParameters, other.pathParameters);
 
-void _validatePort(int port, String name) {
-  if (port < 0 || port > 65535) {
-    throw ArgumentError.value(port, name, 'must be from 0 through 65535');
+  /// Claims this exchange for dispatch, rejecting reuse through any view.
+  void admit() {
+    if (_exchange.admitted) {
+      throw StateError('A Request can be admitted only once.');
+    }
+
+    _exchange.admitted = true;
   }
 }

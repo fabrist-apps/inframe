@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:chronicler/chronicler.dart';
 import 'package:chronicler/src/runtime/delivery_queue.dart';
+import 'package:conflux/effect.dart';
+import 'package:conflux/moment.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:test/test.dart';
 
@@ -58,14 +60,15 @@ void main() {
     test('should pass records in backoff and retain enqueue order when eligible', () {
       fakeAsync((time) {
         final exporter = TestExporter();
+        final runtime = Runtime(clock: _QueueClock(time));
         final queue = DeliveryQueue(
+          runtime: runtime,
           options: const DeliveryOptions(
             maxBatchRecords: 2,
             initialRetryDelay: Duration(milliseconds: 20),
           ),
           exporter: exporter,
-          diagnostics: DiagnosticChannel(const DiagnosticOptions()),
-          elapsed: () => time.elapsed,
+          diagnostics: DiagnosticChannel(const DiagnosticOptions(), runtime: runtime),
           nextRandom: () => 0.999999999999,
         );
         final oldRecords = [testLogRecord('old-one'), testLogRecord('old-two')];
@@ -91,7 +94,7 @@ void main() {
         expect(exporter.batches[2].records, oldRecords);
         exporter.attempts[2].completer.complete(const ExportResult.accepted());
         time.flushMicrotasks();
-        _close(queue, time);
+        _close(queue, runtime, time);
       });
     });
   });
@@ -104,13 +107,14 @@ void _expectRetrySchedule({
 }) {
   fakeAsync((time) {
     final exporter = TestExporter();
-    final diagnostics = DiagnosticChannel(const DiagnosticOptions());
+    final runtime = Runtime(clock: _QueueClock(time));
+    final diagnostics = DiagnosticChannel(const DiagnosticOptions(), runtime: runtime);
     var randomCalls = 0;
     final queue = DeliveryQueue(
+      runtime: runtime,
       options: options,
       exporter: exporter,
       diagnostics: diagnostics,
-      elapsed: () => time.elapsed,
       nextRandom: () => randomValues[randomCalls++],
     );
     final record = testLogRecord('retry');
@@ -141,16 +145,34 @@ void _expectRetrySchedule({
     expect(randomCalls, delays.length);
     expect(diagnostics.counts[DiagnosticReason.attemptsExhausted], BigInt.one);
     expect(diagnostics.counts[DiagnosticReason.exportFailed], isNull);
-    _close(queue, time);
+    _close(queue, runtime, time);
   });
 }
 
-void _close(DeliveryQueue queue, FakeAsync time) {
+void _close(DeliveryQueue queue, Runtime runtime, FakeAsync time) {
   DeliveryReport? report;
   unawaited(queue.close(finalize: () => const []).then((value) => report = value));
   time
     ..flushMicrotasks()
     ..elapse(Duration.zero);
   expect(report?.runtimeState, ChroniclerRuntimeState.closed);
+  unawaited(runtime.close());
+  time.flushMicrotasks();
   expect(time.pendingTimers, isEmpty);
+}
+
+final class _QueueClock implements Clock {
+  _QueueClock(this.time);
+
+  final FakeAsync time;
+  final _system = SystemClock();
+
+  @override
+  Duration monotonic() => time.elapsed;
+
+  @override
+  UtcMoment wallTime() => _system.wallTime();
+
+  @override
+  CancellableWait sleep(Duration duration) => _system.sleep(duration);
 }

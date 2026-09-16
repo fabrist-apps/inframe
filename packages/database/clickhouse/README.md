@@ -99,3 +99,25 @@ CLICKHOUSE_PASSWORD=test-password \
 CLICKHOUSE_ALLOW_INSECURE_HTTP=true \
 dart test packages/database/clickhouse/test/integration
 ```
+
+## Implementation
+
+The client owns a native Dio connection pool. Each operation uses its own cancellation token.
+Responses remain streams until the decompressed byte limit has been checked during collection.
+The operation deadline covers the complete request, including encoding and decoding; Dio's
+per-phase timeouts are disabled so they cannot reset that deadline.
+
+Start with `lib/src/client.dart` for request construction and graceful shutdown, then follow:
+
+- `transport.dart`: Dio requests, transmission state, bounded response collection, and cancellation.
+- `deadline.dart`: elapsed time and asynchronous deadline waits.
+- `response.dart`: server errors, query decoding, and empty command acknowledgements.
+- `query_result.dart`: wire-result validation and immutable result snapshots.
+- `insert.dart`: table quoting and strict JSONEachRow encoding without custom `toJson` conversion.
+- `exception.dart`: public failure categories and request outcome metadata.
+
+Run the local HTTP tests from the workspace root:
+
+```sh
+dart test packages/database/clickhouse/test --exclude-tags integration --chain-stack-traces
+```
