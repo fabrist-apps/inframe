@@ -56,6 +56,28 @@ final class Flow<A, E> {
     ),
   );
 
+  /// Creates a scoped source that is pulled only when a consumer requests a value.
+  ///
+  /// Each consumption acquires independently in its child scope. Successful
+  /// acquisition atomically registers [release], which runs once on completion,
+  /// failure, cancellation, or scope exit, even without a first pull. Failed
+  /// acquisition must clean up its partial resources and does not call [release].
+  ///
+  /// [release] receives the acquisition Context; [next] receives the consumption
+  /// Context. Callback throws remain defects, including combined cleanup causes.
+  /// There is no prefetch or additional buffer, and overlapping pulls fail.
+  /// Only an outer [None] completes: `Some(null)` and `Some(None())` emit values.
+  static Flow<A, E> fromPull<A, E, S>(
+    Effect<S, E> acquire, {
+    required Effect<Option<A>, E> Function(S source, Context context) next,
+    required Effect<void, Never> Function(S source, Context context) release,
+  }) => Flow._(
+    () => Effect.build(($) async {
+      final source = await $.acquireRelease(acquire, release: release);
+      return _CallbackCursor(() => Effect.defer((context) => next(source, context)));
+    }),
+  );
+
   /// Lazily chooses a Flow for each consumption.
   ///
   /// The factory runs inside the consumption boundary. A thrown object becomes
