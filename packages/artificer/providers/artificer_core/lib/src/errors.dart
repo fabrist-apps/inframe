@@ -32,6 +32,7 @@ sealed class AiError with AiErrorMappable {
 
   /// Decodes a JSON string using the shipped generated mapper.
   static const fromJson = AiErrorMapper.fromJson;
+
   @override
   String toString() => 'AiError';
 }

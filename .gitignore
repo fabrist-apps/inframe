@@ -36,13 +36,8 @@ doc/api/
 *.g.dart
 *.freezed.dart
 *.mapper.dart
+*.init.dart
 *.rivet.dart
 *.voxel.dart
 *.voxel_migrations.dart
 *_generated.dart
-
-# Artificer Core mapper initializer
-/packages/artificer/providers/artificer_core/lib/artificer_core.init.dart
-
-# Chronicler mapper initializer
-/packages/chronicler/chronicler/lib/chronicler.init.dart

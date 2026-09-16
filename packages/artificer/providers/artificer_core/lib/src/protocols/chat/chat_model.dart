@@ -37,6 +37,7 @@ final class ChatProvider implements LanguageModelProvider {
 
   /// The single transport owner; model handles only borrow it.
   final ProviderHttpClient client;
+
   @override
   ChatLanguageModel languageModel(String modelId) => ChatLanguageModel(
     client: client,
