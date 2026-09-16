@@ -4,7 +4,6 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/commands/streams.dart';
-import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/operation.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
 import 'package:runnel/src/errors.dart';
@@ -93,7 +92,7 @@ final class BlockingSession {
     RunnelOperation.validate(() => _requirePositive(timeout, 'timeout'));
     if (_closed || _connection.isClosed) {
       _markClosed();
-      throw const RedisClosedException(message: 'The blocking session is closed.');
+      throw RunnelClosedError('The blocking session is closed.', stackTrace: StackTrace.current);
     }
     if (_active) {
       throw const RunnelUsageError('A blocking operation is already active on this session.');
@@ -105,16 +104,18 @@ final class BlockingSession {
       final command = RunnelOperation.validate(buildCommand);
       final remaining = timeout - elapsed.elapsed;
       if (remaining <= Duration.zero) {
-        throw const RedisTimeoutException(
-          message: 'The blocking operation deadline expired during local encoding.',
-          deliveryStatus: RedisDeliveryStatus.notSent,
+        throw RunnelTimeoutError(
+          'The blocking operation deadline expired during local encoding.',
+          deliveryStatus: const Some(RedisDeliveryStatus.notSent),
+          stackTrace: StackTrace.current,
         );
       }
       final result = await _connection.execute(command, timeout: remaining);
       if (elapsed.elapsed >= timeout) {
-        throw const RedisTimeoutException(
-          message: 'The blocking operation deadline expired during reply decoding.',
-          deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+        throw RunnelTimeoutError(
+          'The blocking operation deadline expired during reply decoding.',
+          deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+          stackTrace: StackTrace.current,
         );
       }
       return result;
@@ -154,10 +155,10 @@ Option<({String key, String value})> _popReply(RespValue reply) {
 }
 
 bool _isTerminal(Object error) =>
-    error is RedisTransportException ||
-    error is RedisTimeoutException ||
-    error is RedisProtocolException ||
-    error is RedisClosedException ||
+    error is RunnelTransportError ||
+    error is RunnelTimeoutError ||
+    error is RunnelProtocolError ||
+    error is RunnelClosedError ||
     error is FormatException;
 
 void _requireWholeMillisecondWait(Duration wait) {

@@ -5,8 +5,8 @@ import 'dart:typed_data';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/connection/connection_attempt.dart' show ConnectionAttempt;
-import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/socket.dart';
+import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/resp/resp_parser.dart';
 import 'package:runnel/src/resp/resp_value.dart';
@@ -69,7 +69,10 @@ final class PubSubTransport {
     final transport = PubSubTransport._(socket, limits, onFrame, onTerminated);
     if (!attempt.attachResource(transport.close)) {
       await transport.close();
-      throw const RedisClosedException(message: 'The Pub/Sub connection was cancelled.');
+      throw RunnelClosedError(
+        'The Pub/Sub connection was cancelled.',
+        stackTrace: StackTrace.current,
+      );
     }
     return transport;
   }
@@ -87,7 +90,7 @@ final class PubSubTransport {
     }
     return completer.future.timeout(timeout).then((reply) {
       if (reply case RespError(:final code, :final message)) {
-        throw RedisServerException(code: code, message: message);
+        throw RunnelServerError(message, code: code, cause: reply, stackTrace: StackTrace.current);
       }
       return reply;
     });
@@ -177,7 +180,10 @@ final class PubSubTransport {
     _socket.destroy();
     _release = _subscription.cancel();
     await _release;
-    const error = RedisClosedException(message: 'The Pub/Sub transport closed.');
+    final error = RunnelClosedError(
+      'The Pub/Sub transport closed.',
+      stackTrace: StackTrace.current,
+    );
     _failReplies(error);
   }
 

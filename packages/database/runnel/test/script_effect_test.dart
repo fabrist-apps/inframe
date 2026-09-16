@@ -49,6 +49,27 @@ void main() {
       expect(peer.commands.where((c) => c.name == 'EVAL'), isEmpty);
     });
 
+    test('should not retry a server error returned by the decoder', () async {
+      final peer = await RespPeer.start(
+        onCommand: (command) {
+          if (command.replyToHandshake()) return;
+          command.reply(command.name == 'GET' ? '-NOSCRIPT missing\r\n' : '+OK\r\n');
+        },
+      );
+      addTearDown(peer.close);
+      final client = await Runnel.connect(peer.endpoint).runFuture();
+      addTearDown(() => client.close().runFuture());
+      final previous = await client.get('key').runFutureExit();
+      final serverError =
+          (previous as Failed<Option<String>, RunnelError>).cause.expectedErrors.single;
+      final script = RedisScript<void>('return 1', (_) => Failure(serverError));
+
+      final exit = await client.runScript(script, keys: [], arguments: []).runFutureExit();
+
+      expect((exit as Failed<void, RunnelError>).cause.expectedErrors.single, same(serverError));
+      expect(peer.commands.where((c) => c.name == 'EVAL'), isEmpty);
+    });
+
     test(
       'should preserve exact nullable script values and captured arguments across runs',
       () async {

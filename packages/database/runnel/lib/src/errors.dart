@@ -1,7 +1,13 @@
 import 'package:conflux/option.dart';
-import 'package:runnel/src/connection/legacy_errors.dart' show RedisDeliveryStatus;
 
-export 'connection/legacy_errors.dart' show RedisDeliveryStatus;
+/// Whether an unsuccessful command could have reached Redis.
+enum RedisDeliveryStatus {
+  /// No bytes belonging to the command were submitted.
+  notSent,
+
+  /// Some or all command bytes were submitted without a conclusive reply.
+  outcomeUnknown,
+}
 
 /// Expected Runnel failures. Cancellation and unexpected defects use Conflux Cause.
 sealed class RunnelError {

@@ -6,7 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:runnel/src/connection/connection_attempt.dart';
-import 'package:runnel/src/connection/legacy_errors.dart';
+import 'package:runnel/src/errors.dart';
 
 /// Byte-stream socket operations shared by plain and raw TLS transports.
 abstract class ConnectionSocket extends Stream<Uint8List> {
@@ -45,7 +45,10 @@ Future<ConnectionSocket> _openPlainSocket(
   final task = await Socket.startConnect(host, port);
   if (!(attempt?.attachConnect(task.cancel) ?? true)) {
     await _discardTaskResult(task.socket, (socket) => socket.destroy());
-    throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+    throw RunnelClosedError(
+      'The connection attempt was cancelled.',
+      stackTrace: StackTrace.current,
+    );
   }
   try {
     final socket = await _awaitTask(
@@ -57,7 +60,10 @@ Future<ConnectionSocket> _openPlainSocket(
     final connection = _IoConnectionSocket(socket);
     if (!(attempt?.attachResource(() async => connection.destroy()) ?? true)) {
       connection.destroy();
-      throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+      throw RunnelClosedError(
+        'The connection attempt was cancelled.',
+        stackTrace: StackTrace.current,
+      );
     }
     return connection;
   } finally {
@@ -76,7 +82,10 @@ Future<ConnectionSocket> _openSecureSocket(
   final task = await RawSocket.startConnect(host, port);
   if (!(attempt?.attachConnect(task.cancel) ?? true)) {
     await _discardTaskResult(task.socket, (socket) => unawaited(socket.close()));
-    throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+    throw RunnelClosedError(
+      'The connection attempt was cancelled.',
+      stackTrace: StackTrace.current,
+    );
   }
   late final RawSocket plainSocket;
   try {
@@ -98,7 +107,10 @@ Future<ConnectionSocket> _openSecureSocket(
 
   if (!(attempt?.attachResource(closeHandshake) ?? true)) {
     await closeHandshake();
-    throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+    throw RunnelClosedError(
+      'The connection attempt was cancelled.',
+      stackTrace: StackTrace.current,
+    );
   }
   final securing = RawSecureSocket.secure(
     plainSocket,
@@ -124,7 +136,10 @@ Future<ConnectionSocket> _openSecureSocket(
     final connection = _RawSecureConnectionSocket(socket);
     if (abandoned || !(attempt?.attachResource(() async => connection.destroy()) ?? true)) {
       connection.destroy();
-      throw const RedisClosedException(message: 'The connection attempt was cancelled.');
+      throw RunnelClosedError(
+        'The connection attempt was cancelled.',
+        stackTrace: StackTrace.current,
+      );
     }
     return connection;
   } on Object {
@@ -179,7 +194,7 @@ Future<void> _discardTaskResult<T>(
   try {
     dispose(await result);
   } on Object {
-    // Cancellation is represented to the caller by RedisClosedException.
+    // Cancellation is represented to the caller by RunnelClosedError.
   }
 }
 

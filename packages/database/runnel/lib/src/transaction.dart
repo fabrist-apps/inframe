@@ -1,9 +1,9 @@
 import 'dart:async';
 
+import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
 import 'package:runnel/src/batch.dart';
 import 'package:runnel/src/command.dart';
-import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
 import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
@@ -31,16 +31,25 @@ Future<List<Result<Object?, RunnelError>>> executeTransaction(
   }
   final execReply = _requireTransactionSuccess(replies.last, 'EXEC was rejected.');
   if (execReply is RespNull) {
-    throw const RedisTransactionException('EXEC did not commit the transaction.');
+    throw RunnelTransactionError(
+      'EXEC did not commit the transaction.',
+      stackTrace: StackTrace.current,
+    );
   }
   if (execReply is! RespArray || execReply.values.length != commands.length) {
-    throw const RedisProtocolException(message: 'EXEC returned an invalid result array.');
+    throw RunnelProtocolError(
+      'EXEC returned an invalid result array.',
+      deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+      stackTrace: StackTrace.current,
+    );
   }
   final results = List.generate(commands.length, (index) {
     _requireTransactionDeadline(deadline);
     final reply = execReply.values[index];
     if (reply case RespError(:final code, :final message)) {
-      return Failure<Object?, RunnelError>(RunnelServerError(message, code: code));
+      return Failure<Object?, RunnelError>(
+        RunnelServerError(message, code: code, cause: reply, stackTrace: StackTrace.current),
+      );
     }
     _requireTransactionDeadline(deadline);
     final result = commands[index].decode(reply);
@@ -75,11 +84,12 @@ Object? _requireTransactionSuccess(Result<Object?, RunnelError> outcome, String 
 void _requireTransactionDeadline(ConnectionDeadline deadline) {
   try {
     deadline.remaining;
-  } on TimeoutException catch (error) {
-    throw RedisTimeoutException(
-      message: 'The Redis transaction deadline expired during reply decoding.',
-      deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+  } on TimeoutException catch (error, stackTrace) {
+    throw RunnelTimeoutError(
+      'The Redis transaction deadline expired during reply decoding.',
+      deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
       cause: error,
+      stackTrace: stackTrace,
     );
   }
 }

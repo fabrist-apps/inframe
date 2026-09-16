@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:runnel/runnel.dart';
-import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -62,7 +61,7 @@ void main() {
       );
       expect(
         () => RespParser(maxFrameBytes: exactFrame.length - 1, maxNestingDepth: 1).add(exactFrame),
-        throwsA(isA<RedisLimitException>()),
+        throwsA(isA<RunnelLimitError>()),
       );
 
       expect(
@@ -74,7 +73,7 @@ void main() {
           maxFrameBytes: 32,
           maxNestingDepth: 1,
         ).add(ascii.encode('*1\r\n*1\r\n:1\r\n')),
-        throwsA(isA<RedisLimitException>()),
+        throwsA(isA<RunnelLimitError>()),
       );
       expect(
         () => RespParser(maxFrameBytes: 8, maxNestingDepth: 1).add(
@@ -83,7 +82,7 @@ void main() {
             '\r\n',
           ),
         ),
-        throwsA(isA<RedisLimitException>()),
+        throwsA(isA<RunnelLimitError>()),
       );
       expect(
         () => RespParser(maxFrameBytes: 15, maxNestingDepth: 1).add(
@@ -92,7 +91,7 @@ void main() {
             '\r\n',
           ),
         ),
-        throwsA(isA<RedisLimitException>()),
+        throwsA(isA<RunnelLimitError>()),
       );
 
       final attributed = ascii.encode('|1\r\n+meta\r\n+x\r\n+OK\r\n');
@@ -105,7 +104,7 @@ void main() {
           maxFrameBytes: attributed.length - 1,
           maxNestingDepth: 1,
         ).add(attributed),
-        throwsA(isA<RedisLimitException>()),
+        throwsA(isA<RunnelLimitError>()),
       );
     });
 
@@ -121,7 +120,7 @@ void main() {
       ]) {
         expect(
           () => RespParser(maxFrameBytes: 64, maxNestingDepth: 4).add(ascii.encode(frame)),
-          throwsA(isA<RedisProtocolException>()),
+          throwsA(isA<RunnelProtocolError>()),
         );
       }
     });

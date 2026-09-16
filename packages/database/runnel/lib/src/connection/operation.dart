@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:conflux/effect.dart';
 import 'package:conflux/option.dart';
 import 'package:runnel/src/command.dart';
-import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/errors.dart';
 
 /// Owns cancellation hooks for one execution, never for a reusable Effect.
@@ -55,46 +54,6 @@ final class RunnelOperation {
       'The Redis connection deadline expired.',
       deliveryStatus: const Some(RedisDeliveryStatus.notSent),
       cause: error,
-      stackTrace: stack,
-    ),
-    RedisTransportException() => RunnelTransportError(
-      error.message,
-      deliveryStatus: Some(error.deliveryStatus),
-      cause: error.cause,
-      stackTrace: stack,
-    ),
-    RedisTimeoutException() => RunnelTimeoutError(
-      error.message,
-      deliveryStatus: Some(error.deliveryStatus),
-      cause: error.cause,
-      stackTrace: stack,
-    ),
-    RedisProtocolException() => RunnelProtocolError(
-      error.message,
-      deliveryStatus: Some(error.deliveryStatus),
-      cause: error.cause,
-      stackTrace: stack,
-    ),
-    RedisLimitException() => RunnelLimitError(
-      error.message,
-      limit: error.limit,
-      deliveryStatus: Some(error.deliveryStatus),
-      stackTrace: stack,
-    ),
-    RedisClosedException() => RunnelClosedError(
-      error.message,
-      deliveryStatus: Some(error.deliveryStatus),
-      stackTrace: stack,
-    ),
-    RedisServerException() => RunnelServerError(
-      error.message,
-      code: error.code,
-      cause: error,
-      stackTrace: stack,
-    ),
-    RedisTransactionException() => RunnelTransactionError(
-      error.message,
-      cause: error.cause,
       stackTrace: stack,
     ),
     _ => Error.throwWithStackTrace(error, stack),

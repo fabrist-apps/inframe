@@ -10,7 +10,6 @@ import 'package:runnel/src/command.dart';
 import 'package:runnel/src/command_validation.dart';
 import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/connection/connection_attempt.dart';
-import 'package:runnel/src/connection/legacy_errors.dart';
 import 'package:runnel/src/connection/operation.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
@@ -100,7 +99,10 @@ final class Runnel {
       final connection = await client._openPhysicalConnection();
       if (operation.isCancelled) {
         await connection.close(commandsAreUncertain: true);
-        throw const RedisClosedException(message: 'Connection acquisition cancelled.');
+        throw RunnelClosedError(
+          'Connection acquisition cancelled.',
+          stackTrace: StackTrace.current,
+        );
       }
       client
         .._unclaimedConnections.remove(connection)
@@ -138,7 +140,10 @@ final class Runnel {
       }
       if (operation?.isCancelled ?? false) {
         await connection.close(commandsAreUncertain: true);
-        throw const RedisClosedException(message: 'Connection acquisition cancelled.');
+        throw RunnelClosedError(
+          'Connection acquisition cancelled.',
+          stackTrace: StackTrace.current,
+        );
       }
       _unclaimedConnections.add(connection);
       return connection;
@@ -156,7 +161,7 @@ final class Runnel {
     if (!identical(_connection, connection)) return;
     _connection = null;
     if (_state == _ClientState.closing || _state == _ClientState.closed) return;
-    if (cause is RedisProtocolException) {
+    if (cause is RunnelProtocolError) {
       _state = _ClientState.closed;
       return;
     }
@@ -240,27 +245,32 @@ final class Runnel {
         return Effect.fail(const RunnelInputError('Script timeout must be positive.'));
       }
       final acceptedAt = Stopwatch()..start();
-      Effect<T, RunnelError> submit(RedisCommand<T> command) => Effect.defer((_) {
-        final remaining = duration - acceptedAt.elapsed;
-        if (remaining <= Duration.zero) {
-          return Effect.fail(
-            const RunnelTimeoutError(
-              'The Redis script deadline expired before submission.',
-              deliveryStatus: Some(RedisDeliveryStatus.notSent),
-            ),
-          );
-        }
-        return execute(command, timeout: remaining);
-      });
+      Effect<Result<T, RunnelError>, RunnelError> submit(RedisCommand<T> command) =>
+          Effect.defer((_) {
+            final remaining = duration - acceptedAt.elapsed;
+            if (remaining <= Duration.zero) {
+              return Effect.fail(
+                const RunnelTimeoutError(
+                  'The Redis script deadline expired before submission.',
+                  deliveryStatus: Some(RedisDeliveryStatus.notSent),
+                ),
+              );
+            }
+            // Handle wire errors before exposing decoder failures to the Effect.
+            final decoded = RedisCommand<Result<T, RunnelError>>(
+              command.arguments,
+              (reply) => Success(command.decode(reply)),
+            );
+            return execute(decoded, timeout: remaining);
+          });
       return submit(evalshaCommand(script, keys: ownedKeys, arguments: ownedArguments))
           .catchError((error, _) {
-            if (error is! RunnelServerError ||
-                error.code.toUpperCase() != 'NOSCRIPT' ||
-                error.cause is! RedisServerException) {
+            if (error is! RunnelServerError || error.code.toUpperCase() != 'NOSCRIPT') {
               return Effect.fail(error);
             }
             return submit(evalCommand(script, keys: ownedKeys, arguments: ownedArguments));
-          });
+          })
+          .flatMap((result, _) => Effect.fromResult(result));
     });
   }
 
@@ -306,7 +316,7 @@ final class Runnel {
     );
     if (_state != _ClientState.ready || operation.isCancelled) {
       await session.closeFuture();
-      throw const RedisClosedException(message: 'The Runnel client is closing.');
+      throw RunnelClosedError('The Runnel client is closing.', stackTrace: StackTrace.current);
     }
     operation.onCancel(session.closeFuture);
     return session;
@@ -340,7 +350,7 @@ final class Runnel {
     );
     if (_state != _ClientState.ready || operation.isCancelled) {
       await session.closeFuture();
-      throw const RedisClosedException(message: 'The Runnel client is closing.');
+      throw RunnelClosedError('The Runnel client is closing.', stackTrace: StackTrace.current);
     }
     return session;
   });
@@ -368,7 +378,7 @@ final class Runnel {
     if (_state != _ClientState.ready || operation.isCancelled) {
       _unclaimedConnections.remove(connection);
       await connection.close(commandsAreUncertain: true);
-      throw const RedisClosedException(message: 'The Runnel client is closing.');
+      throw RunnelClosedError('The Runnel client is closing.', stackTrace: StackTrace.current);
     }
     _unclaimedConnections.remove(connection);
     _transactionConnections.add(connection);
@@ -385,13 +395,14 @@ final class Runnel {
   RedisConnection _readyConnection() {
     final connection = _connection;
     if (_state == _ClientState.reconnecting || _state == _ClientState.connecting) {
-      throw const RedisTransportException(
-        message: 'The Redis connection is reconnecting; offline queuing is disabled.',
-        deliveryStatus: RedisDeliveryStatus.notSent,
+      throw RunnelTransportError(
+        'The Redis connection is reconnecting; offline queuing is disabled.',
+        deliveryStatus: const Some(RedisDeliveryStatus.notSent),
+        stackTrace: StackTrace.current,
       );
     }
     if (_state != _ClientState.ready || connection == null || connection.isClosed) {
-      throw const RedisClosedException(message: 'The Runnel client is closed.');
+      throw RunnelClosedError('The Runnel client is closed.', stackTrace: StackTrace.current);
     }
     return connection;
   }
@@ -459,7 +470,7 @@ Future<void> _withinShutdown(Future<void> work, ConnectionDeadline deadline) asy
 enum _ClientState { connecting, ready, reconnecting, closing, closed }
 
 bool _terminalConnectFailure(Object error) =>
-    error is RedisServerException || error is RedisProtocolException || error is HandshakeException;
+    error is RunnelServerError || error is RunnelProtocolError || error is HandshakeException;
 
 void _positive(Duration value, String name) {
   if (value <= Duration.zero) throw ArgumentError.value(value, name, 'must be positive');

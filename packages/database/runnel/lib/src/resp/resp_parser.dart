@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:runnel/src/connection/legacy_errors.dart';
+import 'package:conflux/option.dart';
+import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
 /// Incrementally decodes complete RESP3 top-level frames.
@@ -180,20 +181,30 @@ final class RespParser {
   String _strictText(Uint8List bytes) {
     try {
       return utf8.decode(bytes);
-    } on FormatException catch (error) {
-      throw RedisProtocolException(message: 'RESP text is not valid UTF-8.', cause: error);
+    } on FormatException catch (error, stackTrace) {
+      throw RunnelProtocolError(
+        'RESP text is not valid UTF-8.',
+        cause: error,
+        deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+        stackTrace: stackTrace,
+      );
     }
   }
 
-  Never _limit({bool depth = false}) => throw RedisLimitException(
-    message: depth
+  Never _limit({bool depth = false}) => throw RunnelLimitError(
+    depth
         ? 'RESP aggregate nesting exceeds $maxNestingDepth.'
         : 'RESP frame exceeds $maxFrameBytes bytes.',
-    deliveryStatus: RedisDeliveryStatus.outcomeUnknown,
+    deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
     limit: depth ? maxNestingDepth : maxFrameBytes,
+    stackTrace: StackTrace.current,
   );
 
-  Never _malformed(String message) => throw RedisProtocolException(message: message);
+  Never _malformed(String message) => throw RunnelProtocolError(
+    message,
+    deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+    stackTrace: StackTrace.current,
+  );
 }
 
 enum _Aggregate { array, map, set, push }
