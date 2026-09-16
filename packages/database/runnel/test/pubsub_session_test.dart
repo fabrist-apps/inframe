@@ -7,6 +7,7 @@ import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
 import 'package:conflux/option.dart';
 import 'package:conflux/result.dart';
+import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
@@ -313,13 +314,13 @@ Future<PubSubSession> _connect(
   RunnelLimits connectionLimits = const RunnelLimits(),
   void Function(PubSubSession)? onClosed,
 }) => PubSubSessionOwnership.connect(
-  PubSubConnectionConfiguration(
+  ConnectionConfiguration(
     host: InternetAddress.loopbackIPv4.address,
     port: peer.port,
     tls: false,
-    connectTimeout: const Duration(seconds: 1),
-    connectionLimits: connectionLimits,
   ),
+  connectTimeout: const Duration(seconds: 1),
+  connectionLimits: connectionLimits,
   limits: limits,
   controlTimeout: const Duration(seconds: 1),
   onClosed: onClosed,

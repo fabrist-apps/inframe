@@ -13,6 +13,7 @@ import 'package:runnel/src/connection/connection_attempt.dart';
 import 'package:runnel/src/connection/operation.dart';
 import 'package:runnel/src/connection/reconnect_backoff.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
+import 'package:runnel/src/connection/resources.dart';
 import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
@@ -38,11 +39,7 @@ final class Runnel {
   final Duration _shutdownTimeout;
   final RunnelLimits _limits;
   final ReconnectBackoff _backoff = ReconnectBackoff();
-  final Set<RedisConnection> _transactionConnections = {};
-  final Set<RedisConnection> _unclaimedConnections = {};
-  final Set<ConnectionAttempt> _openingConnections = {};
-  final Set<BlockingSession> _blockingSessions = {};
-  final Set<PubSubSession> _pubSubSessions = {};
+  final ClientResources _resources = ClientResources();
 
   RedisConnection? _connection;
   Timer? _reconnectTimer;
@@ -96,7 +93,8 @@ final class Runnel {
     );
     operation.onCancel(client._close);
     try {
-      final connection = await client._openPhysicalConnection();
+      final ownership = client._resources.register();
+      final connection = await client._openPhysicalConnection(ownership);
       if (operation.isCancelled) {
         await connection.close(commandsAreUncertain: true);
         throw RunnelClosedError(
@@ -104,8 +102,8 @@ final class Runnel {
           stackTrace: StackTrace.current,
         );
       }
+      ownership.detach();
       client
-        .._unclaimedConnections.remove(connection)
         .._connection = connection
         .._state = _ClientState.ready;
       return client;
@@ -115,14 +113,13 @@ final class Runnel {
     }
   }
 
-  Future<RedisConnection> _openPhysicalConnection({
-    Duration? timeout,
-    RunnelOperation? operation,
+  Future<RedisConnection> _openPhysicalConnection(
+    ResourceRegistration ownership, {
+    Deadline? deadline,
   }) async {
-    final deadline = ConnectionDeadline(timeout ?? _connectTimeout);
+    final budget = deadline ?? Deadline(_connectTimeout);
     final attempt = ConnectionAttempt();
-    _openingConnections.add(attempt);
-    final detach = operation?.onCancel(attempt.cancel);
+    ownership.replace(attempt.cancel);
     RedisConnection? connection;
     try {
       connection = await RedisConnection.open(
@@ -131,29 +128,43 @@ final class Runnel {
         tls: _endpoint.tls,
         securityContext: _endpoint.securityContext,
         limits: _limits,
-        timeout: deadline.remaining,
+        deadline: budget,
         onTerminated: _connectionTerminated,
         attempt: attempt,
       );
       for (final command in _endpoint.handshakeCommands) {
-        await connection.execute(command, timeout: deadline.remaining, enforceLimits: false);
-      }
-      if (operation?.isCancelled ?? false) {
-        await connection.close(commandsAreUncertain: true);
-        throw RunnelClosedError(
-          'Connection acquisition cancelled.',
-          stackTrace: StackTrace.current,
+        await connection.execute(
+          command,
+          deadline: budget,
+          enforceLimits: false,
         );
       }
-      _unclaimedConnections.add(connection);
+      final acquired = connection;
+      ownership.replace(() => acquired.close(commandsAreUncertain: true));
       return connection;
     } on Object {
       await connection?.close(commandsAreUncertain: true);
+      await ownership.close();
       rethrow;
     } finally {
-      detach?.call();
       attempt.finish();
-      _openingConnections.remove(attempt);
+    }
+  }
+
+  /// Keeps acquisition owned by both the client and its interrupted caller.
+  Future<T> _acquire<T>(
+    RunnelOperation operation,
+    Future<T> Function(ResourceRegistration ownership) open,
+  ) async {
+    final ownership = _resources.register();
+    operation.onCancel(ownership.close);
+    try {
+      final resource = await open(ownership);
+      ownership.checkOpen();
+      return resource;
+    } on Object {
+      await ownership.close();
+      rethrow;
     }
   }
 
@@ -181,13 +192,13 @@ final class Runnel {
   Future<void> _reconnect() async {
     if (_state != _ClientState.reconnecting) return;
     try {
-      final replacement = await _openPhysicalConnection();
+      final ownership = _resources.register();
+      final replacement = await _openPhysicalConnection(ownership);
       if (_state != _ClientState.reconnecting) {
-        _unclaimedConnections.remove(replacement);
-        await replacement.close(commandsAreUncertain: true);
+        await ownership.close();
         return;
       }
-      _unclaimedConnections.remove(replacement);
+      ownership.detach();
       _connection = replacement;
       _backoff.reset();
       _state = _ClientState.ready;
@@ -211,20 +222,12 @@ final class Runnel {
     Duration? timeout,
     RunnelOperation? operation,
   }) {
-    final deadline = timeout ?? _commandTimeout;
-    RunnelOperation.validate(() => _positive(deadline, 'timeout'));
-    try {
-      RunnelOperation.validate(() => validateOrdinaryCommand(command as RedisCommand<Object?>));
-    } on Object catch (error, stackTrace) {
-      return Future.error(error, stackTrace);
-    }
-    final RedisConnection connection;
-    try {
-      connection = _readyConnection();
-    } on Object catch (error, stackTrace) {
-      return Future.error(error, stackTrace);
-    }
-    return connection.execute(command, timeout: deadline, operation: operation);
+    final duration = timeout ?? _commandTimeout;
+    RunnelOperation.validate(() {
+      _positive(duration, 'timeout');
+      validateOrdinaryCommand(command as RedisCommand<Object?>);
+    });
+    return _readyConnection().execute(command, deadline: Deadline(duration), operation: operation);
   }
 
   /// Executes a typed Lua script, falling back to source only after NOSCRIPT.
@@ -240,37 +243,35 @@ final class Runnel {
     final ownedKeys = List<String>.unmodifiable(keys);
     final ownedArguments = List<RedisArgument>.unmodifiable(arguments);
     final duration = timeout ?? _commandTimeout;
-    return Effect.defer((_) {
-      if (duration <= Duration.zero) {
-        return Effect.fail(const RunnelInputError('Script timeout must be positive.'));
+    return RunnelOperation.run((operation) async {
+      RunnelOperation.validate(() => _positive(duration, 'timeout'));
+      final deadline = Deadline(duration);
+      Future<Result<T, RunnelError>> submit(RedisCommand<T> command) {
+        if (operation.isCancelled) {
+          throw const RunnelClosedError('Script execution cancelled.');
+        }
+        if (deadline.isExpired) {
+          throw const RunnelTimeoutError(
+            'The Redis script deadline expired before submission.',
+            deliveryStatus: Some(RedisDeliveryStatus.notSent),
+          );
+        }
+        return _readyConnection().executeDecoded(
+          command,
+          deadline: deadline,
+          operation: operation,
+        );
       }
-      final acceptedAt = Stopwatch()..start();
-      Effect<Result<T, RunnelError>, RunnelError> submit(RedisCommand<T> command) =>
-          Effect.defer((_) {
-            final remaining = duration - acceptedAt.elapsed;
-            if (remaining <= Duration.zero) {
-              return Effect.fail(
-                const RunnelTimeoutError(
-                  'The Redis script deadline expired before submission.',
-                  deliveryStatus: Some(RedisDeliveryStatus.notSent),
-                ),
-              );
-            }
-            // Handle wire errors before exposing decoder failures to the Effect.
-            final decoded = RedisCommand<Result<T, RunnelError>>(
-              command.arguments,
-              (reply) => Success(command.decode(reply)),
-            );
-            return execute(decoded, timeout: remaining);
-          });
-      return submit(evalshaCommand(script, keys: ownedKeys, arguments: ownedArguments))
-          .catchError((error, _) {
-            if (error is! RunnelServerError || error.code.toUpperCase() != 'NOSCRIPT') {
-              return Effect.fail(error);
-            }
-            return submit(evalCommand(script, keys: ownedKeys, arguments: ownedArguments));
-          })
-          .flatMap((result, _) => Effect.fromResult(result));
+
+      final Result<T, RunnelError> result;
+      try {
+        result = await submit(evalshaCommand(script, keys: ownedKeys, arguments: ownedArguments));
+      } on RunnelServerError catch (error) {
+        if (error.code.toUpperCase() != 'NOSCRIPT') rethrow;
+        return (await submit(evalCommand(script, keys: ownedKeys, arguments: ownedArguments)))
+            .getOrThrowWith((error) => error);
+      }
+      return result.getOrThrowWith((error) => error);
     });
   }
 
@@ -301,58 +302,45 @@ final class Runnel {
   /// Opens a dedicated connection for one blocking operation at a time.
   Effect<BlockingSession, RunnelError> blocking() => RunnelOperation.run(_blocking);
 
-  Future<BlockingSession> _blocking(RunnelOperation operation) async {
+  Future<BlockingSession> _blocking(RunnelOperation operation) {
     _readyConnection();
-    late RedisConnection openingConnection;
-    final session = await BlockingSessionAccess.internal(
-      openConnection: () async =>
-          openingConnection = await _openPhysicalConnection(operation: operation),
-      commandTimeout: _commandTimeout,
-      onClosed: _blockingSessions.remove,
-      onCreated: (session) {
-        _unclaimedConnections.remove(openingConnection);
-        _blockingSessions.add(session);
-      },
-    );
-    if (_state != _ClientState.ready || operation.isCancelled) {
-      await session.closeFuture();
-      throw RunnelClosedError('The Runnel client is closing.', stackTrace: StackTrace.current);
-    }
-    operation.onCancel(session.closeFuture);
-    return session;
+    return _acquire(operation, (ownership) async {
+      final session = await BlockingSessionAccess.internal(
+        openConnection: () => _openPhysicalConnection(ownership),
+        commandTimeout: _commandTimeout,
+        onClosed: (_) => ownership.detach(),
+        onCreated: (session) => ownership.replace(session.closeFuture),
+      );
+      if (_state != _ClientState.ready || operation.isCancelled) {
+        await session.closeFuture();
+        throw const RunnelClosedError('The Runnel client is closing.');
+      }
+      return session;
+    });
   }
 
   /// Opens a bounded, dynamically subscribed Pub/Sub session on a dedicated socket.
   Effect<PubSubSession, RunnelError> openPubSub({
     Duration controlTimeout = const Duration(seconds: 5),
     PubSubLimits limits = const PubSubLimits(),
-  }) => RunnelOperation.run((operation) async {
+  }) => RunnelOperation.run((operation) {
     _readyConnection();
-    final session = await PubSubSessionOwnership.connect(
-      PubSubConnectionConfiguration(
-        host: _endpoint.host,
-        port: _endpoint.port,
-        tls: _endpoint.tls,
+    return _acquire(operation, (ownership) async {
+      final session = await PubSubSessionOwnership.connect(
+        _endpoint,
         connectTimeout: _connectTimeout,
         connectionLimits: _limits,
-        securityContext: _endpoint.securityContext,
-        database: _endpoint.database,
-        username: _endpoint.username,
-        password: _endpoint.password,
-      ),
-      controlTimeout: controlTimeout,
-      limits: limits,
-      onClosed: _pubSubSessions.remove,
-      onCreated: (session) {
-        _pubSubSessions.add(session);
-        operation.onCancel(session.closeFuture);
-      },
-    );
-    if (_state != _ClientState.ready || operation.isCancelled) {
-      await session.closeFuture();
-      throw RunnelClosedError('The Runnel client is closing.', stackTrace: StackTrace.current);
-    }
-    return session;
+        controlTimeout: controlTimeout,
+        limits: limits,
+        onClosed: (_) => ownership.detach(),
+        onCreated: (session) => ownership.replace(session.closeFuture),
+      );
+      if (_state != _ClientState.ready || operation.isCancelled) {
+        await session.closeFuture();
+        throw const RunnelClosedError('The Runnel client is closing.');
+      }
+      return session;
+    });
   });
 
   Future<List<Result<Object?, RunnelError>>> _executePipeline(
@@ -361,7 +349,9 @@ final class Runnel {
     RunnelOperation operation,
   ) async {
     final connection = _readyConnection();
-    return settleBatch(connection.executeBatch(commands, timeout: timeout, operation: operation));
+    return settleBatch(
+      connection.executeBatch(commands, deadline: Deadline(timeout), operation: operation),
+    );
   }
 
   Future<List<Result<Object?, RunnelError>>> _executeTransaction(
@@ -370,25 +360,19 @@ final class Runnel {
     RunnelOperation operation,
   ) async {
     _readyConnection();
-    final deadline = ConnectionDeadline(timeout);
-    final connection = await _openPhysicalConnection(
-      timeout: deadline.remaining,
-      operation: operation,
-    );
-    if (_state != _ClientState.ready || operation.isCancelled) {
-      _unclaimedConnections.remove(connection);
-      await connection.close(commandsAreUncertain: true);
-      throw RunnelClosedError('The Runnel client is closing.', stackTrace: StackTrace.current);
-    }
-    _unclaimedConnections.remove(connection);
-    _transactionConnections.add(connection);
-    final detach = operation.onCancel(() => connection.close(commandsAreUncertain: true));
+    final deadline = Deadline(timeout);
+    final ownership = _resources.register();
+    final detach = operation.onCancel(ownership.close);
     try {
+      final connection = await _openPhysicalConnection(ownership, deadline: deadline);
+      ownership.checkOpen();
+      if (_state != _ClientState.ready || operation.isCancelled) {
+        throw const RunnelClosedError('The Runnel client is closing.');
+      }
       return await executeTransaction(connection, commands, deadline);
     } finally {
       detach();
-      _transactionConnections.remove(connection);
-      await connection.close(commandsAreUncertain: !connection.isIdle);
+      await ownership.close();
     }
   }
 
@@ -418,35 +402,12 @@ final class Runnel {
 
   Future<void> _close() async {
     _state = _ClientState.closing;
-    final deadline = ConnectionDeadline(_shutdownTimeout);
+    final deadline = Deadline(_shutdownTimeout);
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     final connection = _connection;
     _connection = null;
-    final transactions = List<RedisConnection>.of(_transactionConnections);
-    _transactionConnections.clear();
-    final blockingSessions = List<BlockingSession>.of(_blockingSessions);
-    _blockingSessions.clear();
-    final pubSubSessions = List<PubSubSession>.of(_pubSubSessions);
-    _pubSubSessions.clear();
-    final unclaimed = List<RedisConnection>.of(_unclaimedConnections);
-    _unclaimedConnections.clear();
-    final opening = List<ConnectionAttempt>.of(_openingConnections);
-    _openingConnections.clear();
-    await _withinShutdown(
-      Future.wait([
-        ...opening.map((attempt) => attempt.cancel()),
-        ...blockingSessions.map((session) => session.closeFuture()),
-        ...pubSubSessions.map((session) => session.closeFuture()),
-        ...transactions.map(
-          (transaction) => transaction.close(commandsAreUncertain: true),
-        ),
-        ...unclaimed.map(
-          (connection) => connection.close(commandsAreUncertain: true),
-        ),
-      ]),
-      deadline,
-    );
+    await _withinShutdown(_resources.close(), deadline);
     if (connection != null && !connection.isClosed) {
       try {
         await connection.waitUntilIdle().timeout(deadline.remaining);
@@ -459,7 +420,7 @@ final class Runnel {
   }
 }
 
-Future<void> _withinShutdown(Future<void> work, ConnectionDeadline deadline) async {
+Future<void> _withinShutdown(Future<void> work, Deadline deadline) async {
   try {
     await work.timeout(deadline.remaining);
   } on TimeoutException {

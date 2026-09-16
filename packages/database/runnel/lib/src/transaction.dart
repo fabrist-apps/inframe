@@ -15,7 +15,7 @@ import 'package:runnel/src/resp/resp_value.dart';
 Future<List<Result<Object?, RunnelError>>> executeTransaction(
   RedisConnection connection,
   List<RedisCommand<Object?>> commands,
-  ConnectionDeadline deadline,
+  Deadline deadline,
 ) async {
   final wireCommands = <RedisCommand<Object?>>[
     transactionFrame('MULTI'),
@@ -23,7 +23,7 @@ Future<List<Result<Object?, RunnelError>>> executeTransaction(
     transactionFrame('EXEC'),
   ];
   final replies = await settleBatch(
-    connection.executeBatch(wireCommands, timeout: deadline.remaining),
+    connection.executeBatch(wireCommands, deadline: deadline),
   );
   _requireTransactionSuccess(replies.first, 'MULTI was rejected.');
   for (var index = 0; index < commands.length; index++) {
@@ -81,7 +81,7 @@ Object? _requireTransactionSuccess(Result<Object?, RunnelError> outcome, String 
   };
 }
 
-void _requireTransactionDeadline(ConnectionDeadline deadline) {
+void _requireTransactionDeadline(Deadline deadline) {
   try {
     deadline.remaining;
   } on TimeoutException catch (error, stackTrace) {

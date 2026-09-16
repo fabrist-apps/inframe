@@ -8,6 +8,7 @@ import 'package:conflux/option.dart';
 import 'package:runnel/src/blocking.dart';
 import 'package:runnel/src/commands/streams.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
+import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:test/test.dart';
@@ -303,7 +304,7 @@ Future<RedisConnection> _openConnection(_BlockingPeer peer) => RedisConnection.o
   tls: false,
   securityContext: null,
   limits: const RunnelLimits(),
-  timeout: const Duration(seconds: 1),
+  deadline: Deadline(const Duration(seconds: 1)),
   onTerminated: (_, _) {},
 );
 

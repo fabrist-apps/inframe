@@ -7,6 +7,7 @@ import 'package:conflux/result.dart';
 import 'package:runnel/runnel.dart';
 import 'package:runnel/src/connection/operation.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
+import 'package:runnel/src/deadline.dart';
 import 'package:test/test.dart';
 
 import 'support/resp_peer.dart';
@@ -176,7 +177,7 @@ void main() {
         tls: false,
         securityContext: null,
         limits: const RunnelLimits(),
-        timeout: const Duration(seconds: 1),
+        deadline: Deadline(const Duration(seconds: 1)),
         onTerminated: (_, _) {},
       );
       addTearDown(connection.close);
@@ -184,11 +185,11 @@ void main() {
       final command = RedisCommand<bool>([RedisArgument.text('PING')], (_) => const Success(true));
       final first = connection.execute(
         command,
-        timeout: const Duration(seconds: 1),
+        deadline: Deadline(const Duration(seconds: 1)),
         operation: operation,
       );
       final observed = first.then<Object?>((value) => value, onError: (Object error) => error);
-      final second = connection.execute(command, timeout: const Duration(seconds: 1));
+      final second = connection.execute(command, deadline: Deadline(const Duration(seconds: 1)));
       await operation.cancel();
       await observed;
       expect(await second, isTrue);

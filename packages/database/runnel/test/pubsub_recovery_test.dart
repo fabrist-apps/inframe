@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
+import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub.dart';
@@ -414,6 +415,34 @@ void main() {
       expect(peer.connectionCount, connectionsAfterTimeout);
     });
 
+    test('should close stalled recovery and settle controls waiting for readiness', () async {
+      final peer = await _RecoveryPeer.start()
+        ..holdHelloFromConnection = 2;
+      addTearDown(peer.close);
+      final session = await _connect(peer);
+      addTearDown(() => session.close().runFuture());
+      peer.destroyLatest();
+      await _eventually(() => peer.connectionCount == 2);
+
+      final subscribing = session.subscribe(['orders']).runFuture();
+      final rejected = expectLater(
+        subscribing,
+        throwsA(
+          isA<EffectException<RunnelError>>().having(
+            (error) => error.cause.expectedErrors.single,
+            'expected error',
+            isA<RunnelClosedError>(),
+          ),
+        ),
+      );
+      await _eventually(() => session.desiredChannels.contains('orders'));
+      await session.close().runFuture().timeout(const Duration(seconds: 1));
+      await rejected.timeout(const Duration(seconds: 1));
+      await peer.waitForConnectionClosed(2);
+      expect(session.state, PubSubState.closed);
+      expect(peer.connectionCount, 2);
+    });
+
     test('should close during backoff without opening another socket', () async {
       final peer = await _RecoveryPeer.start();
       addTearDown(peer.close);
@@ -469,13 +498,13 @@ Future<PubSubSession> _connect(
   Duration controlTimeout = const Duration(milliseconds: 200),
   RunnelLimits connectionLimits = const RunnelLimits(),
 }) => PubSubSessionOwnership.connect(
-  PubSubConnectionConfiguration(
+  ConnectionConfiguration(
     host: InternetAddress.loopbackIPv4.address,
     port: peer.port,
     tls: false,
-    connectTimeout: const Duration(milliseconds: 200),
-    connectionLimits: connectionLimits,
   ),
+  connectTimeout: const Duration(milliseconds: 200),
+  connectionLimits: connectionLimits,
   controlTimeout: controlTimeout,
 );
 

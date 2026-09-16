@@ -6,6 +6,7 @@ import 'package:runnel/src/command.dart';
 import 'package:runnel/src/commands/streams.dart';
 import 'package:runnel/src/connection/operation.dart';
 import 'package:runnel/src/connection/redis_connection.dart';
+import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/resp/resp_value.dart';
 
@@ -98,11 +99,11 @@ final class BlockingSession {
       throw const RunnelUsageError('A blocking operation is already active on this session.');
     }
     _active = true;
-    final elapsed = Stopwatch()..start();
+    final deadline = Deadline(timeout);
     final detach = operation.onCancel(closeFuture);
     try {
       final command = RunnelOperation.validate(buildCommand);
-      final remaining = timeout - elapsed.elapsed;
+      final remaining = deadline.timeLeft;
       if (remaining <= Duration.zero) {
         throw RunnelTimeoutError(
           'The blocking operation deadline expired during local encoding.',
@@ -110,8 +111,8 @@ final class BlockingSession {
           stackTrace: StackTrace.current,
         );
       }
-      final result = await _connection.execute(command, timeout: remaining);
-      if (elapsed.elapsed >= timeout) {
+      final result = await _connection.execute(command, deadline: deadline);
+      if (deadline.isExpired) {
         throw RunnelTimeoutError(
           'The blocking operation deadline expired during reply decoding.',
           deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),

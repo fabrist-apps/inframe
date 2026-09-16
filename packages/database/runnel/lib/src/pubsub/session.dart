@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
@@ -17,7 +15,6 @@ import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/pubsub/event_queue.dart';
 import 'package:runnel/src/pubsub/events.dart';
 import 'package:runnel/src/pubsub/transport.dart';
-import 'package:runnel/src/resp/resp_value.dart';
 
 /// Resource limits for one Pub/Sub session.
 final class PubSubLimits {
@@ -88,40 +85,18 @@ final class PubSubConnectionConfiguration {
 
   /// Inherited command and incoming-frame limits.
   final RunnelLimits connectionLimits;
-
-  void _validate() {
-    if (host.isEmpty) throw ArgumentError.value(host, 'host', 'must not be empty');
-    if (port <= 0 || port > 65535) {
-      throw ArgumentError.value(port, 'port', 'must be between 1 and 65535');
-    }
-    if (database < 0) throw ArgumentError.value(database, 'database', 'must be nonnegative');
-    if (connectTimeout <= Duration.zero) {
-      throw ArgumentError.value(connectTimeout, 'connectTimeout', 'must be positive');
-    }
-    if (!tls && securityContext != null) {
-      throw ArgumentError.value(securityContext, 'securityContext', 'requires TLS');
-    }
-    connectionLimits.validate();
-  }
 }
 
 /// One bounded, dynamically subscribed Pub/Sub connection.
 final class PubSubSession {
   PubSubSession._(
-    this._configuration,
+    this._endpoint,
+    this._connectTimeout,
+    this._connectionLimits,
     this._controlTimeout,
     this._limits,
     this._onClosed,
   ) {
-    _endpoint = ConnectionConfiguration(
-      host: _configuration.host,
-      port: _configuration.port,
-      tls: _configuration.tls,
-      securityContext: _configuration.securityContext,
-      database: _configuration.database,
-      username: _configuration.username,
-      password: _configuration.password,
-    );
     _events = PubSubEventQueue(
       maxBufferedEvents: _limits.maxBufferedEvents,
       maxBufferedBytes: _limits.maxBufferedBytes,
@@ -129,8 +104,9 @@ final class PubSubSession {
     );
   }
 
-  final PubSubConnectionConfiguration _configuration;
-  late final ConnectionConfiguration _endpoint;
+  final ConnectionConfiguration _endpoint;
+  final Duration _connectTimeout;
+  final RunnelLimits _connectionLimits;
   final Duration _controlTimeout;
   final PubSubLimits _limits;
   final void Function(PubSubSession session)? _onClosed;
@@ -147,7 +123,6 @@ final class PubSubSession {
   Future<void>? _closing;
   Future<void>? _recovery;
   Future<void>? _explicitReconnect;
-  Completer<void>? _readyAfterRecovery;
   Timer? _reconnectTimer;
   Completer<bool>? _reconnectWaiter;
   PubSubState _state = PubSubState.reconnecting;
@@ -201,7 +176,7 @@ final class PubSubSession {
   PubSubInterrupted? get lastInterruption => _lastInterruption;
 
   Future<void> _openInitialTransport() async {
-    await _openTransport(_configuration.connectTimeout);
+    await _openTransport(Deadline(_connectTimeout));
     if (_state == PubSubState.closed || _state == PubSubState.closing) {
       throw RunnelClosedError(
         'The Pub/Sub session closed during acquisition.',
@@ -213,8 +188,7 @@ final class PubSubSession {
     _state = PubSubState.ready;
   }
 
-  Future<void> _openTransport(Duration timeout) async {
-    final deadline = ConnectionDeadline(timeout);
+  Future<void> _openTransport(Deadline deadline) async {
     final attempt = ConnectionAttempt();
     _openingTransport = attempt;
     late final PubSubTransport transport;
@@ -222,11 +196,24 @@ final class PubSubSession {
     try {
       transport = await PubSubTransport.open(
         _endpoint,
-        limits: _configuration.connectionLimits,
-        timeout: deadline.remaining,
+        limits: _connectionLimits,
+        deadline: deadline,
         attempt: attempt,
-        onFrame: (value) {
-          if (identical(_transport, transport)) _onFrame(value);
+        acceptsChannel: (channel) =>
+            identical(_transport, transport) && _desiredChannels.contains(channel),
+        onMessage: (channel, payload) {
+          if (identical(_transport, transport)) {
+            _emit(PubSubMessage(generation: _generation, channel: channel, payload: payload));
+          }
+        },
+        onAcknowledgement: (kind, channel) {
+          if (!identical(_transport, transport)) return;
+          switch (kind) {
+            case ControlKind.subscribe:
+              _acknowledgedChannels.add(channel);
+            case ControlKind.unsubscribe:
+              _acknowledgedChannels.remove(channel);
+          }
         },
         onTerminated: (error) {
           if (identical(_transport, transport)) _onTransportTerminated(error);
@@ -239,7 +226,7 @@ final class PubSubSession {
       }
       _transport = transport;
       for (final command in _endpoint.handshakeCommands) {
-        await transport.requestReply(command, timeout: deadline.remaining);
+        await transport.requestReply(command, deadline: deadline);
       }
     } on Object {
       if (transportOpened) {
@@ -372,7 +359,7 @@ final class PubSubSession {
     execution.onCancel(() => _closing ??= _close(listenerCancelled: true));
     final existing = _explicitReconnect;
     if (existing != null) return existing;
-    final deadline = timeout ?? _configuration.connectTimeout + _controlTimeout;
+    final deadline = timeout ?? _connectTimeout + _controlTimeout;
     final operation = _startExplicitReconnect(deadline);
     _explicitReconnect = operation;
     unawaited(
@@ -395,12 +382,6 @@ final class PubSubSession {
     if (_state == PubSubState.closed) return;
     _state = PubSubState.closing;
     _cancelReconnectDelay();
-    final ready = _readyAfterRecovery;
-    if (ready != null && !ready.isCompleted) {
-      ready.completeError(
-        RunnelClosedError('The Pub/Sub session closed.', stackTrace: StackTrace.current),
-      );
-    }
     _failControls(RunnelClosedError('The Pub/Sub session closed.', stackTrace: StackTrace.current));
     _desiredChannels.clear();
     _acknowledgedChannels.clear();
@@ -447,7 +428,7 @@ final class PubSubSession {
       commands++;
       bytes += _controlCommand(command, chunk).encodedLength;
     }
-    final connectionLimits = _configuration.connectionLimits;
+    final connectionLimits = _connectionLimits;
     if (_reservedControlCommands + commands > connectionLimits.maxPendingCommands) {
       throw RunnelLimitError(
         'The request would exceed ${connectionLimits.maxPendingCommands} pending controls.',
@@ -494,7 +475,7 @@ final class PubSubSession {
       if (_state == PubSubState.reconnecting) {
         final remaining = operation.remaining;
         if (remaining <= Duration.zero) throw TimeoutException('Subscription control timed out.');
-        await _readyAfterRecovery!.future.timeout(remaining);
+        await _recovery!.timeout(remaining);
       }
       if (_state == PubSubState.closed || _state == PubSubState.closing) {
         throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
@@ -603,69 +584,9 @@ final class PubSubSession {
     _releaseReservation(operation.reservation);
   }
 
-  void _onFrame(RespValue received) {
-    try {
-      final value = switch (received) {
-        RespAttributed(:final value) => value,
-        _ => received,
-      };
-      if (value case RespError(:final code, :final message)) {
-        _transport?.rejectControl(
-          RunnelServerError(message, code: code, cause: value, stackTrace: StackTrace.current),
-        );
-        return;
-      }
-      final parts = switch (value) {
-        RespPush(:final values) => values,
-        _ => throw const FormatException('Expected a Pub/Sub push frame.'),
-      };
-      if (parts.isEmpty) throw const FormatException('Received an empty Pub/Sub frame.');
-      final type = respText(parts.first).toLowerCase();
-      switch (type) {
-        case 'message':
-          if (parts.length != 3) throw const FormatException('Malformed Pub/Sub message.');
-          final channel = respText(parts[1]);
-          if (!_desiredChannels.contains(channel)) return;
-          final payload = _replyBytes(parts[2]);
-          _emit(PubSubMessage(generation: _generation, channel: channel, payload: payload));
-        case 'subscribe':
-          _handleAcknowledgement(parts, ControlKind.subscribe);
-        case 'unsubscribe':
-          _handleAcknowledgement(parts, ControlKind.unsubscribe);
-        case 'pong':
-          break;
-        default:
-          throw FormatException('Unsupported Pub/Sub frame type $type.');
-      }
-    } on FormatException catch (error, stackTrace) {
-      _terminateTerminal(
-        PubSubInterruptionCause.protocolFailure,
-        RunnelProtocolError(
-          error.message,
-          cause: error,
-          deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
-          stackTrace: stackTrace,
-        ),
-      );
-    }
-  }
-
-  void _handleAcknowledgement(List<RespValue> parts, ControlKind kind) {
-    if (parts.length != 3) throw const FormatException('Malformed Pub/Sub acknowledgement.');
-    final channel = respText(parts[1]);
-    switch (kind) {
-      case ControlKind.subscribe:
-        _acknowledgedChannels.add(channel);
-      case ControlKind.unsubscribe:
-        _acknowledgedChannels.remove(channel);
-    }
-    _transport?.acknowledge(kind, channel);
-  }
-
   void _onTransportTerminated(Object error) {
     if (_state == PubSubState.closing || _state == PubSubState.closed) return;
     if (_generation == 0) return;
-    _transport = null;
     if (error is RunnelProtocolError || error is RunnelLimitError || error is FormatException) {
       _terminateTerminal(PubSubInterruptionCause.protocolFailure, error);
       return;
@@ -712,7 +633,7 @@ final class PubSubSession {
   }
 
   Future<void> _startExplicitReconnect(Duration timeout) async {
-    final deadline = ConnectionDeadline(timeout);
+    final deadline = Deadline(timeout);
     final startingChannels = Set<String>.of(_desiredChannels);
     final automaticRecovery = _recovery;
     if (automaticRecovery != null) {
@@ -742,33 +663,30 @@ final class PubSubSession {
     }
     await _beginRecovery(
       immediate: true,
-      overallTimeout: deadline.remaining,
+      deadline: deadline,
       restorationTarget: startingChannels,
     );
   }
 
   Future<void> _beginRecovery({
     required bool immediate,
-    Duration? overallTimeout,
+    Deadline? deadline,
     Set<String>? restorationTarget,
   }) {
     final existing = _recovery;
     if (existing != null) return existing;
-    final ready = Completer<void>();
-    _readyAfterRecovery = ready;
-    unawaited(ready.future.then<void>((_) {}, onError: (_, _) {}));
-    final recovery = overallTimeout == null
-        ? _recoverAutomatically(immediate: immediate)
-        : _recoverExplicitly(overallTimeout, restorationTarget!);
+    final recovery = _recover(
+      immediate: immediate,
+      deadline: deadline,
+      restorationTarget: restorationTarget,
+    );
     _recovery = recovery;
     unawaited(
       recovery.then<void>(
         (_) {
-          if (!ready.isCompleted) ready.complete();
           if (identical(_recovery, recovery)) _recovery = null;
         },
         onError: (Object error, StackTrace stackTrace) {
-          if (!ready.isCompleted) ready.completeError(error, stackTrace);
           if (identical(_recovery, recovery)) _recovery = null;
         },
       ),
@@ -776,64 +694,61 @@ final class PubSubSession {
     return recovery;
   }
 
-  Future<void> _recoverAutomatically({required bool immediate}) async {
+  // Automatic recovery follows current desires without an overall deadline.
+  // Explicit recovery shares one deadline and restores its starting snapshot.
+  Future<void> _recover({
+    required bool immediate,
+    Deadline? deadline,
+    Set<String>? restorationTarget,
+  }) async {
     var skipDelay = immediate;
     while (_state == PubSubState.reconnecting) {
-      if (!skipDelay && !await _waitForReconnectDelay(_backoff.next())) return;
-      skipDelay = false;
       try {
-        await _replaceAndRestore(
-          connectTimeout: _configuration.connectTimeout,
-          controlTimeout: _controlTimeout,
-        );
-        return;
-      } on Object catch (error, stackTrace) {
-        _throwTerminalRecoveryFailure(error, stackTrace, automatic: true);
-        if (_state == PubSubState.reconnecting && _transport != null) {
-          _interrupt(
-            error is TimeoutException
-                ? PubSubInterruptionCause.subscriptionTimeout
-                : PubSubInterruptionCause.networkLoss,
-            error,
-          );
+        if (!skipDelay && !await _waitForReconnectDelay(_backoff.next(), deadline: deadline)) {
+          if (deadline != null) {
+            throw TimeoutException('The explicit Pub/Sub reconnect deadline expired.');
+          }
+          return;
         }
-        if (_state != PubSubState.reconnecting) return;
-      }
-    }
-  }
-
-  Future<void> _recoverExplicitly(Duration timeout, Set<String> restorationTarget) async {
-    final deadline = ConnectionDeadline(timeout);
-    var firstAttempt = true;
-    while (_state == PubSubState.reconnecting) {
-      try {
-        if (!firstAttempt && !await _waitForReconnectDelay(_backoff.next(), deadline: deadline)) {
-          throw TimeoutException('The explicit Pub/Sub reconnect deadline expired.');
-        }
-        firstAttempt = false;
-        final remaining = deadline.remaining;
+        skipDelay = false;
         await _replaceAndRestore(
-          connectTimeout: remaining,
-          controlTimeout: remaining,
+          deadline: deadline,
           restorationTarget: restorationTarget,
-          overallDeadline: deadline,
         );
         return;
-      } on TimeoutException catch (error, stackTrace) {
-        _failExplicitReconnect(error, stackTrace);
       } on Object catch (error, stackTrace) {
-        _throwTerminalRecoveryFailure(error, stackTrace, automatic: false);
-        if (_state != PubSubState.reconnecting) {
-          throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
-        }
-        try {
-          deadline.remaining;
-        } on TimeoutException catch (error, stackTrace) {
+        if (deadline != null && error is TimeoutException) {
           _failExplicitReconnect(error, stackTrace);
         }
+        _throwTerminalRecoveryFailure(error, stackTrace, automatic: deadline == null);
+        if (deadline == null) {
+          if (_state == PubSubState.reconnecting && _transport != null) {
+            _interrupt(
+              error is TimeoutException
+                  ? PubSubInterruptionCause.subscriptionTimeout
+                  : PubSubInterruptionCause.networkLoss,
+              error,
+            );
+          }
+          if (_state != PubSubState.reconnecting) return;
+        } else {
+          if (_state != PubSubState.reconnecting) {
+            throw RunnelClosedError(
+              'The Pub/Sub session is closed.',
+              stackTrace: StackTrace.current,
+            );
+          }
+          try {
+            deadline.remaining;
+          } on TimeoutException catch (error, stackTrace) {
+            _failExplicitReconnect(error, stackTrace);
+          }
+        }
       }
     }
-    throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
+    if (deadline != null) {
+      throw RunnelClosedError('The Pub/Sub session is closed.', stackTrace: StackTrace.current);
+    }
   }
 
   Never _failExplicitReconnect(TimeoutException error, StackTrace stackTrace) {
@@ -865,20 +780,18 @@ final class PubSubSession {
   }
 
   Future<void> _replaceAndRestore({
-    required Duration connectTimeout,
-    required Duration controlTimeout,
+    Deadline? deadline,
     Set<String>? restorationTarget,
-    ConnectionDeadline? overallDeadline,
   }) async {
     final previous = _transport;
     _transport = null;
     await previous?.close();
-    await _openTransport(overallDeadline?.remaining ?? connectTimeout);
+    await _openTransport(deadline ?? Deadline(_connectTimeout));
     _generation++;
     _backoff.reset();
     try {
       await _restoreDesiredChannels(
-        overallDeadline?.remaining ?? controlTimeout,
+        deadline ?? Deadline(_controlTimeout),
         restorationTarget: restorationTarget,
       );
     } on RunnelServerError catch (error) {
@@ -891,8 +804,7 @@ final class PubSubSession {
     _emit(PubSubRestored(generation: _generation, channels: _acknowledgedChannels));
   }
 
-  Future<void> _restoreDesiredChannels(Duration timeout, {Set<String>? restorationTarget}) async {
-    final deadline = ConnectionDeadline(timeout);
+  Future<void> _restoreDesiredChannels(Deadline deadline, {Set<String>? restorationTarget}) async {
     while (_state == PubSubState.reconnecting) {
       final target = restorationTarget == null
           ? Set<String>.of(_desiredChannels)
@@ -921,7 +833,7 @@ final class PubSubSession {
     final name = kind == ControlKind.subscribe ? 'SUBSCRIBE' : 'UNSUBSCRIBE';
     final command = _controlCommand(name, channels);
     final encoded = encodeCommand(command as RedisCommand<Object?>);
-    final connectionLimits = _configuration.connectionLimits;
+    final connectionLimits = _connectionLimits;
     if (encoded.length > connectionLimits.maxPendingBytes) {
       throw RunnelLimitError(
         'Restoration exceeds ${connectionLimits.maxPendingBytes} pending control bytes.',
@@ -933,7 +845,7 @@ final class PubSubSession {
     return _transport!.sendControl(encoded, kind: kind, channels: channels).timeout(timeout);
   }
 
-  Future<bool> _waitForReconnectDelay(Duration delay, {ConnectionDeadline? deadline}) {
+  Future<bool> _waitForReconnectDelay(Duration delay, {Deadline? deadline}) {
     if (_state != PubSubState.reconnecting) return Future.value(false);
     var actualDelay = delay;
     if (deadline != null) {
@@ -975,31 +887,15 @@ final class PubSubSession {
     _events.add(event);
   }
 
-  void _overflow({required int limit}) {
-    if (_state == PubSubState.closed) return;
-    _state = PubSubState.closed;
-    _cancelReconnectDelay();
-    _acknowledgedChannels.clear();
-    final failure = RunnelLimitError(
+  void _overflow({required int limit}) => _terminateTerminal(
+    PubSubInterruptionCause.bufferOverflow,
+    RunnelLimitError(
       'The Pub/Sub event buffer exceeded its configured limit.',
       deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
       limit: limit,
       stackTrace: StackTrace.current,
-    );
-    _failControls(failure);
-    final interruption = PubSubInterrupted(
-      generation: _generation,
-      cause: PubSubInterruptionCause.bufferOverflow,
-      terminal: true,
-      error: Some(RunnelOperation.expected(failure, StackTrace.current)),
-    );
-    _lastInterruption = interruption;
-    _events.finish(discard: true, terminal: interruption);
-    final transport = _transport;
-    _transport = null;
-    final release = _releaseTerminalResources(_openingTransport, transport);
-    _closing ??= release.whenComplete(_notifyClosed);
-  }
+    ),
+  );
 
   Future<void> _releaseTerminalResources(
     ConnectionAttempt? opening,
@@ -1045,12 +941,6 @@ Iterable<List<String>> _chunks(List<String> channels) sync* {
   }
 }
 
-Uint8List _replyBytes(RespValue reply) => switch (reply) {
-  RespBlobString(:final value) => Uint8List.fromList(value),
-  RespSimpleString(:final value) => Uint8List.fromList(utf8.encode(value)),
-  _ => throw FormatException('Expected a Pub/Sub payload, received ${reply.runtimeType}.'),
-};
-
 final class _RestorationRejected implements Exception {
   const _RestorationRejected(this.error);
 
@@ -1071,19 +961,18 @@ final class _ControlOperation {
     required this.channels,
     required this.additions,
     required this.revision,
-    required this._deadline,
+    required Duration deadline,
     required this.reservation,
     required this._onRelease,
-  });
+  }) : _deadline = Deadline(deadline);
 
   final ControlKind kind;
   final List<String> channels;
   final Set<String> additions;
   final int revision;
   final _ControlReservation reservation;
-  final Duration _deadline;
+  final Deadline _deadline;
   final void Function(_ControlOperation) _onRelease;
-  final Stopwatch _stopwatch = Stopwatch()..start();
   final Completer<void> _result = Completer<void>();
   Timer? _timer;
   bool submitted = false;
@@ -1091,7 +980,7 @@ final class _ControlOperation {
 
   Future<void> get future => _result.future;
   bool get isCompleted => _result.isCompleted;
-  Duration get remaining => _deadline - _stopwatch.elapsed;
+  Duration get remaining => _deadline.timeLeft;
 
   void startDeadline(void Function() onExpire) => _timer = Timer(remaining, onExpire);
 
@@ -1120,20 +1009,32 @@ extension PubSubSessionOwnership on PubSubSession {
   /// [onClosed] is invoked once after the socket is released so a parent client can
   /// unregister ownership.
   static Future<PubSubSession> connect(
-    PubSubConnectionConfiguration configuration, {
+    ConnectionConfiguration configuration, {
+    required Duration connectTimeout,
+    required RunnelLimits connectionLimits,
     Duration controlTimeout = const Duration(seconds: 5),
     PubSubLimits limits = const PubSubLimits(),
     void Function(PubSubSession session)? onClosed,
     void Function(PubSubSession session)? onCreated,
   }) async {
     RunnelOperation.validate(() {
-      configuration._validate();
+      connectionLimits.validate();
+      if (connectTimeout <= Duration.zero) {
+        throw ArgumentError.value(connectTimeout, 'connectTimeout', 'must be positive');
+      }
       limits._validate();
       if (controlTimeout <= Duration.zero) {
         throw ArgumentError.value(controlTimeout, 'controlTimeout', 'must be positive');
       }
     });
-    final session = PubSubSession._(configuration, controlTimeout, limits, onClosed);
+    final session = PubSubSession._(
+      configuration,
+      connectTimeout,
+      connectionLimits,
+      controlTimeout,
+      limits,
+      onClosed,
+    );
     onCreated?.call(session);
     try {
       await session._openInitialTransport();

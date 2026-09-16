@@ -209,6 +209,8 @@ child-session lifetimes. Follow the operation into its owner:
 | Responsibility | Implementation |
 | --- | --- |
 | Endpoint parsing and handshake commands | [connection/configuration.dart](lib/src/connection/configuration.dart) |
+| Child ownership across acquisition and release | [connection/resources.dart](lib/src/connection/resources.dart) |
+| Shared operation deadlines | [deadline.dart](lib/src/deadline.dart) |
 | Socket establishment and cancellation | [connection/socket.dart](lib/src/connection/socket.dart), [connection/connection_attempt.dart](lib/src/connection/connection_attempt.dart) |
 | Ordinary command admission, reply order, and pending deadlines | [connection/redis_connection.dart](lib/src/connection/redis_connection.dart) |
 | Typed batch results and MULTI/EXEC decoding | [batch.dart](lib/src/batch.dart), [transaction.dart](lib/src/transaction.dart) |
@@ -216,6 +218,20 @@ child-session lifetimes. Follow the operation into its owner:
 | Pub/Sub socket replies and acknowledgements | [pubsub/transport.dart](lib/src/pubsub/transport.dart) |
 | Bounded pull delivery and reserved terminal events | [pubsub/event_queue.dart](lib/src/pubsub/event_queue.dart) |
 | Command construction and common reply shapes | [commands/](lib/src/commands/), [commands/reply_decoding.dart](lib/src/commands/reply_decoding.dart) |
+
+Each child acquisition keeps one resource registration while its cleanup changes from cancelling
+an opening socket to closing an established connection or session. The ordinary connection leaves
+that registry when acquired so client shutdown can drain its commands separately. Internal calls
+share a `Deadline` through connection, handshake, submission, and decoding phases.
+
+The command connection keeps queued and submitted requests separately. Its decoded execution
+boundary returns decoder Results while wire failures fail the Future; script fallback therefore
+handles server `NOSCRIPT` before exposing the decoder result. Decoding remains inside ordered reply
+handling so a decoding deadline still terminates unanswered submitted siblings.
+
+Pub/Sub transport decodes wire messages and matches acknowledgements, updating session state before
+completing a control. The session owns subscription intent and one recovery loop: automatic recovery
+follows current desired channels, while explicit recovery retains its deadline and starting target.
 
 The event queue owns retained Pub/Sub events and wakes pending pulls without polling. The session
 owns overflow policy, consumer ownership, and channel reconciliation. `Flow.fromPull` consumes the

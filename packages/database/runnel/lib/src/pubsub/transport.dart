@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:conflux/option.dart';
 import 'package:runnel/src/command.dart';
 import 'package:runnel/src/connection/configuration.dart';
 import 'package:runnel/src/connection/connection_attempt.dart' show ConnectionAttempt;
 import 'package:runnel/src/connection/socket.dart';
+import 'package:runnel/src/deadline.dart';
 import 'package:runnel/src/errors.dart';
 import 'package:runnel/src/limits.dart';
 import 'package:runnel/src/resp/resp_parser.dart';
@@ -25,7 +28,9 @@ final class PubSubTransport {
   PubSubTransport._(
     this._socket,
     RunnelLimits limits,
-    this._onFrame,
+    this._acceptsChannel,
+    this._onMessage,
+    this._onAcknowledgement,
     this._onTerminated,
   ) : _parser = RespParser(
         maxFrameBytes: limits.maxFrameBytes,
@@ -41,7 +46,9 @@ final class PubSubTransport {
 
   final ConnectionSocket _socket;
   final RespParser _parser;
-  final void Function(RespValue value) _onFrame;
+  final bool Function(String channel) _acceptsChannel;
+  final void Function(String channel, Uint8List payload) _onMessage;
+  final void Function(ControlKind kind, String channel) _onAcknowledgement;
   final void Function(Object error) _onTerminated;
   final Queue<Completer<RespValue>> _replyWaiters = Queue();
   late final StreamSubscription<Uint8List> _subscription;
@@ -53,9 +60,11 @@ final class PubSubTransport {
   static Future<PubSubTransport> open(
     ConnectionConfiguration configuration, {
     required RunnelLimits limits,
-    required Duration timeout,
+    required Deadline deadline,
     required ConnectionAttempt attempt,
-    required void Function(RespValue value) onFrame,
+    required bool Function(String channel) acceptsChannel,
+    required void Function(String channel, Uint8List payload) onMessage,
+    required void Function(ControlKind kind, String channel) onAcknowledgement,
     required void Function(Object error) onTerminated,
   }) async {
     final socket = await openSocket(
@@ -63,10 +72,17 @@ final class PubSubTransport {
       port: configuration.port,
       tls: configuration.tls,
       securityContext: configuration.securityContext,
-      timeout: timeout,
+      deadline: deadline,
       attempt: attempt,
     );
-    final transport = PubSubTransport._(socket, limits, onFrame, onTerminated);
+    final transport = PubSubTransport._(
+      socket,
+      limits,
+      acceptsChannel,
+      onMessage,
+      onAcknowledgement,
+      onTerminated,
+    );
     if (!attempt.attachResource(transport.close)) {
       await transport.close();
       throw RunnelClosedError(
@@ -78,17 +94,19 @@ final class PubSubTransport {
   }
 
   /// Sends a handshake command and waits for its non-push reply.
-  Future<RespValue> requestReply(RedisCommand<Object?> command, {required Duration timeout}) {
+  Future<RespValue> requestReply(RedisCommand<Object?> command, {required Deadline deadline}) {
     if (_closed) return Future.error(StateError('The Pub/Sub transport is closed.'));
+    final bytes = encodeCommand(command);
+    final remaining = deadline.remaining;
     final completer = Completer<RespValue>();
     _replyWaiters.add(completer);
     try {
-      _socket.add(encodeCommand(command));
+      _socket.add(bytes);
     } on Object catch (error, stackTrace) {
       _replyWaiters.remove(completer);
       completer.completeError(error, stackTrace);
     }
-    return completer.future.timeout(timeout).then((reply) {
+    return completer.future.timeout(remaining).then((reply) {
       if (reply case RespError(:final code, :final message)) {
         throw RunnelServerError(message, code: code, cause: reply, stackTrace: StackTrace.current);
       }
@@ -117,8 +135,9 @@ final class PubSubTransport {
     return pending.completer.future;
   }
 
-  /// Consumes an acknowledgement after the session updates its channel state.
-  void acknowledge(ControlKind kind, String channel) {
+  // Publish acknowledged state before waking the caller awaiting this control.
+  void _acknowledge(ControlKind kind, String channel) {
+    _onAcknowledgement(kind, channel);
     final pending = _pendingControl;
     if (pending == null || pending.kind != kind || !pending.remaining.remove(channel)) return;
     if (pending.remaining.isNotEmpty) return;
@@ -126,8 +145,7 @@ final class PubSubTransport {
     pending.completer.complete();
   }
 
-  /// Rejects the active control, or terminates an unsolicited server error.
-  void rejectControl(Object error) {
+  void _rejectControl(Object error) {
     final pending = _pendingControl;
     if (pending == null) {
       _terminate(error);
@@ -147,11 +165,62 @@ final class PubSubTransport {
         if (_replyWaiters.isNotEmpty && value is! RespPush) {
           _replyWaiters.removeFirst().complete(value);
         } else {
-          _onFrame(received);
+          _onFrame(value);
         }
       }
     } on Object catch (error) {
       _terminate(error);
+    }
+  }
+
+  void _onFrame(RespValue value) {
+    try {
+      if (value case RespError(:final code, :final message)) {
+        _rejectControl(
+          RunnelServerError(message, code: code, cause: value, stackTrace: StackTrace.current),
+        );
+        return;
+      }
+      final parts = switch (value) {
+        RespPush(:final values) => values,
+        _ => throw const FormatException('Expected a Pub/Sub push frame.'),
+      };
+      if (parts.isEmpty) throw const FormatException('Received an empty Pub/Sub frame.');
+      final type = respText(parts.first).toLowerCase();
+      switch (type) {
+        case 'message':
+          if (parts.length != 3) throw const FormatException('Malformed Pub/Sub message.');
+          final channel = respText(parts[1]);
+          if (!_acceptsChannel(channel)) return;
+          final payload = switch (parts[2]) {
+            RespBlobString(:final value) => value,
+            RespSimpleString(:final value) => Uint8List.fromList(utf8.encode(value)),
+            _ => throw FormatException(
+              'Expected a Pub/Sub payload, received ${parts[2].runtimeType}.',
+            ),
+          };
+          _onMessage(channel, payload);
+        case 'subscribe':
+        case 'unsubscribe':
+          if (parts.length != 3) throw const FormatException('Malformed Pub/Sub acknowledgement.');
+          _acknowledge(
+            type == 'subscribe' ? ControlKind.subscribe : ControlKind.unsubscribe,
+            respText(parts[1]),
+          );
+        case 'pong':
+          break;
+        default:
+          throw FormatException('Unsupported Pub/Sub frame type $type.');
+      }
+    } on FormatException catch (error, stackTrace) {
+      _terminate(
+        RunnelProtocolError(
+          error.message,
+          cause: error,
+          deliveryStatus: const Some(RedisDeliveryStatus.outcomeUnknown),
+          stackTrace: stackTrace,
+        ),
+      );
     }
   }
 
