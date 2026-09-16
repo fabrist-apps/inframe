@@ -48,6 +48,16 @@ final class ModelCapabilities with ModelCapabilitiesMappable {
   CapabilitySupport operator [](ModelCapability feature) =>
       values[feature] ?? CapabilitySupport.unknown;
 
+  /// Rejects only features known to be unsupported; unknown remains pass-through.
+  UnsupportedFeatureError? validateRequested(Iterable<ModelCapability> requested) {
+    for (final feature in requested) {
+      if (this[feature] == CapabilitySupport.unsupported) {
+        return UnsupportedFeatureError('Feature is unsupported.', feature: feature.name);
+      }
+    }
+    return null;
+  }
+
   /// Decodes a map using the shipped generated mapper.
   static const fromMap = ModelCapabilitiesMapper.fromMap;
 

@@ -9,6 +9,7 @@ import 'src/generation/generation.dart' as p1;
 import 'src/messages/messages.dart' as p2;
 import 'src/models.dart' as p3;
 import 'src/native.dart' as p4;
+import 'src/settings.dart' as p5;
 
 void initializeMappers() {
   p0.AiErrorMapper.ensureInitialized();
@@ -21,6 +22,7 @@ void initializeMappers() {
   p0.ClientClosedErrorMapper.ensureInitialized();
   p0.DeliveryStateMapper.ensureInitialized();
   p1.GenerationOptionsMapper.ensureInitialized();
+  p1.ResolvedGenerationOptionsMapper.ensureInitialized();
   p1.GenerationRequestMapper.ensureInitialized();
   p1.UsageMapper.ensureInitialized();
   p1.GenerationResultMapper.ensureInitialized();
@@ -40,5 +42,10 @@ void initializeMappers() {
   p4.ResponseMetadataMapper.ensureInitialized();
   p4.NativePayloadMapper.ensureInitialized();
   p4.NativeResponseMapper.ensureInitialized();
+  p5.SettingMapper.ensureInitialized();
+  p5.InheritSettingMapper.ensureInitialized();
+  p5.ValueSettingMapper.ensureInitialized();
+  p5.ClearSettingMapper.ensureInitialized();
+  p5.NativeFieldMapper.ensureInitialized();
 }
 

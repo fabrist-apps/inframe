@@ -1,38 +1,96 @@
+import 'package:artificer_core/src/errors.dart';
 import 'package:artificer_core/src/messages/messages.dart';
 import 'package:artificer_core/src/native.dart';
 import 'package:artificer_core/src/serialization.dart';
+import 'package:artificer_core/src/settings.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 
 part 'generation.mapper.dart';
 
-/// Common request options; optional sampling values are omitted unless supplied.
+/// Common per-request overrides; omitted options inherit model and SDK defaults.
 @MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
 final class GenerationOptions with GenerationOptionsMappable {
-  /// Creates a [GenerationOptions] retaining the supplied values.
+  /// Creates overrides without resolving or copying their values.
   const GenerationOptions({
-    this.maxOutputTokens = 4096,
-    this.temperature,
-    this.topP,
-    this.stop = const [],
+    this.maxOutputTokens = const Setting.inherit(),
+    this.temperature = const Setting.inherit(),
+    this.topP = const Setting.inherit(),
+    this.stop = const Setting.inherit(),
   });
 
-  /// Maximum output tokens; the common default is 4096.
-  final int maxOutputTokens;
+  /// Maximum output tokens; the inherited SDK default is 4096.
+  final Setting<int> maxOutputTokens;
 
-  /// Optional sampling temperature, omitted when absent.
-  final double? temperature;
+  /// Optional temperature; absent by default.
+  final Setting<double> temperature;
 
-  /// Optional nucleus sampling value, omitted when absent.
-  final double? topP;
+  /// Optional nucleus sampling; absent by default.
+  final Setting<double> topP;
 
-  /// Stop sequences, preserving caller order.
-  final List<String> stop;
+  /// Stop sequences; a replacement list is never concatenated.
+  final Setting<List<String>> stop;
 
-  /// Decodes a map using the shipped generated mapper.
+  /// Resolves SDK defaults, model defaults, then these per-call overrides.
+  ResolvedGenerationOptions resolve([GenerationOptions defaults = const GenerationOptions()]) =>
+      ResolvedGenerationOptions(
+        maxOutputTokens: maxOutputTokens.resolve(defaults.maxOutputTokens.resolve(4096)),
+        temperature: temperature.resolve(defaults.temperature.resolve(null)),
+        topP: topP.resolve(defaults.topP.resolve(null)),
+        stop: stop.resolve(defaults.stop.resolve(const [])),
+      );
+
+  /// Decodes persisted map data.
   static const fromMap = GenerationOptionsMapper.fromMap;
 
-  /// Decodes a JSON string using the shipped generated mapper.
+  /// Decodes a persisted JSON string.
   static const fromJson = GenerationOptionsMapper.fromJson;
+}
+
+/// Resolved common options ready for endpoint-specific field translation.
+@MappableClass(generateMethods: GenerateMethods.encode | GenerateMethods.decode)
+final class ResolvedGenerationOptions with ResolvedGenerationOptionsMappable {
+  /// Creates resolved values; null means omit the corresponding native field.
+  const ResolvedGenerationOptions({this.maxOutputTokens, this.temperature, this.topP, this.stop});
+
+  /// Maximum output tokens, or an explicitly cleared default.
+  final int? maxOutputTokens;
+
+  /// Optional sampling temperature.
+  final double? temperature;
+
+  /// Optional nucleus sampling.
+  final double? topP;
+
+  /// Stop sequences, or an explicitly cleared value.
+  final List<String>? stop;
+
+  /// Returns a typed configuration failure before network work.
+  InvalidRequestError? validate() {
+    if (maxOutputTokens != null && maxOutputTokens! <= 0) {
+      return const InvalidRequestError('maxOutputTokens must be positive.');
+    }
+    if (temperature != null && (!temperature!.isFinite || temperature! < 0)) {
+      return const InvalidRequestError('temperature must be finite and nonnegative.');
+    }
+    if (topP != null && (!topP!.isFinite || topP! < 0 || topP! > 1)) {
+      return const InvalidRequestError('topP must be between zero and one.');
+    }
+    return null;
+  }
+
+  /// Encodes resolved native fields without domain tags or Setting wrappers.
+  Map<String, Object?> toWire({String maxOutputTokensKey = 'max_tokens'}) => {
+    if (maxOutputTokens != null) maxOutputTokensKey: maxOutputTokens,
+    if (temperature != null) 'temperature': temperature,
+    if (topP != null) 'top_p': topP,
+    if (stop != null && stop!.isNotEmpty) 'stop': stop,
+  };
+
+  /// Decodes persisted map data.
+  static const fromMap = ResolvedGenerationOptionsMapper.fromMap;
+
+  /// Decodes a persisted JSON string.
+  static const fromJson = ResolvedGenerationOptionsMapper.fromJson;
 }
 
 /// One foreground inference with explicit ordered history.

@@ -56,3 +56,19 @@ dart analyze
 ```
 
 Generate from this package with `dart run build_runner build`. CI regenerates and requires a clean diff. The separate consumer fixture resolves and runs outside the workspace using only public imports and shipped mappers. HTTP tests use loopback servers and require no live credentials.
+
+## Options and preflight
+
+`GenerationOptions` carries `Setting<T>` overrides. `inherit()` retains model defaults, `set(value)` replaces a scalar or complete collection, and `clear()` omits the native field. `options.resolve(modelDefaults)` applies SDK defaults first; its `toWire()` emits plain JSON fields. Optional sampling fields are absent unless supplied, and the default output limit is 4096 tokens.
+
+```dart
+final overrides = GenerationOptions(
+  temperature: const Setting.clear(),
+  stop: Setting.set(['END']),
+);
+final nativeOptions = overrides.resolve(modelDefaults).toWire();
+```
+
+`NativeField<T>` separately represents native omitted/null/present values. Use `NativeField.fromJson<String>(json)` to retain generic type arguments through the public decoding alias. A native field is resolved into a wire object with `writeTo`, never by sending its persisted form.
+
+Provider codecs use `TextRequestPolicy` from `protocols.dart` with their pinned typed fields, hosted-tool inventory, unsupported options and storage policy. Apply it inside the lazy operation. It returns typed preflight failures for collisions and known deferred capabilities while retaining neutral new text extras. `ModelCapabilities.validateRequested` rejects only known unsupported features; unknown model support remains pass-through.

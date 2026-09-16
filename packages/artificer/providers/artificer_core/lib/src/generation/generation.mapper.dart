@@ -81,6 +81,7 @@ class GenerationOptionsMapper extends ClassMapperBase<GenerationOptions> {
   static GenerationOptionsMapper ensureInitialized() {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = GenerationOptionsMapper._());
+      SettingMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -88,31 +89,35 @@ class GenerationOptionsMapper extends ClassMapperBase<GenerationOptions> {
   @override
   final String id = 'GenerationOptions';
 
-  static int _$maxOutputTokens(GenerationOptions v) => v.maxOutputTokens;
-  static const Field<GenerationOptions, int> _f$maxOutputTokens = Field(
-    'maxOutputTokens',
-    _$maxOutputTokens,
-    opt: true,
-    def: 4096,
-  );
-  static double? _$temperature(GenerationOptions v) => v.temperature;
-  static const Field<GenerationOptions, double> _f$temperature = Field(
+  static Setting<int> _$maxOutputTokens(GenerationOptions v) =>
+      v.maxOutputTokens;
+  static const Field<GenerationOptions, Setting<int>> _f$maxOutputTokens =
+      Field(
+        'maxOutputTokens',
+        _$maxOutputTokens,
+        opt: true,
+        def: const Setting.inherit(),
+      );
+  static Setting<double> _$temperature(GenerationOptions v) => v.temperature;
+  static const Field<GenerationOptions, Setting<double>> _f$temperature = Field(
     'temperature',
     _$temperature,
     opt: true,
+    def: const Setting.inherit(),
   );
-  static double? _$topP(GenerationOptions v) => v.topP;
-  static const Field<GenerationOptions, double> _f$topP = Field(
+  static Setting<double> _$topP(GenerationOptions v) => v.topP;
+  static const Field<GenerationOptions, Setting<double>> _f$topP = Field(
     'topP',
     _$topP,
     opt: true,
+    def: const Setting.inherit(),
   );
-  static List<String> _$stop(GenerationOptions v) => v.stop;
-  static const Field<GenerationOptions, List<String>> _f$stop = Field(
+  static Setting<List<String>> _$stop(GenerationOptions v) => v.stop;
+  static const Field<GenerationOptions, Setting<List<String>>> _f$stop = Field(
     'stop',
     _$stop,
     opt: true,
-    def: const [],
+    def: const Setting.inherit(),
   );
 
   @override
@@ -153,6 +158,94 @@ mixin GenerationOptionsMappable {
   Map<String, dynamic> toMap() {
     return GenerationOptionsMapper.ensureInitialized()
         .encodeMap<GenerationOptions>(this as GenerationOptions);
+  }
+}
+
+class ResolvedGenerationOptionsMapper
+    extends ClassMapperBase<ResolvedGenerationOptions> {
+  ResolvedGenerationOptionsMapper._();
+
+  static ResolvedGenerationOptionsMapper? _instance;
+  static ResolvedGenerationOptionsMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(
+        _instance = ResolvedGenerationOptionsMapper._(),
+      );
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'ResolvedGenerationOptions';
+
+  static int? _$maxOutputTokens(ResolvedGenerationOptions v) =>
+      v.maxOutputTokens;
+  static const Field<ResolvedGenerationOptions, int> _f$maxOutputTokens = Field(
+    'maxOutputTokens',
+    _$maxOutputTokens,
+    opt: true,
+  );
+  static double? _$temperature(ResolvedGenerationOptions v) => v.temperature;
+  static const Field<ResolvedGenerationOptions, double> _f$temperature = Field(
+    'temperature',
+    _$temperature,
+    opt: true,
+  );
+  static double? _$topP(ResolvedGenerationOptions v) => v.topP;
+  static const Field<ResolvedGenerationOptions, double> _f$topP = Field(
+    'topP',
+    _$topP,
+    opt: true,
+  );
+  static List<String>? _$stop(ResolvedGenerationOptions v) => v.stop;
+  static const Field<ResolvedGenerationOptions, List<String>> _f$stop = Field(
+    'stop',
+    _$stop,
+    opt: true,
+  );
+
+  @override
+  final MappableFields<ResolvedGenerationOptions> fields = const {
+    #maxOutputTokens: _f$maxOutputTokens,
+    #temperature: _f$temperature,
+    #topP: _f$topP,
+    #stop: _f$stop,
+  };
+
+  static ResolvedGenerationOptions _instantiate(DecodingData data) {
+    return ResolvedGenerationOptions(
+      maxOutputTokens: data.dec(_f$maxOutputTokens),
+      temperature: data.dec(_f$temperature),
+      topP: data.dec(_f$topP),
+      stop: data.dec(_f$stop),
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static ResolvedGenerationOptions fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<ResolvedGenerationOptions>(map);
+  }
+
+  static ResolvedGenerationOptions fromJson(String json) {
+    return ensureInitialized().decodeJson<ResolvedGenerationOptions>(json);
+  }
+}
+
+mixin ResolvedGenerationOptionsMappable {
+  String toJson() {
+    return ResolvedGenerationOptionsMapper.ensureInitialized()
+        .encodeJson<ResolvedGenerationOptions>(
+          this as ResolvedGenerationOptions,
+        );
+  }
+
+  Map<String, dynamic> toMap() {
+    return ResolvedGenerationOptionsMapper.ensureInitialized()
+        .encodeMap<ResolvedGenerationOptions>(
+          this as ResolvedGenerationOptions,
+        );
   }
 }
 
