@@ -341,3 +341,257 @@ final class GenerationFinished extends GenerationEvent with GenerationFinishedMa
   /// Decodes a JSON string using the shipped generated mapper.
   static const fromJson = GenerationFinishedMapper.fromJson;
 }
+
+/// Semantic content expected for a stable local part.
+@MappableEnum()
+enum GenerationPartKind {
+  /// Visible model text.
+  text,
+
+  /// Public reasoning summary only.
+  reasoning,
+
+  /// Refusal text.
+  refusal,
+
+  /// Caller executed action.
+  toolCall,
+
+  /// Provider executed action record.
+  providerTool,
+
+  /// Unnormalized native content.
+  opaque,
+}
+
+/// Closed ContentDelta variants.
+@MappableClass(
+  discriminatorKey: 'type',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+sealed class ContentDelta with ContentDeltaMappable {
+  /// Creates a variant.
+  const ContentDelta();
+
+  /// Decodes persisted map data.
+  static const fromMap = ContentDeltaMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ContentDeltaMapper.fromJson;
+}
+
+/// TextDelta.
+@MappableClass(
+  discriminatorValue: 'text',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class TextDelta extends ContentDelta with TextDeltaMappable {
+  /// Creates the value retaining supplied collections.
+  const TextDelta({required this.text});
+
+  /// Text.
+  final String text;
+
+  /// Decodes persisted map data.
+  static const fromMap = TextDeltaMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = TextDeltaMapper.fromJson;
+}
+
+/// ReasoningDelta.
+@MappableClass(
+  discriminatorValue: 'reasoning',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class ReasoningDelta extends ContentDelta with ReasoningDeltaMappable {
+  /// Creates the value retaining supplied collections.
+  const ReasoningDelta({required this.text});
+
+  /// Text.
+  final String text;
+
+  /// Decodes persisted map data.
+  static const fromMap = ReasoningDeltaMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ReasoningDeltaMapper.fromJson;
+}
+
+/// ToolArgumentsDelta.
+@MappableClass(
+  discriminatorValue: 'toolArguments',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class ToolArgumentsDelta extends ContentDelta with ToolArgumentsDeltaMappable {
+  /// Creates the value retaining supplied collections.
+  const ToolArgumentsDelta({required this.text});
+
+  /// Text.
+  final String text;
+
+  /// Decodes persisted map data.
+  static const fromMap = ToolArgumentsDeltaMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ToolArgumentsDeltaMapper.fromJson;
+}
+
+/// GenerationStarted.
+@MappableClass(
+  discriminatorValue: 'started',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class GenerationStarted extends GenerationEvent with GenerationStartedMappable {
+  /// Creates the value retaining supplied collections.
+  const GenerationStarted({this.responseId, this.requestId});
+
+  /// ResponseId.
+  final String? responseId;
+
+  /// RequestId.
+  final String? requestId;
+
+  /// Decodes persisted map data.
+  static const fromMap = GenerationStartedMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = GenerationStartedMapper.fromJson;
+}
+
+/// PartStarted.
+@MappableClass(
+  discriminatorValue: 'partStarted',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class PartStarted extends GenerationEvent with PartStartedMappable {
+  /// Creates the value retaining supplied collections.
+  const PartStarted({
+    required this.id,
+    required this.index,
+    required this.kind,
+    this.callId,
+    this.name,
+    this.owner,
+  });
+
+  /// Id.
+  final String id;
+
+  /// Index.
+  final int index;
+
+  /// Kind.
+  final GenerationPartKind kind;
+
+  /// CallId.
+  final String? callId;
+
+  /// Name.
+  final String? name;
+
+  /// Owner.
+  final ToolExecutionOwner? owner;
+
+  /// Decodes persisted map data.
+  static const fromMap = PartStartedMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = PartStartedMapper.fromJson;
+}
+
+/// PartDelta.
+@MappableClass(
+  discriminatorValue: 'partDelta',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class PartDelta extends GenerationEvent with PartDeltaMappable {
+  /// Creates the value retaining supplied collections.
+  const PartDelta({required this.id, required this.delta});
+
+  /// Id.
+  final String id;
+
+  /// Delta.
+  final ContentDelta delta;
+
+  /// Decodes persisted map data.
+  static const fromMap = PartDeltaMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = PartDeltaMapper.fromJson;
+}
+
+/// PartFinished.
+@MappableClass(
+  discriminatorValue: 'partFinished',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class PartFinished extends GenerationEvent with PartFinishedMappable {
+  /// Creates the value retaining supplied collections.
+  const PartFinished({required this.id, required this.part});
+
+  /// Id.
+  final String id;
+
+  /// Part.
+  final OutputPart part;
+
+  /// Decodes persisted map data.
+  static const fromMap = PartFinishedMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = PartFinishedMapper.fromJson;
+}
+
+/// UsageUpdated.
+@MappableClass(
+  discriminatorValue: 'usageUpdated',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class UsageUpdated extends GenerationEvent with UsageUpdatedMappable {
+  /// Creates the value retaining supplied collections.
+  const UsageUpdated({required this.usage});
+
+  /// Usage.
+  final Usage usage;
+
+  /// Decodes persisted map data.
+  static const fromMap = UsageUpdatedMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = UsageUpdatedMapper.fromJson;
+}
+
+/// ProviderEvent.
+@MappableClass(
+  discriminatorValue: 'providerEvent',
+  generateMethods: GenerateMethods.encode | GenerateMethods.decode,
+)
+final class ProviderEvent extends GenerationEvent with ProviderEventMappable {
+  /// Creates the value retaining supplied collections.
+  const ProviderEvent({
+    required this.providerId,
+    required this.api,
+    required this.event,
+    required this.data,
+  });
+
+  /// ProviderId.
+  final String providerId;
+
+  /// Api.
+  final String api;
+
+  /// Event.
+  final String event;
+
+  /// Data.
+  final Object? data;
+
+  /// Decodes persisted map data.
+  static const fromMap = ProviderEventMapper.fromMap;
+
+  /// Decodes persisted JSON.
+  static const fromJson = ProviderEventMapper.fromJson;
+}

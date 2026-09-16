@@ -6,8 +6,10 @@ import 'dart:typed_data';
 import 'package:artificer_core/src/errors.dart';
 import 'package:artificer_core/src/json/json_value.dart';
 import 'package:artificer_core/src/native.dart';
+import 'package:artificer_core/src/protocols/sse.dart';
 import 'package:artificer_core/src/transport/provider_dio_adapter.dart';
 import 'package:conflux/effect.dart';
+import 'package:conflux/flow.dart';
 import 'package:dio/dio.dart';
 
 /// A decoded native JSON value together with its HTTP metadata.
@@ -58,7 +60,64 @@ class ProviderHttpClient {
     String method = 'POST',
     Map<String, Object?> headers = const {},
     Object? body,
-  }) => Effect.defer((_) {
+  }) => Effect.using(
+    _openRequest(
+      url,
+      method,
+      headers,
+      body,
+    ).flatMap((opened, _) => _io(opened.handle, () => _decodeJson(opened.response))),
+  );
+
+  /// Consumes one bounded SSE response within this provider's request scope.
+  ///
+  /// [consume] may classify native events using their HTTP [ResponseMetadata].
+  /// Append final-result emission after this entire Flow: it completes transport
+  /// cleanup before normal completion, early take, cancellation, or failure.
+  /// Each consumption allocates a fresh request, parser, and bounded event queue.
+  Flow<T, AiError> withSse<T>({
+    required Uri url,
+    required Flow<T, AiError> Function(ResponseMetadata metadata, Flow<SseEvent, AiError> events)
+    consume,
+    String method = 'POST',
+    Map<String, Object?> headers = const {},
+    Object? body,
+    int eventCapacity = 16,
+    int maxEventBytes = 8 * 1024 * 1024,
+  }) {
+    if (eventCapacity <= 0) throw ArgumentError.value(eventCapacity, 'eventCapacity');
+    final parser = SseParser(maxEventBytes: maxEventBytes);
+    return _openRequest(url, method, headers, body).asFlow().concatMap((opened, _) {
+      final response = opened.response;
+      if (response.statusCode! < 200 || response.statusCode! >= 300) {
+        return _io(opened.handle, () => _decodeJson(response)).asFlow().concatMap<T>(
+          (_, _) => Flow.fail(const ProtocolError('Expected an SSE response.')),
+        );
+      }
+      final responseBody = response.data;
+      if (responseBody == null) return Flow.fail(const ProtocolError('Missing response body.'));
+      final events =
+          Flow.fromStream<SseEvent, AiError>(
+            (_) => parser.decode(responseBody.stream),
+            capacity: eventCapacity,
+            onError: (error, stack, _) => _mapError(error, stack, opened.handle),
+          ).catchError(
+            (error, _) => opened.handle.interrupted
+                ? Effect.failCause<SseEvent, AiError>(const Interrupted('Provider closed')).asFlow()
+                : Flow.fail(error),
+          );
+      // Abort reads before closing the async generator's subscription. This
+      // unblocks a parser waiting for the next chunk when the consumer stops.
+      return consume(_metadata(response), events).ensuring(_dispose(opened.handle));
+    });
+  }
+
+  Effect<_OpenedResponse, AiError> _openRequest(
+    Uri url,
+    String method,
+    Map<String, Object?> headers,
+    Object? body,
+  ) => Effect.defer((_) {
     if (_closing != null) return Effect.fail(const ClientClosedError());
     if (!url.hasScheme || !url.hasAuthority || !['http', 'https'].contains(url.scheme)) {
       return Effect.fail(const InvalidRequestError('An absolute HTTP endpoint is required.'));
@@ -68,64 +127,74 @@ class ProviderHttpClient {
     } on FormatException {
       return Effect.fail(const InvalidRequestError('Request body must contain JSON values.'));
     }
-    return Effect.using(
-      Effect.build<ProviderJsonResponse, AiError>(($) async {
-        final handle = await $.acquireRelease(
-          Effect.defer<RequestLifetime, AiError>((_) {
-            if (_closing != null) return Effect.fail(const ClientClosedError());
-            final handle = RequestLifetime();
-            _active.add(handle);
-            return Effect.succeed(handle);
-          }),
-          release: (handle, _) => Effect.tryFuture<void, Never>((_) async {
-            try {
-              await handle.dispose();
-            } finally {
-              _active.remove(handle);
-              handle.finishOperation();
-            }
-          }, onError: (error, stack, _) => Error.throwWithStackTrace(error, stack)),
-        );
-        return $(
-          Effect.tryFuture<ProviderJsonResponse, AiError>(
-            (_) => _request(handle, url, method, headers, body),
-            onCancel: (_) => handle.dispose(interrupt: true),
-            onError: (error, stack, _) => _mapError(error, stack, handle),
-          ).catchError(
-            (error, _) => handle.interrupted
-                ? Effect.failCause(const Interrupted('Provider closed'))
-                : Effect.fail(error),
+    return Effect.build<_OpenedResponse, AiError>(($) async {
+      final handle = await $.acquireRelease(
+        Effect.defer<RequestLifetime, AiError>((_) {
+          if (_closing != null) return Effect.fail(const ClientClosedError());
+          final handle = RequestLifetime();
+          _active.add(handle);
+          return Effect.succeed(handle);
+        }),
+        release: (handle, _) => _release(handle),
+      );
+      final response = await $(
+        _io(
+          handle,
+          () => _dio.fetch<ResponseBody>(
+            RequestOptions(
+              path: url.toString(),
+              method: method,
+              headers: headers,
+              data: body == null ? null : jsonEncode(body),
+              contentType: Headers.jsonContentType,
+              responseType: ResponseType.stream,
+              connectTimeout: connectTimeout,
+              sendTimeout: Duration.zero,
+              receiveTimeout: Duration.zero,
+              followRedirects: false,
+              maxRedirects: 0,
+              validateStatus: (_) => true,
+              cancelToken: handle.token,
+              extra: {ProviderDioAdapter.lifetimeKey: handle},
+            ),
           ),
-        );
-      }),
-    );
+        ),
+      );
+      return _OpenedResponse(handle, response);
+    });
   });
 
-  Future<ProviderJsonResponse> _request(
-    RequestLifetime handle,
-    Uri url,
-    String method,
-    Map<String, Object?> headers,
-    Object? body,
-  ) async {
-    final response = await _dio.fetch<ResponseBody>(
-      RequestOptions(
-        path: url.toString(),
-        method: method,
-        headers: headers,
-        data: body == null ? null : jsonEncode(body),
-        contentType: Headers.jsonContentType,
-        responseType: ResponseType.stream,
-        connectTimeout: connectTimeout,
-        sendTimeout: Duration.zero,
-        receiveTimeout: Duration.zero,
-        followRedirects: false,
-        maxRedirects: 0,
-        validateStatus: (_) => true,
-        cancelToken: handle.token,
-        extra: {ProviderDioAdapter.lifetimeKey: handle},
-      ),
-    );
+  Effect<T, AiError> _io<T>(RequestLifetime handle, Future<T> Function() operation) =>
+      Effect.tryFuture<T, AiError>(
+        (_) => operation(),
+        onCancel: (_) => handle.dispose(interrupt: true),
+        onError: (error, stack, _) => _mapError(error, stack, handle),
+      ).catchError(
+        (error, _) => handle.interrupted
+            ? Effect.failCause(const Interrupted('Provider closed'))
+            : Effect.fail(error),
+      );
+
+  Effect<void, Never> _dispose(RequestLifetime handle) => Effect.tryFuture(
+    (_) => handle.dispose(),
+    onError: (error, stack, _) => Error.throwWithStackTrace(error, stack),
+  );
+
+  Effect<void, Never> _release(RequestLifetime handle) => Effect.tryFuture((_) async {
+    try {
+      await handle.dispose();
+    } finally {
+      _active.remove(handle);
+    }
+  }, onError: (error, stack, _) => Error.throwWithStackTrace(error, stack));
+
+  ResponseMetadata _metadata(Response<ResponseBody> response) => ResponseMetadata(
+    statusCode: response.statusCode!,
+    headers: response.headers.map,
+    requestId: response.headers.value('x-request-id') ?? response.headers.value('request-id'),
+  );
+
+  Future<ProviderJsonResponse> _decodeJson(Response<ResponseBody> response) async {
     final bytes = BytesBuilder(copy: false);
     final responseBody = response.data;
     if (responseBody == null) throw const ProtocolError('Missing response body.');
@@ -142,11 +211,7 @@ class ProviderHttpClient {
     } on FormatException {
       throw const ProtocolError('Response is not valid UTF-8 JSON.');
     }
-    final metadata = ResponseMetadata(
-      statusCode: response.statusCode!,
-      headers: response.headers.map,
-      requestId: response.headers.value('x-request-id') ?? response.headers.value('request-id'),
-    );
+    final metadata = _metadata(response);
     if (metadata.statusCode < 200 || metadata.statusCode >= 300) {
       throw ProviderError(
         'Provider returned an unsuccessful HTTP status.',
@@ -188,15 +253,10 @@ class ProviderHttpClient {
 
   Future<void> _close() async {
     try {
-      await Future.wait(
-        _active.toList().map((handle) async {
-          try {
-            await handle.dispose(interrupt: true);
-          } finally {
-            await handle.finished;
-          }
-        }),
-      );
+      // Caller Flow callbacks are outside this client's ownership. Joining the
+      // transport fence, rather than their cursor scopes, also permits callers
+      // to close a provider from inside a response observer without self-waiting.
+      await Future.wait(_active.toList().map((handle) => handle.dispose(interrupt: true)));
     } finally {
       if (_ownsDio) _dio.close(force: true);
     }
@@ -207,4 +267,10 @@ class ProviderHttpClient {
     (_) => close(),
     onError: (error, stack, _) => Error.throwWithStackTrace(error, stack),
   );
+}
+
+class _OpenedResponse {
+  _OpenedResponse(this.handle, this.response);
+  final RequestLifetime handle;
+  final Response<ResponseBody> response;
 }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:artificer_core/src/json/json_value.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 
 part 'tools.mapper.dart';
@@ -200,8 +201,9 @@ sealed class ToolArguments with ToolArgumentsMappable {
   /// Parses function arguments without fabricating an object on malformed output.
   static ToolArguments parse(String original) {
     try {
-      final value = jsonDecode(original);
-      if (value is Map<String, dynamic>) return JsonToolArguments(value: value, original: original);
+      final Object? value = jsonDecode(original);
+      JsonValues.validate(value);
+      if (value is Map<String, Object?>) return JsonToolArguments(value: value, original: original);
       return MalformedToolArguments(original: original, issue: 'Expected a JSON object.');
     } on FormatException catch (error) {
       return MalformedToolArguments(original: original, issue: error.message);

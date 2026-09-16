@@ -104,6 +104,15 @@ class NativePayloadMapper extends ClassMapperBase<NativePayload> {
   );
   static Object? _$data(NativePayload v) => v.data;
   static const Field<NativePayload, Object> _f$data = Field('data', _$data);
+  static List<Map<String, Object?>> _$unknownEvents(NativePayload v) =>
+      v.unknownEvents;
+  static const Field<NativePayload, List<Map<String, Object?>>>
+  _f$unknownEvents = Field(
+    'unknownEvents',
+    _$unknownEvents,
+    opt: true,
+    def: const [],
+  );
 
   @override
   final MappableFields<NativePayload> fields = const {
@@ -111,6 +120,7 @@ class NativePayloadMapper extends ClassMapperBase<NativePayload> {
     #api: _f$api,
     #modelId: _f$modelId,
     #data: _f$data,
+    #unknownEvents: _f$unknownEvents,
   };
 
   static NativePayload _instantiate(DecodingData data) {
@@ -119,6 +129,7 @@ class NativePayloadMapper extends ClassMapperBase<NativePayload> {
       api: data.dec(_f$api),
       modelId: data.dec(_f$modelId),
       data: data.dec(_f$data),
+      unknownEvents: data.dec(_f$unknownEvents),
     );
   }
 

@@ -95,3 +95,11 @@ final program = Effect.build<EmbeddingResult, AiError>(($) async {
 ```
 
 The application's Runtime runs the complete program. Native results retain full unknown JSON, actual model identity and available usage. Normalization restores provider indices and rejects wrong counts, duplicate/missing indices, empty/nonfinite vectors and inconsistent/requested dimensions. It never rescales vectors or splits an oversized batch. `raw.value.normalize(request, raw.raw, metadata: raw.metadata)` normalizes an existing response without another inference request.
+
+## Streaming
+
+`ProviderHttpClient.withSse` gives a codec response metadata and a bounded Flow of `SseEvent` frames. Defaults are 16 buffered events and 8 MiB per SSE event; `GenerationAssembler` bounds assembled output and native data to 64 MiB. Limits are configurable positive values. Parsing preserves backpressure even when a single network chunk contains many frames.
+
+Codecs assign stable local part IDs, feed typed events to `GenerationAssembler`, and recognize their endpoint's terminal semantics. Append `GenerationFinished` after `withSse` completes so transport cleanup precedes final success. EOF alone is not success: incomplete parts, malformed frames, native errors and size limits retain typed failures and available partial output. Unknown native events remain in the final native payload without collecting every known delta.
+
+Each consumption opens a fresh request. Early `take`, interruption and provider close release owned transport resources; closing does not wait for arbitrary application callbacks consuming the stream.

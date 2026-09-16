@@ -67,13 +67,6 @@ class RequestLifetime {
   /// Cancellation signal unique to this execution.
   final CancelToken token = CancelToken();
   final Completer<void> _fetchCompleted = Completer<void>();
-  final Completer<void> _operationFinished = Completer<void>();
-
-  /// Completes after the operation's protected finalizer leaves client ownership.
-  Future<void> get finished => _operationFinished.future;
-
-  /// Marks the protected operation finalizer complete, including failed cleanup.
-  void finishOperation() => _operationFinished.complete();
 
   /// Conservative evidence about whether a failed attempt reached the service.
   DeliveryState get deliveryState => _response != null

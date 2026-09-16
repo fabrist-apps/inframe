@@ -33,6 +33,7 @@ final class NativePayload with NativePayloadMappable {
     required this.api,
     required this.modelId,
     required this.data,
+    this.unknownEvents = const [],
   });
 
   /// Stable provider identity.
@@ -46,6 +47,9 @@ final class NativePayload with NativePayloadMappable {
 
   /// Complete JSON value, including unknown nested fields.
   final Object? data;
+
+  /// Unknown stream records retained separately from the assembled native response.
+  final List<Map<String, Object?>> unknownEvents;
 
   /// Decodes a map using the shipped generated mapper.
   static const fromMap = NativePayloadMapper.fromMap;
