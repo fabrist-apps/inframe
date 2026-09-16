@@ -5,6 +5,7 @@ library;
 import 'package:dart_mappable/dart_mappable.dart';
 
 export 'artificer_core.init.dart';
+export 'src/embeddings/embeddings.dart';
 export 'src/errors.dart';
 export 'src/generation/generation.dart';
 export 'src/messages/messages.dart';

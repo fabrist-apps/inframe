@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:artificer_core/artificer_core.dart';
 import 'package:artificer_core/transport.dart';
+import 'package:artificer_core/protocols.dart';
 import 'package:conflux/effect.dart';
 import 'package:conflux/flow.dart';
 import 'package:dart_mappable/dart_mappable.dart';
@@ -12,12 +13,14 @@ final class TestOptions {
   final String tag;
 }
 
-final class TextProvider implements LanguageModelProvider {
+final class TextProvider implements LanguageModelProvider, EmbeddingModelProvider {
   TextProvider(this.endpoint);
   final Uri endpoint;
   final client = ProviderHttpClient();
   @override
   TextModel languageModel(String modelId) => TextModel(this, modelId);
+  @override
+  CompatibleEmbeddingModel embeddingModel(String modelId) => CompatibleEmbeddingModel(providerId: 'fixture', modelId: modelId, client: client, endpoint: endpoint.resolve('/embed'));
   Future<void> close() => client.close();
 }
 
@@ -69,7 +72,9 @@ Future<void> main() async {
   server.listen((request) async {
     bodies.add(jsonDecode(await utf8.decoder.bind(request).join()) as Map<String, Object?>);
     request.response.headers.contentType = ContentType.json;
-    request.response.write(jsonEncode({'reply': 'hello', 'unknown': {'nested': [1, true]}}));
+    request.response.write(jsonEncode(request.uri.path == '/embed'
+      ? {'model': 'actual-embedding-model', 'data': [{'index': 0, 'embedding': [0.25, 0.5]}], 'unknown': true}
+      : {'reply': 'hello', 'unknown': {'nested': [1, true]}}));
     await request.response.close();
   });
   final provider = TextProvider(Uri.parse('http://127.0.0.1:${server.port}/generate'));
@@ -107,6 +112,19 @@ Future<void> main() async {
     var rejected = false;
     try { AssistantMessage.fromMap(unknownVersion); } on Object { rejected = true; }
     if (!rejected) throw StateError('unknown version accepted');
+    final composed = Effect.build<EmbeddingResult, AiError>(($) async {
+      final reply = await $(provider.languageModel('text-model').generate(request));
+      return await $(provider.embeddingModel('embedding-alias').embed(
+        EmbeddingRequest(items: [EmbeddingInput.text(reply.text)]),
+      ));
+    });
+    final embeddingExit = await runtime.run(composed);
+    if (embeddingExit case Succeeded(:final value)) {
+      final restored = EmbeddingResult.fromJson(value.toJson());
+      if (restored.modelId != 'actual-embedding-model' || restored.vectors.single.length != 2) throw StateError('embedding persistence');
+      if ((bodies.last['input'] as List).single != 'hello') throw StateError('composition');
+    } else { throw StateError('embedding failed: $embeddingExit'); }
+
   } finally {
     await provider.close();
     await runtime.close();

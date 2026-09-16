@@ -80,3 +80,18 @@ Provider codecs use `TextRequestPolicy` from `protocols.dart` with their pinned 
 Assistant output distinguishes application calls from provider-owned tool records, including pending records without a result. Tool arguments preserve parsed JSON with original text, declared free-form input, tagged native actions, or malformed original arguments. Tool results retain success/application failure and JSON, ordered text or tagged native content.
 
 Persist the returned `AssistantMessage` with its `ProviderReplay` to resubmit signed or opaque native items to the same provider/API/model. Incompatible targets fail explicitly. `withParts` and `copyWith` drop replay on content edits. If you mutate `parts` or nested collections directly, set `message.replay = null` before resubmission. Generated copy helpers are disabled for these data models so they cannot retain stale replay. Opaque native base64 strings remain native strings; the SDK does not infer private reasoning from them.
+
+## Text embeddings
+
+`EmbeddingModel` describes one synchronous request for an ordered nonempty list of `EmbeddingInput.text` values. `CompatibleEmbeddingModel` in `protocols.dart` is provider support for indexed embedding endpoints. It borrows the provider client, accepts an open model ID, and exposes typed `EmbeddingOptions` plus `rawEmbed` for the same native execution path.
+
+```dart
+final program = Effect.build<EmbeddingResult, AiError>(($) async {
+  final reply = await $(provider.languageModel(modelId).generate(request));
+  return await $(provider.embeddingModel(embeddingModelId).embed(
+    EmbeddingRequest(items: [EmbeddingInput.text(reply.text)]),
+  ));
+});
+```
+
+The application's Runtime runs the complete program. Native results retain full unknown JSON, actual model identity and available usage. Normalization restores provider indices and rejects wrong counts, duplicate/missing indices, empty/nonfinite vectors and inconsistent/requested dimensions. It never rescales vectors or splits an oversized batch. `raw.value.normalize(request, raw.raw, metadata: raw.metadata)` normalizes an existing response without another inference request.
