@@ -122,6 +122,7 @@ final class RedisConnection {
   List<Future<Object?>> executeBatch(
     List<RedisCommand<Object?>> commands, {
     required Duration timeout,
+    RunnelOperation? operation,
   }) {
     final acceptedAt = Stopwatch()..start();
     if (_closed) {
@@ -141,6 +142,9 @@ final class RedisConnection {
       for (var index = 0; index < commands.length; index++)
         _register(commands[index], encoded[index], acceptedAt, timeout, remaining),
     ];
+    for (final pending in accepted) {
+      pending.detachCancellation = operation?.onCancel(() => _cancel(pending));
+    }
     _scheduleFlush();
     return List.unmodifiable(accepted.map((pending) => pending.completer.future));
   }

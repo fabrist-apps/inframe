@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:conflux/effect.dart';
+import 'package:conflux/result.dart';
 import 'package:runnel/src/batch.dart';
 import 'package:runnel/src/blocking.dart';
 import 'package:runnel/src/command.dart';
@@ -327,31 +328,38 @@ final class Runnel {
     return session;
   }
 
-  Future<List<BatchOutcome<Object?>>> _executePipeline(
+  Future<List<Result<Object?, RunnelError>>> _executePipeline(
     List<RedisCommand<Object?>> commands,
     Duration timeout,
+    RunnelOperation operation,
   ) async {
     final connection = _readyConnection();
-    return settleBatch(connection.executeBatch(commands, timeout: timeout));
+    return settleBatch(connection.executeBatch(commands, timeout: timeout, operation: operation));
   }
 
-  Future<List<BatchOutcome<Object?>>> _executeTransaction(
+  Future<List<Result<Object?, RunnelError>>> _executeTransaction(
     List<RedisCommand<Object?>> commands,
     Duration timeout,
+    RunnelOperation operation,
   ) async {
     _readyConnection();
     final deadline = ConnectionDeadline(timeout);
-    final connection = await _openPhysicalConnection(timeout: deadline.remaining);
-    if (_state != _ClientState.ready) {
+    final connection = await _openPhysicalConnection(
+      timeout: deadline.remaining,
+      operation: operation,
+    );
+    if (_state != _ClientState.ready || operation.isCancelled) {
       _unclaimedConnections.remove(connection);
       await connection.close(commandsAreUncertain: true);
       throw const RedisClosedException(message: 'The Runnel client is closing.');
     }
     _unclaimedConnections.remove(connection);
     _transactionConnections.add(connection);
+    final detach = operation.onCancel(() => connection.close(commandsAreUncertain: true));
     try {
       return await executeTransaction(connection, commands, deadline);
     } finally {
+      detach();
       _transactionConnections.remove(connection);
       await connection.close(commandsAreUncertain: !connection.isIdle);
     }
