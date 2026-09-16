@@ -19,7 +19,7 @@ try {
 
 Factories accept nonempty provider-local string model IDs. Unknown IDs do not imply unsupported capabilities and do not trigger discovery. Credentials and endpoints belong to provider construction, never serialized model data. Native JSON uses ordinary Dart maps, lists and primitive values.
 
-`GenerationResult.fromJson(result.toJson())` restores a persisted result, including its complete native payload. Public data classes expose `fromMap` and `fromJson`; JSON entry points consume/return strings. Call `initializeMappers()` before container-based decoding of nested or polymorphic values. Initialization is synchronous, repeatable and makes no network requests. Generated mappers are shipped with core; consuming applications need no builder dependency or code generation. Domain messages and results use schema version 1 and reject unknown versions. Native wire bodies use their endpoint schema, without domain tags.
+`GenerationResult.fromJson(result.toJson())` restores a persisted result, including its complete native payload. Public data classes expose `fromMap` and `fromJson`; JSON entry points consume/return strings. Call `initializeArtificerCoreMappers()` before container-based decoding of nested or polymorphic values. Initialization is synchronous, repeatable and makes no network requests. Generated mappers are shipped with core; consuming applications need no builder dependency or code generation. Domain messages and results use schema version 1 and reject unknown versions. Native wire bodies use their endpoint schema, without domain tags.
 
 Collections are ordinary Dart collections. Do not mutate requests or configuration during execution. Cold operations read their supplied values when executed, so reusing an Effect performs a new request with independent request state. Diagnostic strings omit content and raw headers; native payloads and metadata are available for explicit inspection.
 
@@ -55,7 +55,7 @@ dart test packages/artificer/providers/artificer_core/test --chain-stack-traces
 dart analyze
 ```
 
-Generate from this package with `dart run build_runner build`. CI regenerates and requires a clean diff. The separate consumer fixture resolves and runs outside the workspace using only public imports and shipped mappers. HTTP tests use loopback servers and require no live credentials.
+Generate from this package with `dart run build_runner build`. CI regenerates and requires a clean diff. The separate consumer fixture resolves and runs outside the workspace using only public imports and shipped mappers. HTTP tests use loopback servers and require no live credentials. [Conformance coverage](test/README.md) maps the foundation contracts to focused suites.
 
 ## Options and preflight
 
@@ -103,3 +103,48 @@ The application's Runtime runs the complete program. Native results retain full 
 Codecs assign stable local part IDs, feed typed events to `GenerationAssembler`, and recognize their endpoint's terminal semantics. Append `GenerationFinished` after `withSse` completes so transport cleanup precedes final success. EOF alone is not success: incomplete parts, malformed frames, native errors and size limits retain typed failures and available partial output. Unknown native events remain in the final native payload without collecting every known delta.
 
 Each consumption opens a fresh request. Early `take`, interruption and provider close release owned transport resources; closing does not wait for arbitrary application callbacks consuming the stream.
+
+## Compatible protocols
+
+`protocols.dart` exposes pure `ChatCodec` and `ResponsesCodec` conversion plus model handles that borrow a `ProviderHttpClient`. Provider packages configure routes, authentication, text-only inventories and dialect differences. Core imports no vendor SDK. `ChatProvider` is a convenience owner for a configured Chat endpoint; applications can also construct `ChatLanguageModel` with a shared provider client.
+
+```dart
+final codec = ResponsesCodec(ResponsesDialect(
+  providerId: 'my-provider',
+  route: (modelId) => configuredEndpoint,
+  authentication: () => {'authorization': 'Bearer $explicitApiKey'},
+));
+final model = CompatibleResponsesModel(
+  modelId: 'provider-local-model', client: client, codec: codec,
+);
+final exit = await runtime.run(model.rawGenerate(request));
+if (exit case Succeeded(:final value)) {
+  // Normalize the existing response without performing more I/O.
+  final common = codec.normalize(value.value, value.raw, metadata: value.metadata);
+}
+```
+
+Common `generate` performs this same path once. Chat uses `model.rawGenerate` and `model.codec.normalize(raw)`. Explicit native requests use `model.native(NativeChatRequest(...))` for Chat and `model.create(ResponsesRequest(...))` for Responses. Native multiple-choice normalization requires `choiceIndex` or `candidateIndex`; common requests select one candidate.
+
+Chat defaults to a `[DONE]` terminal sentinel. A configured `ChatTerminalPolicy.finishThenEof` instead requires selected-candidate finish metadata followed by normal EOF, allowing trailing usage. Responses requires a terminal response event with its authoritative output snapshot; provider event aliases adapt compatible dialects. Both retain complete raw data and same-target replay. Unknown events remain separately available on `NativePayload.unknownEvents`.
+
+Responses always sends `store:false` and rejects stop sequences. Dialects can configure instruction placement, hosted tool types, schema support, native error envelopes and tool event/item variations. They must explicitly represent a supported native input or reject it; unknown model names never determine capabilities. Tool results preserve ordered text parts, and application code remains responsible for executing application-owned calls.
+
+## Invocation observations
+
+Supply `ProviderHttpClient(observer: callback)` to receive ordered, content-free `ProviderObservation` records. Provider implementations wrap the complete decoding and normalization path with `client.observe` or `client.observeFlow`; nested transport calls share one execution-local attempt. Normalizing an already obtained response is pure and emits no new attempt.
+
+Bind optional caller IDs at the application's execution boundary:
+
+```dart
+import 'package:context/context.dart';
+
+final context = Context().withBinding(invocationContextKey.bind(
+  const InvocationContext(operationId: 'job-42', attemptId: 'attempt-1'),
+));
+final runtime = Runtime(context: context);
+```
+
+Without a supplied attempt ID, core allocates one for each run. A caller-provided attempt ID should identify one attempt; use an operation ID to group several calls. Records include identity, status, available usage, verdict and one terminal outcome. They omit prompts, generated content, credentials, raw headers and error payloads. Callbacks run synchronously; exceptions remain defects and protected request cleanup still runs. Partial consumption is recorded as interrupted. Observation does not add retry or exporter behavior.
+
+`ProviderError` preserves native diagnostics and the raw `retryAfter` header. `retryAfterDelay` parses nonnegative delay-seconds; `retryAfterDate` parses HTTP dates. Malformed values remain available as raw text and return null from parsed accessors. Applications decide whether and when to retry.

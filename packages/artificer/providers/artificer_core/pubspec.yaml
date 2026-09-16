@@ -8,6 +8,8 @@ environment:
 dependencies:
   conflux:
     path: ../../../conflux
+  context:
+    path: ../../../context
   dart_mappable: ^4.10.0
   dio: ^5.11.1
 dev_dependencies:

@@ -283,6 +283,7 @@ class ProviderErrorMapper extends SubClassMapperBase<ProviderError> {
     'details',
     _$details,
     opt: true,
+    hook: JsonValueHook(),
   );
   static String? _$requestId(ProviderError v) => v.requestId;
   static const Field<ProviderError, String> _f$requestId = Field(

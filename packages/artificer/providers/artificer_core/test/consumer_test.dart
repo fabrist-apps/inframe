@@ -25,8 +25,12 @@ dependencies:
     path: ${jsonEncode(Directory('${package.path}/../../../conflux').absolute.path)}
   dart_mappable: ^4.10.0
 ''');
-      await File('${package.path}/test/fixtures/consumer/main.dart.txt')
-          .copy('${directory.path}/main.dart');
+      await for (final source in Directory('${package.path}/test/fixtures/consumer').list()) {
+        if (source is File && source.path.endsWith('.dart.txt')) {
+          final name = source.uri.pathSegments.last.replaceFirst('.txt', '');
+          await source.copy('${directory.path}/$name');
+        }
+      }
       for (final args in [
         ['pub', 'get', '--offline'],
         ['analyze', 'main.dart'],

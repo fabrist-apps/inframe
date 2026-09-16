@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:artificer_core/src/json/json_value_hook.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 
 part 'errors.mapper.dart';
@@ -95,6 +98,7 @@ final class ProviderError extends AiError with ProviderErrorMappable {
   final String? code;
 
   /// Complete native error details, including unknown fields.
+  @MappableField(hook: JsonValueHook())
   final Object? details;
 
   /// Provider request identifier when supplied.
@@ -102,6 +106,27 @@ final class ProviderError extends AiError with ProviderErrorMappable {
 
   /// Unmodified Retry-After header value.
   final String? retryAfter;
+
+  /// Parsed delay-seconds; HTTP-date and malformed values return null.
+  Duration? get retryAfterDelay {
+    final raw = retryAfter?.trim();
+    if (raw == null || !RegExp(r'^\d+$').hasMatch(raw)) return null;
+    final seconds = int.tryParse(raw);
+    // Duration stores microseconds in a signed native integer.
+    if (seconds == null || seconds > 9223372036854) return null;
+    return Duration(seconds: seconds);
+  }
+
+  /// Parsed HTTP-date in UTC; raw malformed values remain on [retryAfter].
+  DateTime? get retryAfterDate {
+    final raw = retryAfter?.trim();
+    if (raw == null) return null;
+    try {
+      return HttpDate.parse(raw).toUtc();
+    } on HttpException {
+      return null;
+    }
+  }
 
   /// Output received before failure, when available.
   final Object? partialOutput;
