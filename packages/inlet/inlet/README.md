@@ -7,7 +7,7 @@ Inlet routes the same Dart handler in process or through an HTTP/TLS listener. I
 From the repository root, run a complete example:
 
 ```sh
-dart run packages/inlet/example/inlet_example.dart
+dart run packages/inlet/inlet/example/inlet_example.dart
 ```
 
 Register routes before the first dispatch or successful listener bind:
@@ -82,9 +82,9 @@ Malformed UTF-8 or JSON defaults to an empty 400 response; request body limits t
 See [Response](lib/src/response.dart) for headers, limits, negotiation, and lifecycle contracts, and [SseEvent](lib/src/sse_event.dart) for event encoding. Runnable examples:
 
 ```sh
-dart run packages/inlet/example/stream_transfers.dart
-dart run packages/inlet/example/live_events.dart
-dart run packages/inlet/example/web_socket_chat.dart
+dart run packages/inlet/inlet/example/stream_transfers.dart
+dart run packages/inlet/inlet/example/live_events.dart
+dart run packages/inlet/inlet/example/web_socket_chat.dart
 ```
 
 The examples use ephemeral listeners or in-process dispatch and release their resources before exiting.
@@ -102,6 +102,37 @@ The public entrypoint exports only supported API types. Internal runtime extensi
 From the repository root:
 
 ```sh
-dart test packages/inlet/test --chain-stack-traces
-dart analyze packages/inlet --fatal-infos
+dart test packages/inlet/inlet/test --chain-stack-traces
+dart analyze packages/inlet/inlet --fatal-infos
 ```
+
+## Middleware packages
+
+[Request IDs](../middlewares/inlet_request_id/README.md) generate and attach a per-request ID to the context and HTTP headers.
+
+[HTTP tracing](../middlewares/inlet_tracing/README.md) records Chronicler server
+spans for request handling. Register it before request ID middleware.
+
+[Logger](../middlewares/inlet_logger/README.md) prints request summaries to the
+terminal and emits structured Chronicler logs, including recovered error statuses. Register it
+early to observe downstream short circuits.
+
+[CORS](../middlewares/inlet_cors/README.md) handles preflights and applies an
+explicit browser origin policy to responses, including recovered errors.
+
+For these packages together, register `logger()`, HTTP tracing, request ID,
+then CORS. This includes preflight responses in telemetry.
+
+## Response hooks
+
+Middleware can register `request.onResponse((context, request, response) => response)`.
+Hooks run once in reverse registration order after middleware unwinds, dispatch
+errors are recovered, and HEAD responses are finalized. They receive the latest
+forwarded context and request. Return the response or a `response.withHeaders(...)`
+view; changing status or body ownership is rejected. Hook failures are reported
+and remaining hooks continue with the last valid response.
+
+This boundary observes dispatch completion, before streamed body delivery,
+WebSocket negotiation, or transport error recovery. It does not measure those
+lifetimes. Register hooks before dispatch completes, including through request
+header views; registration during or after hook execution throws `StateError`.

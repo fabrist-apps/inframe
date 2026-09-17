@@ -10,6 +10,12 @@ final _chroniclerKey = ContextKey<ChroniclerRecorder>('chronicler');
 
 /// Binds a borrowed Chronicler recorder to a [Context].
 extension ChroniclerContextBinding on Context {
+  /// Whether this context has a recorder bound through [withChronicler].
+  ///
+  /// Includes bindings inherited by derived contexts. This checks presence,
+  /// not whether the recorder's runtime is open or telemetry will be exported.
+  bool get hasChronicler => read(_chroniclerKey) != null;
+
   /// Returns a child context bound to [recorder].
   Context withChronicler(ChroniclerRecorder recorder) => withBinding(_chroniclerKey.bind(recorder));
 

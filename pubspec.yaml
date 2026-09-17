@@ -5,12 +5,10 @@ environment:
   sdk: ^3.13.0
 
 workspace:
-  - packages/artificer/providers/artificer_core
+  - packages/artificer
   - packages/context
   - packages/inlet
-  - packages/database/clickhouse
-  - packages/database/runnel
-  - packages/database/turso
+  - packages/database
   - packages/json_patch
   - packages/chrono_id
   - packages/conflux

@@ -1,14 +1,13 @@
-name: inlet
-description: In-process and HTTP routing with streams, server-sent events, and WebSockets.
-version: 0.1.0
+name: inlet_workspace
 publish_to: none
 resolution: workspace
 
 environment:
-  sdk: '>=3.13.3 <4.0.0'
+  sdk: ^3.13.0
 
-dependencies:
-  context: any
-
-dev_dependencies:
-  test: ^1.26.3
+workspace:
+  - inlet
+  - middlewares/inlet_request_id
+  - middlewares/inlet_tracing
+  - middlewares/inlet_logger
+  - middlewares/inlet_cors

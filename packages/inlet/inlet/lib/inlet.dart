@@ -5,7 +5,7 @@ export 'src/handler.dart' show ErrorHandler, ErrorReporter, Handler, Middleware,
 export 'src/headers.dart';
 export 'src/inlet.dart' show Inlet;
 export 'src/request.dart'
-    show BodyLimitExceededException, ConnectionInfo, MalformedBodyException, Request;
+    show BodyLimitExceededException, ConnectionInfo, MalformedBodyException, Request, ResponseHook;
 export 'src/response.dart'
     show Response, ResponseBodyLimitExceededException, WebSocketCallback, WebSocketProtocolSelector;
 export 'src/router.dart' show Router;

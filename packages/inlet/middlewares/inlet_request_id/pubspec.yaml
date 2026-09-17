@@ -1,0 +1,17 @@
+name: inlet_request_id
+description: Request ID generation and propagation for Inlet middleware.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: '>=3.13.3 <4.0.0'
+
+dependencies:
+  chronicler: any
+  chrono_id: any
+  context: any
+  inlet: any
+
+dev_dependencies:
+  test: ^1.26.3

@@ -1,9 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:context/context.dart';
 import 'package:inlet/src/body.dart';
 import 'package:inlet/src/headers.dart';
 import 'package:inlet/src/http_token.dart';
+import 'package:inlet/src/response.dart';
+
+/// Observes a completed dispatch and optionally replaces its response headers.
+///
+/// Return [response] or a header view made with [Response.withHeaders].
+typedef ResponseHook = Response Function(Context context, Request request, Response response);
 
 /// A malformed UTF-8 or JSON request body.
 final class MalformedBodyException implements Exception {
@@ -77,6 +84,7 @@ final class Request {
     required this.connection,
     required this.pathParameters,
     required this._exchange,
+    this.routeTemplate,
   });
 
   /// The case-sensitive HTTP method.
@@ -91,10 +99,33 @@ final class Request {
   /// Immutable captures from the selected route.
   final Map<String, String> pathParameters;
 
+  /// The matched route template, including mount prefixes, or null if unmatched.
+  ///
+  /// Available during dispatch; contains parameter names instead of values.
+  final String? routeTemplate;
+
   /// Transport facts, when supplied by the request owner.
   final ConnectionInfo? connection;
 
   final _RequestExchange _exchange;
+
+  /// Registers a synchronous hook after middleware, error recovery, and HEAD handling.
+  ///
+  /// Hooks run once in reverse registration order with the latest forwarded
+  /// context and request. Return the response or a view from `withHeaders`;
+  /// changing status or body ownership is rejected. Hook failures are reported
+  /// without replacing the response, and remaining hooks still run.
+  ///
+  /// This observes dispatch completion before transport delivery. It excludes
+  /// streamed body work, WebSocket sessions, and transport error recovery.
+  /// Header views share registrations. Register before dispatch completes;
+  /// registration during or after hook execution throws [StateError].
+  void onResponse(ResponseHook hook) {
+    if (_exchange.responseCompleted) {
+      throw StateError('Response hooks must be registered before dispatch completes.');
+    }
+    _exchange.responseHooks.add(hook);
+  }
 
   /// Creates a metadata view with [headers] and the same body and exchange identity.
   Request withHeaders(Headers headers) => Request._(
@@ -104,6 +135,7 @@ final class Request {
     connection: connection,
     pathParameters: pathParameters,
     exchange: _exchange,
+    routeTemplate: routeTemplate,
   );
 
   /// The body stream, claimed when it is first listened to.
@@ -175,18 +207,56 @@ final class _RequestExchange {
 
   final Body body;
   bool admitted = false;
+  bool responseCompleted = false;
+  final responseHooks = <ResponseHook>[];
 }
 
 /// Dispatch-only operations, excluded from the public entrypoint.
 extension RequestRuntime on Request {
+  /// Finalizes dispatch metadata without transferring response body ownership.
+  Future<Response> completeResponse(
+    Context context,
+    Response response,
+    void Function(Object, StackTrace) report,
+  ) async {
+    if (_exchange.responseCompleted) return response;
+    _exchange.responseCompleted = true;
+    final hooks = _exchange.responseHooks.reversed.toList();
+    _exchange.responseHooks.clear();
+    var current = response;
+    for (final hook in hooks) {
+      try {
+        final viewed = hook(context, this, current);
+        if (!viewed.isHeaderViewOf(current)) {
+          if (!identical(viewed.delivery, current.delivery)) {
+            try {
+              await viewed.close();
+            } on Object catch (error, stackTrace) {
+              report(error, stackTrace);
+            }
+          }
+          throw StateError('Response hooks may only replace headers.');
+        }
+        current = viewed;
+      } on Object catch (error, stackTrace) {
+        report(error, stackTrace);
+      }
+    }
+    return current;
+  }
+
   /// Adds route captures while retaining exchange and body ownership.
-  Request withPathParameters(Map<String, String> pathParameters) => Request._(
+  Request withPathParameters(
+    Map<String, String> pathParameters, {
+    String? routeTemplate,
+  }) => Request._(
     method: method,
     uri: uri,
     headers: headers,
     connection: connection,
     pathParameters: pathParameters,
     exchange: _exchange,
+    routeTemplate: routeTemplate,
   );
 
   /// Whether both views share an exchange and the current route captures.

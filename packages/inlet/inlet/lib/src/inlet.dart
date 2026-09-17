@@ -128,7 +128,10 @@ final class Inlet extends Router {
           ...registration.middleware,
         ],
         terminal: registration.handler,
-        dispatchRequest: request.withPathParameters(pathParameters),
+        dispatchRequest: request.withPathParameters(
+          pathParameters,
+          routeTemplate: registration.rawPath,
+        ),
       ),
     };
     final dispatch = DispatchState(dispatchContext, dispatchRequest, _report);
@@ -161,6 +164,12 @@ final class Inlet extends Router {
         finalizedResponse = response.withoutBody();
       }
     }
+
+    finalizedResponse = await dispatch.request.completeResponse(
+      dispatch.context,
+      finalizedResponse,
+      _report,
+    );
 
     return DispatchResult(
       finalizedResponse,
