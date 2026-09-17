@@ -27,8 +27,8 @@ request.events.track(
   'purchase_completed',
   properties: {'orderId': 'order_123', 'amountMinor': 1200},
 );
-await request.trace('checkout', run: (trace) async {
-  await trace.span('inventory.reserve', run: (span) async {
+await request.trace('checkout', (trace) async {
+  await trace.span('inventory.reserve', (span) async {
     span.tracing.setAttribute('warehouse', 'east');
     span.logs.info('Inventory reserved');
   });
@@ -290,13 +290,13 @@ authorization meaning:
 final parent = TracePropagation.extract(requestHeaders);
 await context.trace(
   'POST /orders',
+  (server) => server.span(
+    'payments.create',
+    (client) => sendPayment(client.tracing.inject(outgoingHeaders)),
+    kind: SpanKind.client,
+  ),
   parent: parent,
   kind: SpanKind.server,
-  run: (server) => server.span(
-    'payments.create',
-    kind: SpanKind.client,
-    run: (client) => sendPayment(client.tracing.inject(outgoingHeaders)),
-  ),
 );
 ```
 

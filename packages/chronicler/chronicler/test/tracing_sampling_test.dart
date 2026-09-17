@@ -51,9 +51,9 @@ void main() {
           .withChronicler(chronicler.recorder)
           .span(
             'unsampled root',
-            run: (root) => root.span(
+            (root) => root.span(
               'unsampled child',
-              run: (child) {
+              (child) {
                 calls++;
                 child.logs.info('still captured');
                 child.events.track('still captured');
@@ -91,8 +91,8 @@ void main() {
 
       await recorder.span(
         'unsampled',
+        (_) {},
         attributes: unreadable,
-        run: (_) {},
       );
       expect(unreadable.reads, 0);
 
@@ -105,11 +105,11 @@ void main() {
       );
       await recording.recorder.span(
         'disabled while active',
-        attributes: {'secret': 'retained'},
-        run: (active) {
+        (active) {
           recording.setCollectionEnabled(ChroniclerSignal.traces, enabled: false);
           active.setSpanAttributes(unreadable);
         },
+        attributes: {'secret': 'retained'},
       );
       await recording.flush();
       expect(unreadable.reads, 0);

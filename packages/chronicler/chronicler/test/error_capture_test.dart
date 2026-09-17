@@ -26,7 +26,7 @@ void main() {
           .withIdentity(userId: 'user', anonymousId: 'anon', sessionId: 'session')
           .traceSync(
             'operation',
-            run: (operation) {
+            (operation) {
               operation.errors.capture(
                 StateError('failed'),
                 stackTrace: StackTrace.fromString('first\r\nsecond\n'),
@@ -161,7 +161,7 @@ void main() {
       final context = Context().withChronicler(chronicler.recorder);
 
       context.logs.error('log', error: StateError('logged'));
-      context.spanSync('span', run: (span) => span.tracing.setError());
+      context.spanSync('span', (span) => span.tracing.setError());
       context.errors.capture(StateError('captured'));
       await Future<void>.delayed(Duration.zero);
 

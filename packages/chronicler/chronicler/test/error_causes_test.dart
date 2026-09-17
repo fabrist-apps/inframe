@@ -130,7 +130,7 @@ void main() {
       ];
       late Context retained;
 
-      base.spanSync('operation', run: (span) => retained = span);
+      base.spanSync('operation', (span) => retained = span);
       retained.errors.capture('root', causes: causes);
       causes.clear();
       causeText.value = 'after';
