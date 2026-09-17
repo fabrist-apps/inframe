@@ -16,19 +16,17 @@ void main() {
       final chronicler = createTracingChronicler(exporter);
       final nested = <Object?>[1];
 
-      await Context()
-          .withChronicler(chronicler.recorder)
-          .span(
-            'attributes',
-            attributes: {'kept': true, 'replace': 1},
-            run: (span) {
-              span.tracing
-                ..setAttribute('replace', 2)
-                ..setAttributes({'nested': nested, 'api_token': 'secret'});
-              nested.add(3);
-              span.tracing.setAttributes({'valid': true, 'invalid': Object()});
-            },
-          );
+      await Context().withChronicler(chronicler.recorder).span(
+        'attributes',
+        (span) {
+          span.tracing
+            ..setAttribute('replace', 2)
+            ..setAttributes({'nested': nested, 'api_token': 'secret'});
+          nested.add(3);
+          span.tracing.setAttributes({'valid': true, 'invalid': Object()});
+        },
+        attributes: {'kept': true, 'replace': 1},
+      );
       await Future<void>.delayed(Duration.zero);
 
       final attributes = (exporter.batches.single.records.single as SpanRecord).payload.attributes;
@@ -58,7 +56,7 @@ void main() {
 
       final value = await context.span(
         'handled',
-        run: (span) {
+        (span) {
           span.tracing
             ..setError()
             ..setError();
@@ -69,7 +67,7 @@ void main() {
       await expectLater(
         context.span<void>(
           'cancelled',
-          run: (span) {
+          (span) {
             span.tracing.setError();
             throw cancellation;
           },
@@ -102,7 +100,7 @@ void main() {
             .withChronicler(chronicler.recorder)
             .span<void>(
               'failure',
-              run: (_) => throw failure,
+              (_) => throw failure,
             ),
         throwsA(same(failure)),
       );
@@ -127,7 +125,7 @@ void main() {
       base.tracing
         ..setError()
         ..setAttribute('ignored', true);
-      await base.span('ended', run: (span) => retained = span);
+      await base.span('ended', (span) => retained = span);
       retained.tracing
         ..setError()
         ..setAttributes({'ignored': true});

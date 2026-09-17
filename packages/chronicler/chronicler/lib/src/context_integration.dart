@@ -18,17 +18,10 @@ extension ChroniclerContextBinding on Context {
   /// Omitted fields are absent on records captured through the returned
   /// context. This affects telemetry attribution only; callers remain
   /// responsible for authentication and identity lifecycle.
-  Context withIdentity({
-    String? userId,
-    String? anonymousId,
-    String? sessionId,
-  }) => withBinding(
+  Context withIdentity({String? userId, String? anonymousId, String? sessionId}) => withBinding(
     _chroniclerKey.bind(
-      require(_chroniclerKey).withIdentity(
-        userId: userId,
-        anonymousId: anonymousId,
-        sessionId: sessionId,
-      ),
+      require(_chroniclerKey)
+          .withIdentity(userId: userId, anonymousId: anonymousId, sessionId: sessionId),
     ),
   );
 }
@@ -64,58 +57,58 @@ extension ChroniclerContextTracing on Context {
 
   /// Runs [run] in a new root trace and returns its result asynchronously.
   Future<T> trace<T>(
-    String name, {
-    required FutureOr<T> Function(Context context) run,
+    String name,
+    FutureOr<T> Function(Context context) run, {
     RemoteTraceParent? parent,
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => require(_chroniclerKey).trace(
     name,
+    (recorder) => run(withChronicler(recorder)),
     parent: parent,
     kind: kind,
     attributes: attributes,
-    run: (recorder) => run(withChronicler(recorder)),
   );
 
   /// Runs [run] synchronously in a new root trace.
   T traceSync<T>(
-    String name, {
-    required T Function(Context context) run,
+    String name,
+    T Function(Context context) run, {
     RemoteTraceParent? parent,
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => require(_chroniclerKey).traceSync(
     name,
+    (recorder) => run(withChronicler(recorder)),
     parent: parent,
     kind: kind,
     attributes: attributes,
-    run: (recorder) => run(withChronicler(recorder)),
   );
 
   /// Runs [run] in a child span, or a new root when no span is active.
   Future<T> span<T>(
-    String name, {
-    required FutureOr<T> Function(Context context) run,
+    String name,
+    FutureOr<T> Function(Context context) run, {
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => require(_chroniclerKey).span(
     name,
+    (recorder) => run(withChronicler(recorder)),
     kind: kind,
     attributes: attributes,
-    run: (recorder) => run(withChronicler(recorder)),
   );
 
   /// Runs [run] synchronously in a child span, or a root when no span is active.
   T spanSync<T>(
-    String name, {
-    required T Function(Context context) run,
+    String name,
+    T Function(Context context) run, {
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => require(_chroniclerKey).spanSync(
     name,
+    (recorder) => run(withChronicler(recorder)),
     kind: kind,
     attributes: attributes,
-    run: (recorder) => run(withChronicler(recorder)),
   );
 }
 

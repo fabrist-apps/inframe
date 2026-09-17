@@ -69,7 +69,7 @@ Future<void> _checkout(Context request, {required String orderId, required bool 
   try {
     await request.trace(
       'checkout',
-      run: (trace) async {
+      (trace) async {
         trace.tracing.setAttribute('orderId', orderId);
         trace.events.track('checkout_form_viewed');
         trace.logs.info(
@@ -85,7 +85,7 @@ Future<void> _checkout(Context request, {required String orderId, required bool 
         try {
           await trace.span(
             'inventory.reserve',
-            run: (inventory) async {
+            (inventory) async {
               inventory.tracing.setAttribute('warehouse', 'east');
               if (!inStock) throw const _OutOfStock();
               inventory.logs.info('Inventory reserved', attributes: {'orderId': orderId});

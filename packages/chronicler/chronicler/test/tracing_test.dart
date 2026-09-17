@@ -19,15 +19,15 @@ void main() {
 
       final result = await context.trace(
         'request',
-        kind: SpanKind.server,
-        run: (request) => request.span(
+        (request) => request.span(
           'database',
-          kind: SpanKind.client,
-          run: (database) {
+          (database) {
             database.logs.info('query complete');
             return 42;
           },
+          kind: SpanKind.client,
         ),
+        kind: SpanKind.server,
       );
       await chronicler.flush();
 
@@ -56,7 +56,7 @@ void main() {
       try {
         context.spanSync<void>(
           'sync',
-          run: (_) => Error.throwWithStackTrace(syncError, originalSyncStack),
+          (_) => Error.throwWithStackTrace(syncError, originalSyncStack),
         );
       } on Object catch (error, stackTrace) {
         expect(identical(error, syncError), isTrue);
@@ -68,7 +68,7 @@ void main() {
       try {
         await context.span<void>(
           'async',
-          run: (_) async => Error.throwWithStackTrace(asyncError, originalAsyncStack),
+          (_) async => Error.throwWithStackTrace(asyncError, originalAsyncStack),
         );
       } on Object catch (error, stackTrace) {
         expect(identical(error, asyncError), isTrue);
@@ -91,19 +91,19 @@ void main() {
 
       await base.trace(
         'parent',
-        run: (parent) async {
+        (parent) async {
           endedParent = parent;
-          unawaited(parent.span('detached', run: (_) => detached.future));
+          unawaited(parent.span('detached', (_) => detached.future));
           await Future.wait([
-            parent.span('left', run: (left) async => left.logs.info('left')),
-            parent.span('right', run: (right) async => right.logs.info('right')),
+            parent.span('left', (left) async => left.logs.info('left')),
+            parent.span('right', (right) async => right.logs.info('right')),
           ]);
         },
       );
       detached.complete();
       await Future<void>.delayed(Duration.zero);
 
-      await endedParent.span('fresh', run: (_) {});
+      await endedParent.span('fresh', (_) {});
       await Future<void>.delayed(Duration.zero);
       final spans = exporter.batches
           .expand((batch) => batch.records)
@@ -127,7 +127,7 @@ void main() {
       final context = Context().withChronicler(chronicler.recorder);
       final original = Future<int>.value(7);
 
-      final returned = context.spanSync<Future<int>>('sync misuse', run: (_) => original);
+      final returned = context.spanSync<Future<int>>('sync misuse', (_) => original);
 
       expect(identical(returned, original), isTrue);
       expect(await returned, 7);
@@ -143,9 +143,9 @@ void main() {
 
       final operation = base.span(
         'outer',
-        run: (outer) async {
+        (outer) async {
           outerContext = outer;
-          await outer.trace('nested root', run: (_) async => release.future);
+          await outer.trace('nested root', (_) async => release.future);
         },
       );
       await Future<void>.delayed(Duration.zero);
@@ -153,7 +153,7 @@ void main() {
       release.complete();
       await operation;
 
-      await outerContext.span('after end', run: (_) {});
+      await outerContext.span('after end', (_) {});
       await Future<void>.delayed(Duration.zero);
       final spans = exporter.batches.single.records.cast<SpanRecord>().toList();
       final outer = spans.singleWhere((span) => span.payload.name == 'outer');
@@ -176,7 +176,7 @@ void main() {
 
       await base.span(
         'identity',
-        run: (span) async {
+        (span) async {
           expect(identical(span.require(markerKey), marker), isTrue);
           span.withIdentity(userId: 'changed').logs.info('changed identity');
         },
@@ -195,9 +195,9 @@ void main() {
 
       await context.span(
         '',
-        run: (invalid) async {
+        (invalid) async {
           calls++;
-          await invalid.span('valid child', run: (_) {});
+          await invalid.span('valid child', (_) {});
         },
       );
       await Future<void>.delayed(Duration.zero);
@@ -228,12 +228,12 @@ void main() {
               if (hookCalls == 1) {
                 context.spanSync(
                   'recursive sync',
-                  run: (_) => callbackCalls++,
+                  (_) => callbackCalls++,
                 );
                 unawaited(
                   context.span(
                     'recursive async',
-                    run: (_) => callbackCalls++,
+                    (_) => callbackCalls++,
                   ),
                 );
               }
@@ -257,7 +257,7 @@ void main() {
       var invoked = false;
 
       expect(
-        () => Context().spanSync<void>('missing', run: (_) => invoked = true),
+        () => Context().spanSync<void>('missing', (_) => invoked = true),
         throwsA(isA<MissingContextValue>()),
       );
       expect(invoked, isFalse);
@@ -271,7 +271,7 @@ void main() {
           .withChronicler(chronicler.recorder)
           .span(
             'duration',
-            run: (_) => Future<void>.delayed(const Duration(milliseconds: 2)),
+            (_) => Future<void>.delayed(const Duration(milliseconds: 2)),
           );
       await Future<void>.delayed(Duration.zero);
 

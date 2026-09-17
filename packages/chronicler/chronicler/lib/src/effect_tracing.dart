@@ -52,17 +52,8 @@ extension ChroniclerEffectTracing<A, E> on Effect<A, E> {
     final operation = Effect.build<A, E>(($) {
       final context = $.context;
       final acquired = forceRoot
-          ? context.tracing.startRootSpan(
-              name,
-              parent: parent,
-              kind: kind,
-              attributes: attributes,
-            )
-          : context.tracing.startSpan(
-              name,
-              kind: kind,
-              attributes: attributes,
-            );
+          ? context.tracing.startRootSpan(name, parent: parent, kind: kind, attributes: attributes)
+          : context.tracing.startSpan(name, kind: kind, attributes: attributes);
       span = acquired;
       final traced = context.withChronicler(acquired.recorder);
       return $(Effect.using(withContext(traced)));

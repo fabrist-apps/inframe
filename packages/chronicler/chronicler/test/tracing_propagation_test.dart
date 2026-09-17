@@ -28,8 +28,7 @@ void main() {
 
       await context.trace(
         'server',
-        parent: parent,
-        run: (server) {
+        (server) {
           final source = {
             'Chronicler-Trace-Id': 'stale',
             'CHRONICLER-SPAN-ID': 'stale',
@@ -39,6 +38,7 @@ void main() {
           injected = server.tracing.inject(source);
           expect(source['Chronicler-Trace-Id'], 'stale');
         },
+        parent: parent,
       );
 
       expect(injected['other'], 'kept');
@@ -77,17 +77,17 @@ void main() {
 
       await context.trace(
         'POST /orders',
-        parent: remote,
-        kind: SpanKind.server,
-        run: (server) {
+        (server) {
           return server.span(
             'payments.create',
-            kind: SpanKind.client,
-            run: (client) {
+            (client) {
               outgoing = client.tracing.inject({'content-type': 'application/json'});
             },
+            kind: SpanKind.client,
           );
         },
+        parent: remote,
+        kind: SpanKind.server,
       );
       await Future<void>.delayed(Duration.zero);
 
@@ -117,9 +117,9 @@ void main() {
       );
       await receiver.recorder.trace(
         'payments.receive',
+        (_) {},
         parent: nextParent,
         kind: SpanKind.server,
-        run: (_) {},
       );
       await Future<void>.delayed(Duration.zero);
       final received = receiverExporter.batches.single.records.single as SpanRecord;
@@ -145,8 +145,8 @@ void main() {
           .withChronicler(trusted.recorder)
           .trace(
             'trusted',
+            (_) {},
             parent: remote,
-            run: (_) {},
           );
       expect(trustedExporter.batches, isEmpty);
       expect(trusted.diagnosticCounts[DiagnosticReason.sampledOut], BigInt.one);
@@ -165,8 +165,8 @@ void main() {
       final base = Context().withChronicler(local.recorder);
       await base.trace(
         'caller',
-        run: (caller) async {
-          caller.traceSync('remote', parent: remote, run: (_) {});
+        (caller) async {
+          caller.traceSync('remote', (_) {}, parent: remote);
         },
       );
       await Future<void>.delayed(Duration.zero);
@@ -192,7 +192,7 @@ void main() {
       expect(base.tracing.inject({'Chronicler-Trace-Id': 'stale', 'other': 'kept'}), {
         'other': 'kept',
       });
-      await base.span('ended', run: (span) => retained = span);
+      await base.span('ended', (span) => retained = span);
       expect(retained.tracing.inject({'chronicler-span-id': 'stale'}), isEmpty);
     });
 
@@ -213,7 +213,7 @@ void main() {
 
       await base.span(
         'active',
-        run: (active) async {
+        (active) async {
           final before = active.tracing.inject({})['chronicler-sampled']!;
           chronicler.setCollectionEnabled(ChroniclerSignal.traces, enabled: false);
           active.tracing
@@ -224,14 +224,14 @@ void main() {
           chronicler.setCollectionEnabled(ChroniclerSignal.traces, enabled: true);
           await active.span(
             'suppressed child',
-            run: (child) {
+            (child) {
               suppressedChildHeader = child.tracing.inject({})['chronicler-sampled']!;
               child.logs.info('correlated without spans');
             },
           );
         },
       );
-      await base.trace('fresh boundary', run: (_) {});
+      await base.trace('fresh boundary', (_) {});
       await Future<void>.delayed(Duration.zero);
 
       expect(activeHeader, '1');
@@ -266,14 +266,14 @@ void main() {
       chronicler.setPropagationEnabled(enabled: false);
       await base.trace(
         'local',
-        parent: remote,
-        run: (local) {
+        (local) {
           expect(local.tracing.inject({'chronicler-sampled': 'stale'}), isEmpty);
           local.logs.info('local correlation');
           chronicler.setPropagationEnabled(enabled: true);
           activeHeader = local.tracing.inject({})['chronicler-trace-id']!;
           chronicler.setPropagationEnabled(enabled: false);
         },
+        parent: remote,
       );
       chronicler.setPropagationEnabled(enabled: true);
       await Future<void>.delayed(Duration.zero);
@@ -302,16 +302,14 @@ void main() {
       )..setCollectionEnabled(ChroniclerSignal.traces, enabled: false);
       late Map<String, String> headers;
 
-      await Context()
-          .withChronicler(chronicler.recorder)
-          .trace(
-            'server',
-            parent: remote,
-            run: (server) {
-              headers = server.tracing.inject({});
-              server.logs.info('remote correlation');
-            },
-          );
+      await Context().withChronicler(chronicler.recorder).trace(
+        'server',
+        (server) {
+          headers = server.tracing.inject({});
+          server.logs.info('remote correlation');
+        },
+        parent: remote,
+      );
       await Future<void>.delayed(Duration.zero);
 
       expect(headers['chronicler-trace-id'], traceId);

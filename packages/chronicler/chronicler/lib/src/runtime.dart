@@ -137,8 +137,8 @@ final class ChroniclerRecorder {
 
   /// Runs [run] in a new root trace and records its callback lifetime.
   Future<T> trace<T>(
-    String name, {
-    required FutureOr<T> Function(ChroniclerRecorder recorder) run,
+    String name,
+    FutureOr<T> Function(ChroniclerRecorder recorder) run, {
     RemoteTraceParent? parent,
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
@@ -153,8 +153,8 @@ final class ChroniclerRecorder {
 
   /// Runs [run] synchronously in a new root trace.
   T traceSync<T>(
-    String name, {
-    required T Function(ChroniclerRecorder recorder) run,
+    String name,
+    T Function(ChroniclerRecorder recorder) run, {
     RemoteTraceParent? parent,
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
@@ -169,8 +169,8 @@ final class ChroniclerRecorder {
 
   /// Runs [run] in a child span, or a new root when no span is active.
   Future<T> span<T>(
-    String name, {
-    required FutureOr<T> Function(ChroniclerRecorder recorder) run,
+    String name,
+    FutureOr<T> Function(ChroniclerRecorder recorder) run, {
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => _runSpan(
@@ -184,8 +184,8 @@ final class ChroniclerRecorder {
 
   /// Runs [run] synchronously in a child span, or a new root when inactive.
   T spanSync<T>(
-    String name, {
-    required T Function(ChroniclerRecorder recorder) run,
+    String name,
+    T Function(ChroniclerRecorder recorder) run, {
     SpanKind kind = SpanKind.internal,
     Map<String, Object?> attributes = const {},
   }) => _runSpanSync(
