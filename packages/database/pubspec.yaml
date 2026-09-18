@@ -1,0 +1,11 @@
+name: database_workspace
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+
+workspace:
+  - clickhouse
+  - runnel
+  - turso

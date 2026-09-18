@@ -44,6 +44,18 @@ database, then registers Chronicler’s mappers. Repeated calls are safe and cre
 no runtime or exporter. The generated `initializeMappers()` only registers
 Chronicler’s mappers; it does not replace this required setup.
 
+Packages that optionally use telemetry can check whether a recorder is bound:
+
+```dart
+if (context.hasChronicler) {
+  context.logs.info('Request received', attributes: {'requestId': requestId});
+}
+```
+
+`hasChronicler` includes inherited bindings and checks presence only, not runtime
+liveness or successful delivery. Accessing `context.logs` without a binding still
+throws `MissingContextValue`.
+
 ## Runnable base SDK example
 
 Run the [checkout example](example/chronicler_example.dart) from the repository root:

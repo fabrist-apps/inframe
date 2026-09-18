@@ -1,0 +1,15 @@
+name: inlet_cors
+description: Explicit cross-origin resource sharing policy for Inlet applications.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: '>=3.13.3 <4.0.0'
+
+dependencies:
+  context: any
+  inlet: any
+
+dev_dependencies:
+  test: ^1.26.3

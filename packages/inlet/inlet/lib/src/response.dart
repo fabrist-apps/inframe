@@ -334,6 +334,12 @@ final class Response {
 
 /// Transport-only access, excluded from the public entrypoint.
 extension ResponseRuntime on Response {
+  /// Whether this view preserves another response's status and body ownership.
+  bool isHeaderViewOf(Response other) =>
+      identical(_delivery, other._delivery) &&
+      statusCode == other.statusCode &&
+      _suppressBody == other._suppressBody;
+
   /// Shared content or upgrade owner behind response metadata views.
   ResponseDelivery get delivery => _delivery;
 
